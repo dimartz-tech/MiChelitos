@@ -1,0 +1,10 @@
+# Dependencias web
+node_modules/
+
+# Compilados de Rust
+src-tauri/target/
+
+# Logs e IDEs
+.vscode/
+.idea/
+.DS_Store

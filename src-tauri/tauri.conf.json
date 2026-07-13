@@ -1,0 +1,62 @@
+{
+  "build": {
+    "distDir": "../src",
+    "devPath": "../src"
+  },
+  "package": {
+    "productName": "MiChelitos",
+    "version": "1.2.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": true
+    },
+    "bundle": {
+      "active": true,
+      "category": "Finance",
+      "copyright": "Copyright © 2026 Wilfod. All rights reserved.",
+      "deb": {
+        "depends": []
+      },
+      "externalBin": [],
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "identifier": "com.michelitos.desktop",
+      "longDescription": "",
+      "macOS": {
+        "entitlements": null,
+        "exceptionDomain": "",
+        "frameworks": [],
+        "providerBundleIdentifier": null,
+        "signingIdentity": null
+      },
+      "resources": [],
+      "shortDescription": "Gestor Financiero Personal y Corporativo",
+      "targets": "all",
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampServer": ""
+      }
+    },
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "height": 780,
+        "resizable": true,
+        "title": "MiChelitos",
+        "width": 1100,
+        "decorations": true,
+        "transparent": false
+      }
+    ]
+  }
+}
