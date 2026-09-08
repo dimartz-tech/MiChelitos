@@ -59,6 +59,8 @@ pub struct Gasto {
     categoria_nombre: String,
     metodo_pago: String,
     costo_adicional: f64,
+    tarjeta_id: Option<i64>,
+    cuenta_ahorro_id: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -72,8 +74,14 @@ pub struct Tarjeta {
     id: i64,
     entidad: String,
     nombre_tarjeta: String,
-    limite: f64,
-    balance_actual: f64,
+    limite_pesos: f64,
+    limite_dolares: f64,
+    limite_sobregiro_pesos: f64,
+    limite_sobregiro_dolares: f64,
+    balance_pesos: f64,
+    balance_dolares: f64,
+    balance_corte_pesos: f64,
+    balance_corte_dolares: f64,
     fecha_corte: i32,
     fecha_limite_pago: i32,
     // Enriquecidos
@@ -90,8 +98,34 @@ pub struct Suscripcion {
     monto: f64,
     tarjeta_id: i64,
     frecuencia: String,
+    dia_facturacion: i32,
+    fecha_ultimo_pago: Option<String>,
+    divisa: String,
     entidad: String,
     nombre_tarjeta: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CuentaAhorro {
+    id: i64,
+    nombre: String,
+    divisa: String,
+    balance_actual: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TransaccionCuenta {
+    id: i64,
+    fecha: String,
+    cuenta_origen_id: i64,
+    cuenta_origen_nombre: String,
+    cuenta_destino_id: i64,
+    cuenta_destino_nombre: String,
+    monto_origen: f64,
+    monto_destino: f64,
+    tasa_cambio: f64,
+    cargo: f64,
+    descripcion: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -191,7 +225,7 @@ fn eliminar_categoria(id: i64) -> Result<(), String> {
 fn obtener_gastos() -> Result<Vec<Gasto>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT g.id, g.fecha, g.monto, g.divisa, g.descripcion, g.categoria_id, c.nombre, g.metodo_pago, g.costo_adicional
+        "SELECT g.id, g.fecha, g.monto, g.divisa, g.descripcion, g.categoria_id, c.nombre, g.metodo_pago, g.costo_adicional, g.tarjeta_id, g.cuenta_ahorro_id
          FROM gastos g
          JOIN categorias c ON g.categoria_id = c.id
          ORDER BY g.id DESC;"
@@ -208,6 +242,8 @@ fn obtener_gastos() -> Result<Vec<Gasto>, String> {
             categoria_nombre: row.get(6)?,
             metodo_pago: row.get(7)?,
             costo_adicional: row.get(8)?,
+            tarjeta_id: row.get(9)?,
+            cuenta_ahorro_id: row.get(10)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -228,6 +264,7 @@ struct GastoInput {
     metodo_pago: String,
     es_lbtr: bool,
     tarjeta_id: Option<i64>,
+    cuenta_ahorro_id: Option<i64>,
 }
 
 #[tauri::command]
@@ -237,7 +274,20 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
     // Calcular comisiones
     let mut costo_adicional = 0.0;
     if input.metodo_pago == "transferencia" {
-        costo_adicional = (input.monto * 0.002).round();
+        let is_tss_tax = if let Ok(cat_nom) = conn.query_row(
+            "SELECT nombre FROM categorias WHERE id = ?;",
+            [input.categoria_id],
+            |r| r.get::<_, String>(0)
+        ) {
+            cat_nom.to_lowercase() == "impuestos" && input.descripcion.to_uppercase().contains("TSS")
+        } else {
+            false
+        };
+
+        if !is_tss_tax {
+            costo_adicional = (input.monto * 0.002).round();
+        }
+
         if input.es_lbtr {
             costo_adicional += 100.00;
         }
@@ -245,19 +295,45 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // Si el pago es por tarjeta, debitar/sumar al balance actual de la tarjeta
+    // Si el pago es por tarjeta, debitar/sumar al balance de la tarjeta en la divisa correspondiente
     if input.metodo_pago == "tarjeta" {
         if let Some(t_id) = input.tarjeta_id {
+            if input.divisa == "USD" {
+                tx.execute(
+                    "UPDATE tarjetas SET balance_dolares = balance_dolares + ? WHERE id = ?;",
+                    [input.monto, t_id as f64],
+                ).map_err(|e| e.to_string())?;
+            } else {
+                tx.execute(
+                    "UPDATE tarjetas SET balance_pesos = balance_pesos + ? WHERE id = ?;",
+                    [input.monto, t_id as f64],
+                ).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    // Si es transferencia y hay una cuenta de ahorro asociada, descontar monto + comisiones
+    if input.metodo_pago == "transferencia" {
+        if let Some(c_id) = input.cuenta_ahorro_id {
             tx.execute(
-                "UPDATE tarjetas SET balance_actual = balance_actual + ? WHERE id = ?;",
-                [input.monto, t_id as f64],
+                "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
+                [input.monto + costo_adicional, c_id as f64],
             ).map_err(|e| e.to_string())?;
         }
     }
 
+    // Si el pago es en efectivo, descontar del balance de la cuenta de efectivo correspondiente
+    if input.metodo_pago == "efectivo" {
+        let cuenta_efectivo = if input.divisa == "USD" { "Efectivo USD" } else { "Efectivo DOP" };
+        tx.execute(
+            "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE nombre = ?;",
+            (input.monto, cuenta_efectivo),
+        ).map_err(|e| e.to_string())?;
+    }
+
     tx.execute(
-        "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+        "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
         (
             &input.fecha,
             input.monto,
@@ -267,6 +343,7 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
             &input.metodo_pago,
             costo_adicional,
             input.tarjeta_id,
+            input.cuenta_ahorro_id,
         )
     ).map_err(|e| e.to_string())?;
 
@@ -378,11 +455,21 @@ fn crear_ingreso(input: IngresoInput) -> Result<i64, String> {
 
 #[tauri::command]
 fn marcar_ingreso_pagado(id: i64, institucion: String, fecha: String, monto_recibido: f64) -> Result<(), String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    conn.execute(
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
+    tx.execute(
         "UPDATE ingresos SET estatus = 'pagada', institucion_deposito = ?, fecha_pago = ?, monto_recibido = ? WHERE id = ?;",
-        (institucion, fecha, monto_recibido, id)
+        (&institucion, &fecha, monto_recibido, id)
     ).map_err(|e| e.to_string())?;
+
+    // Incrementar balance de la cuenta de ahorro/efectivo si su nombre coincide
+    let _ = tx.execute(
+        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
+        (monto_recibido, &institucion)
+    );
+
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -427,11 +514,21 @@ fn crear_ingreso_informal(fecha: String, descripcion: String, monto: f64) -> Res
 
 #[tauri::command]
 fn marcar_informal_pagado(id: i64, institucion: String, fecha: String, monto_recibido: f64) -> Result<(), String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    conn.execute(
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
+    tx.execute(
         "UPDATE ingresos_informales SET estatus = 'pagado', institucion_deposito = ?, fecha_pago = ?, monto_recibido = ? WHERE id = ?;",
-        (institucion, fecha, monto_recibido, id)
+        (&institucion, &fecha, monto_recibido, id)
     ).map_err(|e| e.to_string())?;
+
+    // Incrementar balance de la cuenta de ahorro/efectivo si su nombre coincide
+    let _ = tx.execute(
+        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
+        (monto_recibido, &institucion)
+    );
+
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -439,7 +536,9 @@ fn marcar_informal_pagado(id: i64, institucion: String, fecha: String, monto_rec
 #[tauri::command]
 fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, entidad, nombre_tarjeta, limite, balance_actual, fecha_corte, fecha_limite_pago FROM tarjetas;").map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago FROM tarjetas;"
+    ).map_err(|e| e.to_string())?;
     
     let hoy = Local::now();
     let dia_actual = hoy.day() as i32;
@@ -448,10 +547,16 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
         let id: i64 = row.get(0)?;
         let entidad: String = row.get(1)?;
         let nombre_tarjeta: String = row.get(2)?;
-        let limite: f64 = row.get(3)?;
-        let balance_actual: f64 = row.get(4)?;
-        let fecha_corte: i32 = row.get(5)?;
-        let fecha_limite_pago: i32 = row.get(6)?;
+        let limite_pesos: f64 = row.get(3)?;
+        let limite_dolares: f64 = row.get(4)?;
+        let limite_sobregiro_pesos: f64 = row.get(5)?;
+        let limite_sobregiro_dolares: f64 = row.get(6)?;
+        let balance_pesos: f64 = row.get(7)?;
+        let balance_dolares: f64 = row.get(8)?;
+        let balance_corte_pesos: f64 = row.get(9)?;
+        let balance_corte_dolares: f64 = row.get(10)?;
+        let fecha_corte: i32 = row.get(11)?;
+        let fecha_limite_pago: i32 = row.get(12)?;
 
         // Calcular alertas corte
         let dias_corte = if fecha_corte >= dia_actual {
@@ -487,8 +592,14 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
             id,
             entidad,
             nombre_tarjeta,
-            limite,
-            balance_actual,
+            limite_pesos,
+            limite_dolares,
+            limite_sobregiro_pesos,
+            limite_sobregiro_dolares,
+            balance_pesos,
+            balance_dolares,
+            balance_corte_pesos,
+            balance_corte_dolares,
             fecha_corte,
             fecha_limite_pago,
             alerta_corte,
@@ -506,37 +617,104 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
 }
 
 #[tauri::command]
-fn crear_tarjeta(entidad: String, nombre: String, limite: f64, balance: f64, corte: i32, pago: i32) -> Result<i64, String> {
+fn crear_tarjeta(
+    entidad: String,
+    nombre: String,
+    limite_pesos: f64,
+    limite_dolares: f64,
+    sobregiro_pesos: f64,
+    sobregiro_dolares: f64,
+    balance_pesos: f64,
+    balance_dolares: f64,
+    balance_corte_pesos: f64,
+    balance_corte_dolares: f64,
+    corte: i32,
+    pago: i32
+) -> Result<i64, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO tarjetas (entidad, nombre_tarjeta, limite, balance_actual, fecha_corte, fecha_limite_pago)
-         VALUES (?, ?, ?, ?, ?, ?);",
-        (entidad, nombre, limite, balance, corte, pago)
+        "INSERT INTO tarjetas (entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        (entidad, nombre, limite_pesos, limite_dolares, sobregiro_pesos, sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, corte, pago)
     ).map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
 }
 
 #[tauri::command]
-fn actualizar_limite_tarjeta(id: i64, limite: f64) -> Result<(), String> {
+fn actualizar_limites_tarjeta(
+    id: i64,
+    limite_pesos: f64,
+    limite_dolares: f64,
+    sobregiro_pesos: f64,
+    sobregiro_dolares: f64,
+    balance_corte_pesos: f64,
+    balance_corte_dolares: f64
+) -> Result<(), String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    conn.execute("UPDATE tarjetas SET limite = ? WHERE id = ?;", (limite, id)).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE tarjetas SET limite_pesos = ?, limite_dolares = ?, limite_sobregiro_pesos = ?, limite_sobregiro_dolares = ?, balance_corte_pesos = ?, balance_corte_dolares = ? WHERE id = ?;",
+        (limite_pesos, limite_dolares, sobregiro_pesos, sobregiro_dolares, balance_corte_pesos, balance_corte_dolares, id)
+    ).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-fn registrar_pago_tarjeta(id: i64, fecha: String, monto: f64) -> Result<(), String> {
+fn registrar_pago_tarjeta(
+    id: i64,
+    fecha: String,
+    monto: f64,
+    divisa: String,
+    cuenta_ahorro_id: Option<i64>,
+    tasa_cambio: f64
+) -> Result<(), String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    tx.execute(
-        "UPDATE tarjetas SET balance_actual = balance_actual - ? WHERE id = ?;",
-        (monto, id)
-    ).map_err(|e| e.to_string())?;
+    if divisa == "USD" {
+        tx.execute(
+            "UPDATE tarjetas SET balance_dolares = MAX(0.0, balance_dolares - ?) WHERE id = ?;",
+            (monto, id)
+        ).map_err(|e| e.to_string())?;
+    } else {
+        tx.execute(
+            "UPDATE tarjetas SET balance_pesos = MAX(0.0, balance_pesos - ?) WHERE id = ?;",
+            (monto, id)
+        ).map_err(|e| e.to_string())?;
+    }
 
     tx.execute(
-        "INSERT INTO pagos_tarjeta (tarjeta_id, fecha_pago, monto_pagado) VALUES (?, ?, ?);",
-        (id, &fecha, monto)
+        "INSERT INTO pagos_tarjeta (tarjeta_id, fecha_pago, monto_pagado, divisa) VALUES (?, ?, ?, ?);",
+        (id, &fecha, monto, &divisa)
     ).map_err(|e| e.to_string())?;
+
+    if let Some(c_id) = cuenta_ahorro_id {
+        if tasa_cambio > 0.0 {
+            let monto_dop = monto * tasa_cambio;
+            let comision_dop = monto_dop * 0.002;
+            tx.execute(
+                "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
+                (monto_dop + comision_dop, c_id)
+                ).map_err(|e| e.to_string())?;
+
+            tx.execute(
+                "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id)
+                 VALUES (?, ?, 'DOP', ?, (SELECT id FROM categorias WHERE nombre = 'Otros' LIMIT 1), 'transferencia', 0.0, NULL, ?);",
+                (&fecha, comision_dop, &format!("Comisión 0.20% Pago Tarjeta (Tasa {})", tasa_cambio), c_id)
+            ).map_err(|e| e.to_string())?;
+        } else {
+            let comision = monto * 0.002;
+            tx.execute(
+                "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
+                (monto + comision, c_id)
+            ).map_err(|e| e.to_string())?;
+
+            tx.execute(
+                "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id)
+                 VALUES (?, ?, ?, ?, (SELECT id FROM categorias WHERE nombre = 'Otros' LIMIT 1), 'transferencia', 0.0, NULL, ?);",
+                (&fecha, comision, &divisa, &format!("Comisión 0.20% Pago Tarjeta"), c_id)
+            ).map_err(|e| e.to_string())?;
+        }
+    }
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -547,7 +725,7 @@ fn registrar_pago_tarjeta(id: i64, fecha: String, monto: f64) -> Result<(), Stri
 fn obtener_suscripciones() -> Result<Vec<Suscripcion>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT s.id, s.plataforma, s.monto, s.tarjeta_id, s.frecuencia, t.entidad, t.nombre_tarjeta
+        "SELECT s.id, s.plataforma, s.monto, s.tarjeta_id, s.frecuencia, s.dia_facturacion, s.fecha_ultimo_pago, s.divisa, t.entidad, t.nombre_tarjeta
          FROM suscripciones s
          JOIN tarjetas t ON s.tarjeta_id = t.id
          ORDER BY s.plataforma ASC;"
@@ -560,8 +738,11 @@ fn obtener_suscripciones() -> Result<Vec<Suscripcion>, String> {
             monto: row.get(2)?,
             tarjeta_id: row.get(3)?,
             frecuencia: row.get(4)?,
-            entidad: row.get(5)?,
-            nombre_tarjeta: row.get(6)?,
+            dia_facturacion: row.get(5)?,
+            fecha_ultimo_pago: row.get(6)?,
+            divisa: row.get(7)?,
+            entidad: row.get(8)?,
+            nombre_tarjeta: row.get(9)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -573,11 +754,11 @@ fn obtener_suscripciones() -> Result<Vec<Suscripcion>, String> {
 }
 
 #[tauri::command]
-fn crear_suscripcion(plataforma: String, monto: f64, tarjeta_id: i64, frecuencia: String) -> Result<i64, String> {
+fn crear_suscripcion(plataforma: String, monto: f64, tarjeta_id: i64, frecuencia: String, dia_facturacion: i32, divisa: String) -> Result<i64, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO suscripciones (plataforma, monto, tarjeta_id, frecuencia) VALUES (?, ?, ?, ?);",
-        (plataforma, monto, tarjeta_id, frecuencia)
+        "INSERT INTO suscripciones (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa) VALUES (?, ?, ?, ?, ?, ?);",
+        (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa)
     ).map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
 }
@@ -587,6 +768,139 @@ fn eliminar_suscripcion(id: i64) -> Result<(), String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM suscripciones WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+fn procesar_suscripciones() -> Result<Vec<String>, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    
+    // Obtener la fecha actual
+    let hoy = Local::now().naive_local();
+    let hoy_fecha_str = hoy.format("%d/%m/%Y").to_string(); // Formato estándar usado en el frontend
+    let dia_actual = hoy.day() as i32;
+    let mes_actual = hoy.month();
+    let anio_actual = hoy.year();
+
+    let mut stmt = conn.prepare(
+        "SELECT id, plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, fecha_ultimo_pago, divisa FROM suscripciones;"
+    ).map_err(|e| e.to_string())?;
+
+    struct SubRecord {
+        id: i64,
+        plataforma: String,
+        monto: f64,
+        tarjeta_id: i64,
+        frecuencia: String,
+        dia_facturacion: i32,
+        fecha_ultimo_pago: Option<String>,
+        divisa: String,
+    }
+
+    let rows = stmt.query_map([], |row| {
+        Ok(SubRecord {
+            id: row.get(0)?,
+            plataforma: row.get(1)?,
+            monto: row.get(2)?,
+            tarjeta_id: row.get(3)?,
+            frecuencia: row.get(4)?,
+            dia_facturacion: row.get(5)?,
+            fecha_ultimo_pago: row.get(6)?,
+            divisa: row.get(7)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut suscripciones = Vec::new();
+    for r in rows {
+        suscripciones.push(r.map_err(|e| e.to_string())?);
+    }
+    drop(stmt);
+
+    // Buscar o crear la categoría de Suscripciones en el sistema
+    let categoria_suscripciones_id: i64 = match conn.query_row(
+        "SELECT id FROM categorias WHERE LOWER(nombre) = 'suscripciones';",
+        [],
+        |r| r.get(0)
+    ) {
+        Ok(id) => id,
+        Err(_) => {
+            // Si no existe, usar la categoría "Otros" o crear "Suscripciones"
+            match conn.query_row(
+                "SELECT id FROM categorias WHERE LOWER(nombre) = 'otros';",
+                [],
+                |r| r.get(0)
+            ) {
+                Ok(id) => id,
+                Err(_) => 1 // Fallback al ID 1
+            }
+        }
+    };
+
+    let mut mensajes_cargo = Vec::new();
+
+    for sub in suscripciones {
+        // Determinar si corresponde realizar el cargo automático
+        let mut requiere_cargo = false;
+        
+        if let Some(ref ultimo_pago) = sub.fecha_ultimo_pago {
+            // Intentar parsear el último pago
+            let partes: Vec<&str> = ultimo_pago.split('/').collect();
+            if partes.len() == 3 {
+                if let (Ok(_p_dia), Ok(p_mes), Ok(p_anio)) = (partes[0].parse::<i32>(), partes[1].parse::<u32>(), partes[2].parse::<i32>()) {
+                    if sub.frecuencia == "mensual" {
+                        if (anio_actual > p_anio || (anio_actual == p_anio && mes_actual > p_mes)) && dia_actual >= sub.dia_facturacion {
+                            requiere_cargo = true;
+                        }
+                    } else if sub.frecuencia == "anual" {
+                        if anio_actual > p_anio && dia_actual >= sub.dia_facturacion {
+                            requiere_cargo = true;
+                        }
+                    }
+                }
+            } else {
+                requiere_cargo = true;
+            }
+        } else {
+            if dia_actual >= sub.dia_facturacion {
+                requiere_cargo = true;
+            }
+        }
+
+        if requiere_cargo {
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+            // 1. Cargar a la tarjeta correspondiente
+            if sub.divisa == "USD" {
+                tx.execute(
+                    "UPDATE tarjetas SET balance_dolares = balance_dolares + ? WHERE id = ?;",
+                    (sub.monto, sub.tarjeta_id)
+                ).map_err(|e| e.to_string())?;
+            } else {
+                tx.execute(
+                    "UPDATE tarjetas SET balance_pesos = balance_pesos + ? WHERE id = ?;",
+                    (sub.monto, sub.tarjeta_id)
+                ).map_err(|e| e.to_string())?;
+            }
+
+            // 2. Registrar en gastos
+            tx.execute(
+                "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id)
+                 VALUES (?, ?, ?, ?, ?, 'tarjeta', 0.0, ?);",
+                (&hoy_fecha_str, sub.monto, &sub.divisa, format!("Cargo recurrente: {}", sub.plataforma), categoria_suscripciones_id, sub.tarjeta_id)
+            ).map_err(|e| e.to_string())?;
+
+            // 3. Actualizar fecha de último pago
+            tx.execute(
+                "UPDATE suscripciones SET fecha_ultimo_pago = ? WHERE id = ?;",
+                (&hoy_fecha_str, sub.id)
+            ).map_err(|e| e.to_string())?;
+
+            tx.commit().map_err(|e| e.to_string())?;
+
+            mensajes_cargo.push(format!("Cargo automático realizado para {} ({} {})", sub.plataforma, sub.divisa, sub.monto));
+        }
+    }
+
+    Ok(mensajes_cargo)
 }
 
 // --- COMANDOS: CAPITAL (NoSQL) ---
@@ -779,6 +1093,364 @@ fn eliminar_prestamo(id: i64) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn obtener_clientes() -> Result<Vec<Cliente>, String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id, rnc, nombre FROM clientes ORDER BY nombre ASC;").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Cliente {
+            id: row.get(0)?,
+            rnc: row.get(1)?,
+            nombre: row.get(2)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+    for r in rows {
+        list.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(list)
+}
+
+#[tauri::command]
+fn crear_cliente(rnc: String, nombre: String) -> Result<Cliente, String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let rnc_clean = rnc.trim();
+    let nombre_clean = nombre.trim();
+    if rnc_clean.is_empty() || nombre_clean.is_empty() {
+        return Err("RNC y nombre no pueden estar vacíos.".to_string());
+    }
+
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM clientes WHERE rnc = ?;",
+        [rnc_clean],
+        |r| r.get(0)
+    ).map_err(|e| e.to_string())?;
+
+    if count > 0 {
+        return Err("Ya existe un cliente con este RNC.".to_string());
+    }
+
+    conn.execute(
+        "INSERT INTO clientes (rnc, nombre) VALUES (?, ?);",
+        [rnc_clean, nombre_clean]
+    ).map_err(|e| e.to_string())?;
+
+    Ok(Cliente {
+        id: conn.last_insert_rowid(),
+        rnc: rnc_clean.to_string(),
+        nombre: nombre_clean.to_string(),
+    })
+}
+
+#[tauri::command]
+fn eliminar_cliente(id: i64) -> Result<(), String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingresos WHERE cliente_id = ?;",
+        [id],
+        |r| r.get(0)
+    ).map_err(|e| e.to_string())?;
+
+    if count > 0 {
+        return Err("No se puede eliminar el cliente porque tiene facturas registradas.".to_string());
+    }
+
+    conn.execute("DELETE FROM clientes WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn obtener_cuentas() -> Result<Vec<CuentaAhorro>, String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id, nombre, divisa, balance_actual FROM cuentas_ahorro ORDER BY nombre ASC;").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| {
+        Ok(CuentaAhorro {
+            id: row.get(0)?,
+            nombre: row.get(1)?,
+            divisa: row.get(2)?,
+            balance_actual: row.get(3)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+    for r in rows {
+        list.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(list)
+}
+
+#[tauri::command]
+fn crear_cuenta(nombre: String, divisa: String, balance: f64) -> Result<i64, String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let nombre_clean = nombre.trim();
+    if nombre_clean.is_empty() {
+        return Err("El nombre de la cuenta no puede estar vacío.".to_string());
+    }
+
+    conn.execute(
+        "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES (?, ?, ?);",
+        (nombre_clean, divisa, balance)
+    ).map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn eliminar_cuenta(id: i64) -> Result<(), String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM gastos WHERE cuenta_ahorro_id = ?;",
+        [id],
+        |r| r.get(0)
+    ).map_err(|e| e.to_string())?;
+
+    if count > 0 {
+        return Err("No se puede eliminar la cuenta porque tiene transferencias registradas en gastos.".to_string());
+    }
+
+    conn.execute("DELETE FROM cuentas_ahorro WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn transferir_entre_cuentas(
+    fecha: String,
+    origen_id: i64,
+    destino_id: i64,
+    monto_origen: f64,
+    monto_destino: f64,
+    cargo: f64,
+    descripcion: String
+) -> Result<(), String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
+        (monto_origen + cargo, origen_id)
+    ).map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
+        (monto_destino, destino_id)
+    ).map_err(|e| e.to_string())?;
+
+    let tasa_cambio = if monto_origen > 0.0 { monto_destino / monto_origen } else { 1.0 };
+    tx.execute(
+        "INSERT INTO transacciones_cuentas (fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, tasa_cambio, cargo, descripcion)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+        (fecha, origen_id, destino_id, monto_origen, monto_destino, tasa_cambio, cargo, &descripcion)
+    ).map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn obtener_transacciones_cuentas() -> Result<Vec<TransaccionCuenta>, String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.fecha, t.cuenta_origen_id, co.nombre, t.cuenta_destino_id, cd.nombre, t.monto_origen, t.monto_destino, t.tasa_cambio, t.cargo, t.descripcion
+         FROM transacciones_cuentas t
+         JOIN cuentas_ahorro co ON t.cuenta_origen_id = co.id
+         JOIN cuentas_ahorro cd ON t.cuenta_destino_id = cd.id
+         ORDER BY t.id DESC;"
+    ).map_err(|e| e.to_string())?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(TransaccionCuenta {
+            id: row.get(0)?,
+            fecha: row.get(1)?,
+            cuenta_origen_id: row.get(2)?,
+            cuenta_origen_nombre: row.get(3)?,
+            cuenta_destino_id: row.get(4)?,
+            cuenta_destino_nombre: row.get(5)?,
+            monto_origen: row.get(6)?,
+            monto_destino: row.get(7)?,
+            tasa_cambio: row.get(8)?,
+            cargo: row.get(9)?,
+            descripcion: row.get(10)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+    for r in rows {
+        list.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(list)
+}
+
+#[tauri::command]
+fn actualizar_ingreso(
+    id: i64,
+    numero_factura: String,
+    cliente_id: i64,
+    fecha_emision: String,
+    monto_total: f64,
+    porcentaje_retencion: f64
+) -> Result<(), String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let monto_retenido = (monto_total * (porcentaje_retencion / 100.0)).round();
+    conn.execute(
+        "UPDATE ingresos SET numero_factura = ?, cliente_id = ?, fecha_emision = ?, monto_total = ?, porcentaje_retencion = ?, monto_retenido = ? WHERE id = ?;",
+        (numero_factura, cliente_id, fecha_emision, monto_total, porcentaje_retencion, monto_retenido, id)
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn crear_cobro_efectivo_informal(fecha: String, descripcion: String, monto: f64, divisa: String) -> Result<i64, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
+    let cuenta_efectivo = if divisa == "USD" { "Efectivo USD" } else { "Efectivo DOP" };
+    
+    tx.execute(
+        "INSERT INTO ingresos_informales (fecha, descripcion, monto, estatus, institucion_deposito, fecha_pago, monto_recibido)
+         VALUES (?, ?, ?, 'pagado', ?, ?, ?);",
+        (&fecha, &descripcion, monto, cuenta_efectivo, &fecha, monto)
+    ).map_err(|e| e.to_string())?;
+    
+    let id = tx.last_insert_rowid();
+    
+    tx.execute(
+        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
+        (monto, cuenta_efectivo)
+    ).map_err(|e| e.to_string())?;
+    
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+#[tauri::command]
+fn eliminar_gasto(id: i64) -> Result<(), String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
+    let (monto, divisa, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id): (f64, String, String, f64, Option<i64>, Option<i64>) = tx.query_row(
+        "SELECT monto, divisa, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id FROM gastos WHERE id = ?;",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+    ).map_err(|e| e.to_string())?;
+    
+    if metodo_pago == "tarjeta" {
+        if let Some(t_id) = tarjeta_id {
+            if divisa == "USD" {
+                tx.execute(
+                    "UPDATE tarjetas SET balance_dolares = MAX(0.0, balance_dolares - ?) WHERE id = ?;",
+                    (monto, t_id)
+                ).map_err(|e| e.to_string())?;
+            } else {
+                tx.execute(
+                    "UPDATE tarjetas SET balance_pesos = MAX(0.0, balance_pesos - ?) WHERE id = ?;",
+                    (monto, t_id)
+                ).map_err(|e| e.to_string())?;
+            }
+        }
+    } else if metodo_pago == "transferencia" {
+        if let Some(c_id) = cuenta_ahorro_id {
+            tx.execute(
+                "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
+                (monto + costo_adicional, c_id)
+            ).map_err(|e| e.to_string())?;
+        }
+    } else if metodo_pago == "efectivo" {
+        let cuenta_efectivo = if divisa == "USD" { "Efectivo USD" } else { "Efectivo DOP" };
+        tx.execute(
+            "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
+            (monto, cuenta_efectivo)
+        ).map_err(|e| e.to_string())?;
+    }
+    
+    tx.execute("DELETE FROM gastos WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
+    
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn eliminar_transaccion_cuenta(id: i64) -> Result<(), String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
+    let (origen_id, destino_id, monto_origen, monto_destino, cargo): (i64, i64, f64, f64, f64) = tx.query_row(
+        "SELECT cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, cargo FROM transacciones_cuentas WHERE id = ?;",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+    ).map_err(|e| e.to_string())?;
+    
+    tx.execute(
+        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
+        (monto_origen + cargo, origen_id)
+    ).map_err(|e| e.to_string())?;
+    
+    tx.execute(
+        "UPDATE cuentas_ahorro SET balance_actual = MAX(0.0, balance_actual - ?) WHERE id = ?;",
+        (monto_destino, destino_id)
+    ).map_err(|e| e.to_string())?;
+    
+    tx.execute("DELETE FROM transacciones_cuentas WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
+    
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn eliminar_ingreso_informal(id: i64) -> Result<(), String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
+    let (estatus, institucion_deposito, monto_recibido): (String, Option<String>, Option<f64>) = tx.query_row(
+        "SELECT estatus, institucion_deposito, monto_recibido FROM ingresos_informales WHERE id = ?;",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+    ).map_err(|e| e.to_string())?;
+    
+    if estatus == "pagado" {
+        if let Some(ref inst) = institucion_deposito {
+            if !inst.is_empty() {
+                tx.execute(
+                    "UPDATE cuentas_ahorro SET balance_actual = MAX(0.0, balance_actual - ?) WHERE nombre = ?;",
+                    (monto_recibido.unwrap_or(0.0), inst)
+                ).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    
+    tx.execute("DELETE FROM ingresos_informales WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
+    
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn eliminar_ingreso(id: i64) -> Result<(), String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
+    let (estatus, institucion_deposito, monto_recibido): (String, Option<String>, Option<f64>) = tx.query_row(
+        "SELECT estatus, institucion_deposito, monto_recibido FROM ingresos WHERE id = ?;",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+    ).map_err(|e| e.to_string())?;
+    
+    if estatus == "pagada" {
+        if let Some(ref inst) = institucion_deposito {
+            if !inst.is_empty() {
+                tx.execute(
+                    "UPDATE cuentas_ahorro SET balance_actual = MAX(0.0, balance_actual - ?) WHERE nombre = ?;",
+                    (monto_recibido.unwrap_or(0.0), inst)
+                ).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    
+    tx.execute("DELETE FROM ingresos WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
+    
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // --- PUNTO DE ENTRADA PRINCIPAL ---
 fn main() {
     // Inicializar bases de datos antes del arranque
@@ -794,23 +1466,38 @@ fn main() {
             crear_gasto,
             obtener_ingresos,
             crear_ingreso,
+            actualizar_ingreso,
             marcar_ingreso_pagado,
             obtener_ingresos_informales,
             crear_ingreso_informal,
             marcar_informal_pagado,
             obtener_tarjetas,
             crear_tarjeta,
-            actualizar_limite_tarjeta,
+            actualizar_limites_tarjeta,
             registrar_pago_tarjeta,
             obtener_suscripciones,
             crear_suscripcion,
             eliminar_suscripcion,
+            procesar_suscripciones,
             obtener_capital,
             guardar_capital,
             obtener_prestamos,
             crear_prestamo,
             pagar_cuota_prestamo,
-            eliminar_prestamo
+            eliminar_prestamo,
+            obtener_clientes,
+            crear_cliente,
+            eliminar_cliente,
+            obtener_cuentas,
+            crear_cuenta,
+            eliminar_cuenta,
+            transferir_entre_cuentas,
+            obtener_transacciones_cuentas,
+            crear_cobro_efectivo_informal,
+            eliminar_gasto,
+            eliminar_transaccion_cuenta,
+            eliminar_ingreso_informal,
+            eliminar_ingreso
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");

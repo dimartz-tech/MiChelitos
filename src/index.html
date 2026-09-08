@@ -38,6 +38,14 @@
                     <span class="nav-icon">💳</span>
                     <span class="nav-label">Tarjetas</span>
                 </button>
+                <button onclick="navigate('cuentas')" id="nav-btn-cuentas" class="nav-item">
+                    <span class="nav-icon">🏦</span>
+                    <span class="nav-label">Cuentas</span>
+                </button>
+                <button onclick="navigate('efectivo')" id="nav-btn-efectivo" class="nav-item">
+                    <span class="nav-icon">💵</span>
+                    <span class="nav-label">Efectivo</span>
+                </button>
                 <button onclick="navigate('suscripciones')" id="nav-btn-suscripciones" class="nav-item">
                     <span class="nav-icon">🔄</span>
                     <span class="nav-label">Suscripciones</span>
@@ -60,9 +68,12 @@
                 </button>
             </nav>
 
-            <div class="sidebar-footer">
+            <div class="sidebar-footer" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                 <button id="theme-toggle-btn" class="theme-toggle" title="Cambiar tema">
                     🌙
+                </button>
+                <button id="sidebar-collapse-btn" class="sidebar-toggle" title="Colapsar menú" style="background: none; border: none; font-size: 1.1rem; cursor: pointer; color: var(--text-normal); transition: transform 0.2s ease;">
+                    ◀️
                 </button>
             </div>
         </aside>

@@ -1,11 +1,12 @@
 {
   "build": {
     "distDir": "../src",
-    "devPath": "../src"
+    "devPath": "../src",
+    "withGlobalTauri": true
   },
   "package": {
     "productName": "MiChelitos",
-    "version": "1.2.0"
+    "version": "1.3.5"
   },
   "tauri": {
     "allowlist": {
@@ -32,16 +33,14 @@
         "entitlements": null,
         "exceptionDomain": "",
         "frameworks": [],
-        "providerBundleIdentifier": null,
         "signingIdentity": null
       },
       "resources": [],
       "shortDescription": "Gestor Financiero Personal y Corporativo",
-      "targets": "all",
+      "targets": ["dmg"],
       "windows": {
         "certificateThumbprint": null,
-        "digestAlgorithm": "sha256",
-        "timestampServer": ""
+        "digestAlgorithm": "sha256"
       }
     },
     "security": {

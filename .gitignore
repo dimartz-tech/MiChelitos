@@ -1,10 +1,47 @@
-# Dependencias web
+# =====================================================================
+#  MiChelitosTauri — Reglas de exclusión de control de versiones
+#  Ver justificación detallada en plan_arquitectura_hexagonal.md §2
+# =====================================================================
+
+# --- Datos financieros reales (NUNCA versionar) ---
+# La aplicación opera sobre saldos bancarios, RNC de clientes y facturas
+# reales. Un dato committeado sobrevive al `git rm`: permanece en el
+# historial y en cualquier clon. Estas reglas deben preceder al primer add.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.backup_*
+michelitos.db*
+
+# --- Respaldos y copias del proyecto ---
+*_backup_*/
+*.bak
+
+# --- Dependencias web ---
 node_modules/
 
-# Compilados de Rust
+# --- Compilados de Rust ---
 src-tauri/target/
 
-# Logs e IDEs
+# --- Artefactos de empaquetado macOS ---
+*.dmg
+*.app/
+
+# --- Entorno y secretos ---
+.env
+.env.local
+.env.*.local
+
+# --- Resultados de pruebas y cobertura ---
+/cobertura/
+/coverage/
+*.profraw
+*.gcda
+
+# --- Logs e IDEs ---
 .vscode/
 .idea/
 .DS_Store

@@ -1,6 +1,18 @@
 // --- MICHELITOS TAURI - PUENTE DE COMUNICACIÓN CON EL BACKEND DE RUST (IPC) ---
 
-const { invoke } = window.__TAURI__ ? window.__TAURI__.tauri : { invoke: async () => [] };
+const invoke = (window.__TAURI__ && window.__TAURI__.invoke) || 
+               (window.__TAURI__ && window.__TAURI__.tauri && window.__TAURI__.tauri.invoke) || 
+               (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) ||
+               (async (cmd) => {
+                   if (cmd === 'obtener_capital') {
+                       return {
+                           propiedades: { inmobiliario: [], vehiculos: [], maquinaria: [] },
+                           certificados: [],
+                           bolsa: []
+                       };
+                   }
+                   return [];
+               });
 
 const AppAPI = {
     // --- CATEGORÍAS ---
@@ -14,6 +26,48 @@ const AppAPI = {
 
     async eliminarCategoria(id) {
         return await invoke('eliminar_categoria', { id: Number(id) });
+    },
+
+    // --- CLIENTES ---
+    async obtenerClientes() {
+        return await invoke('obtener_clientes');
+    },
+
+    async crearCliente(rnc, nombre) {
+        return await invoke('crear_cliente', { rnc, nombre });
+    },
+
+    async eliminarCliente(id) {
+        return await invoke('eliminar_cliente', { id: Number(id) });
+    },
+
+    // --- CUENTAS DE AHORRO ---
+    async obtenerCuentas() {
+        return await invoke('obtener_cuentas');
+    },
+
+    async crearCuenta(nombre, divisa, balance) {
+        return await invoke('crear_cuenta', { nombre, divisa, balance: Number(balance) });
+    },
+
+    async eliminarCuenta(id) {
+        return await invoke('eliminar_cuenta', { id: Number(id) });
+    },
+
+    async transferirEntreCuentas(fecha, origenId, destinoId, montoOrigen, montoDestino, cargo, descripcion) {
+        return await invoke('transferir_entre_cuentas', {
+            fecha,
+            origenId: Number(origenId),
+            destinoId: Number(destinoId),
+            montoOrigen: Number(montoOrigen),
+            montoDestino: Number(montoDestino),
+            cargo: Number(cargo),
+            descripcion
+        });
+    },
+
+    async obtenerTransaccionesCuentas() {
+        return await invoke('obtener_transacciones_cuentas');
     },
 
     // --- GASTOS ---
@@ -32,6 +86,17 @@ const AppAPI = {
 
     async crearIngreso(ingresoData) {
         return await invoke('crear_ingreso', { input: ingresoData });
+    },
+
+    async actualizarIngreso(id, numeroFactura, clienteId, fechaEmision, montoTotal, porcentajeRetencion) {
+        return await invoke('actualizar_ingreso', {
+            id: Number(id),
+            numeroFactura,
+            clienteId: Number(clienteId),
+            fechaEmision,
+            montoTotal: Number(montoTotal),
+            porcentajeRetencion: Number(porcentajeRetencion)
+        });
     },
 
     async marcarIngresoPagado(id, institucion, fecha, montoRecibido) {
@@ -70,29 +135,43 @@ const AppAPI = {
         return await invoke('obtener_tarjetas');
     },
 
-    async crearTarjeta(entidad, nombre, limite, balance, corte, pago) {
+    async crearTarjeta(entidad, nombre, limitePesos, limiteDolares, sobregiroPesos, sobregiroDolares, balancePesos, balanceDolares, balanceCortePesos, balanceCorteDolares, corte, pago) {
         return await invoke('crear_tarjeta', {
             entidad,
             nombre,
-            limite: Number(limite),
-            balance: Number(balance),
+            limitePesos: Number(limitePesos),
+            limiteDolares: Number(limiteDolares),
+            sobregiroPesos: Number(sobregiroPesos),
+            sobregiroDolares: Number(sobregiroDolares),
+            balancePesos: Number(balancePesos),
+            balanceDolares: Number(balanceDolares),
+            balanceCortePesos: Number(balanceCortePesos),
+            balanceCorteDolares: Number(balanceCorteDolares),
             corte: Number(corte),
             pago: Number(pago)
         });
     },
 
-    async actualizarLimiteTarjeta(id, limite) {
-        return await invoke('actualizar_limite_tarjeta', {
+    async actualizarLimitesTarjeta(id, limitePesos, limiteDolares, sobregiroPesos, sobregiroDolares, balanceCortePesos, balanceCorteDolares) {
+        return await invoke('actualizar_limites_tarjeta', {
             id: Number(id),
-            limite: Number(limite)
+            limitePesos: Number(limitePesos),
+            limiteDolares: Number(limiteDolares),
+            sobregiroPesos: Number(sobregiroPesos),
+            sobregiroDolares: Number(sobregiroDolares),
+            balanceCortePesos: Number(balanceCortePesos),
+            balanceCorteDolares: Number(balanceCorteDolares)
         });
     },
 
-    async registrarPagoTarjeta(id, fecha, monto) {
-        return await invoke('registrar_pago_tarjeta', {
-            id: Number(id),
-            fecha,
-            monto: Number(monto)
+    async registrarPagoTarjeta(id, fec, mon, div, cuentaAhorroId = null, tasaCambio = 0) {
+        return await invoke('registrar_pago_tarjeta', { 
+            id: Number(id), 
+            fecha: fec, 
+            monto: mon, 
+            divisa: div, 
+            cuentaAhorroId: cuentaAhorroId ? Number(cuentaAhorroId) : null,
+            tasaCambio: Number(tasaCambio || 0)
         });
     },
 
@@ -101,17 +180,23 @@ const AppAPI = {
         return await invoke('obtener_suscripciones');
     },
 
-    async crearSuscripcion(plataforma, monto, tarjetaId, frecuencia) {
+    async crearSuscripcion(plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa) {
         return await invoke('crear_suscripcion', {
             plataforma,
             monto: Number(monto),
             tarjetaId: Number(tarjetaId),
-            frecuencia
+            frecuencia,
+            diaFacturacion: Number(diaFacturacion),
+            divisa
         });
     },
 
     async eliminarSuscripcion(id) {
         return await invoke('eliminar_suscripcion', { id: Number(id) });
+    },
+
+    async procesarSuscripciones() {
+        return await invoke('procesar_suscripciones');
     },
 
     // --- CAPITAL (NoSQL) ---
@@ -138,5 +223,32 @@ const AppAPI = {
 
     async eliminarPrestamo(id) {
         return await invoke('eliminar_prestamo', { id: Number(id) });
+    },
+
+    // --- EFECTIVO ---
+    async crearCobroEfectivoInformal(fecha, descripcion, monto, divisa) {
+        return await invoke('crear_cobro_efectivo_informal', {
+            fecha,
+            descripcion,
+            monto: Number(monto),
+            divisa
+        });
+    },
+
+    // --- CORRECCIONES ---
+    async eliminarGasto(id) {
+        return await invoke('eliminar_gasto', { id: Number(id) });
+    },
+
+    async eliminarTransaccionCuenta(id) {
+        return await invoke('eliminar_transaccion_cuenta', { id: Number(id) });
+    },
+
+    async eliminarIngresoInformal(id) {
+        return await invoke('eliminar_ingreso_informal', { id: Number(id) });
+    },
+
+    async eliminarIngreso(id) {
+        return await invoke('eliminar_ingreso', { id: Number(id) });
     }
 };
