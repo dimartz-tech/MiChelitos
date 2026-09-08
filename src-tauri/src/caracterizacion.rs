@@ -6,7 +6,7 @@
 //! comportamiento es correcto: lo fijan.
 
 use crate::db_sql;
-use crate::{crear_gasto, eliminar_gasto, GastoInput};
+use crate::{crear_gasto, eliminar_gasto, registrar_pago_tarjeta, GastoInput};
 use rusqlite::{params, Connection};
 use std::sync::{Mutex, MutexGuard};
 
@@ -140,6 +140,18 @@ fn total_gastos() -> i64 {
     conexion()
         .query_row("SELECT COUNT(*) FROM gastos;", [], |r| r.get(0))
         .expect("contar gastos")
+}
+
+/// Monto, divisa y costo_adicional del último gasto registrado, que es como se
+/// asienta la comisión de un abono a tarjeta.
+fn ultimo_gasto() -> (f64, String, f64) {
+    conexion()
+        .query_row(
+            "SELECT monto, divisa, costo_adicional FROM gastos ORDER BY id DESC LIMIT 1;",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("leer último gasto")
 }
 
 /// Constructor con los valores por defecto de una transferencia ordinaria.
@@ -465,4 +477,100 @@ fn c16_una_divisa_distinta_de_usd_se_trata_como_pesos() {
     let (pesos, dolares) = balances_tarjeta(tarjeta);
     assert_importe(pesos, 300.0, "se carga al balance en pesos");
     assert_importe(dolares, 0.0, "el balance en dólares no se toca");
+}
+
+// =====================================================================
+//  Abonos a tarjeta — la otra ruta que calcula el 0.20 % (H8)
+// =====================================================================
+
+#[test]
+fn c17_el_abono_en_igual_divisa_cobra_la_comision_sobre_el_monto() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(50000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100000.0);
+
+    // 10 423.44 x 0.20 % = 20.84688, un importe con cinco decimales.
+    registrar_pago_tarjeta(
+        tarjeta,
+        "08/09/2026".to_string(),
+        10423.44,
+        "DOP".to_string(),
+        Some(cuenta),
+        0.0,
+    )
+    .unwrap();
+
+    let (monto_comision, divisa, costo) = ultimo_gasto();
+    assert_importe(monto_comision, 20.85, "comisión al centavo");
+    assert_eq!(divisa, "DOP");
+    assert_importe(costo, 0.0, "la comisión se asienta como monto, no como costo");
+
+    // Saldo: 100 000 − 10 423.44 − 20.85
+    assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 89555.71, "saldo debitado");
+    assert_importe(balances_tarjeta(tarjeta).0, 39576.56, "deuda reducida");
+}
+
+#[test]
+fn c18_el_abono_multidivisa_convierte_y_comisiona_al_centavo() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 1000.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100000.0);
+
+    // 250 USD x 58.9167 = 14 729.175 DOP; su 0.20 % = 29.45835.
+    // Ambos valores se redondean a centavos: 14 729.18 y 29.46.
+    registrar_pago_tarjeta(
+        tarjeta,
+        "08/09/2026".to_string(),
+        250.0,
+        "USD".to_string(),
+        Some(cuenta),
+        58.9167,
+    )
+    .unwrap();
+
+    let (monto_comision, divisa, _) = ultimo_gasto();
+    assert_importe(monto_comision, 29.46, "comisión al centavo");
+    assert_eq!(divisa, "DOP", "la comisión se registra en pesos");
+
+    // Saldo: 100 000 − 14 729.18 − 29.46
+    assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 85241.36, "saldo debitado");
+    assert_importe(balances_tarjeta(tarjeta).1, 750.0, "la deuda baja en USD");
+}
+
+#[test]
+fn c19_un_abono_sin_cuenta_de_origen_no_genera_comision() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(50000.0, 0.0);
+
+    registrar_pago_tarjeta(
+        tarjeta,
+        "08/09/2026".to_string(),
+        10000.0,
+        "DOP".to_string(),
+        None,
+        0.0,
+    )
+    .unwrap();
+
+    assert_eq!(total_gastos(), 0, "sin cuenta no hay comisión que asentar");
+    assert_importe(balances_tarjeta(tarjeta).0, 40000.0, "la deuda sí se reduce");
+}
+
+#[test]
+fn c20_h5_el_abono_superior_a_la_deuda_recorta_el_balance_en_cero() {
+    // Misma invariante escrita en SQL que en eliminar_gasto: MAX(0.0, ...).
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(500.0, 0.0);
+
+    registrar_pago_tarjeta(
+        tarjeta,
+        "08/09/2026".to_string(),
+        800.0,
+        "DOP".to_string(),
+        None,
+        0.0,
+    )
+    .unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "no queda saldo a favor");
 }
