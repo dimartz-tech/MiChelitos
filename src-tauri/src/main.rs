@@ -18,8 +18,8 @@ use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use chrono::{NaiveDate, Local, Datelike};
 
-use dominio::cargos::cargos_de_transferencia;
-use dominio::dinero::{Dinero, Divisa};
+use dominio::cargos::{cargos_de_transferencia, TASA_RETENCION};
+use dominio::dinero::{Dinero, Divisa, TasaCambio};
 
 // --- ESTRUCTURAS DTO (DATA TRANSFER OBJECTS) ---
 #[derive(Serialize, Deserialize, Debug)]
@@ -697,32 +697,40 @@ fn registrar_pago_tarjeta(
     ).map_err(|e| e.to_string())?;
 
     if let Some(c_id) = cuenta_ahorro_id {
-        if tasa_cambio > 0.0 {
-            let monto_dop = monto * tasa_cambio;
-            let comision_dop = monto_dop * 0.002;
-            tx.execute(
-                "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
-                (monto_dop + comision_dop, c_id)
-                ).map_err(|e| e.to_string())?;
+        let divisa_pago = if divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
+        let monto_pago = Dinero::nuevo(monto, divisa_pago)?;
 
-            tx.execute(
-                "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id)
-                 VALUES (?, ?, 'DOP', ?, (SELECT id FROM categorias WHERE nombre = 'Otros' LIMIT 1), 'transferencia', 0.0, NULL, ?);",
-                (&fecha, comision_dop, &format!("Comisión 0.20% Pago Tarjeta (Tasa {})", tasa_cambio), c_id)
-            ).map_err(|e| e.to_string())?;
+        // Importe que realmente sale de la cuenta. Cuando media una tasa de
+        // cambio, la conversión se redondea a centavos antes de comisionar.
+        let (debitado, descripcion) = if tasa_cambio > 0.0 {
+            let en_pesos = match divisa_pago {
+                Divisa::Usd => monto_pago.convertir(Divisa::Dop, TasaCambio::nueva(tasa_cambio)?)?,
+                // Conducta vigente: si llega una tasa con un abono ya en pesos,
+                // el código la aplicaba igualmente. Se conserva.
+                Divisa::Dop => Dinero::nuevo(monto * tasa_cambio, Divisa::Dop)?,
+            };
+            (en_pesos, format!("Comisión 0.20% Pago Tarjeta (Tasa {})", tasa_cambio))
         } else {
-            let comision = monto * 0.002;
-            tx.execute(
-                "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
-                (monto + comision, c_id)
-            ).map_err(|e| e.to_string())?;
+            (monto_pago, "Comisión 0.20% Pago Tarjeta".to_string())
+        };
 
-            tx.execute(
-                "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id)
-                 VALUES (?, ?, ?, ?, (SELECT id FROM categorias WHERE nombre = 'Otros' LIMIT 1), 'transferencia', 0.0, NULL, ?);",
-                (&fecha, comision, &divisa, &format!("Comisión 0.20% Pago Tarjeta"), c_id)
-            ).map_err(|e| e.to_string())?;
-        }
+        // Misma regla de redondeo que crear_gasto: una sola política para el
+        // 0.20 % en todo el sistema.
+        let comision = debitado.porcentaje(TASA_RETENCION)?;
+        let total = debitado.sumar(&comision)?;
+
+        tx.execute(
+            "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
+            (total.unidades(), c_id),
+        )
+        .map_err(|e| e.to_string())?;
+
+        tx.execute(
+            "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id)
+             VALUES (?, ?, ?, ?, (SELECT id FROM categorias WHERE nombre = 'Otros' LIMIT 1), 'transferencia', 0.0, NULL, ?);",
+            (&fecha, comision.unidades(), comision.divisa().codigo(), &descripcion, c_id),
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     tx.commit().map_err(|e| e.to_string())?;
