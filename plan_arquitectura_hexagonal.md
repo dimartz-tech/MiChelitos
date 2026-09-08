@@ -8,7 +8,7 @@
 
 ## 0. Resumen ejecutivo
 
-Este documento propone reorganizar internamente MiChelitosTauri hacia una **arquitectura hexagonal (puertos y adaptadores)** guiada por **principios SOLID**, sin cambiar el stack, sin añadir dependencias de ejecución y sin alterar la experiencia de uso existente.
+Este documento propone reorganizar internamente MiChelitosTauri hacia una **arquitectura hexagonal (puertos y adaptadores)**, guiada por **principios SOLID** y por los **patrones tácticos del diseño guiado por el dominio (DDD)**, sin cambiar el stack, sin añadir dependencias de ejecución y sin alterar la experiencia de uso existente.
 
 El objetivo no es "modernizar por moda": es que las **reglas financieras** de la aplicación (comisiones, retenciones, conversión de divisa, disponibilidad de crédito) puedan **probarse de forma aislada y demostrarse correctas**, algo que hoy es imposible porque están entrelazadas con SQL y con generación de HTML.
 
@@ -274,9 +274,48 @@ src/js/
 
 **Mecanismo:** módulos ES nativos vía `<script type="module">`. Funcionan en el WebView de Tauri sin transpilación. **No se añade bundler, ni npm run build, ni dependencias.** El peso del `.dmg` no aumenta.
 
+### 4.4 Tipado del frontend — decisión diferida a la Fase 7
+
+Existe hoy una **asimetría** entre los dos lados de la aplicación. El backend Rust obtiene seguridad de divisas en **tiempo de compilación**: `Dinero::sumar()` entre DOP y USD no llega a ejecutarse mal. El núcleo JS replica la misma invariante, pero solo puede lanzar el error **en tiempo de ejecución** — es decir, cuando el usuario ya pulsó el botón.
+
+Cerrar esa brecha en el frontend es deseable, pero la forma de hacerlo condiciona el criterio de peso contenido. Se evalúan tres opciones en la Fase 7, cuando exista el código real que tipar:
+
+| Opción | Detecta errores | Paso de compilación | Dependencias | Archivo ejecutado |
+|---|---|---|---|---|
+| **A. JS puro** (actual) | en ejecución | no | 0 | el `.js` escrito |
+| **B. JSDoc + `@ts-check`** | al escribir | **no** | 1 de desarrollo | el `.js` escrito |
+| **C. TypeScript completo** | al escribir | **sí** | varias + bundler | un `.js` generado |
+
+**Opción B como candidata principal.** TypeScript puede verificar archivos `.js` corrientes cuando los tipos se declaran en comentarios JSDoc y el archivo abre con `// @ts-check`. Se obtiene la comprobación estática y el autocompletado del editor **sin compilar nada, sin generar archivos y sin tocar el runtime**: el `.js` que se escribe sigue siendo exactamente el que el WebView ejecuta.
+
+```js
+// @ts-check
+/** @typedef {'DOP' | 'USD'} Divisa */
+
+/**
+ * @param {{monto: number, divisa: Divisa}} a
+ * @param {{monto: number, divisa: Divisa}} b
+ * @returns {{monto: number, divisa: Divisa}}
+ */
+export function sumar(a, b) { /* ... */ }
+```
+
+**Por qué se difiere y no se decide ahora:** tipar es una operación sobre código que todavía no existe. `ui.js` sigue siendo un archivo de 2 874 líneas; los once módulos de vista que se tiparían nacen precisamente en la Fase 7. Decidirlo antes obligaría a elegir a ciegas.
+
+**Criterios con los que se decidirá en su momento:**
+
+1. ¿La opción B detecta los errores que realmente aparecen en este código (divisas cruzadas, campos ausentes en respuestas IPC, `null` no contemplado)? Si los cubre, gana por no requerir compilación.
+2. ¿La verbosidad de JSDoc degrada la legibilidad más de lo que aporta? En funciones de render con muchos parámetros puede ser costoso.
+3. ¿La opción C introduciría un `node_modules` de producción o un artefacto generado? Si es así, contradice el criterio de peso contenido y queda descartada salvo que B resulte insuficiente.
+4. La opción A permanece como salida válida: **no tipar es una decisión legítima** si el coste supera al beneficio en este proyecto.
+
+**Restricción previa:** cualquiera de las tres opciones exige que el paso 0.8 —módulos ES confirmados en el WebView— esté verificado. Sin eso, la división de `ui.js` no puede empezar y esta decisión no llega a plantearse.
+
 ---
 
-## 5. Principios SOLID — aplicación concreta
+## 5. Principios de diseño
+
+### 5.1 SOLID — aplicación concreta
 
 No como teoría, sino señalando el punto exacto del código actual que cada principio corrige:
 
@@ -289,6 +328,107 @@ No como teoría, sino señalando el punto exacto del código actual que cada pri
 | **D** — Inversión de dependencias | `main.rs` depende directamente de `rusqlite::Connection` | Los casos de uso dependen de *traits* definidos por el dominio; SQLite se inyecta en `main.rs` |
 
 **El principio D es el que habilita todo lo demás:** sin él, no hay forma de sustituir SQLite por un doble en memoria, y sin eso no hay pruebas unitarias rápidas.
+
+**Ya aplicado en la Fase 0**, para que no quede como declaración de intenciones:
+
+| Principio | Evidencia en el código construido |
+|---|---|
+| S | `dinero.rs` solo sabe de importes; `errores.rs` solo de mensajes; `reloj_sistema.rs` solo de leer la fecha |
+| I | `Reloj` expone un único método (`hoy`), no una interfaz de utilidades de fecha |
+| D | `adaptadores::reloj_sistema` depende de `puertos::reloj`, nunca al revés |
+| L | `RelojFijo` y `RelojSistema` son intercambiables allí donde se espere un `Reloj` |
+
+---
+
+### 5.2 Diseño guiado por el dominio (DDD)
+
+DDD es una caja de herramientas, no un paquete que se adopta entero. Se toman las que se pagan solas bajo el criterio de peso contenido, y se dice explícitamente cuáles no.
+
+**Alcance adoptado: patrones tácticos, no estratégicos.** El DDD estratégico —contextos delimitados, mapas de contexto, capas anticorrupción— resuelve problemas de coordinación entre equipos y sistemas heredados. Aquí hay una aplicación de escritorio, un usuario y un lenguaje común. Trocearla en contextos añadiría ceremonia sin resolver nada. Los patrones tácticos, en cambio, atacan directamente los defectos ya identificados.
+
+#### a) Lenguaje ubicuo
+
+El proyecto parte con ventaja: el código ya está escrito en español, el mismo idioma en que el usuario piensa su dominio. Pero hay deriva, y **H1 lo demostró**: `costo_adicional` fusionaba en una sola palabra un impuesto y una comisión, dos conceptos con reglas, exenciones y tratamiento contable distintos. El nombre no describía ninguno de los dos, y por eso la pregunta "¿debe el LBTR pagar sobre un TSS exento?" no tenía respuesta legible en el código.
+
+Glosario que el dominio debe reflejar en sus nombres:
+
+| Término | Significado preciso | Cómo aparece hoy |
+|---|---|---|
+| **Retención de transferencia** | Impuesto del 0.20 % sobre transferencias bancarias | dentro de `costo_adicional` |
+| **Comisión de servicio** | Precio del banco por un carril concreto (LBTR: 100.00 DOP) | dentro de `costo_adicional` |
+| **Exención** | Dispensa tributaria; no alcanza a las comisiones | `is_tss_tax` |
+| **Abono** | Pago parcial que reduce la deuda de una tarjeta | `pagos_tarjeta` |
+| **Corte** | Cierre del ciclo de facturación de una tarjeta | `fecha_corte`, `balance_corte_*` |
+| **Sobregiro** | Crédito disponible por encima del límite | `limite_sobregiro_*` |
+| **Ingreso formal / informal** | Con factura y retención del 15 %, o sin ellas | dos tablas distintas |
+| **Efectivo** | Caja física, modelada como una cuenta más | filas `'Efectivo DOP'` / `'Efectivo USD'` |
+
+> **Regla operativa:** todo nombre que necesite un comentario para entenderse es un defecto de lenguaje ubicuo, no una carencia de documentación.
+
+#### b) Objetos de valor frente a entidades
+
+**Objetos de valor** — sin identidad, inmutables, comparados por su contenido:
+
+`Dinero`, `Divisa`, `TasaCambio` *(ya construidos en la Fase 0)*, más `DiaDelCiclo`, `Rnc`, `NumeroFactura`, `Porcentaje`.
+
+**Entidades** — con identidad que sobrevive al cambio de sus atributos:
+
+`Gasto`, `Ingreso`, `Tarjeta`, `CuentaAhorro`, `Prestamo`, `Suscripcion`, `Cliente`, `Categoria`.
+
+Por qué importa en concreto: hoy `fecha_corte` es un `i32`, así que el tipo admite `0` y `47`. La restricción real (`CHECK BETWEEN 1 AND 31`) vive únicamente en SQLite, de modo que **la regla de negocio está en la base de datos y no en el dominio**. Un objeto de valor `DiaDelCiclo` hace imposible construir uno inválido, y la regla viaja con el tipo allí donde se use. Lo mismo aplica a `Rnc`, hoy un `String` que acepta cualquier cosa.
+
+#### c) Agregados y sus invariantes
+
+Un agregado es una **frontera de consistencia**: un grupo que cambia como una unidad y cuyas invariantes deben cumplirse al terminar cada operación. Es el patrón que más rendimiento da aquí, porque nombra exactamente lo que hoy falta.
+
+| Agregado (raíz) | Invariante que debe proteger | Estado actual |
+|---|---|---|
+| **Tarjeta** | `balance ≤ límite + sobregiro`, por divisa | **no se comprueba en ningún sitio** |
+| **CuentaAhorro** | Todo movimiento ocurre en la divisa de la cuenta | **violado por H2** |
+| **Gasto** | El método de pago es coherente con sus referencias | **violado por H4** |
+| **Ingreso** | La retención es coherente con el monto y el tipo | se calcula, no se valida |
+
+Dos observaciones que se derivan de esto:
+
+**H5 es una invariante implementada en el lugar equivocado.** El `MAX(0.0, balance - ?)` de `main.rs:1340` es una regla de negocio —"la deuda no baja de cero"— escrita en SQL. Al vivir ahí, no se aplica en la creación (que sí permite cualquier valor), y de esa asimetría nace que crear y revertir no sean operaciones inversas. Como invariante de la raíz `Tarjeta`, se aplicaría siempre o nunca, pero nunca a medias.
+
+**`crear_gasto` cruza fronteras de agregado.** Modifica `Gasto` y además `CuentaAhorro` o `Tarjeta` en una sola transacción. El DDD ortodoxo prescribe una transacción por agregado y consistencia eventual entre ellos. **Aquí se decide no seguir esa prescripción**: es una aplicación local, de un solo usuario, sobre SQLite, donde la consistencia transaccional entre agregados es barata y la eventual sería una complicación gratuita. Lo que sí se adopta es **nombrar las fronteras**, para saber qué invariante pertenece a quién y cuáles deben cumplirse de forma síncrona.
+
+#### d) Servicios de dominio
+
+Cuando una regla no pertenece con naturalidad a ninguna entidad. `calcular_retencion(monto, categoria, descripcion)` involucra `Gasto` y `Categoria` sin ser propiedad de ninguno: vive como servicio en `dominio::cargos`, no como método de `Gasto`. El criterio para distinguirlo de un método: si la operación necesita datos de dos agregados para decidir, es un servicio.
+
+#### e) Repositorios por raíz de agregado
+
+Uno por raíz, **no uno por tabla**. `RepositorioTarjetas` entrega agregados `Tarjeta` completos y consistentes, no filas sueltas de `tarjetas` y `pagos_tarjeta` que el llamante deba recomponer. Esto determina directamente la forma de los puertos de §4.2: son interfaces del dominio expresadas en su lenguaje, no una capa de acceso a datos.
+
+#### f) Eventos de dominio — el puente con la auditoría
+
+`GastoRegistrado`, `AbonoAplicado`, `MovimientoRevertido`: cada uno declara qué cambió y por qué.
+
+Aquí encaja la pieza que §9.3 pedía sin nombrarla. La tabla `auditoria` de solo-inserción **es** el registro de eventos de dominio, y los asientos de compensación son la forma natural de revertir cuando lo que se guarda son hechos ocurridos y no estados sobrescritos. Sustituir `DELETE` por un evento de anulación deja de ser un añadido y pasa a ser la consecuencia de haber modelado el dominio en términos de hechos.
+
+#### g) Lo que NO se adopta, y por qué
+
+| Patrón | Motivo del descarte |
+|---|---|
+| Contextos delimitados y mapas de contexto | Una aplicación, un usuario, un lenguaje. Trocearla añade ceremonia sin resolver ningún problema real |
+| *Event sourcing* | Reconstruir el estado desde eventos exige proyecciones y versionado. Una tabla de auditoría append-only cubre la necesidad con una fracción del coste |
+| CQRS | Las lecturas son `SELECT` directos que alimentan tablas. Separar modelos de lectura y escritura no compensa |
+| Fábricas como clases aparte | Los constructores que devuelven `Result` ya impiden construir agregados inválidos |
+| Especificaciones como objetos | Las reglas de filtrado son simples; funciones basta |
+
+#### h) Dónde aterriza cada pieza
+
+| Concepto DDD | Fase | Materialización |
+|---|---|---|
+| Objetos de valor | 0 ✅ / 1 | `Dinero`, `Divisa`, `TasaCambio` hechos; `DiaDelCiclo`, `Rnc` pendientes |
+| Lenguaje ubicuo | 1 | Separar retención de comisión; glosario en `archivo_de_control.md` |
+| Agregado `Gasto` + servicios | 1 | `dominio::cargos`, `dominio::gasto` |
+| Agregado `Tarjeta` e invariante de límite | 2 | `dominio::tarjeta` |
+| Agregado `CuentaAhorro` e invariante de divisa | 3 | Cierra **H2** |
+| Repositorios por raíz | 1–6 | `puertos::repositorios`, uno por vertical |
+| Eventos de dominio | 8 | Tabla `auditoria` y asientos de compensación |
 
 ---
 
@@ -581,6 +721,8 @@ Todas respetan la estructura de navegación actual: no se añaden ni se eliminan
   Fase 5 · Suscripciones      → idempotencia
   Fase 6 · Capital y préstamos
   Fase 7 · Frontend           → división de ui.js + nucleo/ + mejoras de usabilidad §8
+                                 + evaluación de tipado (§4.4): JS puro vs JSDoc
+                                   con @ts-check vs TypeScript completo
   Fase 8 · Auditoría y cierre → asientos de compensación, migraciones versionadas, allowlist
 ```
 
