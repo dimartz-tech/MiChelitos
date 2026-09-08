@@ -411,3 +411,49 @@ fn c14_un_fallo_a_mitad_de_la_operacion_no_deja_el_saldo_movido() {
     assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 100000.0, "saldo intacto");
     assert_eq!(total_gastos(), 0, "ningún gasto insertado");
 }
+
+// =====================================================================
+//  Casos límite del cálculo de cargos, fijados antes de extraer el dominio
+// =====================================================================
+
+#[test]
+fn c15_en_una_transferencia_en_dolares_la_comision_lbtr_se_suma_sin_convertir() {
+    // La comisión del LBTR está denominada en pesos, pero el código la suma al
+    // costo_adicional del gasto sea cual sea su divisa. Se fija tal cual.
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros USD", "USD", 5000.0);
+
+    let mut entrada = transferencia(1000.0, "Alimentación", "Compra en dólares", cuenta);
+    entrada.divisa = "USD".to_string();
+    entrada.es_lbtr = true;
+    let id = crear_gasto(entrada).unwrap();
+
+    // (1000 * 0.002).round() = 2, más 100 añadidos sin conversión.
+    assert_importe(costo_adicional(id), 102.0, "retención en USD + 100 sin convertir");
+}
+
+#[test]
+fn c16_una_divisa_distinta_de_usd_se_trata_como_pesos() {
+    // La columna gastos.divisa no tiene CHECK, a diferencia del resto de
+    // tablas, y el código compara únicamente contra "USD".
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+
+    let entrada = GastoInput {
+        fecha: "08/09/2026".to_string(),
+        monto: 300.0,
+        divisa: "EUR".to_string(),
+        descripcion: "Compra en euros".to_string(),
+        categoria_id: id_categoria("Otros"),
+        metodo_pago: "tarjeta".to_string(),
+        es_lbtr: false,
+        tarjeta_id: Some(tarjeta),
+        cuenta_ahorro_id: None,
+    };
+    let resultado = crear_gasto(entrada);
+
+    assert!(resultado.is_ok(), "hoy se acepta cualquier divisa");
+    let (pesos, dolares) = balances_tarjeta(tarjeta);
+    assert_importe(pesos, 300.0, "se carga al balance en pesos");
+    assert_importe(dolares, 0.0, "el balance en dólares no se toca");
+}

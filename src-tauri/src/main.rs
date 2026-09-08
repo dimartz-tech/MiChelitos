@@ -18,6 +18,9 @@ use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use chrono::{NaiveDate, Local, Datelike};
 
+use dominio::cargos::cargos_de_transferencia;
+use dominio::dinero::{Dinero, Divisa};
+
 // --- ESTRUCTURAS DTO (DATA TRANSFER OBJECTS) ---
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Cliente {
@@ -278,26 +281,25 @@ struct GastoInput {
 fn crear_gasto(input: GastoInput) -> Result<i64, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     
-    // Calcular comisiones
+    // Calcular retención impositiva y comisión de servicio
     let mut costo_adicional = 0.0;
     if input.metodo_pago == "transferencia" {
-        let is_tss_tax = if let Ok(cat_nom) = conn.query_row(
-            "SELECT nombre FROM categorias WHERE id = ?;",
-            [input.categoria_id],
-            |r| r.get::<_, String>(0)
-        ) {
-            cat_nom.to_lowercase() == "impuestos" && input.descripcion.to_uppercase().contains("TSS")
-        } else {
-            false
-        };
+        let categoria = conn
+            .query_row(
+                "SELECT nombre FROM categorias WHERE id = ?;",
+                [input.categoria_id],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap_or_default();
 
-        if !is_tss_tax {
-            costo_adicional = (input.monto * 0.002).round();
-        }
+        // Se conserva la interpretación vigente de la divisa: la columna
+        // gastos.divisa no tiene CHECK y el código solo distingue "USD".
+        let divisa = if input.divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
+        let monto = Dinero::nuevo(input.monto, divisa)?;
 
-        if input.es_lbtr {
-            costo_adicional += 100.00;
-        }
+        let cargos =
+            cargos_de_transferencia(monto, &categoria, &input.descripcion, input.es_lbtr)?;
+        costo_adicional = cargos.total()?.monto();
     }
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
