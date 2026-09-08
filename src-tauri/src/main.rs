@@ -299,7 +299,7 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
 
         let cargos =
             cargos_de_transferencia(monto, &categoria, &input.descripcion, input.es_lbtr)?;
-        costo_adicional = cargos.total()?.monto();
+        costo_adicional = cargos.total()?.unidades();
     }
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;

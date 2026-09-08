@@ -229,14 +229,23 @@ fn c6_la_exencion_del_tss_no_alcanza_a_la_comision_del_lbtr() {
 }
 
 #[test]
-fn c7_la_retencion_se_redondea_a_unidades_enteras() {
+fn c7_la_retencion_se_redondea_a_centavos() {
+    // CAMBIO DE CONDUCTA CONSENTIDO — 2026-09-08, decisión del usuario.
+    //
+    // Hasta la Fase 1.2b el cálculo era (monto * 0.002).round(), que redondeaba
+    // a unidades enteras, de modo que 1250.00 producía una retención de 3.00.
+    // El banco cobra la comisión al centavo, así que el valor correcto es 2.50.
+    //
+    // Es la única prueba de caracterización cuyo valor esperado cambia. Se
+    // documenta aquí en lugar de ajustarse en silencio, conforme al paso 5 del
+    // protocolo de pruebas. El cruce contra los importes históricos reales se
+    // hará en la fase de migración del esquema.
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100000.0);
 
-    // 1250 * 0.002 = 2.5 y el código aplica .round(), que redondea al alza.
     let id = crear_gasto(transferencia(1250.0, "Alimentación", "Compra", cuenta)).unwrap();
 
-    assert_importe(costo_adicional(id), 3.0, "redondeo de 2.5");
+    assert_importe(costo_adicional(id), 2.50, "1250.00 x 0.20 % al centavo");
 }
 
 // =====================================================================
