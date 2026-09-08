@@ -3,8 +3,12 @@
   "version": "1.3.5",
   "description": "Aplicación de escritorio nativa macOS con Tauri y Rust para MiChelitos",
   "main": "src/index.html",
+  "type": "module",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "node --test src/js/**/*.test.js",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:todo": "npm run test && npm run test:rust"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^1.5.0"
