@@ -7,6 +7,10 @@
 mod db_sql;
 mod db_nosql;
 
+mod adaptadores;
+mod dominio;
+mod puertos;
+
 #[cfg(test)]
 mod caracterizacion;
 
