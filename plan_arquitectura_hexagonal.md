@@ -274,6 +274,43 @@ src/js/
 
 **Mecanismo:** módulos ES nativos vía `<script type="module">`. Funcionan en el WebView de Tauri sin transpilación. **No se añade bundler, ni npm run build, ni dependencias.** El peso del `.dmg` no aumenta.
 
+### 4.4 Tipado del frontend — decisión diferida a la Fase 7
+
+Existe hoy una **asimetría** entre los dos lados de la aplicación. El backend Rust obtiene seguridad de divisas en **tiempo de compilación**: `Dinero::sumar()` entre DOP y USD no llega a ejecutarse mal. El núcleo JS replica la misma invariante, pero solo puede lanzar el error **en tiempo de ejecución** — es decir, cuando el usuario ya pulsó el botón.
+
+Cerrar esa brecha en el frontend es deseable, pero la forma de hacerlo condiciona el criterio de peso contenido. Se evalúan tres opciones en la Fase 7, cuando exista el código real que tipar:
+
+| Opción | Detecta errores | Paso de compilación | Dependencias | Archivo ejecutado |
+|---|---|---|---|---|
+| **A. JS puro** (actual) | en ejecución | no | 0 | el `.js` escrito |
+| **B. JSDoc + `@ts-check`** | al escribir | **no** | 1 de desarrollo | el `.js` escrito |
+| **C. TypeScript completo** | al escribir | **sí** | varias + bundler | un `.js` generado |
+
+**Opción B como candidata principal.** TypeScript puede verificar archivos `.js` corrientes cuando los tipos se declaran en comentarios JSDoc y el archivo abre con `// @ts-check`. Se obtiene la comprobación estática y el autocompletado del editor **sin compilar nada, sin generar archivos y sin tocar el runtime**: el `.js` que se escribe sigue siendo exactamente el que el WebView ejecuta.
+
+```js
+// @ts-check
+/** @typedef {'DOP' | 'USD'} Divisa */
+
+/**
+ * @param {{monto: number, divisa: Divisa}} a
+ * @param {{monto: number, divisa: Divisa}} b
+ * @returns {{monto: number, divisa: Divisa}}
+ */
+export function sumar(a, b) { /* ... */ }
+```
+
+**Por qué se difiere y no se decide ahora:** tipar es una operación sobre código que todavía no existe. `ui.js` sigue siendo un archivo de 2 874 líneas; los once módulos de vista que se tiparían nacen precisamente en la Fase 7. Decidirlo antes obligaría a elegir a ciegas.
+
+**Criterios con los que se decidirá en su momento:**
+
+1. ¿La opción B detecta los errores que realmente aparecen en este código (divisas cruzadas, campos ausentes en respuestas IPC, `null` no contemplado)? Si los cubre, gana por no requerir compilación.
+2. ¿La verbosidad de JSDoc degrada la legibilidad más de lo que aporta? En funciones de render con muchos parámetros puede ser costoso.
+3. ¿La opción C introduciría un `node_modules` de producción o un artefacto generado? Si es así, contradice el criterio de peso contenido y queda descartada salvo que B resulte insuficiente.
+4. La opción A permanece como salida válida: **no tipar es una decisión legítima** si el coste supera al beneficio en este proyecto.
+
+**Restricción previa:** cualquiera de las tres opciones exige que el paso 0.8 —módulos ES confirmados en el WebView— esté verificado. Sin eso, la división de `ui.js` no puede empezar y esta decisión no llega a plantearse.
+
 ---
 
 ## 5. Principios SOLID — aplicación concreta
@@ -581,6 +618,8 @@ Todas respetan la estructura de navegación actual: no se añaden ni se eliminan
   Fase 5 · Suscripciones      → idempotencia
   Fase 6 · Capital y préstamos
   Fase 7 · Frontend           → división de ui.js + nucleo/ + mejoras de usabilidad §8
+                                 + evaluación de tipado (§4.4): JS puro vs JSDoc
+                                   con @ts-check vs TypeScript completo
   Fase 8 · Auditoría y cierre → asientos de compensación, migraciones versionadas, allowlist
 ```
 
