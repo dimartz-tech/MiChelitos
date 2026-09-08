@@ -55,10 +55,10 @@ pub fn esta_exenta_de_retencion(categoria: &str, descripcion: &str) -> bool {
 
 /// Calcula los cargos de una transferencia.
 ///
-/// La retención se redondea a unidades enteras de la divisa. La comisión del
-/// LBTR se expresa en la divisa del monto sin conversión, replicando el
-/// comportamiento vigente; convertirla sería un cambio de conducta y
-/// corresponde decidirlo aparte.
+/// La retención se redondea **a centavos**, porque el banco la cobra al
+/// centavo. La comisión del LBTR se expresa en la divisa del monto sin
+/// conversión, replicando el comportamiento vigente; convertirla sería un
+/// cambio de conducta y corresponde decidirlo aparte.
 pub fn cargos_de_transferencia(
     monto: Dinero,
     categoria: &str,
@@ -70,7 +70,7 @@ pub fn cargos_de_transferencia(
     let retencion = if esta_exenta_de_retencion(categoria, descripcion) {
         Dinero::cero(divisa)
     } else {
-        Dinero::nuevo((monto.monto() * TASA_RETENCION).round(), divisa)?
+        monto.porcentaje(TASA_RETENCION)?
     };
 
     let comision = if es_lbtr {
@@ -140,17 +140,19 @@ mod tests {
     }
 
     #[test]
-    fn la_retencion_se_redondea_al_alza_desde_la_mitad() {
-        // 1250 * 0.002 = 2.5
+    fn la_retencion_conserva_los_centavos_en_vez_de_redondear_a_pesos() {
+        // 1250.00 × 0.20 % = 2.50 exactos.
+        // Conducta anterior: 3.00, por redondear a unidades enteras.
         let c = cargos_de_transferencia(dop(1250.0), "Alimentación", "Compra", false).unwrap();
-        assert_eq!(c.retencion, dop(3.0));
+        assert_eq!(c.retencion, dop(2.50));
+        assert_eq!(c.retencion.centavos(), 250);
     }
 
     #[test]
-    fn la_retencion_se_redondea_a_la_baja_por_debajo_de_la_mitad() {
-        // 1200 * 0.002 = 2.4
+    fn la_retencion_no_pierde_los_centavos_por_debajo_de_media_unidad() {
+        // 1200.00 × 0.20 % = 2.40. Conducta anterior: 2.00.
         let c = cargos_de_transferencia(dop(1200.0), "Alimentación", "Compra", false).unwrap();
-        assert_eq!(c.retencion, dop(2.0));
+        assert_eq!(c.retencion, dop(2.40));
     }
 
     #[test]
@@ -161,10 +163,19 @@ mod tests {
     }
 
     #[test]
-    fn un_monto_pequeno_redondea_la_retencion_a_cero() {
-        // 100 * 0.002 = 0.2
+    fn un_monto_pequeno_ya_no_pierde_la_retencion() {
+        // 100.00 × 0.20 % = 0.20. Conducta anterior: 0.00, el cargo se perdía.
         let c = cargos_de_transferencia(dop(100.0), "Alimentación", "Compra", false).unwrap();
-        assert_eq!(c.retencion, dop(0.0));
+        assert_eq!(c.retencion, dop(0.20));
+        assert_eq!(c.retencion.centavos(), 20);
+    }
+
+    #[test]
+    fn la_retencion_de_un_importe_con_centavos_es_exacta() {
+        // 10 423.44 × 0.20 % = 20.84688 → 20.85 al centavo.
+        // Sin redondeo, ese sobrante fraccionario acababa en los saldos.
+        let c = cargos_de_transferencia(dop(10423.44), "Alimentación", "Compra", false).unwrap();
+        assert_eq!(c.retencion.centavos(), 2085);
     }
 
     // --- Exención y comisión, juntas ---
