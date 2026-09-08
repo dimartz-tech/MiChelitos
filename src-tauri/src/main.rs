@@ -7,6 +7,9 @@
 mod db_sql;
 mod db_nosql;
 
+#[cfg(test)]
+mod caracterizacion;
+
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use chrono::{NaiveDate, Local, Datelike};
