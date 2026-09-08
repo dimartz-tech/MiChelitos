@@ -7,6 +7,10 @@
 mod db_sql;
 mod db_nosql;
 
+mod adaptadores;
+mod dominio;
+mod puertos;
+
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use chrono::{NaiveDate, Local, Datelike};
