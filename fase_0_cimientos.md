@@ -91,7 +91,10 @@ Antes de publicar en un repositorio **público**, se revisaron los tres `.md` en
 
 ---
 
-### 🔄 0.5 — Commit evolutivo *(en curso)*
+### ✅ 0.5 — Commit evolutivo *(completado)*
+
+Publicado como `991dcdd` sobre `a097a14` en `origin/main`. Auditoría posterior contra el remoto: 37 archivos, ninguna base de datos, cero coincidencias de datos financieros reales en los `.md`.
+
 
 Un único commit sobre `a097a14` que documenta el salto v1.2.0 → v1.3.5 y deja constancia de las seis versiones intermedias.
 
@@ -99,19 +102,35 @@ Un único commit sobre `a097a14` que documenta el salto v1.2.0 → v1.3.5 y deja
 
 ---
 
-### ⬜ 0.6 — Núcleo mínimo del dominio *(pendiente)*
+### ✅ 0.6 — Núcleo mínimo del dominio *(completado)*
 
-Primer código de la arquitectura nueva. Alcance deliberadamente estrecho:
+Primer código de la arquitectura nueva, en la rama `refactor/fase-0-cimientos`. Alcance deliberadamente estrecho:
 
 ```
 src-tauri/src/dominio/
 ├── mod.rs
-├── dinero.rs      # Divisa, Monto, TasaCambio
-└── errores.rs     # ErrorDominio
+├── dinero.rs              # Divisa, Dinero, TasaCambio
+└── errores.rs             # ErrorDominio
 
 src-tauri/src/puertos/
-└── reloj.rs       # trait Reloj
+├── mod.rs
+└── reloj.rs               # trait Reloj + RelojFijo (doble de prueba)
+
+src-tauri/src/adaptadores/
+├── mod.rs
+└── reloj_sistema.rs       # RelojSistema (adaptador real)
+
+src/js/nucleo/
+└── dinero.js              # espejo del dominio en el frontend
 ```
+
+**Decisiones tomadas y su motivo:**
+
+* **`Dinero` mantiene `f64`, no enteros de centavos.** Migrar a centavos cambiaría el redondeo respecto a lo que hoy está grabado en la base de datos. Según el paso 5 del protocolo de pruebas, una corrección de fórmula debe ser una decisión consciente y versionada, no un efecto colateral de la refactorización. Queda anotado como hallazgo para evaluar en la Fase 1, cuando existan las pruebas de caracterización de comisiones.
+* **`TasaCambio` se expresa en DOP por 1 USD**, que es la convención con la que el usuario la introduce en la interfaz. Rechaza cero y negativos con `TasaDeCambioRequerida`, exactamente el error del segundo escenario Gherkin.
+* **`impl From<ErrorDominio> for String`.** Los 39 comandos Tauri devuelven `Result<_, String>`. Esta conversión les permite adoptar errores de dominio en la Fase 1 **sin cambiar sus firmas**, que es lo que hace viable el estrangulamiento incremental.
+* **`RelojFijo` va tras `#[cfg(test)]`**, de modo que el doble de prueba no existe en el binario de producción.
+* **El frontend replica la regla, no la comparte.** `src/js/nucleo/dinero.js` no puede reutilizar el tipo de Rust, así que duplica la invariante con su propia batería de pruebas. La duplicación es deliberada: la alternativa sería generar tipos, y eso exigiría un paso de compilación que el criterio de peso contenido descarta.
 
 **Por qué `Dinero` primero:** es el tipo del que dependen todas las demás reglas (comisiones, retenciones, disponibilidad, conversión). Extraerlo después obligaría a reescribir lo construido encima. Además, hacer que la divisa forme parte del tipo convierte en **error de compilación** la suma DOP + USD, que es la causa raíz del descuadre corregido a mano en la v1.3.4.
 
@@ -119,13 +138,25 @@ src-tauri/src/puertos/
 
 ---
 
-### ⬜ 0.7 — Andamiaje de pruebas *(pendiente)*
+### ✅ 0.7 — Andamiaje de pruebas *(completado)*
 
-* Rust: `cargo test` nativo, sin dependencias.
-* JS: `node:test` + `node:assert`, sin dependencias.
-* Prueba humo en cada lado que falle a propósito y luego pase, para confirmar que el ejecutor corre de verdad.
+| Lado | Ejecutor | Dependencias añadidas | Pruebas |
+|---|---|---:|---:|
+| Rust | `cargo test` nativo | 0 | 22 |
+| JS | `node:test` + `node:assert` nativos | 0 | 12 |
+| | | | **34** |
+
+```bash
+npm test          # solo frontend
+npm run test:rust # solo backend
+npm run test:todo # ambos
+```
+
+`package.json` incorpora `"type": "module"` para que Node interprete los módulos ES del núcleo igual que el navegador. No afecta al CLI de Tauri, que resuelve su propio paquete.
 
 **Por qué una prueba que falla primero:** un ejecutor mal configurado que no encuentra ningún test reporta éxito. Verificar que sabe fallar es la única forma de confiar en el verde posterior.
+
+**Se verificó de forma no planificada.** La primera ejecución de `cargo test` falló con 20 pasando y 1 fallando: la prueba del reloj situaba una fecha en el 29 de febrero de **2026**, que no existe porque 2026 no es bisiesto. El error estaba en la prueba, no en el código, pero sirvió como demostración de que el ejecutor detecta fallos reales. Se corrigió a 2028 y se añadió una prueba que fija esa invariante (`una_fecha_inexistente_no_se_construye_en_silencio`). En el lado JS ocurrió lo mismo: `Object.create(null)` hacía fallar `deepEqual` frente a un objeto literal pese a tener los mismos valores; se simplificó a `{}` porque las claves son un conjunto fijo ya validado.
 
 ---
 
@@ -145,10 +176,10 @@ La fase se da por cerrada cuando:
 - [x] Ninguna base de datos es visible para git
 - [x] Árbol local enlazado al commit base del remoto, sin pérdida de trabajo
 - [x] Documentación libre de datos financieros personales
-- [ ] Commit evolutivo publicado en `origin/main`
-- [ ] `dominio::dinero` compila y tiene pruebas en verde
-- [ ] Ejecutores de prueba de Rust y JS demostrados funcionales
-- [ ] Módulos ES confirmados en el WebView
+- [x] Commit evolutivo publicado en `origin/main` (`991dcdd`)
+- [x] `dominio::dinero` compila y tiene pruebas en verde (22 Rust + 12 JS)
+- [x] Ejecutores de prueba de Rust y JS demostrados funcionales
+- [ ] Módulos ES confirmados en el WebView de Tauri
 
 **Ninguna regla de negocio se ha movido todavía.** La Fase 0 solo construye el terreno; la primera extracción real ocurre en la Fase 1 (Gastos).
 
@@ -160,31 +191,39 @@ La fase se da por cerrada cuando:
 |---|---|---|
 | Publicar datos financieros en repo público | **Resuelto** | `.gitignore` + anonimización documental + doble verificación |
 | Sobrescribir el trabajo local v1.3.5 con el remoto v1.2.0 | **Resuelto** | `git reset` mixed en lugar de `checkout`/`pull`; respaldo previo |
-| Sin credenciales de push | **Abierto** | Ver §4 |
-| Los módulos ES no cargan en el WebView | Abierto | Paso 0.8 lo verifica antes de comprometer el diseño del frontend |
+| Sin credenciales de push | **Resuelto** | Clave registrada en GitHub y `~/.ssh/config` con `UseKeychain` |
+| Los módulos ES no cargan en el WebView | **Abierto** | Paso 0.8, aún sin verificar; no bloquea porque el núcleo todavía no se importa desde `index.html` |
 
 ---
 
-## 4. Bloqueo activo: credenciales de publicación
+## 4. Publicación — resuelto
 
-El commit puede crearse en local, pero **el push no**. Diagnóstico:
+La clave `~/.ssh/wilfodmba` se registró en la cuenta y se creó `~/.ssh/config` (no existía previamente) para que git la use sin intervención:
 
 ```
-gh CLI               no instalado
-GITHUB_TOKEN         ausente
-~/.ssh/wilfodmba     la clave existe...
-ssh -T git@github.com  → Permission denied (publickey)
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/wilfodmba
+    IdentitiesOnly yes
+    AddKeysToAgent yes
+    UseKeychain yes
 ```
 
-La clave existe en el equipo pero **no está registrada en la cuenta de GitHub**, y no hay `~/.ssh/config` que la asocie al host. Además el agente SSH no tiene identidades cargadas.
+Permisos `600`. Verificado: `ssh -T git@github.com` autentica como `dimartz-tech` y `git ls-remote` resuelve por SSH sin flags ni variables de entorno.
 
-**Opciones para desbloquear**, de menor a mayor esfuerzo:
+**Pendiente del usuario, una sola vez:** la contraseña de la clave aún no está en el Llavero, de modo que tras reiniciar el equipo el agente arrancaría vacío.
 
-1. **Registrar la clave existente** — copiar el contenido de `~/.ssh/wilfodmba.pub` en GitHub → *Settings → SSH and GPG keys → New SSH key*, y cambiar el remoto a SSH:
-   ```bash
-   git remote set-url origin git@github.com:dimartz-tech/MiChelitos.git
-   ```
-2. **Token de acceso personal** — crear un PAT con permiso `repo` en *Settings → Developer settings → Personal access tokens*, y usarlo como contraseña en el primer push HTTPS (macOS lo guarda en el llavero).
-3. **Instalar `gh`** — `brew install gh && gh auth login`, que resuelve credenciales y remoto de una vez.
+```bash
+ssh-add --apple-use-keychain ~/.ssh/wilfodmba
+```
 
-La identidad de git ya está configurada correctamente y coincide con el propietario del repositorio (`dimartz-tech`), así que la autoría del commit será correcta sin ajustes adicionales.
+A partir de ahí `UseKeychain yes` la recupera en cada arranque.
+
+---
+
+## 5. Siguiente paso
+
+**0.8 — Verificación de módulos ES en el WebView**, único punto abierto de la fase. Requiere levantar la aplicación (`npm run tauri dev`) y confirmar que el WebView resuelve un `<script type="module">` servido por el protocolo de activos de Tauri.
+
+No se ha dado por verificado sin ejecutarlo. El núcleo creado en 0.6 todavía no se importa desde `index.html`, así que la aplicación actual no depende de ello y el riesgo permanece acotado hasta la Fase 7.
