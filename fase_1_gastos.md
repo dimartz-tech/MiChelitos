@@ -11,9 +11,9 @@
 
 De los siete verticales, es el que **concentra más reglas de negocio por línea de código**:
 
-* Comisión del 0.20 % sobre transferencias
-* Excepción impositiva TSS
-* Cargo fijo LBTR de +100.00 DOP
+* Retención impositiva del 0.20 % sobre transferencias
+* Exención tributaria del TSS
+* Comisión de servicio del LBTR: +100.00 DOP
 * Tres métodos de pago con efectos distintos sobre los saldos
 * Reversión con restauración de balance
 
@@ -27,13 +27,13 @@ Fuente: `src-tauri/src/main.rs:271-354` (`crear_gasto`) y `1326-1369` (`eliminar
 
 ### 2.1 Reglas identificadas
 
-| # | Regla | Condición |
-|---|---|---|
-| R1 | Comisión 0.20 % redondeada a unidades enteras | solo si `metodo_pago == "transferencia"` |
-| R2 | Excepción TSS: comisión 0.00 | categoría en minúsculas `== "impuestos"` **y** descripción en mayúsculas contiene `"TSS"` |
-| R3 | Cargo LBTR +100.00 | si `es_lbtr`, se suma **después** de R1/R2 |
+| # | Regla | Naturaleza | Condición |
+|---|---|---|---|
+| R1 | Retención impositiva 0.20 % redondeada a unidades enteras | **impuesto** | solo si `metodo_pago == "transferencia"` |
+| R2 | Exención del TSS: retención 0.00 | **exención impositiva** | categoría en minúsculas `== "impuestos"` **y** descripción en mayúsculas contiene `"TSS"` |
+| R3 | Cargo LBTR +100.00 | **comisión de servicio** | si `es_lbtr`, se suma **después** de R1/R2 |
 | R4 | Pago con tarjeta incrementa la deuda | `balance_pesos` o `balance_dolares` según divisa |
-| R5 | Transferencia debita `monto + comisión` | de la cuenta de ahorro indicada |
+| R5 | Transferencia debita `monto + retención + comisión` | de la cuenta de ahorro indicada |
 | R6 | Efectivo debita `monto` | de la cuenta llamada `"Efectivo DOP"` o `"Efectivo USD"` |
 | R7 | Todo ocurre dentro de una transacción SQL | `conn.transaction()` … `commit()` |
 
@@ -41,11 +41,20 @@ Fuente: `src-tauri/src/main.rs:271-354` (`crear_gasto`) y `1326-1369` (`eliminar
 
 Estos puntos se detectaron leyendo el código. **Ninguno se corrige en esta fase**: se documentan, se cubren con pruebas que capturan el comportamiento actual, y se decide después. Es el paso 5 del protocolo (`plan_arquitectura_hexagonal.md` §6.2).
 
-**H1 — El cargo LBTR ignora la excepción TSS.**
-`main.rs:287-293`. El `if !is_tss_tax` protege solo la comisión porcentual; el `if input.es_lbtr { costo_adicional += 100.00 }` que viene después se aplica siempre. Un pago de TSS marcado como LBTR paga 100.00 DOP pese a estar exento del 0.20 %. Puede ser intencionado —son cargos de naturaleza distinta— o un descuido. **Requiere decisión del usuario, no del refactor.**
+El primero se consultó con el usuario y quedó **confirmado como correcto**; los cuatro restantes siguen abiertos.
+
+**H1 — RESUELTO: el comportamiento actual es correcto.**
+`main.rs:287-293`. Se planteó si era un descuido que el `+= 100.00` del LBTR se aplicara también a los pagos exentos del 0.20 %. **No lo es**, y la razón está en que R1 y R3 son cosas distintas:
+
+* El **0.20 % es una retención impositiva**. El TSS goza de una exención tributaria, de modo que las transferencias destinadas a él no están gravadas.
+* Los **100.00 DOP del LBTR son una comisión de servicio** del banco por usar el carril de liquidación en tiempo real. Es opcional porque no toda transferencia se cursa por esa vía.
+
+Una exención de impuestos no exime de pagar un servicio. Si un pago de TSS se cursa por LBTR, corresponde que no tribute el 0.20 % **y** que sí pague los 100.00 de la operación. El orden del código —exención primero, comisión después— refleja exactamente eso.
+
+**Consecuencia para el modelo de dominio:** el campo `costo_adicional` fusiona hoy en un solo número un impuesto y una comisión, que responden a reglas, exenciones y tratamientos contables distintos. Al extraer el dominio se separarán como conceptos —conservando la suma al persistir, para no alterar el esquema ni el comportamiento— de modo que la exención se aplique sobre el concepto que corresponde en lugar de sobre un total indiferenciado. Como efecto secundario, pasa a ser posible responder cuánto se pagó en impuestos de transferencia frente a cuánto en comisiones bancarias, hoy indistinguible.
 
 **H2 — La divisa del gasto y la de la cuenta no se comparan.**
-`main.rs:316-323`. Un gasto en USD pagado por transferencia debita `monto + comisión` de la cuenta indicada **sin verificar que esa cuenta sea en USD**. Si es una cuenta DOP, se le restan unidades de dólar de un saldo en pesos. Es exactamente la clase de error que el tipo `Dinero` de la Fase 0 existe para impedir.
+`main.rs:316-323`. Un gasto en USD pagado por transferencia debita `monto + costo_adicional` de la cuenta indicada **sin verificar que esa cuenta sea en USD**. Si es una cuenta DOP, se le restan unidades de dólar de un saldo en pesos. Es exactamente la clase de error que el tipo `Dinero` de la Fase 0 existe para impedir.
 
 **H3 — El gasto en efectivo busca la cuenta por nombre literal.**
 `main.rs:327-331`. `UPDATE … WHERE nombre = 'Efectivo DOP'`. Si la fila no existe o fue renombrada, el `UPDATE` afecta a 0 filas y **devuelve `Ok`**: el gasto queda registrado y ningún saldo se mueve, sin aviso.
@@ -67,7 +76,8 @@ src-tauri/src/
 ├── dominio/
 │   ├── dinero.rs            ← ya existe (Fase 0)
 │   ├── errores.rs           ← ya existe (Fase 0)
-│   ├── comisiones.rs        ← NUEVO: R1, R2, R3
+│   ├── cargos.rs            ← NUEVO: RetencionTransferencia (R1, R2)
+│   │                                 ComisionServicio (R3)
 │   └── gasto.rs             ← NUEVO: MetodoPago y su efecto sobre saldos
 │
 ├── puertos/
@@ -115,7 +125,7 @@ Se escriben **contra el código actual sin modificarlo** y deben pasar en verde 
 | C3 | Igual que C2 pero categoría "Alimentación" | `costo_adicional == 20.0` |
 | C4 | Igual que C2 pero descripción "Pago ITBIS" | `costo_adicional == 20.0` |
 | C5 | Transferencia LBTR de 10 000, categoría normal | `costo_adicional == 120.0` |
-| C6 | **Transferencia LBTR de TSS** | `costo_adicional == 100.0` → fija **H1** |
+| C6 | **Transferencia LBTR de TSS** | `costo_adicional == 100.0` — exento del impuesto, sí paga la comisión (**H1**) |
 | C7 | Redondeo: transferencia de 1 250 | `(1250*0.002).round() == 3.0` (no 2.5) |
 | C8 | Gasto con tarjeta en USD | `balance_dolares` sube; `balance_pesos` intacto |
 | C9 | Gasto en efectivo DOP | `"Efectivo DOP"` baja el monto exacto |
@@ -125,13 +135,13 @@ Se escriben **contra el código actual sin modificarlo** y deben pasar en verde 
 | C13 | Crear y eliminar gasto por transferencia | saldo de la cuenta vuelve al valor exacto inicial |
 | C14 | Fallo a mitad de la transacción | ningún saldo alterado, ningún gasto insertado |
 
-**Por qué C6, C10, C11 y C12 son los más valiosos:** son los que fijan comportamientos discutibles. Sin ellos, la refactorización podría "arreglarlos" sin que nadie se entere, y los saldos históricos ya grabados dejarían de cuadrar con la lógica nueva.
+**Por qué C6, C10, C11 y C12 son los más valiosos:** son los que fijan comportamientos que a primera vista parecen defectos. Sin ellos, la refactorización podría "arreglarlos" sin que nadie se entere, y los saldos históricos ya grabados dejarían de cuadrar con la lógica nueva. C6 es el ejemplo perfecto: parecía un descuido y resultó ser la regla correcta.
 
 ### 4.2 Pruebas unitarias aisladas (DESPUÉS)
 
 Ya con el dominio extraído, sin base de datos y en microsegundos:
 
-* `dominio::comisiones` — R1, R2, R3 y sus bordes: monto 0, montos con decimales, `"tss"` en minúsculas, `"TSS"` dentro de una palabra mayor, categoría `"Impuestos"` con distinta capitalización.
+* `dominio::cargos` — R1, R2, R3 y sus bordes: monto 0, montos con decimales, `"tss"` en minúsculas, `"TSS"` dentro de una palabra mayor, categoría `"Impuestos"` con distinta capitalización.
 * `dominio::gasto::MetodoPago` — qué saldo afecta cada variante y en qué signo.
 * `aplicacion::RegistrarGasto` — con repositorios **dobles en memoria**: fondos insuficientes, divisa de cuenta incompatible (H2), repositorio que falla a mitad (atomicidad).
 * `adaptadores::sqlite::gastos` — pruebas de contrato ejecutadas **sobre la implementación SQLite y sobre el doble en memoria**, verificando que son intercambiables (sustitución de Liskov).
@@ -149,7 +159,7 @@ Las 14 pruebas de caracterización pasan **idénticas** antes y después de la e
 ```gherkin
 # language: es
 
-Característica: Registro de gastos con comisiones bancarias
+Característica: Registro de gastos con retenciones y comisiones bancarias
   Como responsable de las finanzas
   Quiero que cada gasto descuente el saldo correcto y aplique la comisión que corresponda
   Para que los balances reflejen la realidad sin tener que cuadrarlos a mano
@@ -163,27 +173,39 @@ Característica: Registro de gastos con comisiones bancarias
     Cuando registro un gasto por transferencia de 10000.00 "DOP"
       En la categoría "Alimentación" con descripción "Compra semanal"
       Desde la cuenta "Cuenta Ahorros DOP"
-    Entonces la comisión registrada debe ser 20.00 "DOP"
+    Entonces la retención impositiva debe ser 20.00 "DOP"
     Y el balance de la cuenta "Cuenta Ahorros DOP" debe ser 89980.00
 
   Escenario: El pago del TSS está exento de la comisión porcentual
     Cuando registro un gasto por transferencia de 10000.00 "DOP"
       En la categoría "Impuestos" con descripción "Pago TSS agosto"
       Desde la cuenta "Cuenta Ahorros DOP"
-    Entonces la comisión registrada debe ser 0.00 "DOP"
+    Entonces la retención impositiva debe ser 0.00 "DOP"
     Y el balance de la cuenta "Cuenta Ahorros DOP" debe ser 90000.00
 
   Escenario: La exención exige que se cumplan las dos condiciones
     Cuando registro un gasto por transferencia de 10000.00 "DOP"
       En la categoría "Alimentación" con descripción "Pago TSS agosto"
       Desde la cuenta "Cuenta Ahorros DOP"
-    Entonces la comisión registrada debe ser 20.00 "DOP"
+    Entonces la retención impositiva debe ser 20.00 "DOP"
 
-  Escenario: Una transferencia LBTR añade el cargo fijo
+  Escenario: Una transferencia LBTR añade el cargo fijo del servicio
     Cuando registro un gasto por transferencia LBTR de 10000.00 "DOP"
       En la categoría "Alimentación" con descripción "Pago proveedor"
       Desde la cuenta "Cuenta Ahorros DOP"
-    Entonces la comisión registrada debe ser 120.00 "DOP"
+    Entonces la retención impositiva debe ser 20.00 "DOP"
+    Y la comisión de servicio debe ser 100.00 "DOP"
+    Y el cargo total registrado debe ser 120.00 "DOP"
+
+  Escenario: La exención del TSS no alcanza a la comisión del LBTR
+    # Una exención tributaria libera del impuesto, no del precio de un servicio.
+    Cuando registro un gasto por transferencia LBTR de 10000.00 "DOP"
+      En la categoría "Impuestos" con descripción "Pago TSS agosto"
+      Desde la cuenta "Cuenta Ahorros DOP"
+    Entonces la retención impositiva debe ser 0.00 "DOP"
+    Y la comisión de servicio debe ser 100.00 "DOP"
+    Y el cargo total registrado debe ser 100.00 "DOP"
+    Y el balance de la cuenta "Cuenta Ahorros DOP" debe ser 89900.00
 
   Escenario: Atomicidad — un fallo no deja el saldo movido
     Dado que el repositorio de gastos fallará al guardar
@@ -195,7 +217,7 @@ Característica: Registro de gastos con comisiones bancarias
     Y no debe existir ningún gasto registrado
 ```
 
-> El escenario del LBTR sobre TSS (**H1**) se añadirá cuando el usuario decida cuál es el comportamiento correcto. Escribirlo ahora obligaría a elegir por él.
+> Los dos últimos escenarios distinguen explícitamente **retención impositiva** de **comisión de servicio**, aunque la base de datos siga guardando su suma en `costo_adicional`. Esa distinción es la que hace evidente, al leer la prueba, por qué la exención se aplica a un concepto y no al otro.
 
 ---
 
@@ -203,14 +225,15 @@ Característica: Registro de gastos con comisiones bancarias
 
 ```
   1.1  Pruebas de caracterización C1–C14 contra el código actual        → verde
-  1.2  Extraer dominio::comisiones (R1, R2, R3)                          → C1–C7 siguen verdes
+  1.2  Extraer dominio::cargos: RetencionTransferencia + ComisionServicio → C1–C7 verdes
   1.3  Extraer dominio::gasto::MetodoPago (R4, R5, R6)                   → C8–C13 siguen verdes
   1.4  Definir puertos::repositorios y sus dobles en memoria
   1.5  Extraer aplicacion::RegistrarGasto y RevertirGasto (R7)
   1.6  Implementar adaptadores::sqlite::gastos
   1.7  Reducir crear_gasto/eliminar_gasto a envoltorios en adaptadores::tauri
   1.8  Pruebas unitarias aisladas + Gherkin del vertical
-  1.9  Registrar H1–H5 en archivo_de_control.md como decisiones pendientes
+  1.9  Registrar H2–H5 en archivo_de_control.md como decisiones pendientes
+       (H1 ya resuelto: comportamiento confirmado correcto)
 ```
 
 Cada paso deja la aplicación compilando y con la suite en verde. El paso 1.7 es el único que toca código en producción de forma visible, y para entonces ya está cubierto por las catorce pruebas del paso 1.1.
@@ -225,7 +248,8 @@ Cada paso deja la aplicación compilando y con la suite en verde. El paso 1.7 es
 - [ ] Firmas de los comandos sin cambios: `api.js` y `ui.js` intactos
 - [ ] Pruebas de contrato pasando sobre SQLite y sobre el doble en memoria
 - [ ] Gherkin del vertical en verde
-- [ ] H1–H5 documentados en `archivo_de_control.md` con su decisión o su aplazamiento explícito
+- [ ] H2–H5 documentados en `archivo_de_control.md` con su decisión o su aplazamiento explícito
+- [ ] Retención impositiva y comisión de servicio modeladas como conceptos separados, persistiendo su suma
 - [ ] `cargo build` sin advertencias nuevas
 
 ---
@@ -234,7 +258,8 @@ Cada paso deja la aplicación compilando y con la suite en verde. El paso 1.7 es
 
 | Riesgo | Probabilidad | Mitigación |
 |---|---|---|
-| Corregir H1–H5 sin querer durante la extracción | **Alta** | Las pruebas C6, C10, C11 y C12 fijan el comportamiento actual y fallarían |
+| Corregir H2–H5 sin querer durante la extracción | **Alta** | Las pruebas C6, C10, C11 y C12 fijan el comportamiento actual y fallarían |
+| Fusionar de nuevo impuesto y comisión al persistir | Media | C5 y C6 verifican el total; las pruebas unitarias verifican cada concepto por separado |
 | El redondeo cambia al mover la fórmula | Media | C7 lo fija explícitamente; se conserva `f64` y `.round()` tal cual |
 | La reversión deja saldos distintos a los originales | Media | C12 y C13 comparan el saldo antes y después del ciclo completo |
 | El alcance crece hacia Tarjetas o Cuentas | Media | Los puertos de esas entidades se definen aquí pero se implementan mínimos; su vertical es la Fase 2 y 3 |
@@ -244,7 +269,8 @@ Cada paso deja la aplicación compilando y con la suite en verde. El paso 1.7 es
 
 ## 9. Lo que esta fase NO hace
 
-* No corrige H1–H5. Los documenta y los cubre con pruebas.
+* No corrige H2–H5. Los documenta y los cubre con pruebas. H1 quedó resuelto como comportamiento correcto.
+* No altera el esquema de la base de datos: `costo_adicional` sigue guardando la suma de retención y comisión.
 * No sustituye el `DELETE` por asientos de compensación — eso es la Fase 8, y depende de decidir H5.
 * No toca el frontend. `ui.js` sigue con sus 2 874 líneas hasta la Fase 7.
-* No migra a enteros de centavos. Sigue pendiente de las pruebas de caracterización de comisiones, que esta fase produce.
+* No migra a enteros de centavos. Sigue pendiente de las pruebas de caracterización de cargos, que esta fase produce.
