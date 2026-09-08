@@ -11,6 +11,9 @@ mod adaptadores;
 mod dominio;
 mod puertos;
 
+#[cfg(test)]
+mod caracterizacion;
+
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use chrono::{NaiveDate, Local, Datelike};
