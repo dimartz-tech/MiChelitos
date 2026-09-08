@@ -850,31 +850,39 @@ class AppUI {
                                         <div style="display:flex; gap:0.4rem; align-items:flex-end; width:100%;">
                                             <div style="flex:1.2;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
-                                                <input type="text" value="${hoyStr}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
+                                                <input type="text" id="pag_fecha_${t.id}" value="${hoyStr}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
                                             </div>
                                             <div style="flex:1;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Divisa</label>
-                                                <select class="form-control" style="padding:0.4rem; font-size:0.75rem;">
+                                                <select id="pag_div_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem;" onchange="appUI.aplicarTipoAbono(${t.id}, ${t.balance_corte_pesos}, ${t.balance_corte_dolares}, ${t.balance_pesos}, ${t.balance_dolares})">
                                                     <option value="DOP">DOP</option>
                                                     <option value="USD">USD</option>
                                                 </select>
                                             </div>
                                             <div style="flex:1.2;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Monto</label>
-                                                <input type="number" step="0.01" placeholder="0.00" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
+                                                <input type="number" step="0.01" id="pag_monto_${t.id}" placeholder="0.00" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
                                             </div>
+                                        </div>
+                                        <div style="width:100%;">
+                                            <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Tipo de abono</label>
+                                            <select id="pag_tipo_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;" onchange="appUI.aplicarTipoAbono(${t.id}, ${t.balance_corte_pesos}, ${t.balance_corte_dolares}, ${t.balance_pesos}, ${t.balance_dolares})">
+                                                <option value="personalizado">Personalizado</option>
+                                                <option value="corte">Pago al corte</option>
+                                                <option value="actual">Saldo del balance actual</option>
+                                            </select>
                                         </div>
                                         <div style="display:flex; gap:0.4rem; align-items:flex-end; width:100%;">
                                             <div style="flex:2;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Cuenta Débito (Opcional)</label>
-                                                <select class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;">
+                                                <select id="pag_cuenta_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;">
                                                     <option value="">-- Ninguna (Efectivo/Otro) --</option>
                                                     ${cuentas.map(c => `<option value="${c.id}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
                                                 </select>
                                             </div>
                                             <div style="flex:1;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Tasa Cambio</label>
-                                                <input type="number" step="0.01" value="0.00" placeholder="0.00" class="form-control" style="padding:0.4rem; font-size:0.75rem;">
+                                                <input type="number" step="0.01" id="pag_tasa_${t.id}" value="0.00" placeholder="0.00" class="form-control" style="padding:0.4rem; font-size:0.75rem;">
                                             </div>
                                             <button type="submit" class="btn" style="padding:0.4rem 0.6rem; font-size:0.75rem; height:fit-content; background: linear-gradient(135deg, #10b981, #059669); color:white; flex:1;">Abonar</button>
                                         </div>
@@ -2187,17 +2195,48 @@ class AppUI {
         }
     }
 
+    /**
+     * Rellena el monto del abono según el tipo elegido y la divisa activa.
+     * El importe queda visible antes de confirmar, en lugar de resolverse de
+     * forma opaca al enviar el formulario.
+     */
+    aplicarTipoAbono(id, cortePesos, corteDolares, balPesos, balDolares) {
+        const tipo = document.getElementById(`pag_tipo_${id}`).value;
+        const divisa = document.getElementById(`pag_div_${id}`).value;
+        const campoMonto = document.getElementById(`pag_monto_${id}`);
+
+        if (tipo === 'personalizado') {
+            campoMonto.readOnly = false;
+            return;
+        }
+
+        const esDolares = divisa === 'USD';
+        const saldo = tipo === 'corte'
+            ? (esDolares ? corteDolares : cortePesos)
+            : (esDolares ? balDolares : balPesos);
+
+        campoMonto.value = Number(saldo).toFixed(2);
+        campoMonto.readOnly = true;
+
+        if (Number(saldo) === 0) {
+            this.showToast(`No hay saldo ${tipo === 'corte' ? 'al corte' : 'actual'} en ${divisa}.`, 'info');
+        }
+    }
+
     async handleAbonoTarjeta(e, id) {
         e.preventDefault();
-        const inputs = e.target.querySelectorAll('input');
-        const selects = e.target.querySelectorAll('select');
-        
-        const fec = inputs[0].value;
-        const div = selects[0].value;
-        const mon = Number(inputs[1].value);
-        const cueId = selects[1] ? selects[1].value : "";
 
-        let tasaCambio = inputs[2] ? Number(inputs[2].value) : 0;
+        const fec = document.getElementById(`pag_fecha_${id}`).value;
+        const div = document.getElementById(`pag_div_${id}`).value;
+        const mon = Number(document.getElementById(`pag_monto_${id}`).value);
+        const cueId = document.getElementById(`pag_cuenta_${id}`).value;
+
+        if (!(mon > 0)) {
+            this.showToast("El monto del abono debe ser mayor que cero.", "error");
+            return;
+        }
+
+        let tasaCambio = Number(document.getElementById(`pag_tasa_${id}`).value) || 0;
         if (cueId) {
             try {
                 const cuentas = await AppAPI.obtenerCuentas();
