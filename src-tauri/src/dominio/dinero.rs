@@ -236,9 +236,10 @@ mod tests {
 
     #[test]
     fn una_fraccion_de_centavo_se_redondea_al_construir() {
-        // Es el caso que produjo saldos con decimales sobrantes en producción.
-        assert_eq!(dop(20.84688).centavos(), 2085);
-        assert_eq!(dop(105.86392).centavos(), 10586);
+        // Es la clase de valor que produce una tasa aplicada sin redondear, y
+        // que arrastraba decimales sobrantes hasta los saldos.
+        assert_eq!(dop(24.69134).centavos(), 2469);
+        assert_eq!(dop(102.34567).centavos(), 10235);
         assert_eq!(dop(0.005).centavos(), 1, "la mitad se aleja del cero");
         assert_eq!(dop(-0.005).centavos(), -1);
     }
