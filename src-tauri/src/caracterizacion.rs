@@ -574,3 +574,18 @@ fn c20_h5_el_abono_superior_a_la_deuda_recorta_el_balance_en_cero() {
 
     assert_importe(balances_tarjeta(tarjeta).0, 0.0, "no queda saldo a favor");
 }
+
+#[test]
+fn c21_una_transferencia_sin_cuenta_calcula_la_retencion_pero_no_debita() {
+    // Contrapartida de C11: el cargo se calcula y se guarda, pero no hay
+    // cuenta de la que descontarlo. AfectacionSaldo::Ninguna le pone nombre.
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100000.0);
+
+    let mut entrada = transferencia(10000.0, "Alimentación", "Compra", cuenta);
+    entrada.cuenta_ahorro_id = None;
+    let id = crear_gasto(entrada).unwrap();
+
+    assert_importe(costo_adicional(id), 20.0, "la retención sí se calcula");
+    assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 100000.0, "ningún saldo se movió");
+}
