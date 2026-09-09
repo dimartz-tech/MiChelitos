@@ -19,9 +19,12 @@ use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use chrono::{NaiveDate, Local, Datelike};
 
-use dominio::cargos::{cargos_de_transferencia, TASA_RETENCION};
+use dominio::cargos::TASA_RETENCION;
 use dominio::dinero::{Dinero, Divisa, TasaCambio};
-use dominio::gasto::{afectacion_de_gasto, nombre_caja, AfectacionSaldo, MetodoPago};
+use dominio::gasto::MetodoPago;
+use adaptadores::sqlite::gastos::AlmacenSqlite;
+use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
+use aplicacion::revertir_gasto::revertir_gasto;
 use dominio::tarjeta::LimitesDivisa;
 
 // --- ESTRUCTURAS DTO (DATA TRANSFER OBJECTS) ---
@@ -309,91 +312,35 @@ struct GastoInput {
 
 #[tauri::command]
 fn crear_gasto(input: GastoInput) -> Result<i64, String> {
+    // El comando queda reducido a traducción: interpreta la entrada, abre la
+    // transacción, delega en el caso de uso y confirma. Ninguna regla vive ya
+    // aquí.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    
+
     // Se conserva la interpretación vigente de la divisa: la columna
     // gastos.divisa no tiene CHECK y el código solo distingue "USD".
     let divisa = if input.divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
     let metodo = MetodoPago::desde_codigo(&input.metodo_pago);
 
-    // Retención impositiva y comisión de servicio
-    let mut costo_adicional = 0.0;
-    if metodo.is_some_and(|m| m.devenga_cargos()) {
-        let categoria = conn
-            .query_row(
-                "SELECT nombre FROM categorias WHERE id = ?;",
-                [input.categoria_id],
-                |r| r.get::<_, String>(0),
-            )
-            .unwrap_or_default();
-
-        let monto = Dinero::nuevo(input.monto, divisa)?;
-        let cargos =
-            cargos_de_transferencia(monto, &categoria, &input.descripcion, input.es_lbtr)?;
-        costo_adicional = cargos.total()?.unidades();
-    }
+    let datos = DatosGasto {
+        fecha: input.fecha,
+        monto: Dinero::nuevo(input.monto, divisa)?,
+        descripcion: input.descripcion,
+        categoria_id: input.categoria_id,
+        metodo,
+        metodo_texto: input.metodo_pago,
+        es_lbtr: input.es_lbtr,
+        tarjeta_id: input.tarjeta_id,
+        cuenta_ahorro_id: input.cuenta_ahorro_id,
+    };
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    // Un único punto decide qué saldo se mueve, y el compilador exige que
-    // estén tratados todos los casos.
-    match afectacion_de_gasto(metodo, divisa, input.tarjeta_id, input.cuenta_ahorro_id) {
-        AfectacionSaldo::Ninguna => {}
-
-        AfectacionSaldo::DeudaTarjeta { tarjeta_id } => match divisa {
-            Divisa::Usd => {
-                tx.execute(
-                    "UPDATE tarjetas SET balance_dolares = balance_dolares + ? WHERE id = ?;",
-                    (input.monto, tarjeta_id),
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            Divisa::Dop => {
-                tx.execute(
-                    "UPDATE tarjetas SET balance_pesos = balance_pesos + ? WHERE id = ?;",
-                    (input.monto, tarjeta_id),
-                )
-                .map_err(|e| e.to_string())?;
-            }
-        },
-
-        AfectacionSaldo::DebitoCuenta { cuenta_id } => {
-            tx.execute(
-                "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
-                (input.monto + costo_adicional, cuenta_id),
-            )
-            .map_err(|e| e.to_string())?;
-        }
-
-        AfectacionSaldo::DebitoCaja { divisa } => {
-            tx.execute(
-                "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE nombre = ?;",
-                (input.monto, nombre_caja(divisa)),
-            )
-            .map_err(|e| e.to_string())?;
-        }
-    }
-
-    tx.execute(
-        "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
-        (
-            &input.fecha,
-            input.monto,
-            &input.divisa,
-            &input.descripcion,
-            input.categoria_id,
-            &input.metodo_pago,
-            costo_adicional,
-            input.tarjeta_id,
-            input.cuenta_ahorro_id,
-        )
-    ).map_err(|e| e.to_string())?;
-
-    let gasto_id = tx.last_insert_rowid();
+    let id = {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        registrar_gasto(datos, &mut almacen)?
+    };
     tx.commit().map_err(|e| e.to_string())?;
-
-    Ok(gasto_id)
+    Ok(id)
 }
 
 // --- COMANDOS: INGRESOS FORMALES ---
@@ -1422,61 +1369,15 @@ fn crear_cobro_efectivo_informal(fecha: String, descripcion: String, monto: f64,
 
 #[tauri::command]
 fn eliminar_gasto(id: i64) -> Result<(), String> {
+    // Traducción pura, igual que crear_gasto. La reversión y el recorte en
+    // cero de la deuda de tarjeta (H5) viven ahora en el caso de uso y en el
+    // puerto, no en esta consulta.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    
-    let (monto, divisa, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id): (f64, String, String, f64, Option<i64>, Option<i64>) = tx.query_row(
-        "SELECT monto, divisa, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id FROM gastos WHERE id = ?;",
-        [id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
-    ).map_err(|e| e.to_string())?;
-    
-    let divisa_gasto = if divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
-    let metodo = MetodoPago::desde_codigo(&metodo_pago);
-
-    // Mismo despacho que en crear_gasto, en sentido inverso.
-    match afectacion_de_gasto(metodo, divisa_gasto, tarjeta_id, cuenta_ahorro_id) {
-        AfectacionSaldo::Ninguna => {}
-
-        // El recorte en cero (H5) es una invariante escrita en SQL: al no
-        // aplicarse también en la creación, crear y revertir dejan de ser
-        // operaciones inversas. Se conserva hasta que se decida.
-        AfectacionSaldo::DeudaTarjeta { tarjeta_id } => match divisa_gasto {
-            Divisa::Usd => {
-                tx.execute(
-                    "UPDATE tarjetas SET balance_dolares = MAX(0.0, balance_dolares - ?) WHERE id = ?;",
-                    (monto, tarjeta_id),
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            Divisa::Dop => {
-                tx.execute(
-                    "UPDATE tarjetas SET balance_pesos = MAX(0.0, balance_pesos - ?) WHERE id = ?;",
-                    (monto, tarjeta_id),
-                )
-                .map_err(|e| e.to_string())?;
-            }
-        },
-
-        AfectacionSaldo::DebitoCuenta { cuenta_id } => {
-            tx.execute(
-                "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
-                (monto + costo_adicional, cuenta_id),
-            )
-            .map_err(|e| e.to_string())?;
-        }
-
-        AfectacionSaldo::DebitoCaja { divisa } => {
-            tx.execute(
-                "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
-                (monto, nombre_caja(divisa)),
-            )
-            .map_err(|e| e.to_string())?;
-        }
+    {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        revertir_gasto(id, &mut almacen)?;
     }
-    
-    tx.execute("DELETE FROM gastos WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
-    
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
