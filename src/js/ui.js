@@ -776,12 +776,12 @@ class AppUI {
                 ${tarjetas.length > 0 ? `
                     <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap:1.5rem; width:100%;">
                         ${tarjetas.map(t => {
-                            const limiteTotalDop = t.limite_pesos + t.limite_sobregiro_pesos;
-                            const disponibleDop = limiteTotalDop - t.balance_pesos;
+                            const limiteTotalDop = t.limite_efectivo_pesos + t.limite_sobregiro_pesos;
+                            const disponibleDop = t.disponible_pesos;
                             const pctDop = limiteTotalDop > 0 ? Math.min((t.balance_pesos / limiteTotalDop) * 100, 100) : 0;
 
-                            const limiteTotalUsd = t.limite_dolares + t.limite_sobregiro_dolares;
-                            const disponibleUsd = limiteTotalUsd - t.balance_dolares;
+                            const limiteTotalUsd = t.limite_efectivo_dolares + t.limite_sobregiro_dolares;
+                            const disponibleUsd = t.disponible_dolares;
                             const pctUsd = limiteTotalUsd > 0 ? Math.min((t.balance_dolares / limiteTotalUsd) * 100, 100) : 0;
 
                             const tarjetaAlDia = (t.balance_corte_pesos <= 0 && t.balance_corte_dolares <= 0);
@@ -814,7 +814,7 @@ class AppUI {
                                         </div>
                                         <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-muted);">
                                             <span>Disp: DOP ${this.formatMoney(disponibleDop)}</span>
-                                            <span>Lím: DOP ${this.formatMoney(limiteTotalDop)}</span>
+                                            <span title="${t.limite_ajustado_pesos != null ? `Aprobado por el banco: DOP ${this.formatMoney(t.limite_pesos)}` : ''}">${t.limite_ajustado_pesos != null ? '🔒 ' : ''}Lím: DOP ${this.formatMoney(limiteTotalDop)}</span>
                                         </div>
                                     </div>
 
@@ -829,7 +829,7 @@ class AppUI {
                                         </div>
                                         <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-muted);">
                                             <span>Disp: USD ${this.formatMoney(disponibleUsd)}</span>
-                                            <span>Lím: USD ${this.formatMoney(limiteTotalUsd)}</span>
+                                            <span title="${t.limite_ajustado_dolares != null ? `Aprobado por el banco: USD ${this.formatMoney(t.limite_dolares)}` : ''}">${t.limite_ajustado_dolares != null ? '🔒 ' : ''}Lím: USD ${this.formatMoney(limiteTotalUsd)}</span>
                                         </div>
                                     </div>
 
@@ -2721,6 +2721,11 @@ class AppUI {
                         </div>
                     </div>
                     <div class="form-group">
+                        <label>Límite ajustado DOP <span style="font-weight:400; color:var(--text-muted);">— opcional</span></label>
+                        <input type="number" step="0.01" id="edit_aju_dop_${t.id}" class="form-control" placeholder="Sin ajuste" value="${t.limite_ajustado_pesos ?? ''}">
+                        <span style="font-size:0.68rem; color:var(--text-muted);">Tope que te impones por debajo del aprobado. Déjalo vacío si no lo usas.</span>
+                    </div>
+                    <div class="form-group">
                         <label>Balance Corte DOP</label>
                         <input type="number" step="0.01" id="edit_cor_dop_${t.id}" class="form-control" value="${t.balance_corte_pesos}">
                     </div>
@@ -2735,6 +2740,10 @@ class AppUI {
                             <label>Sobregiro USD</label>
                             <input type="number" step="0.01" id="edit_sob_usd_${t.id}" class="form-control" value="${t.limite_sobregiro_dolares}">
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Límite ajustado USD <span style="font-weight:400; color:var(--text-muted);">— opcional</span></label>
+                        <input type="number" step="0.01" id="edit_aju_usd_${t.id}" class="form-control" placeholder="Sin ajuste" value="${t.limite_ajustado_dolares ?? ''}">
                     </div>
                     <div class="form-group">
                         <label>Balance Corte USD</label>
@@ -2760,8 +2769,20 @@ class AppUI {
         const sobUsd = Number(document.getElementById(`edit_sob_usd_${id}`).value);
         const corUsd = Number(document.getElementById(`edit_cor_usd_${id}`).value);
 
+        // Vacío es "sin ajuste"; cero es un tope deliberado. Se leen como texto
+        // para no confundir ambos casos.
+        const ajuDopTexto = document.getElementById(`edit_aju_dop_${id}`).value.trim();
+        const ajuUsdTexto = document.getElementById(`edit_aju_usd_${id}`).value.trim();
+        const ajuDop = ajuDopTexto === '' ? null : Number(ajuDopTexto);
+        const ajuUsd = ajuUsdTexto === '' ? null : Number(ajuUsdTexto);
+
+        if ((ajuDop !== null && ajuDop > limDop) || (ajuUsd !== null && ajuUsd > limUsd)) {
+            this.showToast("El límite ajustado no puede superar al aprobado.", "error");
+            return;
+        }
+
         try {
-            await AppAPI.actualizarLimitesTarjeta(id, limDop, limUsd, sobDop, sobUsd, corDop, corUsd);
+            await AppAPI.actualizarLimitesTarjeta(id, limDop, limUsd, sobDop, sobUsd, corDop, corUsd, ajuDop, ajuUsd);
             this.showToast("Parámetros actualizados correctamente.");
             document.getElementById(`modal-edit-tar-${id}`).remove();
             await this.render('tarjetas');

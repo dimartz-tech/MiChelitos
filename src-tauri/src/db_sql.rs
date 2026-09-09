@@ -111,6 +111,14 @@ pub fn inicializar_db() -> Result<()> {
         let _ = conn.execute("UPDATE tarjetas SET balance_pesos = balance_actual, limite_pesos = limite;", []);
     }
 
+    // Límite ajustado: tope opcional que el titular se impone por debajo del
+    // aprobado. NULL significa "sin ajuste", lo que deja libre el cero para
+    // expresar una tarjeta deliberadamente congelada.
+    if !columna_existe(&conn, "tarjetas", "limite_ajustado_pesos") {
+        let _ = conn.execute("ALTER TABLE tarjetas ADD COLUMN limite_ajustado_pesos REAL;", []);
+        let _ = conn.execute("ALTER TABLE tarjetas ADD COLUMN limite_ajustado_dolares REAL;", []);
+    }
+
     // 5. Cuentas de Ahorro
     conn.execute(
         "CREATE TABLE IF NOT EXISTS cuentas_ahorro (

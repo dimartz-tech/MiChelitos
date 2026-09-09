@@ -21,6 +21,7 @@ use chrono::{NaiveDate, Local, Datelike};
 use dominio::cargos::{cargos_de_transferencia, TASA_RETENCION};
 use dominio::dinero::{Dinero, Divisa, TasaCambio};
 use dominio::gasto::{afectacion_de_gasto, nombre_caja, AfectacionSaldo, MetodoPago};
+use dominio::tarjeta::LimitesDivisa;
 
 // --- ESTRUCTURAS DTO (DATA TRANSFER OBJECTS) ---
 #[derive(Serialize, Deserialize, Debug)]
@@ -87,6 +88,8 @@ pub struct Tarjeta {
     nombre_tarjeta: String,
     limite_pesos: f64,
     limite_dolares: f64,
+    limite_ajustado_pesos: Option<f64>,
+    limite_ajustado_dolares: Option<f64>,
     limite_sobregiro_pesos: f64,
     limite_sobregiro_dolares: f64,
     balance_pesos: f64,
@@ -96,6 +99,10 @@ pub struct Tarjeta {
     fecha_corte: i32,
     fecha_limite_pago: i32,
     // Enriquecidos
+    limite_efectivo_pesos: f64,
+    limite_efectivo_dolares: f64,
+    disponible_pesos: f64,
+    disponible_dolares: f64,
     alerta_corte: bool,
     alerta_pago: bool,
     dias_corte_msg: String,
@@ -153,6 +160,27 @@ pub struct Prestamo {
     // Enriquecidos
     alerta_pago: bool,
     dias_pago_msg: String,
+}
+
+/// Límite efectivo y disponible de una divisa, resueltos por el dominio.
+/// Devuelve `(efectivo, disponible)` en unidades, listos para el DTO.
+fn cupo(
+    divisa: Divisa,
+    aprobado: f64,
+    ajustado: Option<f64>,
+    sobregiro: f64,
+    balance: f64,
+) -> (f64, f64) {
+    let construir = || -> Result<(f64, f64), dominio::errores::ErrorDominio> {
+        let limites = LimitesDivisa::nuevos(
+            Dinero::nuevo(aprobado, divisa)?,
+            ajustado.map(|a| Dinero::nuevo(a, divisa)).transpose()?,
+            Dinero::nuevo(sobregiro, divisa)?,
+        )?;
+        let saldo = Dinero::nuevo(balance, divisa)?;
+        Ok((limites.efectivo().unidades(), limites.disponible(saldo)?.unidades()))
+    };
+    construir().unwrap_or((aprobado, aprobado + sobregiro - balance))
 }
 
 // --- COMANDOS: CATEGORÍAS ---
@@ -551,7 +579,7 @@ fn marcar_informal_pagado(id: i64, institucion: String, fecha: String, monto_rec
 fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT id, entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago FROM tarjetas;"
+        "SELECT id, entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago, limite_ajustado_pesos, limite_ajustado_dolares FROM tarjetas;"
     ).map_err(|e| e.to_string())?;
     
     let hoy = Local::now();
@@ -571,6 +599,8 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
         let balance_corte_dolares: f64 = row.get(10)?;
         let fecha_corte: i32 = row.get(11)?;
         let fecha_limite_pago: i32 = row.get(12)?;
+        let limite_ajustado_pesos: Option<f64> = row.get(13)?;
+        let limite_ajustado_dolares: Option<f64> = row.get(14)?;
 
         // Calcular alertas corte
         let dias_corte = if fecha_corte >= dia_actual {
@@ -602,12 +632,21 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
             format!("Faltan {} días para pagar", dias_pago)
         };
 
+        // El cupo lo resuelve el dominio, no la vista. Ante datos corruptos
+        // se degrada al límite en bruto en lugar de tumbar la consulta.
+        let (efectivo_dop, disponible_dop) =
+            cupo(Divisa::Dop, limite_pesos, limite_ajustado_pesos, limite_sobregiro_pesos, balance_pesos);
+        let (efectivo_usd, disponible_usd) =
+            cupo(Divisa::Usd, limite_dolares, limite_ajustado_dolares, limite_sobregiro_dolares, balance_dolares);
+
         Ok(Tarjeta {
             id,
             entidad,
             nombre_tarjeta,
             limite_pesos,
             limite_dolares,
+            limite_ajustado_pesos,
+            limite_ajustado_dolares,
             limite_sobregiro_pesos,
             limite_sobregiro_dolares,
             balance_pesos,
@@ -616,6 +655,10 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
             balance_corte_dolares,
             fecha_corte,
             fecha_limite_pago,
+            limite_efectivo_pesos: efectivo_dop,
+            limite_efectivo_dolares: efectivo_usd,
+            disponible_pesos: disponible_dop,
+            disponible_dolares: disponible_usd,
             alerta_corte,
             alerta_pago,
             dias_corte_msg,
@@ -662,12 +705,14 @@ fn actualizar_limites_tarjeta(
     sobregiro_pesos: f64,
     sobregiro_dolares: f64,
     balance_corte_pesos: f64,
-    balance_corte_dolares: f64
+    balance_corte_dolares: f64,
+    limite_ajustado_pesos: Option<f64>,
+    limite_ajustado_dolares: Option<f64>
 ) -> Result<(), String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE tarjetas SET limite_pesos = ?, limite_dolares = ?, limite_sobregiro_pesos = ?, limite_sobregiro_dolares = ?, balance_corte_pesos = ?, balance_corte_dolares = ? WHERE id = ?;",
-        (limite_pesos, limite_dolares, sobregiro_pesos, sobregiro_dolares, balance_corte_pesos, balance_corte_dolares, id)
+        "UPDATE tarjetas SET limite_pesos = ?, limite_dolares = ?, limite_sobregiro_pesos = ?, limite_sobregiro_dolares = ?, balance_corte_pesos = ?, balance_corte_dolares = ?, limite_ajustado_pesos = ?, limite_ajustado_dolares = ? WHERE id = ?;",
+        (limite_pesos, limite_dolares, sobregiro_pesos, sobregiro_dolares, balance_corte_pesos, balance_corte_dolares, limite_ajustado_pesos, limite_ajustado_dolares, id)
     ).map_err(|e| e.to_string())?;
     Ok(())
 }
