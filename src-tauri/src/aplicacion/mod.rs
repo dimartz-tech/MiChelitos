@@ -1,6 +1,7 @@
 //! Casos de uso: orquestan el dominio y los puertos, sin SQL ni Tauri.
 #![allow(dead_code)]
 
+pub mod liquidar_gasto;
 pub mod registrar_gasto;
 pub mod revertir_gasto;
 

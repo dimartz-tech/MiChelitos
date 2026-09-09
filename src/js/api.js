@@ -154,7 +154,7 @@ const AppAPI = {
 
     // Los límites ajustados son opcionales: null significa "sin ajuste", y se
     // distingue de 0, que es un tope deliberado que congela la tarjeta.
-    async actualizarLimitesTarjeta(id, limitePesos, limiteDolares, sobregiroPesos, sobregiroDolares, balanceCortePesos, balanceCorteDolares, ajustadoPesos = null, ajustadoDolares = null) {
+    async actualizarLimitesTarjeta(id, limitePesos, limiteDolares, sobregiroPesos, sobregiroDolares, balanceCortePesos, balanceCorteDolares, ajustadoPesos = null, ajustadoDolares = null, politicaLiquidacion = 'origen') {
         return await invoke('actualizar_limites_tarjeta', {
             id: Number(id),
             limitePesos: Number(limitePesos),
@@ -164,7 +164,8 @@ const AppAPI = {
             balanceCortePesos: Number(balanceCortePesos),
             balanceCorteDolares: Number(balanceCorteDolares),
             limiteAjustadoPesos: ajustadoPesos === null || ajustadoPesos === '' ? null : Number(ajustadoPesos),
-            limiteAjustadoDolares: ajustadoDolares === null || ajustadoDolares === '' ? null : Number(ajustadoDolares)
+            limiteAjustadoDolares: ajustadoDolares === null || ajustadoDolares === '' ? null : Number(ajustadoDolares),
+            politicaLiquidacion
         });
     },
 
@@ -254,6 +255,15 @@ const AppAPI = {
     },
 
     // --- CORRECCIONES ---
+    // El emisor comunica cuánto cargó en moneda local; la tasa la deduce el
+    // backend y la devuelve para poder mostrarla.
+    async liquidarConsumoPendiente(id, montoLiquidado) {
+        return await invoke('liquidar_consumo_pendiente', {
+            id: Number(id),
+            montoLiquidado: Number(montoLiquidado)
+        });
+    },
+
     async eliminarGasto(id) {
         return await invoke('eliminar_gasto', { id: Number(id) });
     },

@@ -174,6 +174,19 @@ pub fn crear_esquema(conn: &Connection) -> Result<()> {
         let _ = conn.execute("ALTER TABLE gastos ADD COLUMN divisa_liquidada TEXT;", []);
     }
 
+    // Estado del consumo respecto a la conversión: NULL cuando no aplica,
+    // 'pendiente' mientras el emisor no fija el importe en moneda local, y
+    // 'liquidado' una vez lo fija.
+    if !columna_existe(conn, "gastos", "estado_conversion") {
+        let _ = conn.execute("ALTER TABLE gastos ADD COLUMN estado_conversion TEXT;", []);
+    }
+
+    // Política de liquidación del emisor. NULL equivale a 'origen', que es la
+    // que no introduce consumos pendientes.
+    if !columna_existe(conn, "tarjetas", "politica_liquidacion") {
+        let _ = conn.execute("ALTER TABLE tarjetas ADD COLUMN politica_liquidacion TEXT;", []);
+    }
+
     // 7. Tabla de Pagos de Tarjetas (Abonos)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS pagos_tarjeta (
