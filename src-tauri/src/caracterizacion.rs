@@ -496,11 +496,11 @@ fn c17_el_abono_en_igual_divisa_cobra_la_comision_sobre_el_monto() {
     let tarjeta = crear_tarjeta(50000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100000.0);
 
-    // 10 423.44 x 0.20 % = 20.84688, un importe con cinco decimales.
+    // 12 345.67 x 0.20 % = 24.69134, un importe con cinco decimales.
     registrar_pago_tarjeta(
         tarjeta,
         "08/09/2026".to_string(),
-        10423.44,
+        12345.67,
         "DOP".to_string(),
         Some(cuenta),
         0.0,
@@ -508,13 +508,13 @@ fn c17_el_abono_en_igual_divisa_cobra_la_comision_sobre_el_monto() {
     .unwrap();
 
     let (monto_comision, divisa, costo) = ultimo_gasto();
-    assert_importe(monto_comision, 20.85, "comisión al centavo");
+    assert_importe(monto_comision, 24.69, "comisión al centavo");
     assert_eq!(divisa, "DOP");
     assert_importe(costo, 0.0, "la comisión se asienta como monto, no como costo");
 
-    // Saldo: 100 000 − 10 423.44 − 20.85
-    assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 89555.71, "saldo debitado");
-    assert_importe(balances_tarjeta(tarjeta).0, 39576.56, "deuda reducida");
+    // Saldo: 100 000 − 12 345.67 − 24.69
+    assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 87629.64, "saldo debitado");
+    assert_importe(balances_tarjeta(tarjeta).0, 37654.33, "deuda reducida");
 }
 
 #[test]
@@ -523,24 +523,24 @@ fn c18_el_abono_multidivisa_convierte_y_comisiona_al_centavo() {
     let tarjeta = crear_tarjeta(0.0, 1000.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100000.0);
 
-    // 250 USD x 58.9167 = 14 729.175 DOP; su 0.20 % = 29.45835.
-    // Ambos valores se redondean a centavos: 14 729.18 y 29.46.
+    // 250 USD x 60.25 = 15 062.50 DOP; su 0.20 % = 30.125, que se redondea
+    // a 30.13. La conversión ocurre antes de comisionar.
     registrar_pago_tarjeta(
         tarjeta,
         "08/09/2026".to_string(),
         250.0,
         "USD".to_string(),
         Some(cuenta),
-        58.9167,
+        60.25,
     )
     .unwrap();
 
     let (monto_comision, divisa, _) = ultimo_gasto();
-    assert_importe(monto_comision, 29.46, "comisión al centavo");
+    assert_importe(monto_comision, 30.13, "comisión al centavo");
     assert_eq!(divisa, "DOP", "la comisión se registra en pesos");
 
-    // Saldo: 100 000 − 14 729.18 − 29.46
-    assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 85241.36, "saldo debitado");
+    // Saldo: 100 000 − 15 062.50 − 30.13
+    assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 84907.37, "saldo debitado");
     assert_importe(balances_tarjeta(tarjeta).1, 750.0, "la deuda baja en USD");
 }
 
@@ -952,7 +952,7 @@ fn c30_una_bonificacion_reduce_la_deuda_sin_tocar_el_gasto() {
 
     let entrada = GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: 728.14,
+        monto: 1234.56,
         divisa: "DOP".to_string(),
         descripcion: "Suscripción".to_string(),
         categoria_id: id_categoria("Suscripciones"),
@@ -963,16 +963,16 @@ fn c30_una_bonificacion_reduce_la_deuda_sin_tocar_el_gasto() {
         tasa_cambio: None,
     };
     let gasto = crear_gasto(entrada).unwrap();
-    assert_importe(deuda_pesos(tarjeta), 10728.14, "el consumo sube la deuda");
+    assert_importe(deuda_pesos(tarjeta), 11234.56, "el consumo sube la deuda");
 
     crate::crear_bonificacion(
-        "09/09/2026".to_string(), tarjeta, 36.41, "DOP".to_string(),
+        "09/09/2026".to_string(), tarjeta, 61.73, "DOP".to_string(),
         "Cashback compra por internet".to_string(), Some(gasto),
     ).unwrap();
 
-    assert_importe(deuda_pesos(tarjeta), 10691.73, "la bonificación la reduce");
+    assert_importe(deuda_pesos(tarjeta), 11172.83, "la bonificación la reduce");
     let (monto_gasto, _, _) = ultimo_gasto();
-    assert_importe(monto_gasto, 728.14, "el consumo original no se altera");
+    assert_importe(monto_gasto, 1234.56, "el consumo original no se altera");
 }
 
 #[test]
@@ -981,12 +981,12 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10000.0, 0.0);
 
-    // El consumo que las genera: 8 640.00 al 3 % de la categoría comida.
+    // El consumo que las genera, con un 3 % repartido en dos créditos.
     let gasto = crear_gasto(GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: 8640.00,
+        monto: 5000.00,
         divisa: "DOP".to_string(),
-        descripcion: "Restaurante".to_string(),
+        descripcion: "Consumo bonificado".to_string(),
         categoria_id: id_categoria("Alimentación"),
         metodo_pago: "tarjeta".to_string(),
         es_lbtr: false,
@@ -996,20 +996,20 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
     })
     .unwrap();
 
-    crate::crear_bonificacion("09/09/2026".into(), tarjeta, 86.40, "DOP".into(),
-        "Recompensas Qik Rebate".into(), Some(gasto)).unwrap();
-    crate::crear_bonificacion("09/09/2026".into(), tarjeta, 172.80, "DOP".into(),
-        "Cashback Personalizado".into(), Some(gasto)).unwrap();
+    crate::crear_bonificacion("09/09/2026".into(), tarjeta, 50.00, "DOP".into(),
+        "Recompensa base".into(), Some(gasto)).unwrap();
+    crate::crear_bonificacion("09/09/2026".into(), tarjeta, 100.00, "DOP".into(),
+        "Bonificación de categoría".into(), Some(gasto)).unwrap();
 
     assert_eq!(crate::obtener_bonificaciones().unwrap().len(), 2);
-    assert_importe(deuda_pesos(tarjeta), 10000.0 + 8640.00 - 259.20, "el consumo sube y las dos bonificaciones bajan");
+    assert_importe(deuda_pesos(tarjeta), 10000.0 + 5000.00 - 150.00, "el consumo sube y las dos bonificaciones bajan");
 }
 
 #[test]
 fn c32_revertir_una_bonificacion_restituye_la_deuda() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10000.0, 0.0);
-    let id = crate::crear_bonificacion("09/09/2026".into(), tarjeta, 36.41, "DOP".into(),
+    let id = crate::crear_bonificacion("09/09/2026".into(), tarjeta, 61.73, "DOP".into(),
         "Cashback".into(), None).unwrap();
 
     crate::eliminar_bonificacion(id).unwrap();
@@ -1024,7 +1024,7 @@ fn c33_una_bonificacion_sin_concepto_o_en_cero_se_rechaza() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10000.0, 0.0);
 
-    assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, 36.41, "DOP".into(),
+    assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, 61.73, "DOP".into(),
         "   ".into(), None).is_err(), "el concepto es obligatorio");
     assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, 0.0, "DOP".into(),
         "Cashback".into(), None).is_err(), "cero no es una bonificación");

@@ -53,7 +53,7 @@ impl Bonificacion {
     /// Es la comparación que de verdad sirve para contrastar lo abonado con
     /// la tabla de beneficios del emisor. Compara **importes redondeados a
     /// centavos**, no porcentajes: el emisor redondea el crédito, de modo que
-    /// 728.14 al 5 % da 36.41 y no 36.407, y una comparación de porcentajes
+    /// 1 234.56 al 5 % da 61.73 y no 61.728, y una comparación de porcentajes
     /// nunca daría exacta.
     pub fn coincide_con_tasa(&self, consumo: Dinero, tasa: f64) -> bool {
         match consumo.porcentaje(tasa) {
@@ -123,40 +123,40 @@ mod tests {
 
     #[test]
     fn reconoce_una_bonificacion_que_cuadra_con_la_tasa_prometida() {
-        // Caso real: 36.41 sobre 728.14. El 5 % exacto son 36.407, que el
-        // emisor redondea a 36.41; comparar porcentajes daría 5.000412 %.
-        let b = Bonificacion::nueva(dop(36.41), "Cashback compra por internet").unwrap();
-        assert!(b.coincide_con_tasa(dop(728.14), 0.05));
-        assert!(!b.coincide_con_tasa(dop(728.14), 0.03), "descarta una tasa que no es");
+        // 61.73 sobre 1 234.56: el 5 % exacto son 61.728, que el emisor
+        // redondea a 61.73. Comparar porcentajes daría 5.000162 % y fallaría.
+        let b = Bonificacion::nueva(dop(61.73), "Cashback compra por internet").unwrap();
+        assert!(b.coincide_con_tasa(dop(1234.56), 0.05));
+        assert!(!b.coincide_con_tasa(dop(1234.56), 0.03), "descarta una tasa que no es");
     }
 
     #[test]
     fn reconoce_el_porcentaje_base_y_el_de_bonificacion_por_separado() {
-        // Caso real: un mismo consumo generó dos créditos en el mismo día,
-        // 1 % base y 2 % de categoría, que juntos son el 3 % de comida.
-        let consumo = dop(8640.00);
-        let base = Bonificacion::nueva(dop(86.40), "Recompensas Qik Rebate").unwrap();
-        let extra = Bonificacion::nueva(dop(172.80), "Cashback Personalizado").unwrap();
+        // Un mismo consumo genera dos créditos el mismo día: 1 % base y 2 %
+        // de categoría, que juntos son el 3 % que promete el emisor.
+        let consumo = dop(5000.00);
+        let base = Bonificacion::nueva(dop(50.00), "Recompensa base").unwrap();
+        let extra = Bonificacion::nueva(dop(100.00), "Bonificación de categoría").unwrap();
 
         assert!(base.coincide_con_tasa(consumo, 0.01));
         assert!(extra.coincide_con_tasa(consumo, 0.02));
-        assert_eq!(base.monto().sumar(&extra.monto()).unwrap(), dop(259.20));
+        assert_eq!(base.monto().sumar(&extra.monto()).unwrap(), dop(150.00));
     }
 
     #[test]
     fn una_tasa_que_no_se_aplico_no_coincide() {
-        // Caso real: una compra que debió recibir el 5 % y no recibió nada.
-        // Al registrar cero no existe bonificación, así que se detecta por
-        // ausencia y no por un crédito que no cuadre.
-        let b = Bonificacion::nueva(dop(105.07), "Cashback").unwrap();
-        assert!(b.coincide_con_tasa(dop(2101.42), 0.05));
-        assert!(!b.coincide_con_tasa(dop(3174.67), 0.05));
+        // Un crédito cuadra con el consumo que lo generó y no con otro. Una
+        // compra que debió recibir el 5 % y no recibió nada se detecta por
+        // ausencia, no por un crédito que no cuadre.
+        let b = Bonificacion::nueva(dop(100.00), "Cashback").unwrap();
+        assert!(b.coincide_con_tasa(dop(2000.00), 0.05));
+        assert!(!b.coincide_con_tasa(dop(3000.00), 0.05));
     }
 
     #[test]
     fn el_porcentaje_mostrado_es_orientativo_por_el_redondeo() {
-        let b = Bonificacion::nueva(dop(36.41), "Cashback").unwrap();
-        let pct = b.porcentaje_sobre(dop(728.14)).unwrap();
+        let b = Bonificacion::nueva(dop(61.73), "Cashback").unwrap();
+        let pct = b.porcentaje_sobre(dop(1234.56)).unwrap();
         assert!((pct - 0.05).abs() < 1e-4, "cerca del 5 %, pero no exacto: {:.6}", pct);
     }
 

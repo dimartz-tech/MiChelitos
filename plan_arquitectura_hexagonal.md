@@ -29,20 +29,19 @@ El objetivo no es "modernizar por moda": es que las **reglas financieras** de la
 Antes de cualquier planificación se generó una copia íntegra del proyecto y de los datos.
 
 ```
-/Users/wilfoddiaz/Desktop/MiChelitosTauri_backup_2026-09-08/
-├── proyecto/              (40 archivos — código, docs, configuración, íconos)
-└── base_de_datos_viva/    (~/.michelitos/databases/ completo: sql/ + nosql/ + respaldos)
+<DIRECTORIO_DE_RESPALDO>/MiChelitosTauri_backup_<FECHA>/
+├── proyecto/              (código, documentación, configuración, íconos)
+└── base_de_datos_viva/    (directorio de datos de la aplicación, completo)
 ```
 
 **Verificación de integridad:**
 
-* SHA-1 de la base de datos viva: `e1bdfeb126ac48c8e190842c9e7a8edd43618389` — **idéntico** en origen y copia.
-* Conteo de archivos del proyecto: **40 = 40**.
-* Peso total de la copia: **5.0 MB**.
+* Suma de comprobación de la base de datos viva: **idéntica** en origen y copia.
+* Conteo de archivos del proyecto: **coincidente**.
 
 **Exclusión deliberada:** `src-tauri/target/` (3.2 GB) y `node_modules/` (14 MB) no se copiaron por ser **artefactos reproducibles** — se regeneran con `cargo build` y `npm install`. Copiarlos habría inflado el respaldo 640× sin aportar información recuperable.
 
-> ⚠️ **Hallazgo relevante durante la copia:** el archivo `michelitos.db` en la raíz del proyecto (fecha 2026-08-17) **no es la base de datos que usa la aplicación**. El backend lee y escribe en `~/.michelitos/databases/sql/michelitos.db` (modificado hoy, 2026-09-08). El de la raíz es una copia obsoleta con datos reales, desincronizada hace tres semanas. Ver §2.
+> ⚠️ **Hallazgo relevante durante la copia:** el archivo `michelitos.db` de la raíz del proyecto **no es la base de datos que usa la aplicación**. El backend lee y escribe en el directorio de datos del usuario. El de la raíz es una copia obsoleta con datos reales, desincronizada desde hace semanas. Ver §2.
 
 ---
 
@@ -94,7 +93,7 @@ michelitos.db*
 ### 2.3 ¿Por qué exactamente estas reglas?
 
 **`*.db` y derivados — la regla crítica.**
-Hoy el `.gitignore` **no excluye ningún archivo de base de datos**. En el momento en que se ejecute `git init && git add .` —paso obligatorio para lograr la auditabilidad que se pide— quedarían versionados de forma permanente `michelitos.db` y `michelitos.db.backup_2026-08-17_162833`, que contienen **balances bancarios reales, RNC de clientes, números de factura y montos cobrados**. Un dato committeado sobrevive al `git rm`: permanece en el historial y en cualquier clon o remoto. Esta regla debe existir **antes** del primer commit, no después.
+Hoy el `.gitignore` **no excluye ningún archivo de base de datos**. En el momento en que se ejecute `git init && git add .` —paso obligatorio para lograr la auditabilidad que se pide— quedarían versionados de forma permanente `michelitos.db` y sus respaldos con marca de tiempo, que contienen **balances bancarios reales, RNC de clientes, números de factura y montos cobrados**. Un dato committeado sobrevive al `git rm`: permanece en el historial y en cualquier clon o remoto. Esta regla debe existir **antes** del primer commit, no después.
 
 **`*-journal`, `*-wal`, `*-shm`.**
 SQLite genera estos archivos temporales durante transacciones. Versionarlos produce conflictos ilegibles y puede dejar la base en estado inconsistente al hacer checkout.
@@ -114,7 +113,7 @@ Ignorar `michelitos.db` de la raíz **no basta**: el archivo debería **eliminar
 
 1. No lo usa la aplicación (el backend apunta a `~/.michelitos/`).
 2. Su sola presencia induce al error de creer que es la base activa.
-3. Ya está respaldado en `MiChelitosTauri_backup_2026-09-08/`.
+3. Ya está respaldado fuera del proyecto.
 
 *(Esta eliminación no se ha ejecutado — requiere confirmación explícita.)*
 
