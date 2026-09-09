@@ -35,6 +35,14 @@ fn columna_existe(conn: &Connection, tabla: &str, columna: &str) -> bool {
 
 pub fn inicializar_db() -> Result<()> {
     let conn = obtener_conexion()?;
+    crear_esquema(&conn)
+}
+
+/// Crea el esquema y las semillas sobre una conexión dada.
+///
+/// Separarlo de `inicializar_db` permite levantar una base en memoria en las
+/// pruebas del adaptador, sin depender de `HOME` ni tocar disco.
+pub fn crear_esquema(conn: &Connection) -> Result<()> {
 
     // 1. Tabla de Clientes
     conn.execute(
