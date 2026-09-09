@@ -989,6 +989,7 @@ class AppUI {
                                             <td>${s.entidad} (${s.nombre_tarjeta})</td>
                                             <td class="amount expense">${s.divisa} ${this.formatMoney(s.monto)}</td>
                                             <td>
+                                                <button onclick='appUI.abrirEdicionSuscripcion(${JSON.stringify(s).replace(/'/g, "&apos;")})' class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Editar">✏️</button>
                                                 <button onclick="appUI.handleEliminarSuscripcion(${s.id})" class="btn btn-danger" style="padding: 0.3rem 0.5rem; font-size:0.8rem;">🗑️</button>
                                             </td>
                                         </tr>
@@ -2282,6 +2283,87 @@ class AppUI {
         try {
             await AppAPI.crearSuscripcion(pla, mon, tar, fre, dia, div);
             this.showToast("Suscripción recurrente guardada.");
+            await this.render('suscripciones');
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
+    }
+
+    async abrirEdicionSuscripcion(s) {
+        const tarjetas = await AppAPI.obtenerTarjetas();
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = `modal-edit-sus-${s.id}`;
+        overlay.innerHTML = `
+            <div class="card" style="width: 420px; background: var(--bg-surface-opaque); max-height:90vh; overflow-y:auto;">
+                <h3 style="font-family: var(--font-heading); margin-bottom: 0.4rem;">✏️ Editar Suscripción</h3>
+                <p style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:1rem;">
+                    Se conserva el último pago registrado (${s.fecha_ultimo_pago || 'ninguno'}), de modo que editar no provoca un cobro repetido este período.
+                </p>
+                <form onsubmit="appUI.handleEdicionSuscripcionSubmit(event, ${s.id})">
+                    <div class="form-group">
+                        <label>Servicio / Plataforma</label>
+                        <input type="text" id="es_pla_${s.id}" class="form-control" value="${s.plataforma}" required>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Monto</label>
+                            <input type="number" step="0.01" id="es_mon_${s.id}" class="form-control" value="${s.monto}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Divisa</label>
+                            <select id="es_div_${s.id}" class="form-control">
+                                <option value="DOP" ${s.divisa === 'DOP' ? 'selected' : ''}>DOP</option>
+                                <option value="USD" ${s.divisa === 'USD' ? 'selected' : ''}>USD</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Día de facturación</label>
+                            <input type="number" min="1" max="31" id="es_dia_${s.id}" class="form-control" value="${s.dia_facturacion}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Frecuencia</label>
+                            <select id="es_fre_${s.id}" class="form-control">
+                                <option value="mensual" ${s.frecuencia === 'mensual' ? 'selected' : ''}>Mensual</option>
+                                <option value="anual" ${s.frecuencia === 'anual' ? 'selected' : ''}>Anual</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Tarjeta de cargo</label>
+                        <select id="es_tar_${s.id}" class="form-control" required>
+                            ${tarjetas.map(t => `<option value="${t.id}" ${t.id === s.tarjeta_id ? 'selected' : ''}>${t.entidad} - ${t.nombre_tarjeta}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
+                        <button type="button" onclick="document.getElementById('modal-edit-sus-${s.id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="submit" class="btn">Guardar Cambios</button>
+                    </div>
+                </form>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+
+    async handleEdicionSuscripcionSubmit(e, id) {
+        e.preventDefault();
+        const pla = document.getElementById(`es_pla_${id}`).value.trim();
+        const mon = Number(document.getElementById(`es_mon_${id}`).value);
+        const div = document.getElementById(`es_div_${id}`).value;
+        const dia = Number(document.getElementById(`es_dia_${id}`).value);
+        const fre = document.getElementById(`es_fre_${id}`).value;
+        const tar = Number(document.getElementById(`es_tar_${id}`).value);
+
+        if (!pla) { this.showToast("El nombre del servicio no puede estar vacío.", "error"); return; }
+        if (!(mon > 0)) { this.showToast("El monto debe ser mayor que cero.", "error"); return; }
+        if (!(dia >= 1 && dia <= 31)) { this.showToast("El día de facturación debe estar entre 1 y 31.", "error"); return; }
+
+        try {
+            await AppAPI.actualizarSuscripcion(id, pla, mon, tar, fre, dia, div);
+            this.showToast("Suscripción actualizada. Los cargos ya realizados no se alteran.");
+            document.getElementById(`modal-edit-sus-${id}`).remove();
             await this.render('suscripciones');
         } catch (err) {
             this.showToast(err.toString(), 'error');
