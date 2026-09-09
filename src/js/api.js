@@ -195,6 +195,20 @@ const AppAPI = {
         });
     },
 
+    // Edita una suscripción conservando fecha_ultimo_pago. Borrar y recrear
+    // reiniciaría esa marca y provocaría un cobro duplicado en el mismo mes.
+    async actualizarSuscripcion(id, plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa) {
+        return await invoke('actualizar_suscripcion', {
+            id: Number(id),
+            plataforma,
+            monto: Number(monto),
+            tarjetaId: Number(tarjetaId),
+            frecuencia,
+            diaFacturacion: Number(diaFacturacion),
+            divisa
+        });
+    },
+
     async eliminarSuscripcion(id) {
         return await invoke('eliminar_suscripcion', { id: Number(id) });
     },

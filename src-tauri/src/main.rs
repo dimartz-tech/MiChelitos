@@ -831,6 +831,36 @@ fn crear_suscripcion(plataforma: String, monto: f64, tarjeta_id: i64, frecuencia
     Ok(conn.last_insert_rowid())
 }
 
+/// Edita una suscripción **conservando `fecha_ultimo_pago`**.
+///
+/// Esa preservación es el motivo de existir del comando: la única alternativa
+/// hasta ahora era borrar y volver a crear, lo que reinicia el marcador de
+/// idempotencia y hace que el siguiente procesamiento cobre otra vez el mismo
+/// mes. Los cargos ya realizados son gastos independientes y no se tocan: lo
+/// que se edita es la configuración de los cobros futuros.
+#[tauri::command]
+fn actualizar_suscripcion(
+    id: i64,
+    plataforma: String,
+    monto: f64,
+    tarjeta_id: i64,
+    frecuencia: String,
+    dia_facturacion: i32,
+    divisa: String,
+) -> Result<(), String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let filas = conn
+        .execute(
+            "UPDATE suscripciones SET plataforma = ?, monto = ?, tarjeta_id = ?, frecuencia = ?, dia_facturacion = ?, divisa = ? WHERE id = ?;",
+            (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, id),
+        )
+        .map_err(|e| e.to_string())?;
+    if filas == 0 {
+        return Err("No se encontró la suscripción que se intenta editar.".to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn eliminar_suscripcion(id: i64) -> Result<(), String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
@@ -1560,6 +1590,7 @@ fn main() {
             registrar_pago_tarjeta,
             obtener_suscripciones,
             crear_suscripcion,
+            actualizar_suscripcion,
             eliminar_suscripcion,
             procesar_suscripciones,
             obtener_capital,
