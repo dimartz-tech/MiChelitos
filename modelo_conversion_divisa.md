@@ -204,16 +204,55 @@ Se resolverán al contrastar estados de cuenta de tarjetas con ambas políticas:
 
 ---
 
-## 7. Impacto en la Fase 1.7
+## 7. Decisión tomada — 2026-09-09
+
+**H2 se resuelve convirtiendo con tasa declarada**, con una precisión que separa dos operaciones que hasta ahora se estaban tratando bajo el mismo nombre.
+
+### 7.1 Cuándo la tasa es un hecho de la operación
+
+Abono a tarjeta desde una cuenta de otra divisa, transferencia entre cuentas de distinta divisa, y gasto pagado por transferencia desde una cuenta de otra divisa.
+
+En los tres, **el dinero sale de la cuenta a esa tasa y en ese momento**. La tasa no es una estimación: es un dato de la operación que el titular conoce porque el banco se lo aplica al ejecutarla.
+
+→ **Convertir con la tasa declarada y dar la conversión por liquidada de inmediato.** `FuenteTasa::Declarada`, estado `Liquidado`.
+
+### 7.2 Cuándo la tasa es una decisión futura del emisor
+
+Consumo con una tarjeta de política de traducción a moneda local.
+
+Aquí la tasa **no existe todavía**. Declararla solo produciría una expectativa, no un hecho.
+
+→ **Se asienta en la divisa de origen y queda pendiente.** `PendienteDeLiquidacion`.
+
+### 7.3 Qué significa exactamente "posponer el asiento"
+
+Conviene ser preciso, porque es fácil leerlo como que el consumo no se registra. No es eso.
+
+| | Ocurre al comprar | Ocurre al liquidar |
+|---|---|---|
+| Registro del gasto | **Sí**, con su importe en divisa | — |
+| Saldo en divisa de la tarjeta | **Sube**, igual que hace el emisor | Baja |
+| Saldo en moneda local | — | **Sube** por el importe que fija el emisor |
+| Tasa aplicada | No existe | Se deduce de los dos importes |
+
+Lo que se pospone es la **traducción**, no el registro ni la afectación del saldo. El consumo se refleja desde el primer momento, en dólares, que es exactamente lo que muestra el emisor durante ese intervalo. Así el saldo nunca subestima la deuda y tampoco inventa una cifra en pesos.
+
+### 7.4 La tasa esperada, si se quiere
+
+Para los consumos del §7.2 se admite registrar una tasa **esperada**, con dos condiciones: es opcional, y **nunca toca el saldo**. Sirve para mostrar una cifra orientativa en pesos y para avisar cuando el emisor liquida a una tasa muy distinta de la prevista. Es información, no contabilidad.
+
+---
+
+## 8. Impacto en la Fase 1.7
 
 El caso de uso `registrar_gasto` de la Fase 1.5 **rechaza** debitar una cuenta de una divisa distinta a la del gasto. Hoy el código en producción no compara divisas y resta igual, que es el hallazgo H2.
 
 Cablearlo en la Fase 1.7 convertiría un fallo silencioso en un error visible. Con este modelo aparece una tercera vía, preferible a las dos anteriores:
 
-| Opción | Efecto |
+| Opción | Resolución |
 |---|---|
-| Rechazar | Seguro, pero bloquea un flujo legítimo |
-| Convertir con tasa declarada | Correcto para pagos donde el titular conoce la tasa |
-| **Registrar como pendiente** | Correcto para consumos bajo política B, donde la tasa aún no existe |
+| Rechazar | **Descartada.** Bloquearía un flujo legítimo |
+| Convertir con tasa declarada | **Adoptada** para las operaciones del §7.1 |
+| Registrar como pendiente | **Adoptada** para los consumos del §7.2 |
 
-La elección depende del tipo de operación, y el modelo ya distingue los tres casos.
+La elección no es única: depende del tipo de operación. `registrar_gasto` dejará de rechazar el cruce de divisas y pasará a exigir una tasa cuando la operación sea de las del §7.1, que es donde el titular la conoce.
