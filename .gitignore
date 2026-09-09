@@ -16,6 +16,15 @@
 *.backup_*
 michelitos.db*
 
+# --- Documentos financieros (estados de cuenta, facturas, comprobantes) ---
+# Nunca deben acabar en el repositorio, que es público. Se guardan fuera del
+# proyecto, en ~/Documents/Finanzas/.
+*.pdf
+*.csv
+*.xlsx
+*.ofx
+*.qif
+
 # --- Respaldos y copias del proyecto ---
 *_backup_*/
 *.bak
