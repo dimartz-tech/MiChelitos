@@ -851,3 +851,88 @@ fn c25_revertir_un_gasto_convertido_restituye_el_saldo_exacto() {
 
     assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 100000.0, "restitución al centavo");
 }
+
+// =====================================================================
+//  Liquidación pendiente — ciclo completo por los comandos reales
+// =====================================================================
+
+fn fijar_politica(tarjeta_id: i64, politica: &str) {
+    conexion()
+        .execute("UPDATE tarjetas SET politica_liquidacion = ? WHERE id = ?;", params![politica, tarjeta_id])
+        .expect("fijar política de liquidación");
+}
+
+fn estado_conversion(gasto_id: i64) -> Option<String> {
+    conexion()
+        .query_row("SELECT estado_conversion FROM gastos WHERE id = ?;", [gasto_id], |r| r.get(0))
+        .expect("leer estado de conversión")
+}
+
+fn compra_en_dolares(tarjeta: i64) -> GastoInput {
+    GastoInput {
+        fecha: "10/09/2026".to_string(),
+        monto: 100.0,
+        divisa: "USD".to_string(),
+        descripcion: "Compra en el exterior".to_string(),
+        categoria_id: id_categoria("Otros"),
+        metodo_pago: "tarjeta".to_string(),
+        es_lbtr: false,
+        tarjeta_id: Some(tarjeta),
+        cuenta_ahorro_id: None,
+        tasa_cambio: None,
+    }
+}
+
+#[test]
+fn c26_una_compra_en_divisa_con_tarjeta_que_traduce_queda_pendiente() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    fijar_politica(tarjeta, "traduce");
+
+    let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
+
+    assert_eq!(estado_conversion(id).as_deref(), Some("pendiente"));
+    let (pesos, dolares) = balances_tarjeta(tarjeta);
+    assert_importe(dolares, 100.0, "la deuda sube en dólares, como hace el emisor");
+    assert_importe(pesos, 0.0, "sin cifra en pesos: todavía no existe");
+}
+
+#[test]
+fn c27_la_misma_compra_con_tarjeta_que_liquida_en_origen_no_queda_pendiente() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+
+    let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
+
+    assert_eq!(estado_conversion(id), None, "nada que liquidar");
+    assert_importe(balances_tarjeta(tarjeta).1, 100.0, "se queda en dólares");
+}
+
+#[test]
+fn c28_liquidar_traslada_el_saldo_entre_divisas_y_guarda_la_tasa_deducida() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    fijar_politica(tarjeta, "traduce");
+    let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
+
+    // El emisor informa que cargó 6 050.00 en pesos.
+    let tasa = crate::liquidar_consumo_pendiente(id, 6050.0).unwrap();
+
+    assert_importe(tasa, 60.5, "la tasa se deduce del importe, no se pide");
+    assert_eq!(estado_conversion(id).as_deref(), Some("liquidado"));
+    let (pesos, dolares) = balances_tarjeta(tarjeta);
+    assert_importe(dolares, 0.0, "baja de la divisa de origen");
+    assert_importe(pesos, 6050.0, "y sube en moneda local");
+}
+
+#[test]
+fn c29_no_se_liquida_dos_veces_ni_lo_que_no_esta_pendiente() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    fijar_politica(tarjeta, "traduce");
+    let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
+
+    crate::liquidar_consumo_pendiente(id, 6050.0).unwrap();
+    assert!(crate::liquidar_consumo_pendiente(id, 6050.0).is_err(), "no se liquida dos veces");
+    assert_importe(balances_tarjeta(tarjeta).0, 6050.0, "ni se duplica el traslado");
+}

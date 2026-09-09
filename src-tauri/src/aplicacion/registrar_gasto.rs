@@ -8,7 +8,8 @@
 use super::ErrorAplicacion;
 use crate::dominio::errores::ErrorDominio;
 use crate::dominio::cargos::cargos_de_transferencia;
-use crate::dominio::conversion::Conversion;
+use crate::dominio::conversion::{Conversion, EstadoConversion};
+use crate::dominio::tarjeta::MONEDA_LOCAL;
 use crate::dominio::dinero::{Dinero, TasaCambio};
 use crate::dominio::gasto::{afectacion_de_gasto, nombre_caja, AfectacionSaldo, MetodoPago};
 use crate::puertos::repositorios::*;
@@ -43,20 +44,30 @@ pub fn registrar_gasto(
     // Si el gasto se paga desde una cuenta de otra divisa, se convierte con la
     // tasa declarada. La conversión ocurre ANTES de calcular los cargos,
     // porque la retención se aplica sobre el importe que sale de la cuenta.
-    let conversion = match afectacion {
+    let estado_conversion = match afectacion {
         AfectacionSaldo::DebitoCuenta { cuenta_id } => {
             let divisa_cuenta = almacen.divisa(cuenta_id)?;
             if divisa_cuenta == divisa {
-                None
+                EstadoConversion::NoAplica
             } else {
                 let tasa = datos.tasa_cambio.ok_or(ErrorDominio::TasaDeCambioRequerida)?;
-                Some(Conversion::con_tasa(datos.monto, divisa_cuenta, tasa)?)
+                EstadoConversion::Liquidada(Conversion::con_tasa(datos.monto, divisa_cuenta, tasa)?)
             }
         }
-        _ => None,
+        // Un consumo en divisa con una tarjeta que traduce queda PENDIENTE: su
+        // importe en moneda local no existe todavía, lo fijará el emisor. No
+        // se estima, porque una cifra inventada nunca cuadraría con el estado.
+        AfectacionSaldo::DeudaTarjeta { tarjeta_id } => {
+            if almacen.politica(tarjeta_id)?.deja_pendiente(divisa, MONEDA_LOCAL) {
+                EstadoConversion::Pendiente
+            } else {
+                EstadoConversion::NoAplica
+            }
+        }
+        _ => EstadoConversion::NoAplica,
     };
 
-    let base_de_cargos = match conversion {
+    let base_de_cargos = match estado_conversion.conversion() {
         Some(c) => c.destino(),
         None => datos.monto,
     };
@@ -92,7 +103,7 @@ pub fn registrar_gasto(
         cargos,
         tarjeta_id: datos.tarjeta_id,
         cuenta_ahorro_id: datos.cuenta_ahorro_id,
-        conversion,
+        estado_conversion,
     })?;
 
     Ok(id)
@@ -325,7 +336,7 @@ mod tests {
         let g = a.obtener(id).unwrap();
         assert_eq!(g.monto, usd(100.0), "el gasto conserva su divisa de origen");
         assert_eq!(g.cargos, dop(12.0), "la retención va en la divisa debitada");
-        assert_eq!(g.conversion.unwrap().destino(), dop(6000.0));
+        assert_eq!(g.estado_conversion.conversion().unwrap().destino(), dop(6000.0));
         assert_eq!(g.monto_debitado(), dop(6000.0));
     }
 
@@ -351,7 +362,7 @@ mod tests {
 
         let id = registrar_gasto(d, &mut a).unwrap();
 
-        assert!(a.obtener(id).unwrap().conversion.is_none());
+        assert_eq!(a.obtener(id).unwrap().estado_conversion, EstadoConversion::NoAplica);
         assert_eq!(a.saldo_de(10), dop(89980.0));
     }
 
@@ -384,13 +395,17 @@ mod tests {
 
     #[test]
     fn un_gasto_con_tarjeta_en_otra_divisa_no_exige_tasa() {
-        // La conversión solo entra cuando se debita una CUENTA. La deuda de
-        // tarjeta se lleva en su propia divisa.
+        // La conversión con tasa declarada solo entra cuando se debita una
+        // CUENTA. La deuda de tarjeta se lleva en su propia divisa, con una
+        // por moneda igual que las columnas del esquema real.
         let mut a = almacen();
         let mut d = datos(75.0, MetodoPago::Tarjeta);
         d.monto = usd(75.0);
         d.tarjeta_id = Some(20);
 
-        assert!(registrar_gasto(d, &mut a).is_err(), "la tarjeta de prueba lleva pesos");
+        registrar_gasto(d, &mut a).unwrap();
+
+        assert_eq!(a.deuda_en(20, Divisa::Usd), usd(75.0), "sube la deuda en dólares");
+        assert_eq!(a.deuda_de(20), dop(500.0), "la deuda en pesos no se toca");
     }
 }

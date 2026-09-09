@@ -683,17 +683,29 @@ class AppUI {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${gastos.map(g => `
+                                        ${gastos.map(g => {
+                                            const pendiente = g.estado_conversion === 'pendiente';
+                                            const liquidado = g.estado_conversion === 'liquidado';
+                                            // Un consumo liquidado se muestra por lo que realmente
+                                            // costó en pesos; uno pendiente, en su divisa, porque
+                                            // el importe en pesos aún no existe.
+                                            const divisaFinal = liquidado ? 'DOP' : g.divisa;
+                                            const montoFinal = liquidado ? g.monto_liquidado : g.monto;
+                                            return `
                                             <tr>
-                                                <td><strong>${g.descripcion}</strong></td>
+                                                <td>
+                                                    <strong>${g.descripcion}</strong>
+                                                    ${pendiente ? `<button onclick="appUI.abrirLiquidacionConsumo(${g.id}, ${g.monto}, '${g.divisa}', '${String(g.descripcion).replace(/'/g, "&apos;")}')" class="btn" style="margin-left:0.4rem; padding:0.1rem 0.4rem; font-size:0.65rem; background:rgba(255,193,7,0.15); border:1px solid rgba(255,193,7,0.4); color:#ffc107;" title="El emisor aún no ha fijado el importe en pesos">⏳ Liquidar</button>` : ''}
+                                                    ${liquidado ? `<span style="margin-left:0.4rem; font-size:0.65rem; color:var(--text-muted);" title="Tasa aplicada por el emisor">@ ${Number(g.tasa_conversion).toFixed(4)}</span>` : ''}
+                                                </td>
                                                 <td>${g.categoria_nombre}</td>
                                                 <td>${g.fecha}</td>
                                                 <td style="text-transform:capitalize;">${g.metodo_pago}</td>
                                                 <td class="amount">${g.divisa} ${this.formatMoney(g.monto)}</td>
-                                                <td class="amount expense">${g.divisa} ${this.formatMoney(g.costo_adicional)}</td>
-                                                <td class="amount" style="font-weight:bold;">${g.divisa} ${this.formatMoney(g.monto + g.costo_adicional)}</td>
+                                                <td class="amount expense">${divisaFinal} ${this.formatMoney(g.costo_adicional)}</td>
+                                                <td class="amount" style="font-weight:bold;">${divisaFinal} ${this.formatMoney(montoFinal + g.costo_adicional)}</td>
                                             </tr>
-                                        `).join('')}
+                                        `;}).join('')}
                                     </tbody>
                                 </table>
                             </div>
@@ -2195,6 +2207,60 @@ class AppUI {
         }
     }
 
+    /**
+     * Liquida un consumo pendiente. Pide el IMPORTE en pesos, no la tasa: el
+     * emisor comunica cuánto cargó, nunca a qué tasa lo hizo.
+     */
+    abrirLiquidacionConsumo(id, montoOrigen, divisaOrigen, descripcion) {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = `modal-liq-${id}`;
+        overlay.innerHTML = `
+            <div class="card" style="width: 420px; background: var(--bg-surface-opaque);">
+                <h3 style="font-family: var(--font-heading); margin-bottom:0.4rem;">⏳ Liquidar consumo</h3>
+                <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
+                    ${descripcion} — <strong>${divisaOrigen} ${this.formatMoney(montoOrigen)}</strong><br>
+                    Indica el importe en pesos que aparece en tu estado de cuenta. La tasa se deduce sola.
+                </p>
+                <form onsubmit="appUI.handleLiquidacionSubmit(event, ${id}, ${montoOrigen})">
+                    <div class="form-group">
+                        <label>Importe cargado en pesos (DOP)</label>
+                        <input type="number" step="0.01" id="liq_monto_${id}" class="form-control" placeholder="0.00"
+                               oninput="appUI.previsualizarTasa(${id}, ${montoOrigen})" required autofocus>
+                        <div id="liq_tasa_${id}" style="font-size:0.72rem; color:var(--text-secondary); margin-top:0.4rem;"></div>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
+                        <button type="button" onclick="document.getElementById('modal-liq-${id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="submit" class="btn">Liquidar</button>
+                    </div>
+                </form>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+
+    previsualizarTasa(id, montoOrigen) {
+        const destino = Number(document.getElementById(`liq_monto_${id}`).value);
+        const salida = document.getElementById(`liq_tasa_${id}`);
+        if (!(destino > 0) || !(montoOrigen > 0)) { salida.textContent = ''; return; }
+        salida.innerHTML = `Tasa aplicada por el emisor: <strong>${(destino / montoOrigen).toFixed(4)}</strong>`;
+    }
+
+    async handleLiquidacionSubmit(e, id, montoOrigen) {
+        e.preventDefault();
+        const monto = Number(document.getElementById(`liq_monto_${id}`).value);
+        if (!(monto > 0)) { this.showToast("El importe en pesos debe ser mayor que cero.", "error"); return; }
+
+        try {
+            const tasa = await AppAPI.liquidarConsumoPendiente(id, monto);
+            this.showToast(`Consumo liquidado a una tasa de ${Number(tasa).toFixed(4)}.`);
+            document.getElementById(`modal-liq-${id}`)?.remove();
+            await this.render('gastos');
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
+    }
+
     async handleAgregarIngreso(e) {
         e.preventDefault();
         const fac = document.getElementById('num_fac').value;
@@ -2895,6 +2961,16 @@ class AppUI {
                         <input type="number" step="0.01" id="edit_cor_usd_${t.id}" class="form-control" value="${t.balance_corte_dolares}">
                     </div>
 
+                    <h4 style="font-size:0.85rem; color:var(--text-secondary); margin-top:1rem; margin-bottom:0.5rem; border-bottom:1px solid var(--border-color); padding-bottom:0.2rem;">Compras en divisa</h4>
+                    <div class="form-group">
+                        <label>¿Cómo liquida el emisor las compras en dólares?</label>
+                        <select id="edit_pol_${t.id}" class="form-control">
+                            <option value="origen" ${t.politica_liquidacion !== 'traduce' ? 'selected' : ''}>Se quedan en dólares</option>
+                            <option value="traduce" ${t.politica_liquidacion === 'traduce' ? 'selected' : ''}>Las traduce a pesos días después</option>
+                        </select>
+                        <span style="font-size:0.68rem; color:var(--text-muted);">Si las traduce, el consumo queda pendiente hasta que indiques el importe en pesos que aparezca en tu estado.</span>
+                    </div>
+
                     <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
                         <button type="button" onclick="document.getElementById('modal-edit-tar-${t.id}').remove()" class="btn btn-secondary">Cancelar</button>
                         <button type="submit" class="btn">Guardar Parámetros</button>
@@ -2927,7 +3003,8 @@ class AppUI {
         }
 
         try {
-            await AppAPI.actualizarLimitesTarjeta(id, limDop, limUsd, sobDop, sobUsd, corDop, corUsd, ajuDop, ajuUsd);
+            const politica = document.getElementById(`edit_pol_${id}`)?.value || 'origen';
+            await AppAPI.actualizarLimitesTarjeta(id, limDop, limUsd, sobDop, sobUsd, corDop, corUsd, ajuDop, ajuUsd, politica);
             this.showToast("Parámetros actualizados correctamente.");
             document.getElementById(`modal-edit-tar-${id}`).remove();
             await this.render('tarjetas');

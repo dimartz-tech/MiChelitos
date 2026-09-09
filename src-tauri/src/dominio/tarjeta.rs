@@ -11,8 +11,45 @@
 //! que el banco hace valer en el punto de venta. Hasta ahora ese cálculo vivía
 //! en el HTML de la vista de tarjetas.
 
-use super::dinero::Dinero;
+use super::dinero::{Dinero, Divisa};
 use super::errores::ErrorDominio;
+
+/// Cómo liquida un emisor los consumos hechos en divisa extranjera.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoliticaLiquidacion {
+    /// El consumo permanece en su divisa de origen. No hay nada que traducir.
+    EnDivisaDeOrigen,
+    /// El emisor lo traduce a moneda local en un momento posterior, a una tasa
+    /// de referencia propia que no se conoce al comprar.
+    TraduceAMonedaLocal,
+}
+
+impl PoliticaLiquidacion {
+    /// Interpreta el texto almacenado. La ausencia significa la política más
+    /// conservadora, que es la que no introduce estados pendientes.
+    pub fn desde_codigo(codigo: Option<&str>) -> PoliticaLiquidacion {
+        match codigo {
+            Some("traduce") => PoliticaLiquidacion::TraduceAMonedaLocal,
+            _ => PoliticaLiquidacion::EnDivisaDeOrigen,
+        }
+    }
+
+    pub fn codigo(&self) -> &'static str {
+        match self {
+            PoliticaLiquidacion::EnDivisaDeOrigen => "origen",
+            PoliticaLiquidacion::TraduceAMonedaLocal => "traduce",
+        }
+    }
+
+    /// Un consumo queda pendiente solo si el emisor traduce y la compra se
+    /// hizo en una divisa distinta de la moneda local.
+    pub fn deja_pendiente(&self, divisa_consumo: Divisa, moneda_local: Divisa) -> bool {
+        matches!(self, PoliticaLiquidacion::TraduceAMonedaLocal) && divisa_consumo != moneda_local
+    }
+}
+
+/// Moneda local del sistema. Los emisores traducen a pesos dominicanos.
+pub const MONEDA_LOCAL: Divisa = Divisa::Dop;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LimitesDivisa {
@@ -190,5 +227,34 @@ mod tests {
     fn los_limites_de_una_divisa_no_admiten_importes_de_otra() {
         assert!(LimitesDivisa::nuevos(dop(70800.0), None, usd(100.0)).is_err());
         assert!(LimitesDivisa::nuevos(dop(70800.0), Some(usd(500.0)), dop(0.0)).is_err());
+    }
+
+    // --- Política de liquidación ---
+
+    #[test]
+    fn la_politica_ausente_es_la_que_no_deja_pendientes() {
+        assert_eq!(PoliticaLiquidacion::desde_codigo(None), PoliticaLiquidacion::EnDivisaDeOrigen);
+        assert_eq!(
+            PoliticaLiquidacion::desde_codigo(Some("desconocida")),
+            PoliticaLiquidacion::EnDivisaDeOrigen
+        );
+    }
+
+    #[test]
+    fn el_codigo_de_politica_va_y_vuelve() {
+        for p in [PoliticaLiquidacion::EnDivisaDeOrigen, PoliticaLiquidacion::TraduceAMonedaLocal] {
+            assert_eq!(PoliticaLiquidacion::desde_codigo(Some(p.codigo())), p);
+        }
+    }
+
+    #[test]
+    fn solo_deja_pendiente_quien_traduce_y_solo_en_divisa_extranjera() {
+        let traduce = PoliticaLiquidacion::TraduceAMonedaLocal;
+        let origen = PoliticaLiquidacion::EnDivisaDeOrigen;
+
+        assert!(traduce.deja_pendiente(Divisa::Usd, MONEDA_LOCAL), "compra en USD con tarjeta que traduce");
+        assert!(!traduce.deja_pendiente(Divisa::Dop, MONEDA_LOCAL), "compra en la propia moneda local");
+        assert!(!origen.deja_pendiente(Divisa::Usd, MONEDA_LOCAL), "la otra política nunca deja pendientes");
+        assert!(!origen.deja_pendiente(Divisa::Dop, MONEDA_LOCAL));
     }
 }
