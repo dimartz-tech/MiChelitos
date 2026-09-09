@@ -205,6 +205,25 @@ pub fn crear_esquema(conn: &Connection) -> Result<()> {
         let _ = conn.execute("ALTER TABLE pagos_tarjeta ADD COLUMN divisa TEXT CHECK(divisa IN ('DOP', 'USD')) NOT NULL DEFAULT 'DOP';", []);
     }
 
+    // 12. Bonificaciones acreditadas por el emisor sobre una tarjeta.
+    // Son créditos aparte, nunca una reducción del consumo original, y un
+    // mismo gasto puede generar varias, así que gasto_id no es único ni
+    // obligatorio: los estados no dicen a qué consumo corresponde cada uno.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS bonificaciones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL,
+            tarjeta_id INTEGER NOT NULL,
+            monto REAL NOT NULL,
+            divisa TEXT CHECK(divisa IN ('DOP', 'USD')) NOT NULL DEFAULT 'DOP',
+            concepto TEXT NOT NULL,
+            gasto_id INTEGER,
+            FOREIGN KEY (tarjeta_id) REFERENCES tarjetas(id) ON DELETE CASCADE,
+            FOREIGN KEY (gasto_id) REFERENCES gastos(id) ON DELETE SET NULL
+        );",
+        [],
+    )?;
+
     // 8. Tabla de Suscripciones Recurrentes
     conn.execute(
         "CREATE TABLE IF NOT EXISTS suscripciones (
