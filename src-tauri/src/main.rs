@@ -20,6 +20,7 @@ use chrono::{NaiveDate, Local, Datelike};
 
 use dominio::cargos::{cargos_de_transferencia, TASA_RETENCION};
 use dominio::dinero::{Dinero, Divisa, TasaCambio};
+use dominio::gasto::{afectacion_de_gasto, nombre_caja, AfectacionSaldo, MetodoPago};
 
 // --- ESTRUCTURAS DTO (DATA TRANSFER OBJECTS) ---
 #[derive(Serialize, Deserialize, Debug)]
@@ -281,9 +282,14 @@ struct GastoInput {
 fn crear_gasto(input: GastoInput) -> Result<i64, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     
-    // Calcular retención impositiva y comisión de servicio
+    // Se conserva la interpretación vigente de la divisa: la columna
+    // gastos.divisa no tiene CHECK y el código solo distingue "USD".
+    let divisa = if input.divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
+    let metodo = MetodoPago::desde_codigo(&input.metodo_pago);
+
+    // Retención impositiva y comisión de servicio
     let mut costo_adicional = 0.0;
-    if input.metodo_pago == "transferencia" {
+    if metodo.is_some_and(|m| m.devenga_cargos()) {
         let categoria = conn
             .query_row(
                 "SELECT nombre FROM categorias WHERE id = ?;",
@@ -292,11 +298,7 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
             )
             .unwrap_or_default();
 
-        // Se conserva la interpretación vigente de la divisa: la columna
-        // gastos.divisa no tiene CHECK y el código solo distingue "USD".
-        let divisa = if input.divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
         let monto = Dinero::nuevo(input.monto, divisa)?;
-
         let cargos =
             cargos_de_transferencia(monto, &categoria, &input.descripcion, input.es_lbtr)?;
         costo_adicional = cargos.total()?.unidades();
@@ -304,40 +306,43 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // Si el pago es por tarjeta, debitar/sumar al balance de la tarjeta en la divisa correspondiente
-    if input.metodo_pago == "tarjeta" {
-        if let Some(t_id) = input.tarjeta_id {
-            if input.divisa == "USD" {
+    // Un único punto decide qué saldo se mueve, y el compilador exige que
+    // estén tratados todos los casos.
+    match afectacion_de_gasto(metodo, divisa, input.tarjeta_id, input.cuenta_ahorro_id) {
+        AfectacionSaldo::Ninguna => {}
+
+        AfectacionSaldo::DeudaTarjeta { tarjeta_id } => match divisa {
+            Divisa::Usd => {
                 tx.execute(
                     "UPDATE tarjetas SET balance_dolares = balance_dolares + ? WHERE id = ?;",
-                    [input.monto, t_id as f64],
-                ).map_err(|e| e.to_string())?;
-            } else {
+                    (input.monto, tarjeta_id),
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            Divisa::Dop => {
                 tx.execute(
                     "UPDATE tarjetas SET balance_pesos = balance_pesos + ? WHERE id = ?;",
-                    [input.monto, t_id as f64],
-                ).map_err(|e| e.to_string())?;
+                    (input.monto, tarjeta_id),
+                )
+                .map_err(|e| e.to_string())?;
             }
-        }
-    }
+        },
 
-    // Si es transferencia y hay una cuenta de ahorro asociada, descontar monto + comisiones
-    if input.metodo_pago == "transferencia" {
-        if let Some(c_id) = input.cuenta_ahorro_id {
+        AfectacionSaldo::DebitoCuenta { cuenta_id } => {
             tx.execute(
                 "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
-                [input.monto + costo_adicional, c_id as f64],
-            ).map_err(|e| e.to_string())?;
+                (input.monto + costo_adicional, cuenta_id),
+            )
+            .map_err(|e| e.to_string())?;
         }
-    }
 
-    // Si el pago es en efectivo, descontar del balance de la cuenta de efectivo correspondiente
-    if input.metodo_pago == "efectivo" {
-        let cuenta_efectivo = if input.divisa == "USD" { "Efectivo USD" } else { "Efectivo DOP" };
-        tx.execute(
-            "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE nombre = ?;",
-            (input.monto, cuenta_efectivo),
-        ).map_err(|e| e.to_string())?;
+        AfectacionSaldo::DebitoCaja { divisa } => {
+            tx.execute(
+                "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE nombre = ?;",
+                (input.monto, nombre_caja(divisa)),
+            )
+            .map_err(|e| e.to_string())?;
+        }
     }
 
     tx.execute(
@@ -1350,33 +1355,48 @@ fn eliminar_gasto(id: i64) -> Result<(), String> {
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
     ).map_err(|e| e.to_string())?;
     
-    if metodo_pago == "tarjeta" {
-        if let Some(t_id) = tarjeta_id {
-            if divisa == "USD" {
+    let divisa_gasto = if divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
+    let metodo = MetodoPago::desde_codigo(&metodo_pago);
+
+    // Mismo despacho que en crear_gasto, en sentido inverso.
+    match afectacion_de_gasto(metodo, divisa_gasto, tarjeta_id, cuenta_ahorro_id) {
+        AfectacionSaldo::Ninguna => {}
+
+        // El recorte en cero (H5) es una invariante escrita en SQL: al no
+        // aplicarse también en la creación, crear y revertir dejan de ser
+        // operaciones inversas. Se conserva hasta que se decida.
+        AfectacionSaldo::DeudaTarjeta { tarjeta_id } => match divisa_gasto {
+            Divisa::Usd => {
                 tx.execute(
                     "UPDATE tarjetas SET balance_dolares = MAX(0.0, balance_dolares - ?) WHERE id = ?;",
-                    (monto, t_id)
-                ).map_err(|e| e.to_string())?;
-            } else {
+                    (monto, tarjeta_id),
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            Divisa::Dop => {
                 tx.execute(
                     "UPDATE tarjetas SET balance_pesos = MAX(0.0, balance_pesos - ?) WHERE id = ?;",
-                    (monto, t_id)
-                ).map_err(|e| e.to_string())?;
+                    (monto, tarjeta_id),
+                )
+                .map_err(|e| e.to_string())?;
             }
-        }
-    } else if metodo_pago == "transferencia" {
-        if let Some(c_id) = cuenta_ahorro_id {
+        },
+
+        AfectacionSaldo::DebitoCuenta { cuenta_id } => {
             tx.execute(
                 "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
-                (monto + costo_adicional, c_id)
-            ).map_err(|e| e.to_string())?;
+                (monto + costo_adicional, cuenta_id),
+            )
+            .map_err(|e| e.to_string())?;
         }
-    } else if metodo_pago == "efectivo" {
-        let cuenta_efectivo = if divisa == "USD" { "Efectivo USD" } else { "Efectivo DOP" };
-        tx.execute(
-            "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
-            (monto, cuenta_efectivo)
-        ).map_err(|e| e.to_string())?;
+
+        AfectacionSaldo::DebitoCaja { divisa } => {
+            tx.execute(
+                "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
+                (monto, nombre_caja(divisa)),
+            )
+            .map_err(|e| e.to_string())?;
+        }
     }
     
     tx.execute("DELETE FROM gastos WHERE id = ?;", [id]).map_err(|e| e.to_string())?;

@@ -5,3 +5,4 @@
 pub mod cargos;
 pub mod dinero;
 pub mod errores;
+pub mod gasto;
