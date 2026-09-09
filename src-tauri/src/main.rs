@@ -308,6 +308,8 @@ struct GastoInput {
     es_lbtr: bool,
     tarjeta_id: Option<i64>,
     cuenta_ahorro_id: Option<i64>,
+    #[serde(default)]
+    tasa_cambio: Option<f64>,
 }
 
 #[tauri::command]
@@ -332,6 +334,12 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
         es_lbtr: input.es_lbtr,
         tarjeta_id: input.tarjeta_id,
         cuenta_ahorro_id: input.cuenta_ahorro_id,
+        // Una tasa de cero o ausente significa "sin conversión"; el caso de
+        // uso la exigirá solo si las divisas realmente difieren.
+        tasa_cambio: match input.tasa_cambio {
+            Some(v) if v > 0.0 => Some(TasaCambio::nueva(v)?),
+            _ => None,
+        },
     };
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;

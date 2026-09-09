@@ -5,7 +5,8 @@
 //! quien abrió la transacción la deshace sin que el caso de uso tenga que
 //! compensar nada por su cuenta.
 
-use crate::dominio::dinero::{Dinero, Divisa};
+use crate::dominio::conversion::Conversion;
+use crate::dominio::dinero::{Dinero, Divisa, TasaCambio};
 use crate::puertos::repositorios::*;
 use rusqlite::{params, OptionalExtension, Transaction};
 
@@ -49,8 +50,8 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
     fn insertar(&mut self, gasto: &GastoAPersistir) -> Result<i64, ErrorAlmacen> {
         self.tx
             .execute(
-                "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+                "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id, tasa_conversion, monto_liquidado, divisa_liquidada)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
                 params![
                     gasto.fecha,
                     gasto.monto.unidades(),
@@ -61,6 +62,9 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
                     gasto.cargos.unidades(),
                     gasto.tarjeta_id,
                     gasto.cuenta_ahorro_id,
+                    gasto.conversion.map(|c| c.tasa().valor()),
+                    gasto.conversion.map(|c| c.destino().unidades()),
+                    gasto.conversion.map(|c| c.destino().divisa().codigo()),
                 ],
             )
             .map_err(fallo)?;
@@ -71,7 +75,8 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
         let fila = self
             .tx
             .query_row(
-                "SELECT monto, divisa, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id
+                "SELECT monto, divisa, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id,
+                        tasa_conversion, monto_liquidado, divisa_liquidada
                  FROM gastos WHERE id = ?;",
                 [gasto_id],
                 |r| {
@@ -82,6 +87,9 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
                         r.get::<_, f64>(3)?,
                         r.get::<_, Option<i64>>(4)?,
                         r.get::<_, Option<i64>>(5)?,
+                        r.get::<_, Option<f64>>(6)?,
+                        r.get::<_, Option<f64>>(7)?,
+                        r.get::<_, Option<String>>(8)?,
                     ))
                 },
             )
@@ -90,15 +98,36 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "gasto", id: gasto_id })?;
 
         let divisa = divisa_desde_texto(&fila.1);
+        let monto = Dinero::nuevo(fila.0, divisa).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
+
+        // Las tres columnas de conversión van juntas: o están las tres o no
+        // hay conversión.
+        let conversion = match (fila.6, fila.7, fila.8.as_deref()) {
+            (Some(tasa), Some(liquidado), Some(divisa_liq)) => {
+                let destino = Dinero::nuevo(liquidado, divisa_desde_texto(divisa_liq))
+                    .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
+                let tasa = TasaCambio::nueva(tasa)
+                    .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
+                Some(
+                    Conversion::reconstruir(monto, destino, tasa)
+                        .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?,
+                )
+            }
+            _ => None,
+        };
+
+        // Los cargos van en la divisa que se debitó.
+        let divisa_cargos = conversion.map(|c| c.destino().divisa()).unwrap_or(divisa);
+
         Ok(GastoGuardado {
             id: gasto_id,
-            monto: Dinero::nuevo(fila.0, divisa)
-                .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?,
+            monto,
             metodo_pago: fila.2,
-            cargos: Dinero::nuevo(fila.3, divisa)
+            cargos: Dinero::nuevo(fila.3, divisa_cargos)
                 .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?,
             tarjeta_id: fila.4,
             cuenta_ahorro_id: fila.5,
+            conversion,
         })
     }
 
@@ -299,6 +328,7 @@ mod tests {
                     cargos: dop(0.0),
                     tarjeta_id: None,
                     cuenta_ahorro_id: Some(semilla.cuenta_id),
+                    conversion: None,
                 })
                 .unwrap();
             }
