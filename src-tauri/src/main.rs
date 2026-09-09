@@ -25,7 +25,8 @@ use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::gastos::AlmacenSqlite;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
 use aplicacion::revertir_gasto::revertir_gasto;
-use dominio::tarjeta::LimitesDivisa;
+use dominio::tarjeta::{LimitesDivisa, PoliticaLiquidacion, MONEDA_LOCAL};
+use aplicacion::liquidar_gasto::liquidar_gasto;
 
 // --- ESTRUCTURAS DTO (DATA TRANSFER OBJECTS) ---
 #[derive(Serialize, Deserialize, Debug)]
@@ -77,6 +78,10 @@ pub struct Gasto {
     costo_adicional: f64,
     tarjeta_id: Option<i64>,
     cuenta_ahorro_id: Option<i64>,
+    // Conversión de divisa: NULL cuando no aplica.
+    estado_conversion: Option<String>,
+    monto_liquidado: Option<f64>,
+    tasa_conversion: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -102,6 +107,7 @@ pub struct Tarjeta {
     balance_corte_dolares: f64,
     fecha_corte: i32,
     fecha_limite_pago: i32,
+    politica_liquidacion: String,
     // Enriquecidos
     limite_efectivo_pesos: f64,
     limite_efectivo_dolares: f64,
@@ -268,7 +274,7 @@ fn eliminar_categoria(id: i64) -> Result<(), String> {
 fn obtener_gastos() -> Result<Vec<Gasto>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT g.id, g.fecha, g.monto, g.divisa, g.descripcion, g.categoria_id, c.nombre, g.metodo_pago, g.costo_adicional, g.tarjeta_id, g.cuenta_ahorro_id
+        "SELECT g.id, g.fecha, g.monto, g.divisa, g.descripcion, g.categoria_id, c.nombre, g.metodo_pago, g.costo_adicional, g.tarjeta_id, g.cuenta_ahorro_id, g.estado_conversion, g.monto_liquidado, g.tasa_conversion
          FROM gastos g
          JOIN categorias c ON g.categoria_id = c.id
          ORDER BY g.id DESC;"
@@ -287,6 +293,9 @@ fn obtener_gastos() -> Result<Vec<Gasto>, String> {
             costo_adicional: row.get(8)?,
             tarjeta_id: row.get(9)?,
             cuenta_ahorro_id: row.get(10)?,
+            estado_conversion: row.get(11)?,
+            monto_liquidado: row.get(12)?,
+            tasa_conversion: row.get(13)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -535,7 +544,7 @@ fn marcar_informal_pagado(id: i64, institucion: String, fecha: String, monto_rec
 fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT id, entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago, limite_ajustado_pesos, limite_ajustado_dolares FROM tarjetas;"
+        "SELECT id, entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago, limite_ajustado_pesos, limite_ajustado_dolares, politica_liquidacion FROM tarjetas;"
     ).map_err(|e| e.to_string())?;
     
     let hoy = Local::now();
@@ -557,6 +566,7 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
         let fecha_limite_pago: i32 = row.get(12)?;
         let limite_ajustado_pesos: Option<f64> = row.get(13)?;
         let limite_ajustado_dolares: Option<f64> = row.get(14)?;
+        let politica_liquidacion: Option<String> = row.get(15)?;
 
         // Calcular alertas corte
         let dias_corte = if fecha_corte >= dia_actual {
@@ -611,6 +621,9 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
             balance_corte_dolares,
             fecha_corte,
             fecha_limite_pago,
+            politica_liquidacion: PoliticaLiquidacion::desde_codigo(politica_liquidacion.as_deref())
+                .codigo()
+                .to_string(),
             limite_efectivo_pesos: efectivo_dop,
             limite_efectivo_dolares: efectivo_usd,
             disponible_pesos: disponible_dop,
@@ -663,12 +676,14 @@ fn actualizar_limites_tarjeta(
     balance_corte_pesos: f64,
     balance_corte_dolares: f64,
     limite_ajustado_pesos: Option<f64>,
-    limite_ajustado_dolares: Option<f64>
+    limite_ajustado_dolares: Option<f64>,
+    politica_liquidacion: Option<String>
 ) -> Result<(), String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE tarjetas SET limite_pesos = ?, limite_dolares = ?, limite_sobregiro_pesos = ?, limite_sobregiro_dolares = ?, balance_corte_pesos = ?, balance_corte_dolares = ?, limite_ajustado_pesos = ?, limite_ajustado_dolares = ? WHERE id = ?;",
-        (limite_pesos, limite_dolares, sobregiro_pesos, sobregiro_dolares, balance_corte_pesos, balance_corte_dolares, limite_ajustado_pesos, limite_ajustado_dolares, id)
+        "UPDATE tarjetas SET limite_pesos = ?, limite_dolares = ?, limite_sobregiro_pesos = ?, limite_sobregiro_dolares = ?, balance_corte_pesos = ?, balance_corte_dolares = ?, limite_ajustado_pesos = ?, limite_ajustado_dolares = ?, politica_liquidacion = ? WHERE id = ?;",
+        (limite_pesos, limite_dolares, sobregiro_pesos, sobregiro_dolares, balance_corte_pesos, balance_corte_dolares, limite_ajustado_pesos, limite_ajustado_dolares,
+         PoliticaLiquidacion::desde_codigo(politica_liquidacion.as_deref()).codigo(), id)
     ).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1375,6 +1390,21 @@ fn crear_cobro_efectivo_informal(fecha: String, descripcion: String, monto: f64,
     Ok(id)
 }
 
+/// Cierra un consumo pendiente con el importe que el emisor cargó en moneda
+/// local. Devuelve la tasa que se dedujo, para poder mostrarla.
+#[tauri::command]
+fn liquidar_consumo_pendiente(id: i64, monto_liquidado: f64) -> Result<f64, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tasa = {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        let importe = Dinero::nuevo(monto_liquidado, MONEDA_LOCAL)?;
+        liquidar_gasto(id, importe, &mut almacen)?.tasa().valor()
+    };
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(tasa)
+}
+
 #[tauri::command]
 fn eliminar_gasto(id: i64) -> Result<(), String> {
     // Traducción pura, igual que crear_gasto. La reversión y el recorte en
@@ -1518,6 +1548,7 @@ fn main() {
             obtener_transacciones_cuentas,
             crear_cobro_efectivo_informal,
             eliminar_gasto,
+            liquidar_consumo_pendiente,
             eliminar_transaccion_cuenta,
             eliminar_ingreso_informal,
             eliminar_ingreso

@@ -10,7 +10,9 @@
 #![cfg(test)]
 
 use super::repositorios::*;
+use crate::dominio::conversion::EstadoConversion;
 use crate::dominio::dinero::{Dinero, Divisa};
+use crate::dominio::tarjeta::PoliticaLiquidacion;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -23,7 +25,13 @@ pub struct CuentaEnMemoria {
 pub struct AlmacenEnMemoria {
     pub categorias: HashMap<i64, String>,
     pub cuentas: HashMap<i64, CuentaEnMemoria>,
-    pub deudas: HashMap<i64, Dinero>,
+    /// Una deuda por tarjeta Y divisa, igual que las columnas separadas
+    /// balance_pesos y balance_dolares del esquema real. Con una sola deuda
+    /// por tarjeta el doble no podría representar el traslado entre divisas
+    /// que ocurre al liquidar.
+    pub deudas: HashMap<(i64, Divisa), Dinero>,
+    pub tarjetas: std::collections::HashSet<i64>,
+    pub politicas: HashMap<i64, PoliticaLiquidacion>,
     pub gastos: HashMap<i64, GastoGuardado>,
     siguiente_id: i64,
     /// Cuando está activo, `insertar` falla. Sirve para provocar un fallo
@@ -47,7 +55,13 @@ impl AlmacenEnMemoria {
     }
 
     pub fn con_tarjeta(mut self, id: i64, deuda: Dinero) -> Self {
-        self.deudas.insert(id, deuda);
+        self.tarjetas.insert(id);
+        self.deudas.insert((id, deuda.divisa()), deuda);
+        self
+    }
+
+    pub fn con_politica(mut self, id: i64, politica: PoliticaLiquidacion) -> Self {
+        self.politicas.insert(id, politica);
         self
     }
 
@@ -59,8 +73,13 @@ impl AlmacenEnMemoria {
         self.cuentas.values().find(|c| c.nombre == nombre).map(|c| c.saldo)
     }
 
+    /// Deuda en moneda local, que es la que consultan la mayoría de pruebas.
     pub fn deuda_de(&self, tarjeta_id: i64) -> Dinero {
-        *self.deudas.get(&tarjeta_id).expect("tarjeta de prueba inexistente")
+        self.deuda_en(tarjeta_id, Divisa::Dop)
+    }
+
+    pub fn deuda_en(&self, tarjeta_id: i64, divisa: Divisa) -> Dinero {
+        *self.deudas.get(&(tarjeta_id, divisa)).unwrap_or(&Dinero::cero(divisa))
     }
 
     pub fn total_gastos(&self) -> usize {
@@ -90,7 +109,7 @@ impl RepositorioGastos for AlmacenEnMemoria {
                 cargos: gasto.cargos,
                 tarjeta_id: gasto.tarjeta_id,
                 cuenta_ahorro_id: gasto.cuenta_ahorro_id,
-                conversion: gasto.conversion,
+                estado_conversion: gasto.estado_conversion,
             },
         );
         Ok(id)
@@ -103,6 +122,19 @@ impl RepositorioGastos for AlmacenEnMemoria {
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "gasto", id: gasto_id })
     }
 
+    fn liquidar(
+        &mut self,
+        gasto_id: i64,
+        estado: EstadoConversion,
+    ) -> Result<(), ErrorAlmacen> {
+        let g = self
+            .gastos
+            .get_mut(&gasto_id)
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "gasto", id: gasto_id })?;
+        g.estado_conversion = estado;
+        Ok(())
+    }
+
     fn eliminar(&mut self, gasto_id: i64) -> Result<(), ErrorAlmacen> {
         self.gastos
             .remove(&gasto_id)
@@ -113,12 +145,23 @@ impl RepositorioGastos for AlmacenEnMemoria {
 
 impl RepositorioTarjetas for AlmacenEnMemoria {
     fn ajustar_deuda(&mut self, tarjeta_id: i64, delta: Dinero) -> Result<(), ErrorAlmacen> {
-        let actual = self
-            .deudas
-            .get_mut(&tarjeta_id)
-            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id })?;
+        if !self.tarjetas.contains(&tarjeta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
+        }
+        let clave = (tarjeta_id, delta.divisa());
+        let actual = self.deudas.entry(clave).or_insert_with(|| Dinero::cero(delta.divisa()));
         *actual = actual.sumar(&delta).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
         Ok(())
+    }
+
+    fn politica(&self, tarjeta_id: i64) -> Result<PoliticaLiquidacion, ErrorAlmacen> {
+        if !self.tarjetas.contains(&tarjeta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
+        }
+        Ok(*self
+            .politicas
+            .get(&tarjeta_id)
+            .unwrap_or(&PoliticaLiquidacion::EnDivisaDeOrigen))
     }
 
     fn reducir_deuda_con_recorte(
@@ -126,10 +169,11 @@ impl RepositorioTarjetas for AlmacenEnMemoria {
         tarjeta_id: i64,
         monto: Dinero,
     ) -> Result<(), ErrorAlmacen> {
-        let actual = self
-            .deudas
-            .get_mut(&tarjeta_id)
-            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id })?;
+        if !self.tarjetas.contains(&tarjeta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
+        }
+        let clave = (tarjeta_id, monto.divisa());
+        let actual = self.deudas.entry(clave).or_insert_with(|| Dinero::cero(monto.divisa()));
         let restado = actual.restar(&monto).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
         // Réplica exacta del MAX(0.0, ...) de SQL: la diferencia se pierde.
         *actual = if restado.es_negativo() { Dinero::cero(restado.divisa()) } else { restado };
@@ -216,7 +260,7 @@ mod tests {
             cargos: dop(2.0),
             tarjeta_id: None,
             cuenta_ahorro_id: Some(10),
-            conversion: None,
+            estado_conversion: EstadoConversion::NoAplica,
         };
         let id = a.insertar(&g).unwrap();
         let leido = a.obtener(id).unwrap();
@@ -247,7 +291,7 @@ mod tests {
             cargos: dop(0.0),
             tarjeta_id: None,
             cuenta_ahorro_id: None,
-            conversion: None,
+            estado_conversion: EstadoConversion::NoAplica,
         };
         let id = a.insertar(&g).unwrap();
         assert_eq!(a.total_gastos(), 1);
@@ -319,7 +363,7 @@ mod tests {
             cargos: dop(0.0),
             tarjeta_id: None,
             cuenta_ahorro_id: None,
-            conversion: None,
+            estado_conversion: EstadoConversion::NoAplica,
         };
         assert!(a.insertar(&g).is_err());
         assert_eq!(a.total_gastos(), 0);

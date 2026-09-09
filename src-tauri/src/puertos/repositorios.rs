@@ -12,7 +12,8 @@
 //! implementa estos puertos abre la transacción y la confirma; los puertos
 //! solo describen las operaciones.
 
-use crate::dominio::conversion::Conversion;
+use crate::dominio::conversion::EstadoConversion;
+use crate::dominio::tarjeta::PoliticaLiquidacion;
 use crate::dominio::dinero::{Dinero, Divisa};
 use std::fmt;
 
@@ -54,8 +55,7 @@ pub struct GastoAPersistir {
     pub cargos: Dinero,
     pub tarjeta_id: Option<i64>,
     pub cuenta_ahorro_id: Option<i64>,
-    /// Presente solo cuando el gasto se pagó desde una cuenta de otra divisa.
-    pub conversion: Option<Conversion>,
+    pub estado_conversion: EstadoConversion,
 }
 
 /// Lo que hace falta saber de un gasto ya guardado para poder revertirlo.
@@ -67,14 +67,14 @@ pub struct GastoGuardado {
     pub cargos: Dinero,
     pub tarjeta_id: Option<i64>,
     pub cuenta_ahorro_id: Option<i64>,
-    pub conversion: Option<Conversion>,
+    pub estado_conversion: EstadoConversion,
 }
 
 impl GastoGuardado {
     /// Importe que salió de la cuenta, sin contar cargos. Con conversión es
     /// el de destino; sin ella, el propio monto del gasto.
     pub fn monto_debitado(&self) -> Dinero {
-        match self.conversion {
+        match self.estado_conversion.conversion() {
             Some(c) => c.destino(),
             None => self.monto,
         }
@@ -92,6 +92,14 @@ pub trait RepositorioGastos {
     fn insertar(&mut self, gasto: &GastoAPersistir) -> Result<i64, ErrorAlmacen>;
     fn obtener(&self, gasto_id: i64) -> Result<GastoGuardado, ErrorAlmacen>;
     fn eliminar(&mut self, gasto_id: i64) -> Result<(), ErrorAlmacen>;
+
+    /// Cierra un consumo pendiente registrando la conversión que aplicó el
+    /// emisor.
+    fn liquidar(
+        &mut self,
+        gasto_id: i64,
+        estado: EstadoConversion,
+    ) -> Result<(), ErrorAlmacen>;
 }
 
 pub trait RepositorioTarjetas {
@@ -113,6 +121,9 @@ pub trait RepositorioTarjetas {
         tarjeta_id: i64,
         monto: Dinero,
     ) -> Result<(), ErrorAlmacen>;
+
+    /// Cómo liquida esta tarjeta los consumos en divisa extranjera.
+    fn politica(&self, tarjeta_id: i64) -> Result<PoliticaLiquidacion, ErrorAlmacen>;
 }
 
 /// Persistencia que necesita una operación sobre gastos.
