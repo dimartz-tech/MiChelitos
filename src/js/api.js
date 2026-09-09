@@ -152,7 +152,9 @@ const AppAPI = {
         });
     },
 
-    async actualizarLimitesTarjeta(id, limitePesos, limiteDolares, sobregiroPesos, sobregiroDolares, balanceCortePesos, balanceCorteDolares) {
+    // Los límites ajustados son opcionales: null significa "sin ajuste", y se
+    // distingue de 0, que es un tope deliberado que congela la tarjeta.
+    async actualizarLimitesTarjeta(id, limitePesos, limiteDolares, sobregiroPesos, sobregiroDolares, balanceCortePesos, balanceCorteDolares, ajustadoPesos = null, ajustadoDolares = null) {
         return await invoke('actualizar_limites_tarjeta', {
             id: Number(id),
             limitePesos: Number(limitePesos),
@@ -160,7 +162,9 @@ const AppAPI = {
             sobregiroPesos: Number(sobregiroPesos),
             sobregiroDolares: Number(sobregiroDolares),
             balanceCortePesos: Number(balanceCortePesos),
-            balanceCorteDolares: Number(balanceCorteDolares)
+            balanceCorteDolares: Number(balanceCorteDolares),
+            limiteAjustadoPesos: ajustadoPesos === null || ajustadoPesos === '' ? null : Number(ajustadoPesos),
+            limiteAjustadoDolares: ajustadoDolares === null || ajustadoDolares === '' ? null : Number(ajustadoDolares)
         });
     },
 
