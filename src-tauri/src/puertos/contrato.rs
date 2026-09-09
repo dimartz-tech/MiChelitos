@@ -39,6 +39,7 @@ fn gasto_de(monto: Dinero, metodo: &str, semilla: &Semilla) -> GastoAPersistir {
         cargos: dop(2.5),
         tarjeta_id: None,
         cuenta_ahorro_id: Some(semilla.cuenta_id),
+        conversion: None,
     }
 }
 

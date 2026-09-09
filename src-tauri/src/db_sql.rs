@@ -163,6 +163,17 @@ pub fn crear_esquema(conn: &Connection) -> Result<()> {
         let _ = conn.execute("ALTER TABLE gastos ADD COLUMN cuenta_ahorro_id INTEGER REFERENCES cuentas_ahorro(id) ON DELETE SET NULL;", []);
     }
 
+    // Conversión de divisa de un gasto pagado desde una cuenta de otra
+    // moneda. NULL en las tres columnas significa que no hubo conversión.
+    // monto_liquidado guarda el importe que REALMENTE salió de la cuenta, y
+    // es el autoritativo para revertir: recalcularlo desde la tasa podría
+    // desviarse en centavos.
+    if !columna_existe(conn, "gastos", "tasa_conversion") {
+        let _ = conn.execute("ALTER TABLE gastos ADD COLUMN tasa_conversion REAL;", []);
+        let _ = conn.execute("ALTER TABLE gastos ADD COLUMN monto_liquidado REAL;", []);
+        let _ = conn.execute("ALTER TABLE gastos ADD COLUMN divisa_liquidada TEXT;", []);
+    }
+
     // 7. Tabla de Pagos de Tarjetas (Abonos)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS pagos_tarjeta (
