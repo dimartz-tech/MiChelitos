@@ -36,6 +36,7 @@ pub struct AlmacenEnMemoria {
     siguiente_id: i64,
     /// Cuando está activo, `insertar` falla. Sirve para provocar un fallo
     /// después de que los saldos ya se hayan movido.
+    pub bonificaciones: HashMap<i64, BonificacionGuardada>,
     pub falla_al_insertar: bool,
 }
 
@@ -80,6 +81,10 @@ impl AlmacenEnMemoria {
 
     pub fn deuda_en(&self, tarjeta_id: i64, divisa: Divisa) -> Dinero {
         *self.deudas.get(&(tarjeta_id, divisa)).unwrap_or(&Dinero::cero(divisa))
+    }
+
+    pub fn total_bonificaciones(&self) -> usize {
+        self.bonificaciones.len()
     }
 
     pub fn total_gastos(&self) -> usize {
@@ -140,6 +145,39 @@ impl RepositorioGastos for AlmacenEnMemoria {
             .remove(&gasto_id)
             .map(|_| ())
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "gasto", id: gasto_id })
+    }
+}
+
+impl RepositorioBonificaciones for AlmacenEnMemoria {
+    fn insertar_bonificacion(&mut self, b: &BonificacionAPersistir) -> Result<i64, ErrorAlmacen> {
+        if !self.tarjetas.contains(&b.tarjeta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: b.tarjeta_id });
+        }
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.bonificaciones.insert(
+            id,
+            BonificacionGuardada {
+                id,
+                tarjeta_id: b.tarjeta_id,
+                bonificacion: b.bonificacion.clone(),
+            },
+        );
+        Ok(id)
+    }
+
+    fn obtener_bonificacion(&self, id: i64) -> Result<BonificacionGuardada, ErrorAlmacen> {
+        self.bonificaciones
+            .get(&id)
+            .cloned()
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "bonificación", id })
+    }
+
+    fn eliminar_bonificacion(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.bonificaciones
+            .remove(&id)
+            .map(|_| ())
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "bonificación", id })
     }
 }
 
