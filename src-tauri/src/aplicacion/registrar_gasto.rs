@@ -6,8 +6,10 @@
 //! la que lo deshace.
 
 use super::ErrorAplicacion;
+use crate::dominio::errores::ErrorDominio;
 use crate::dominio::cargos::cargos_de_transferencia;
-use crate::dominio::dinero::Dinero;
+use crate::dominio::conversion::Conversion;
+use crate::dominio::dinero::{Dinero, TasaCambio};
 use crate::dominio::gasto::{afectacion_de_gasto, nombre_caja, AfectacionSaldo, MetodoPago};
 use crate::puertos::repositorios::*;
 
@@ -24,6 +26,10 @@ pub struct DatosGasto {
     pub es_lbtr: bool,
     pub tarjeta_id: Option<i64>,
     pub cuenta_ahorro_id: Option<i64>,
+    /// Tasa declarada por el titular cuando el gasto se paga desde una cuenta
+    /// de otra divisa. El banco se la aplica al ejecutar, así que no es una
+    /// estimación sino un dato de la operación.
+    pub tasa_cambio: Option<TasaCambio>,
 }
 
 pub fn registrar_gasto(
@@ -31,22 +37,45 @@ pub fn registrar_gasto(
     almacen: &mut impl AlmacenGastos,
 ) -> Result<i64, ErrorAplicacion> {
     let divisa = datos.monto.divisa();
+    let afectacion =
+        afectacion_de_gasto(datos.metodo, divisa, datos.tarjeta_id, datos.cuenta_ahorro_id);
+
+    // Si el gasto se paga desde una cuenta de otra divisa, se convierte con la
+    // tasa declarada. La conversión ocurre ANTES de calcular los cargos,
+    // porque la retención se aplica sobre el importe que sale de la cuenta.
+    let conversion = match afectacion {
+        AfectacionSaldo::DebitoCuenta { cuenta_id } => {
+            let divisa_cuenta = almacen.divisa(cuenta_id)?;
+            if divisa_cuenta == divisa {
+                None
+            } else {
+                let tasa = datos.tasa_cambio.ok_or(ErrorDominio::TasaDeCambioRequerida)?;
+                Some(Conversion::con_tasa(datos.monto, divisa_cuenta, tasa)?)
+            }
+        }
+        _ => None,
+    };
+
+    let base_de_cargos = match conversion {
+        Some(c) => c.destino(),
+        None => datos.monto,
+    };
 
     let cargos = if datos.metodo.is_some_and(|m| m.devenga_cargos()) {
         let categoria = almacen.nombre(datos.categoria_id)?.unwrap_or_default();
-        cargos_de_transferencia(datos.monto, &categoria, &datos.descripcion, datos.es_lbtr)?
+        cargos_de_transferencia(base_de_cargos, &categoria, &datos.descripcion, datos.es_lbtr)?
             .total()?
     } else {
-        Dinero::cero(divisa)
+        Dinero::cero(base_de_cargos.divisa())
     };
 
-    match afectacion_de_gasto(datos.metodo, divisa, datos.tarjeta_id, datos.cuenta_ahorro_id) {
+    match afectacion {
         AfectacionSaldo::Ninguna => {}
         AfectacionSaldo::DeudaTarjeta { tarjeta_id } => {
             almacen.ajustar_deuda(tarjeta_id, datos.monto)?;
         }
         AfectacionSaldo::DebitoCuenta { cuenta_id } => {
-            let total = datos.monto.sumar(&cargos)?;
+            let total = base_de_cargos.sumar(&cargos)?;
             almacen.ajustar_saldo(cuenta_id, negativo(total)?)?;
         }
         AfectacionSaldo::DebitoCaja { divisa } => {
@@ -63,6 +92,7 @@ pub fn registrar_gasto(
         cargos,
         tarjeta_id: datos.tarjeta_id,
         cuenta_ahorro_id: datos.cuenta_ahorro_id,
+        conversion,
     })?;
 
     Ok(id)
@@ -102,6 +132,7 @@ mod tests {
             es_lbtr: false,
             tarjeta_id: None,
             cuenta_ahorro_id: None,
+            tasa_cambio: None,
         }
     }
 
@@ -267,5 +298,99 @@ mod tests {
         // H2: hoy el SQL no compara divisas y resta igual. Con el tipo Dinero
         // la operación deja de ser representable.
         assert!(registrar_gasto(d, &mut a).is_err());
+    }
+
+    // --- Conversión con tasa declarada ---
+
+    fn usd(u: f64) -> Dinero {
+        Dinero::nuevo(u, Divisa::Usd).unwrap()
+    }
+
+    fn tasa(v: f64) -> TasaCambio {
+        TasaCambio::nueva(v).unwrap()
+    }
+
+    #[test]
+    fn un_gasto_en_dolares_desde_cuenta_en_pesos_convierte_y_retiene_sobre_los_pesos() {
+        let mut a = almacen();
+        let mut d = datos(100.0, MetodoPago::Transferencia);
+        d.monto = usd(100.0);
+        d.cuenta_ahorro_id = Some(10);
+        d.tasa_cambio = Some(tasa(60.0));
+
+        let id = registrar_gasto(d, &mut a).unwrap();
+
+        // 100.00 USD x 60 = 6 000.00 DOP; su 0.20 % = 12.00.
+        assert_eq!(a.saldo_de(10), dop(100000.0 - 6012.0), "sale monto convertido + retención");
+        let g = a.obtener(id).unwrap();
+        assert_eq!(g.monto, usd(100.0), "el gasto conserva su divisa de origen");
+        assert_eq!(g.cargos, dop(12.0), "la retención va en la divisa debitada");
+        assert_eq!(g.conversion.unwrap().destino(), dop(6000.0));
+        assert_eq!(g.monto_debitado(), dop(6000.0));
+    }
+
+    #[test]
+    fn cruzar_divisas_sin_declarar_la_tasa_es_error() {
+        let mut a = almacen();
+        let mut d = datos(100.0, MetodoPago::Transferencia);
+        d.monto = usd(100.0);
+        d.cuenta_ahorro_id = Some(10);
+
+        let e = registrar_gasto(d, &mut a).unwrap_err();
+
+        assert_eq!(e, ErrorAplicacion::Dominio(ErrorDominio::TasaDeCambioRequerida));
+        assert_eq!(a.saldo_de(10), dop(100000.0), "ningún saldo se movió");
+        assert_eq!(a.total_gastos(), 0);
+    }
+
+    #[test]
+    fn en_la_misma_divisa_no_se_exige_tasa_ni_se_registra_conversion() {
+        let mut a = almacen();
+        let mut d = datos(10000.0, MetodoPago::Transferencia);
+        d.cuenta_ahorro_id = Some(10);
+
+        let id = registrar_gasto(d, &mut a).unwrap();
+
+        assert!(a.obtener(id).unwrap().conversion.is_none());
+        assert_eq!(a.saldo_de(10), dop(89980.0));
+    }
+
+    #[test]
+    fn una_tasa_declarada_de_mas_se_ignora_si_las_divisas_coinciden() {
+        let mut a = almacen();
+        let mut d = datos(10000.0, MetodoPago::Transferencia);
+        d.cuenta_ahorro_id = Some(10);
+        d.tasa_cambio = Some(tasa(60.0));
+
+        registrar_gasto(d, &mut a).unwrap();
+
+        assert_eq!(a.saldo_de(10), dop(89980.0), "no se aplica conversión alguna");
+    }
+
+    #[test]
+    fn el_pago_de_tss_en_divisa_convierte_pero_no_retiene() {
+        let mut a = almacen();
+        let mut d = datos(100.0, MetodoPago::Transferencia);
+        d.monto = usd(100.0);
+        d.categoria_id = 2;
+        d.descripcion = "Pago TSS".into();
+        d.cuenta_ahorro_id = Some(10);
+        d.tasa_cambio = Some(tasa(60.0));
+
+        registrar_gasto(d, &mut a).unwrap();
+
+        assert_eq!(a.saldo_de(10), dop(94000.0), "sale solo el convertido, sin retención");
+    }
+
+    #[test]
+    fn un_gasto_con_tarjeta_en_otra_divisa_no_exige_tasa() {
+        // La conversión solo entra cuando se debita una CUENTA. La deuda de
+        // tarjeta se lleva en su propia divisa.
+        let mut a = almacen();
+        let mut d = datos(75.0, MetodoPago::Tarjeta);
+        d.monto = usd(75.0);
+        d.tarjeta_id = Some(20);
+
+        assert!(registrar_gasto(d, &mut a).is_err(), "la tarjeta de prueba lleva pesos");
     }
 }

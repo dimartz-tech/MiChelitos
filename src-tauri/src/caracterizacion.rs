@@ -166,6 +166,7 @@ fn transferencia(monto: f64, categoria: &str, descripcion: &str, cuenta_id: i64)
         es_lbtr: false,
         tarjeta_id: None,
         cuenta_ahorro_id: Some(cuenta_id),
+        tasa_cambio: None,
     }
 }
 
@@ -279,6 +280,7 @@ fn c8_el_gasto_con_tarjeta_en_dolares_solo_mueve_el_balance_en_dolares() {
         es_lbtr: false,
         tarjeta_id: Some(tarjeta),
         cuenta_ahorro_id: None,
+        tasa_cambio: None,
     };
     crear_gasto(entrada).unwrap();
 
@@ -303,6 +305,7 @@ fn c9_el_gasto_en_efectivo_descuenta_de_la_caja_de_su_divisa() {
         es_lbtr: false,
         tarjeta_id: None,
         cuenta_ahorro_id: None,
+        tasa_cambio: None,
     };
     crear_gasto(entrada).unwrap();
 
@@ -336,6 +339,7 @@ fn c10_h3_si_la_caja_fue_renombrada_el_gasto_se_registra_sin_mover_saldo() {
         es_lbtr: false,
         tarjeta_id: None,
         cuenta_ahorro_id: None,
+        tasa_cambio: None,
     };
     let resultado = crear_gasto(entrada);
 
@@ -359,6 +363,7 @@ fn c11_h4_un_gasto_con_tarjeta_sin_identificador_no_mueve_ninguna_deuda() {
         es_lbtr: false,
         tarjeta_id: None,
         cuenta_ahorro_id: None,
+        tasa_cambio: None,
     };
     let resultado = crear_gasto(entrada);
 
@@ -384,6 +389,7 @@ fn c12_h5_la_reversion_de_tarjeta_recorta_en_cero_y_pierde_la_diferencia() {
         es_lbtr: false,
         tarjeta_id: Some(tarjeta),
         cuenta_ahorro_id: None,
+        tasa_cambio: None,
     };
     let gasto = crear_gasto(entrada).unwrap();
     assert_importe(balances_tarjeta(tarjeta).0, 250.0, "deuda tras el gasto");
@@ -470,6 +476,7 @@ fn c16_una_divisa_distinta_de_usd_se_trata_como_pesos() {
         es_lbtr: false,
         tarjeta_id: Some(tarjeta),
         cuenta_ahorro_id: None,
+        tasa_cambio: None,
     };
     let resultado = crear_gasto(entrada);
 
@@ -775,10 +782,72 @@ fn c22_una_divisa_no_admitida_se_normaliza_al_persistir() {
         es_lbtr: false,
         tarjeta_id: Some(tarjeta),
         cuenta_ahorro_id: None,
+        tasa_cambio: None,
     };
     crear_gasto(entrada).unwrap();
 
     let (_, divisa, _) = ultimo_gasto();
     assert_eq!(divisa, "DOP", "se normaliza en lugar de almacenar 'EUR'");
     assert_importe(balances_tarjeta(tarjeta).0, 300.0, "el saldo ya se trataba como pesos");
+}
+
+// =====================================================================
+//  Conversión con tasa declarada — de extremo a extremo por el comando
+// =====================================================================
+
+#[test]
+fn c23_un_gasto_en_dolares_desde_cuenta_en_pesos_se_convierte_y_persiste_la_tasa() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100000.0);
+
+    let mut entrada = transferencia(100.0, "Alimentación", "Compra en el exterior", cuenta);
+    entrada.divisa = "USD".to_string();
+    entrada.tasa_cambio = Some(60.0);
+    let id = crear_gasto(entrada).unwrap();
+
+    // 100.00 USD x 60 = 6 000.00; su 0.20 % = 12.00.
+    assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 93988.0, "saldo tras el débito");
+
+    let (tasa, liquidado, divisa_liq): (Option<f64>, Option<f64>, Option<String>) = conexion()
+        .query_row(
+            "SELECT tasa_conversion, monto_liquidado, divisa_liquidada FROM gastos WHERE id = ?;",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+
+    assert_importe(tasa.unwrap(), 60.0, "la tasa queda en columna, no en el texto");
+    assert_importe(liquidado.unwrap(), 6000.0, "el importe realmente debitado");
+    assert_eq!(divisa_liq.as_deref(), Some("DOP"));
+    assert_importe(costo_adicional(id), 12.0, "la retención se calcula sobre los pesos");
+}
+
+#[test]
+fn c24_cruzar_divisas_sin_tasa_falla_sin_mover_nada() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100000.0);
+
+    let mut entrada = transferencia(100.0, "Alimentación", "Compra en el exterior", cuenta);
+    entrada.divisa = "USD".to_string();
+    let resultado = crear_gasto(entrada);
+
+    assert!(resultado.is_err(), "debe exigir la tasa");
+    assert!(resultado.unwrap_err().contains("tasa de cambio"), "el mensaje debe orientar");
+    assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 100000.0, "saldo intacto");
+    assert_eq!(total_gastos(), 0);
+}
+
+#[test]
+fn c25_revertir_un_gasto_convertido_restituye_el_saldo_exacto() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100000.0);
+
+    let mut entrada = transferencia(100.0, "Alimentación", "Compra en el exterior", cuenta);
+    entrada.divisa = "USD".to_string();
+    entrada.tasa_cambio = Some(60.0);
+    let id = crear_gasto(entrada).unwrap();
+
+    eliminar_gasto(id).unwrap();
+
+    assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 100000.0, "restitución al centavo");
 }

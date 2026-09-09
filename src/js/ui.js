@@ -495,7 +495,7 @@ class AppUI {
                             </div>
                             <div class="form-group">
                                 <label for="gas_div">Divisa</label>
-                                <select id="gas_div" class="form-control">
+                                <select id="gas_div" class="form-control" onchange="appUI.actualizarConversionGasto()">
                                     <option value="DOP" selected>DOP</option>
                                     <option value="USD">USD</option>
                                 </select>
@@ -504,7 +504,7 @@ class AppUI {
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gas_mon">Monto *</label>
-                                    <input type="number" id="gas_mon" step="0.01" class="form-control" placeholder="0.00" required>
+                                    <input type="number" id="gas_mon" step="0.01" class="form-control" placeholder="0.00" oninput="appUI.actualizarConversionGasto()" required>
                             </div>
                             <div class="form-group">
                                 <label for="gas_cat">Categoría *</label>
@@ -516,7 +516,7 @@ class AppUI {
                         </div>
                         <div class="form-group">
                             <label for="gas_met">Método de Pago *</label>
-                            <select id="gas_met" class="form-control" onchange="appUI.toggleMetodoPago(this.value)" required>
+                            <select id="gas_met" class="form-control" onchange="appUI.toggleMetodoPago(this.value); appUI.actualizarConversionGasto();" required>
                                 <option value="efectivo" selected>Efectivo</option>
                                 <option value="tarjeta">Tarjeta de Crédito</option>
                                 <option value="transferencia">Transferencia Bancaria</option>
@@ -535,10 +535,17 @@ class AppUI {
                         <!-- Selector cuenta de ahorro -->
                         <div id="gas_cuenta_container" class="form-group" style="display:none;">
                             <label for="gas_cue">Cuenta de Ahorro *</label>
-                            <select id="gas_cue" class="form-control">
+                            <select id="gas_cue" class="form-control" onchange="appUI.actualizarConversionGasto()">
                                 <option value="" disabled selected>Seleccione cuenta...</option>
-                                ${cuentas.map(c => `<option value="${c.id}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
+                                ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
                             </select>
+                        </div>
+
+                        <!-- Conversión: solo si el gasto y la cuenta van en divisas distintas -->
+                        <div id="gas_conversion_container" class="form-group" style="display:none; background:rgba(255, 193, 7, 0.05); padding:0.6rem; border-radius: var(--radius-sm); border:1px solid rgba(255, 193, 7, 0.2);">
+                            <label for="gas_tasa" style="font-size:0.8rem;">Tasa de cambio *</label>
+                            <input type="number" id="gas_tasa" step="0.0001" class="form-control" placeholder="0.0000" oninput="appUI.actualizarConversionGasto()">
+                            <div id="gas_conversion_previa" style="font-size:0.72rem; color:var(--text-secondary); margin-top:0.4rem;"></div>
                         </div>
 
                         <!-- Recordatorio de LBTR -->
@@ -2101,6 +2108,49 @@ class AppUI {
     }
 
     // --- MANEJADORES DE ENTRADAS ---
+    /**
+     * Muestra el campo de tasa solo cuando el gasto y la cuenta de débito van
+     * en divisas distintas, y adelanta lo que saldrá de la cuenta.
+     *
+     * Mostrar el importe antes de confirmar evita el descuadre que obliga
+     * después a revertir el gasto.
+     */
+    actualizarConversionGasto() {
+        const contenedor = document.getElementById('gas_conversion_container');
+        if (!contenedor) return;
+
+        const metodo = document.getElementById('gas_met')?.value;
+        const selCuenta = document.getElementById('gas_cue');
+        const opcion = selCuenta?.selectedOptions?.[0];
+        const divisaCuenta = opcion?.dataset?.divisa;
+        const divisaGasto = document.getElementById('gas_div')?.value;
+
+        const cruzaDivisas = metodo === 'transferencia' && divisaCuenta && divisaGasto && divisaCuenta !== divisaGasto;
+        contenedor.style.display = cruzaDivisas ? 'block' : 'none';
+
+        const previa = document.getElementById('gas_conversion_previa');
+        if (!cruzaDivisas) { if (previa) previa.textContent = ''; return; }
+
+        const monto = Number(document.getElementById('gas_mon')?.value) || 0;
+        const tasa = Number(document.getElementById('gas_tasa')?.value) || 0;
+        if (!(monto > 0) || !(tasa > 0)) {
+            previa.textContent = `Indica la tasa para saber cuánto saldrá en ${divisaCuenta}.`;
+            return;
+        }
+
+        // Misma regla que el dominio: convertir primero, retener después.
+        const convertido = divisaGasto === 'USD' ? monto * tasa : monto / tasa;
+        const convertidoRedondeado = Math.round(convertido * 100) / 100;
+        const retencion = Math.round(convertidoRedondeado * 0.002 * 100) / 100;
+        const lbtr = document.getElementById('gas_lbtr')?.checked ? 100 : 0;
+        const total = convertidoRedondeado + retencion + lbtr;
+
+        previa.innerHTML = `Saldrán <strong>${divisaCuenta} ${this.formatMoney(total)}</strong> `
+            + `— ${this.formatMoney(convertidoRedondeado)} convertidos`
+            + (retencion ? ` + ${this.formatMoney(retencion)} de retención` : '')
+            + (lbtr ? ` + ${this.formatMoney(lbtr)} de LBTR` : '');
+    }
+
     async handleAgregarGasto(e) {
         e.preventDefault();
         const fec = document.getElementById('gas_fec').value;
@@ -2113,6 +2163,18 @@ class AppUI {
         const tar = document.getElementById('gas_tar') ? Number(document.getElementById('gas_tar').value) : null;
         const cue = document.getElementById('gas_cue') && met === 'transferencia' ? Number(document.getElementById('gas_cue').value) : null;
 
+        // La tasa solo viaja si el gasto y la cuenta van en divisas distintas.
+        // El backend la exige en ese caso y la ignora en el resto.
+        const opcionCuenta = document.getElementById('gas_cue')?.selectedOptions?.[0];
+        const divisaCuenta = opcionCuenta?.dataset?.divisa;
+        const cruzaDivisas = met === 'transferencia' && divisaCuenta && divisaCuenta !== div;
+        const tasa = cruzaDivisas ? Number(document.getElementById('gas_tasa')?.value) || 0 : 0;
+
+        if (cruzaDivisas && !(tasa > 0)) {
+            this.showToast(`El gasto va en ${div} y la cuenta en ${divisaCuenta}: indica la tasa de cambio.`, 'error');
+            return;
+        }
+
         try {
             await AppAPI.crearGasto({
                 fecha: fec,
@@ -2123,7 +2185,8 @@ class AppUI {
                 metodo_pago: met,
                 es_lbtr: lbtr,
                 tarjeta_id: met === 'tarjeta' ? tar : null,
-                cuenta_ahorro_id: met === 'transferencia' ? cue : null
+                cuenta_ahorro_id: met === 'transferencia' ? cue : null,
+                tasa_cambio: cruzaDivisas ? tasa : null
             });
             this.showToast("Gasto registrado con éxito.");
             await this.render('gastos');
