@@ -12,6 +12,7 @@
 //! implementa estos puertos abre la transacción y la confirma; los puertos
 //! solo describen las operaciones.
 
+use crate::dominio::conversion::Conversion;
 use crate::dominio::dinero::{Dinero, Divisa};
 use std::fmt;
 
@@ -48,9 +49,13 @@ pub struct GastoAPersistir {
     pub descripcion: String,
     pub categoria_id: i64,
     pub metodo_pago: String,
+    /// Siempre en la divisa que se debita, que con conversión es la de
+    /// destino y sin ella la del propio gasto.
     pub cargos: Dinero,
     pub tarjeta_id: Option<i64>,
     pub cuenta_ahorro_id: Option<i64>,
+    /// Presente solo cuando el gasto se pagó desde una cuenta de otra divisa.
+    pub conversion: Option<Conversion>,
 }
 
 /// Lo que hace falta saber de un gasto ya guardado para poder revertirlo.
@@ -62,6 +67,18 @@ pub struct GastoGuardado {
     pub cargos: Dinero,
     pub tarjeta_id: Option<i64>,
     pub cuenta_ahorro_id: Option<i64>,
+    pub conversion: Option<Conversion>,
+}
+
+impl GastoGuardado {
+    /// Importe que salió de la cuenta, sin contar cargos. Con conversión es
+    /// el de destino; sin ella, el propio monto del gasto.
+    pub fn monto_debitado(&self) -> Dinero {
+        match self.conversion {
+            Some(c) => c.destino(),
+            None => self.monto,
+        }
+    }
 }
 
 pub trait RepositorioCategorias {

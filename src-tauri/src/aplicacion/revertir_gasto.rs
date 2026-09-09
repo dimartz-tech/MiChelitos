@@ -26,7 +26,9 @@ pub fn revertir_gasto(
             almacen.reducir_deuda_con_recorte(tarjeta_id, gasto.monto)?;
         }
         AfectacionSaldo::DebitoCuenta { cuenta_id } => {
-            let total = gasto.monto.sumar(&gasto.cargos)?;
+            // Se devuelve lo que realmente salió: con conversión, el importe
+            // en la divisa de la cuenta; sin ella, el monto del gasto.
+            let total = gasto.monto_debitado().sumar(&gasto.cargos)?;
             almacen.ajustar_saldo(cuenta_id, total)?;
         }
         AfectacionSaldo::DebitoCaja { divisa } => {
@@ -68,6 +70,7 @@ mod tests {
             es_lbtr: false,
             tarjeta_id: None,
             cuenta_ahorro_id: None,
+            tasa_cambio: None,
         }
     }
 
@@ -166,6 +169,26 @@ mod tests {
         revertir_gasto(id, &mut a).unwrap();
 
         assert_eq!(a.deuda_de(20), dop(100.0));
+        assert_eq!(a.total_gastos(), 0);
+    }
+
+    #[test]
+    fn revertir_un_gasto_convertido_devuelve_lo_que_realmente_salio() {
+        use crate::dominio::dinero::TasaCambio;
+
+        let mut a = almacen();
+        let mut d = datos(100.0, MetodoPago::Transferencia);
+        d.monto = Dinero::nuevo(100.0, Divisa::Usd).unwrap();
+        d.cuenta_ahorro_id = Some(10);
+        d.tasa_cambio = Some(TasaCambio::nueva(60.0).unwrap());
+
+        let id = registrar_gasto(d, &mut a).unwrap();
+        assert_eq!(a.saldo_de(10), dop(93988.0), "6 000 convertidos + 12 de retención");
+
+        revertir_gasto(id, &mut a).unwrap();
+
+        // Se devuelven pesos, no dólares: es lo que salió de la cuenta.
+        assert_eq!(a.saldo_de(10), dop(100000.0), "restitución exacta");
         assert_eq!(a.total_gastos(), 0);
     }
 }

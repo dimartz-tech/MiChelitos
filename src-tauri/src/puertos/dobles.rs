@@ -90,6 +90,7 @@ impl RepositorioGastos for AlmacenEnMemoria {
                 cargos: gasto.cargos,
                 tarjeta_id: gasto.tarjeta_id,
                 cuenta_ahorro_id: gasto.cuenta_ahorro_id,
+                conversion: gasto.conversion,
             },
         );
         Ok(id)
@@ -215,6 +216,7 @@ mod tests {
             cargos: dop(2.0),
             tarjeta_id: None,
             cuenta_ahorro_id: Some(10),
+            conversion: None,
         };
         let id = a.insertar(&g).unwrap();
         let leido = a.obtener(id).unwrap();
@@ -245,6 +247,7 @@ mod tests {
             cargos: dop(0.0),
             tarjeta_id: None,
             cuenta_ahorro_id: None,
+            conversion: None,
         };
         let id = a.insertar(&g).unwrap();
         assert_eq!(a.total_gastos(), 1);
@@ -316,6 +319,7 @@ mod tests {
             cargos: dop(0.0),
             tarjeta_id: None,
             cuenta_ahorro_id: None,
+            conversion: None,
         };
         assert!(a.insertar(&g).is_err());
         assert_eq!(a.total_gastos(), 0);
