@@ -321,3 +321,37 @@ mod tests {
         assert_eq!(a.total_gastos(), 0);
     }
 }
+
+#[cfg(test)]
+mod contrato_del_doble {
+    use super::*;
+    use crate::puertos::contrato::{verificar, Semilla};
+
+    fn dop(u: f64) -> Dinero {
+        Dinero::nuevo(u, Divisa::Dop).unwrap()
+    }
+
+    /// El doble se somete a la MISMA suite que el adaptador SQLite. Si ambos
+    /// la pasan, son intercambiables allí donde se espere un AlmacenGastos.
+    #[test]
+    fn el_doble_en_memoria_satisface_el_contrato() {
+        let mut a = AlmacenEnMemoria::nuevo()
+            .con_categoria(1, "Alimentación")
+            .con_cuenta(10, "Cuenta Contrato", dop(100000.0))
+            .con_cuenta(11, "Efectivo DOP", dop(0.0))
+            .con_tarjeta(20, dop(500.0));
+
+        let semilla = Semilla {
+            categoria_id: 1,
+            categoria_nombre: "Alimentación".into(),
+            cuenta_id: 10,
+            cuenta_saldo: dop(100000.0),
+            caja_nombre: "Efectivo DOP".into(),
+            caja_saldo: dop(0.0),
+            tarjeta_id: 20,
+            tarjeta_deuda: dop(500.0),
+        };
+
+        verificar(&mut a, &semilla, "en memoria");
+    }
+}
