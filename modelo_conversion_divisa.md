@@ -243,7 +243,63 @@ Para los consumos del §7.2 se admite registrar una tasa **esperada**, con dos c
 
 ---
 
-## 8. Impacto en la Fase 1.7
+## 8. Liquidación pendiente — caso de uso y plan
+
+Desarrolla el caso del §7.2, en que la tasa es una decisión futura del emisor.
+
+### 8.1 El caso de uso
+
+**Actor:** el titular. **Precondición:** la tarjeta está marcada como de traducción a moneda local.
+
+1. **Registra el consumo.** El sistema sube la deuda **en la divisa de origen** y lo marca `pendiente`. No pide tasa, porque todavía no existe.
+2. **Transcurren los días.** El consumo figura en divisa, igual que en la banca en línea del emisor.
+3. **Llega el estado y se liquida.** El titular abre el consumo pendiente e introduce **el importe en moneda local que el emisor cargó**.
+4. **El sistema cierra el ciclo:** baja el importe del saldo en divisa, lo sube en moneda local, deduce la tasa aplicada y la guarda.
+
+> **La inversión que define el diseño:** el formulario pide **el importe**, no la tasa. El emisor comunica cuánto cargó, nunca a qué tasa lo hizo. El sistema deduce la tasa y la muestra como información derivada. Es lo contrario de la conversión declarada del §7.1, y esa inversión es deliberada.
+
+### 8.2 Tres casos que fijan el comportamiento
+
+**Caso A — el mismo consumo, dos políticas.** Un consumo de 100 en divisa extranjera:
+
+| Política | Ciclo |
+|---|---|
+| En divisa de origen | `saldo divisa +100` · definitivo, nada que liquidar |
+| Traducción a moneda local | `saldo divisa +100` pendiente → al liquidar: `saldo divisa −100`, `saldo local +importe del emisor` |
+
+La misma operación tiene dos ciclos de vida distintos. Por eso la política pertenece a la tarjeta.
+
+**Caso B — la tasa que no se adivina.** Si el sistema estimara con una tasa supuesta y el emisor aplicara otra, el saldo quedaría desviado por la diferencia, y al contrastar el estado aparecería un descuadre **sin causa aparente**. Estimar no produce un número aproximado: produce uno equivocado que además parece correcto.
+
+Con el estado pendiente no hay número erróneo, sino una **ausencia declarada** que después se llena con el dato real.
+
+**Caso C — el corte cae en medio.** Un consumo hecho antes de la fecha de corte y traducido después aparecería en un estado **en divisa** y en el siguiente **en moneda local**: el mismo consumo, en dos estados, en dos monedas.
+
+**Este caso queda abierto a propósito.** No se resuelve por suposición: los estados de cuenta de una tarjeta con esta política dirán si el consumo pendiente figura en el corte, si figura dos veces, o si el emisor lo difiere al período siguiente. La respuesta determina cómo debe cuadrar la reconciliación.
+
+### 8.3 Consecuencia que se acepta de entrada
+
+**Los totales de un mes pueden cambiar al liquidar.** Un consumo de un mes que se liquida al siguiente pasa de contar en divisa a contar en moneda local.
+
+Incomoda si se espera que un mes cerrado sea inmutable, pero es fiel a la realidad: el emisor hace exactamente eso. La alternativa sería congelar una cifra inventada, que es peor.
+
+### 8.4 Plan por etapas
+
+**Etapa 1 — la operación de liquidación.** Política en la tarjeta, estado pendiente, y una acción que pide el importe en moneda local y cierra el ciclo. Con esto el modelo queda cerrado y se puede operar a mano.
+
+**Etapa 2 — reconciliación asistida.** Se carga el estado de cuenta, el sistema empareja sus líneas con los consumos pendientes y propone liquidarlos en bloque.
+
+La segunda etapa **no añade dominio**: es emparejamiento y confirmación. Toda la contabilidad queda hecha en la primera, y por eso se construye antes.
+
+### 8.5 La simetría que reduce el trabajo
+
+Un consumo **liquidado es indistinguible de una conversión declarada**, salvo por el origen de la tasa. Reutiliza `Conversion` por completo; solo falta el constructor que **deduce** la tasa a partir de los dos importes, en lugar de aplicarla.
+
+Lo único genuinamente nuevo es el estado pendiente.
+
+---
+
+## 9. Impacto en la Fase 1.7
 
 El caso de uso `registrar_gasto` de la Fase 1.5 **rechaza** debitar una cuenta de una divisa distinta a la del gasto. Hoy el código en producción no compara divisas y resta igual, que es el hallazgo H2.
 

@@ -5,7 +5,8 @@
 //! quien abrió la transacción la deshace sin que el caso de uso tenga que
 //! compensar nada por su cuenta.
 
-use crate::dominio::conversion::Conversion;
+use crate::dominio::conversion::{Conversion, EstadoConversion};
+use crate::dominio::tarjeta::PoliticaLiquidacion;
 use crate::dominio::dinero::{Dinero, Divisa, TasaCambio};
 use crate::puertos::repositorios::*;
 use rusqlite::{params, OptionalExtension, Transaction};
@@ -50,8 +51,8 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
     fn insertar(&mut self, gasto: &GastoAPersistir) -> Result<i64, ErrorAlmacen> {
         self.tx
             .execute(
-                "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id, tasa_conversion, monto_liquidado, divisa_liquidada)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+                "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id, tasa_conversion, monto_liquidado, divisa_liquidada, estado_conversion)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
                 params![
                     gasto.fecha,
                     gasto.monto.unidades(),
@@ -62,9 +63,10 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
                     gasto.cargos.unidades(),
                     gasto.tarjeta_id,
                     gasto.cuenta_ahorro_id,
-                    gasto.conversion.map(|c| c.tasa().valor()),
-                    gasto.conversion.map(|c| c.destino().unidades()),
-                    gasto.conversion.map(|c| c.destino().divisa().codigo()),
+                    gasto.estado_conversion.conversion().map(|c| c.tasa().valor()),
+                    gasto.estado_conversion.conversion().map(|c| c.destino().unidades()),
+                    gasto.estado_conversion.conversion().map(|c| c.destino().divisa().codigo()),
+                    gasto.estado_conversion.codigo(),
                 ],
             )
             .map_err(fallo)?;
@@ -76,7 +78,7 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
             .tx
             .query_row(
                 "SELECT monto, divisa, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id,
-                        tasa_conversion, monto_liquidado, divisa_liquidada
+                        tasa_conversion, monto_liquidado, divisa_liquidada, estado_conversion
                  FROM gastos WHERE id = ?;",
                 [gasto_id],
                 |r| {
@@ -90,6 +92,7 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
                         r.get::<_, Option<f64>>(6)?,
                         r.get::<_, Option<f64>>(7)?,
                         r.get::<_, Option<String>>(8)?,
+                        r.get::<_, Option<String>>(9)?,
                     ))
                 },
             )
@@ -116,6 +119,12 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
             _ => None,
         };
 
+        let estado_conversion = match (conversion, fila.9.as_deref()) {
+            (Some(c), _) => EstadoConversion::Liquidada(c),
+            (None, Some("pendiente")) => EstadoConversion::Pendiente,
+            _ => EstadoConversion::NoAplica,
+        };
+
         // Los cargos van en la divisa que se debitó.
         let divisa_cargos = conversion.map(|c| c.destino().divisa()).unwrap_or(divisa);
 
@@ -127,8 +136,33 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
                 .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?,
             tarjeta_id: fila.4,
             cuenta_ahorro_id: fila.5,
-            conversion,
+            estado_conversion,
         })
+    }
+
+    fn liquidar(
+        &mut self,
+        gasto_id: i64,
+        estado: EstadoConversion,
+    ) -> Result<(), ErrorAlmacen> {
+        let c = estado.conversion();
+        let filas = self
+            .tx
+            .execute(
+                "UPDATE gastos SET tasa_conversion = ?, monto_liquidado = ?, divisa_liquidada = ?, estado_conversion = ? WHERE id = ?;",
+                params![
+                    c.map(|c| c.tasa().valor()),
+                    c.map(|c| c.destino().unidades()),
+                    c.map(|c| c.destino().divisa().codigo()),
+                    estado.codigo(),
+                    gasto_id,
+                ],
+            )
+            .map_err(fallo)?;
+        if filas == 0 {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "gasto", id: gasto_id });
+        }
+        Ok(())
     }
 
     fn eliminar(&mut self, gasto_id: i64) -> Result<(), ErrorAlmacen> {
@@ -155,6 +189,20 @@ impl RepositorioTarjetas for AlmacenSqlite<'_> {
             return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
         }
         Ok(())
+    }
+
+    fn politica(&self, tarjeta_id: i64) -> Result<PoliticaLiquidacion, ErrorAlmacen> {
+        let codigo: Option<String> = self
+            .tx
+            .query_row(
+                "SELECT politica_liquidacion FROM tarjetas WHERE id = ?;",
+                [tarjeta_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(fallo)?
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id })?;
+        Ok(PoliticaLiquidacion::desde_codigo(codigo.as_deref()))
     }
 
     fn reducir_deuda_con_recorte(
@@ -328,7 +376,7 @@ mod tests {
                     cargos: dop(0.0),
                     tarjeta_id: None,
                     cuenta_ahorro_id: Some(semilla.cuenta_id),
-                    conversion: None,
+                    estado_conversion: EstadoConversion::NoAplica,
                 })
                 .unwrap();
             }
