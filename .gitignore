@@ -54,3 +54,13 @@ src-tauri/target/
 .vscode/
 .idea/
 .DS_Store
+
+# --- Control de fugas y auditorías de privacidad ---
+# Nunca entran a un repositorio: describen dónde estuvieron las fugas y
+# a quién identifican. En un repositorio público orientan a quien busque,
+# y en uno privado siguen sin tener lectores legítimos. Se conservan
+# únicamente como archivos de control local.
+RECOMENDACIONES_PRIVACIDAD.md
+*_PRIVACIDAD.md
+*_AUDITORIA.md
+AUDITORIA_*.md
