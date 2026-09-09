@@ -172,10 +172,10 @@ mod tests {
 
     #[test]
     fn la_retencion_de_un_importe_con_centavos_es_exacta() {
-        // 10 423.44 × 0.20 % = 20.84688 → 20.85 al centavo.
+        // 12 345.67 × 0.20 % = 24.69134 → 24.69 al centavo.
         // Sin redondeo, ese sobrante fraccionario acababa en los saldos.
-        let c = cargos_de_transferencia(dop(10423.44), "Alimentación", "Compra", false).unwrap();
-        assert_eq!(c.retencion.centavos(), 2085);
+        let c = cargos_de_transferencia(dop(12345.67), "Alimentación", "Compra", false).unwrap();
+        assert_eq!(c.retencion.centavos(), 2469);
     }
 
     // --- Exención y comisión, juntas ---

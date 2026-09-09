@@ -83,18 +83,18 @@ mod tests {
 
     #[test]
     fn un_mismo_consumo_admite_varias_bonificaciones() {
-        // Caso real: 1 % base y 2 % de categoría en dos líneas del mismo día.
+        // 1 % base y 2 % de categoría, en dos líneas del mismo día.
         let mut a = almacen();
-        let mut base = datos(dop(86.40), "Recompensas Qik Rebate");
+        let mut base = datos(dop(50.00), "Recompensa base");
         base.gasto_id = Some(7);
-        let mut extra = datos(dop(172.80), "Cashback Personalizado");
+        let mut extra = datos(dop(100.00), "Bonificación de categoría");
         extra.gasto_id = Some(7);
 
         registrar_bonificacion(base, &mut a).unwrap();
         registrar_bonificacion(extra, &mut a).unwrap();
 
         assert_eq!(a.total_bonificaciones(), 2, "dos créditos para un solo gasto");
-        assert_eq!(a.deuda_de(20), dop(10000.0 - 259.20));
+        assert_eq!(a.deuda_de(20), dop(10000.0 - 150.00));
     }
 
     #[test]

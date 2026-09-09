@@ -29,9 +29,9 @@ Existe un **commit base legítimo** en el remoto. Eso cambia la estrategia: en l
 ### ✅ 0.1 — Respaldo verificado *(completado)*
 
 ```
-~/Desktop/MiChelitosTauri_backup_2026-09-08/
-├── proyecto/            40 archivos (= 40 en origen)
-└── base_de_datos_viva/  SHA-1 e1bdfeb126ac48c8e190842c9e7a8edd43618389 (idéntico)
+<DIRECTORIO_DE_RESPALDO>/MiChelitosTauri_backup_<FECHA>/
+├── proyecto/            recuento de archivos coincidente con el origen
+└── base_de_datos_viva/  suma de comprobación idéntica al origen
 ```
 
 **Por qué primero:** todo lo que sigue toca el directorio de trabajo o publica contenido. Sin un punto de retorno verificado, cualquier error es irreversible. Se excluyeron `src-tauri/target/` (3.2 GB) y `node_modules/` por reproducibles.
@@ -42,14 +42,14 @@ Existe un **commit base legítimo** en el remoto. Eso cambia la estrategia: en l
 
 `.gitignore` ampliado con las reglas de `plan_arquitectura_hexagonal.md` §2.
 
-**Por qué antes del primer `git add`:** el `.gitignore` heredado del commit v1.2.0 no excluía ningún `*.db`. Los archivos `michelitos.db` y `michelitos.db.backup_2026-08-17_162833` están en la raíz del proyecto y contienen saldos, RNC de clientes y facturas reales. Un dato committeado sobrevive al `git rm`: permanece en el historial y en todo clon existente. La regla tenía que existir **antes**, no después.
+**Por qué antes del primer `git add`:** el `.gitignore` heredado del commit v1.2.0 no excluía ningún `*.db`. El archivo `michelitos.db` y sus respaldos están en la raíz del proyecto y contienen saldos, RNC de clientes y facturas reales. Un dato committeado sobrevive al `git rm`: permanece en el historial y en todo clon existente. La regla tenía que existir **antes**, no después.
 
 **Verificación ejecutada:**
 
 ```
 git status --porcelain --ignored | grep '^!!'
   !! michelitos.db
-  !! michelitos.db.backup_2026-08-17_162833
+  !! michelitos.db.backup_<marca de tiempo>
   !! node_modules/ · src-tauri/target/ · .DS_Store
 
 git status --porcelain -uall | grep -iE "\.db|backup"
@@ -198,27 +198,9 @@ La fase se da por cerrada cuando:
 
 ## 4. Publicación — resuelto
 
-La clave `~/.ssh/wilfodmba` se registró en la cuenta y se creó `~/.ssh/config` (no existía previamente) para que git la use sin intervención:
+La autenticación SSH con el remoto quedó verificada y funcionando: `git` publica sin pedir credenciales ni requerir variables de entorno.
 
-```
-Host github.com
-    HostName github.com
-    User git
-    IdentityFile ~/.ssh/wilfodmba
-    IdentitiesOnly yes
-    AddKeysToAgent yes
-    UseKeychain yes
-```
-
-Permisos `600`. Verificado: `ssh -T git@github.com` autentica como `dimartz-tech` y `git ls-remote` resuelve por SSH sin flags ni variables de entorno.
-
-**Pendiente del usuario, una sola vez:** la contraseña de la clave aún no está en el Llavero, de modo que tras reiniciar el equipo el agente arrancaría vacío.
-
-```bash
-ssh-add --apple-use-keychain ~/.ssh/wilfodmba
-```
-
-A partir de ahí `UseKeychain yes` la recupera en cada arranque.
+Por higiene, este documento no detalla qué clave se usa, dónde reside ni cómo está configurada: son datos operativos del equipo local que no aportan nada al repositorio y sí describen la superficie de acceso.
 
 ---
 

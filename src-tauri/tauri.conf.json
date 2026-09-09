@@ -15,7 +15,7 @@
     "bundle": {
       "active": true,
       "category": "Finance",
-      "copyright": "Copyright © 2026 Wilfod. All rights reserved.",
+      "copyright": "Copyright © 2026 dimartz-tech. All rights reserved.",
       "deb": {
         "depends": []
       },

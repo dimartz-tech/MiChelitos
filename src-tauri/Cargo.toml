@@ -2,7 +2,7 @@
 name = "michelitos-tauri"
 version = "1.3.5"
 description = "Aplicación de escritorio nativa macOS de gestión financiera personal y corporativa MiChelitos"
-authors = ["Wilfod"]
+authors = ["dimartz-tech"]
 edition = "2021"
 
 [build-dependencies]
