@@ -119,6 +119,21 @@ impl RepositorioTarjetas for AlmacenEnMemoria {
         *actual = actual.sumar(&delta).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
         Ok(())
     }
+
+    fn reducir_deuda_con_recorte(
+        &mut self,
+        tarjeta_id: i64,
+        monto: Dinero,
+    ) -> Result<(), ErrorAlmacen> {
+        let actual = self
+            .deudas
+            .get_mut(&tarjeta_id)
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id })?;
+        let restado = actual.restar(&monto).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
+        // Réplica exacta del MAX(0.0, ...) de SQL: la diferencia se pierde.
+        *actual = if restado.es_negativo() { Dinero::cero(restado.divisa()) } else { restado };
+        Ok(())
+    }
 }
 
 impl RepositorioCuentas for AlmacenEnMemoria {

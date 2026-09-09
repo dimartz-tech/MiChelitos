@@ -81,6 +81,35 @@ pub trait RepositorioTarjetas {
     /// Suma `delta` a la deuda de la divisa que el importe indica. Un delta
     /// negativo la reduce.
     fn ajustar_deuda(&mut self, tarjeta_id: i64, delta: Dinero) -> Result<(), ErrorAlmacen>;
+
+    /// Reduce la deuda **sin permitir que baje de cero**.
+    ///
+    /// El recorte es la conducta vigente al revertir un gasto de tarjeta
+    /// (**H5**), implementada hoy como `MAX(0.0, ...)` en SQL. Al no aplicarse
+    /// también al registrar, crear y revertir dejan de ser operaciones
+    /// inversas exactas y la diferencia desaparece sin registro.
+    ///
+    /// Se le da método propio para que la asimetría sea visible en el
+    /// contrato en lugar de quedar enterrada en una consulta.
+    fn reducir_deuda_con_recorte(
+        &mut self,
+        tarjeta_id: i64,
+        monto: Dinero,
+    ) -> Result<(), ErrorAlmacen>;
+}
+
+/// Persistencia que necesita una operación sobre gastos.
+///
+/// Los puertos siguen siendo uno por raíz de agregado; esto solo expresa que
+/// un mismo adaptador los implementa todos sobre una única transacción.
+pub trait AlmacenGastos:
+    RepositorioCategorias + RepositorioGastos + RepositorioTarjetas + RepositorioCuentas
+{
+}
+
+impl<T> AlmacenGastos for T where
+    T: RepositorioCategorias + RepositorioGastos + RepositorioTarjetas + RepositorioCuentas
+{
 }
 
 pub trait RepositorioCuentas {
