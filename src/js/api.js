@@ -169,6 +169,28 @@ const AppAPI = {
         });
     },
 
+    // --- BONIFICACIONES (cashback, promociones, recompensas) ---
+    // Son créditos aparte que reducen la deuda de la tarjeta; nunca alteran
+    // el consumo que las originó.
+    async obtenerBonificaciones() {
+        return await invoke('obtener_bonificaciones');
+    },
+
+    async crearBonificacion(fecha, tarjetaId, monto, divisa, concepto, gastoId = null) {
+        return await invoke('crear_bonificacion', {
+            fecha,
+            tarjetaId: Number(tarjetaId),
+            monto: Number(monto),
+            divisa,
+            concepto,
+            gastoId: gastoId === null || gastoId === '' ? null : Number(gastoId)
+        });
+    },
+
+    async eliminarBonificacion(id) {
+        return await invoke('eliminar_bonificacion', { id: Number(id) });
+    },
+
     async registrarPagoTarjeta(id, fec, mon, div, cuentaAhorroId = null, tasaCambio = 0) {
         return await invoke('registrar_pago_tarjeta', { 
             id: Number(id), 

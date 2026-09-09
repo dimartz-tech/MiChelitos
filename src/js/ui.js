@@ -732,6 +732,7 @@ class AppUI {
     async renderTarjetas() {
         const tarjetas = await AppAPI.obtenerTarjetas();
         const cuentas = await AppAPI.obtenerCuentas();
+        const bonificaciones = await AppAPI.obtenerBonificaciones();
 
         const hoy = new Date();
         const hoyStr = hoy.getDate().toString().padStart(2, '0') + '/' + (hoy.getMonth() + 1).toString().padStart(2, '0') + '/' + hoy.getFullYear();
@@ -916,8 +917,110 @@ class AppUI {
                 ` : `
                     <p style="color:var(--text-muted); text-align:center; padding:2rem; background:var(--bg-surface); border:1px solid var(--border-color); border-radius:var(--radius-md);">No hay tarjetas registradas.</p>
                 `}
+
+                ${tarjetas.length > 0 ? `
+                <div class="card" style="margin-top:1.2rem;">
+                    <h3 style="font-family:var(--font-heading); margin-bottom:0.3rem;">🎁 Bonificaciones recibidas</h3>
+                    <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
+                        Cashback, devoluciones promocionales y recompensas. Se registran como crédito aparte y reducen la deuda de la tarjeta, sin alterar el consumo que las generó.
+                        Un mismo consumo puede recibir varias.
+                    </p>
+
+                    <form onsubmit="appUI.handleAgregarBonificacion(event)" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
+                        <div style="flex:1; min-width:110px;">
+                            <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
+                            <input type="text" id="bon_fecha" value="${hoyStr}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.78rem;" required>
+                        </div>
+                        <div style="flex:1.6; min-width:170px;">
+                            <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Tarjeta</label>
+                            <select id="bon_tarjeta" class="form-control" style="padding:0.4rem; font-size:0.78rem;" required>
+                                ${tarjetas.map(t => `<option value="${t.id}">${t.entidad} - ${t.nombre_tarjeta}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div style="flex:0.8; min-width:80px;">
+                            <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Divisa</label>
+                            <select id="bon_divisa" class="form-control" style="padding:0.4rem; font-size:0.78rem;">
+                                <option value="DOP">DOP</option><option value="USD">USD</option>
+                            </select>
+                        </div>
+                        <div style="flex:1; min-width:100px;">
+                            <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Monto</label>
+                            <input type="number" step="0.01" id="bon_monto" placeholder="0.00" class="form-control" style="padding:0.4rem; font-size:0.78rem;" required>
+                        </div>
+                        <div style="flex:2; min-width:190px;">
+                            <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Concepto</label>
+                            <input type="text" id="bon_concepto" list="conceptos_bonificacion" placeholder="Cashback compra por internet..." class="form-control" style="padding:0.4rem; font-size:0.78rem;" required>
+                            <datalist id="conceptos_bonificacion">
+                                <option value="Cashback compra por internet"></option>
+                                <option value="Cashback Personalizado"></option>
+                                <option value="Cashback Promocional"></option>
+                                <option value="Recompensas Qik Rebate"></option>
+                                <option value="Devolución promocional"></option>
+                            </datalist>
+                        </div>
+                        <button type="submit" class="btn" style="padding:0.45rem 0.9rem; font-size:0.78rem; background:linear-gradient(135deg, #10b981, #059669); color:white;">Registrar</button>
+                    </form>
+
+                    ${bonificaciones.length > 0 ? `
+                        <div style="max-height:240px; overflow-y:auto;">
+                        <table class="data-table" style="font-size:0.78rem;">
+                            <thead><tr><th>Fecha</th><th>Tarjeta</th><th>Concepto</th><th style="text-align:right;">Monto</th><th></th></tr></thead>
+                            <tbody>
+                                ${bonificaciones.map(b => `
+                                    <tr>
+                                        <td>${b.fecha}</td>
+                                        <td>${b.entidad} (${b.nombre_tarjeta})</td>
+                                        <td>${b.concepto}</td>
+                                        <td class="amount" style="text-align:right; color:var(--color-success);">+${b.divisa} ${this.formatMoney(b.monto)}</td>
+                                        <td><button onclick="appUI.handleEliminarBonificacion(${b.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.7rem;">🗑️</button></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        </div>
+                        <p style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.6rem;">
+                            Total acreditado: ${['DOP','USD'].map(d => {
+                                const suma = bonificaciones.filter(b => b.divisa === d).reduce((s,b) => s + b.monto, 0);
+                                return suma > 0 ? `<strong>${d} ${this.formatMoney(suma)}</strong>` : '';
+                            }).filter(Boolean).join(' · ') || '—'}
+                        </p>
+                    ` : `
+                        <p style="color:var(--text-muted); font-size:0.8rem; text-align:center; padding:0.8rem;">Aún no has registrado bonificaciones.</p>
+                    `}
+                </div>
+                ` : ''}
             </div>
         `;
+    }
+
+    async handleAgregarBonificacion(e) {
+        e.preventDefault();
+        const fecha = document.getElementById('bon_fecha').value.trim();
+        const tarjeta = Number(document.getElementById('bon_tarjeta').value);
+        const divisa = document.getElementById('bon_divisa').value;
+        const monto = Number(document.getElementById('bon_monto').value);
+        const concepto = document.getElementById('bon_concepto').value.trim();
+
+        if (!(monto > 0)) { this.showToast("El monto de la bonificación debe ser mayor que cero.", "error"); return; }
+        if (!concepto) { this.showToast("Indica el concepto: distingue un cashback de una promoción o recompensa.", "error"); return; }
+
+        try {
+            await AppAPI.crearBonificacion(fecha, tarjeta, monto, divisa, concepto);
+            this.showToast("Bonificación registrada. La deuda de la tarjeta se redujo.");
+            await this.render('tarjetas');
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
+    }
+
+    async handleEliminarBonificacion(id) {
+        try {
+            await AppAPI.eliminarBonificacion(id);
+            this.showToast("Bonificación revertida. La deuda vuelve a su valor anterior.");
+            await this.render('tarjetas');
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
     }
 
     // --- RENDER: SUSCRIPCIONES ---

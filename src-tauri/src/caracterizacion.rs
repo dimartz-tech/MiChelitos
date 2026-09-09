@@ -936,3 +936,97 @@ fn c29_no_se_liquida_dos_veces_ni_lo_que_no_esta_pendiente() {
     assert!(crate::liquidar_consumo_pendiente(id, 6050.0).is_err(), "no se liquida dos veces");
     assert_importe(balances_tarjeta(tarjeta).0, 6050.0, "ni se duplica el traslado");
 }
+
+// =====================================================================
+//  Bonificaciones — ciclo completo por los comandos reales
+// =====================================================================
+
+fn deuda_pesos(tarjeta: i64) -> f64 {
+    balances_tarjeta(tarjeta).0
+}
+
+#[test]
+fn c30_una_bonificacion_reduce_la_deuda_sin_tocar_el_gasto() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10000.0, 0.0);
+
+    let entrada = GastoInput {
+        fecha: "09/09/2026".to_string(),
+        monto: 728.14,
+        divisa: "DOP".to_string(),
+        descripcion: "Suscripción".to_string(),
+        categoria_id: id_categoria("Suscripciones"),
+        metodo_pago: "tarjeta".to_string(),
+        es_lbtr: false,
+        tarjeta_id: Some(tarjeta),
+        cuenta_ahorro_id: None,
+        tasa_cambio: None,
+    };
+    let gasto = crear_gasto(entrada).unwrap();
+    assert_importe(deuda_pesos(tarjeta), 10728.14, "el consumo sube la deuda");
+
+    crate::crear_bonificacion(
+        "09/09/2026".to_string(), tarjeta, 36.41, "DOP".to_string(),
+        "Cashback compra por internet".to_string(), Some(gasto),
+    ).unwrap();
+
+    assert_importe(deuda_pesos(tarjeta), 10691.73, "la bonificación la reduce");
+    let (monto_gasto, _, _) = ultimo_gasto();
+    assert_importe(monto_gasto, 728.14, "el consumo original no se altera");
+}
+
+#[test]
+fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
+    // Caso real: 1 % base y 2 % de categoría, en dos líneas del mismo día.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10000.0, 0.0);
+
+    // El consumo que las genera: 8 640.00 al 3 % de la categoría comida.
+    let gasto = crear_gasto(GastoInput {
+        fecha: "09/09/2026".to_string(),
+        monto: 8640.00,
+        divisa: "DOP".to_string(),
+        descripcion: "Restaurante".to_string(),
+        categoria_id: id_categoria("Alimentación"),
+        metodo_pago: "tarjeta".to_string(),
+        es_lbtr: false,
+        tarjeta_id: Some(tarjeta),
+        cuenta_ahorro_id: None,
+        tasa_cambio: None,
+    })
+    .unwrap();
+
+    crate::crear_bonificacion("09/09/2026".into(), tarjeta, 86.40, "DOP".into(),
+        "Recompensas Qik Rebate".into(), Some(gasto)).unwrap();
+    crate::crear_bonificacion("09/09/2026".into(), tarjeta, 172.80, "DOP".into(),
+        "Cashback Personalizado".into(), Some(gasto)).unwrap();
+
+    assert_eq!(crate::obtener_bonificaciones().unwrap().len(), 2);
+    assert_importe(deuda_pesos(tarjeta), 10000.0 + 8640.00 - 259.20, "el consumo sube y las dos bonificaciones bajan");
+}
+
+#[test]
+fn c32_revertir_una_bonificacion_restituye_la_deuda() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10000.0, 0.0);
+    let id = crate::crear_bonificacion("09/09/2026".into(), tarjeta, 36.41, "DOP".into(),
+        "Cashback".into(), None).unwrap();
+
+    crate::eliminar_bonificacion(id).unwrap();
+
+    assert_importe(deuda_pesos(tarjeta), 10000.0, "restitución exacta");
+    assert!(crate::obtener_bonificaciones().unwrap().is_empty());
+    assert!(crate::eliminar_bonificacion(id).is_err(), "no se revierte dos veces");
+}
+
+#[test]
+fn c33_una_bonificacion_sin_concepto_o_en_cero_se_rechaza() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10000.0, 0.0);
+
+    assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, 36.41, "DOP".into(),
+        "   ".into(), None).is_err(), "el concepto es obligatorio");
+    assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, 0.0, "DOP".into(),
+        "Cashback".into(), None).is_err(), "cero no es una bonificación");
+    assert_importe(deuda_pesos(tarjeta), 10000.0, "ningún saldo se movió");
+}
