@@ -9,6 +9,7 @@ pub enum ErrorDominio {
     MontoInvalido { valor: f64 },
     FondosInsuficientes { disponible: f64, requerido: f64, divisa: Divisa },
     DivisaDesconocida { codigo: String },
+    ConceptoVacio,
 }
 
 impl fmt::Display for ErrorDominio {
@@ -44,6 +45,10 @@ impl fmt::Display for ErrorDominio {
                 f,
                 "Divisa no reconocida: '{}'. Las divisas admitidas son DOP y USD.",
                 codigo
+            ),
+            ErrorDominio::ConceptoVacio => write!(
+                f,
+                "Indique el concepto de la bonificación: es lo que distingue un cashback de una promoción o una recompensa."
             ),
         }
     }

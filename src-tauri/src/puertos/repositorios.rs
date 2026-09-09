@@ -12,6 +12,7 @@
 //! implementa estos puertos abre la transacción y la confirma; los puertos
 //! solo describen las operaciones.
 
+use crate::dominio::bonificacion::Bonificacion;
 use crate::dominio::conversion::EstadoConversion;
 use crate::dominio::tarjeta::PoliticaLiquidacion;
 use crate::dominio::dinero::{Dinero, Divisa};
@@ -102,6 +103,29 @@ pub trait RepositorioGastos {
     ) -> Result<(), ErrorAlmacen>;
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BonificacionAPersistir {
+    pub fecha: String,
+    pub tarjeta_id: i64,
+    pub bonificacion: Bonificacion,
+    pub gasto_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BonificacionGuardada {
+    pub id: i64,
+    pub tarjeta_id: i64,
+    pub bonificacion: Bonificacion,
+}
+
+// Los nombres llevan sufijo para no colisionar con los de RepositorioGastos:
+// un mismo adaptador implementa ambos puertos.
+pub trait RepositorioBonificaciones {
+    fn insertar_bonificacion(&mut self, b: &BonificacionAPersistir) -> Result<i64, ErrorAlmacen>;
+    fn obtener_bonificacion(&self, id: i64) -> Result<BonificacionGuardada, ErrorAlmacen>;
+    fn eliminar_bonificacion(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+}
+
 pub trait RepositorioTarjetas {
     /// Suma `delta` a la deuda de la divisa que el importe indica. Un delta
     /// negativo la reduce.
@@ -139,6 +163,12 @@ impl<T> AlmacenGastos for T where
     T: RepositorioCategorias + RepositorioGastos + RepositorioTarjetas + RepositorioCuentas
 {
 }
+
+/// Persistencia que necesita una operación sobre bonificaciones: el crédito
+/// en sí y la deuda de la tarjeta que reduce.
+pub trait AlmacenBonificaciones: RepositorioBonificaciones + RepositorioTarjetas {}
+
+impl<T> AlmacenBonificaciones for T where T: RepositorioBonificaciones + RepositorioTarjetas {}
 
 pub trait RepositorioCuentas {
     /// Suma `delta` al saldo. Un delta negativo lo debita.

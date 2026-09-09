@@ -27,6 +27,8 @@ use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
 use aplicacion::revertir_gasto::revertir_gasto;
 use dominio::tarjeta::{LimitesDivisa, PoliticaLiquidacion, MONEDA_LOCAL};
 use aplicacion::liquidar_gasto::liquidar_gasto;
+use aplicacion::registrar_bonificacion::{registrar_bonificacion, revertir_bonificacion, DatosBonificacion};
+use dominio::bonificacion::Bonificacion;
 
 // --- ESTRUCTURAS DTO (DATA TRANSFER OBJECTS) ---
 #[derive(Serialize, Deserialize, Debug)]
@@ -82,6 +84,19 @@ pub struct Gasto {
     estado_conversion: Option<String>,
     monto_liquidado: Option<f64>,
     tasa_conversion: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BonificacionDto {
+    id: i64,
+    fecha: String,
+    tarjeta_id: i64,
+    entidad: String,
+    nombre_tarjeta: String,
+    monto: f64,
+    divisa: String,
+    concepto: String,
+    gasto_id: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1393,6 +1408,77 @@ fn crear_cobro_efectivo_informal(fecha: String, descripcion: String, monto: f64,
 /// Cierra un consumo pendiente con el importe que el emisor cargó en moneda
 /// local. Devuelve la tasa que se dedujo, para poder mostrarla.
 #[tauri::command]
+fn obtener_bonificaciones() -> Result<Vec<BonificacionDto>, String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT b.id, b.fecha, b.tarjeta_id, t.entidad, t.nombre_tarjeta, b.monto, b.divisa, b.concepto, b.gasto_id
+             FROM bonificaciones b JOIN tarjetas t ON t.id = b.tarjeta_id
+             ORDER BY b.id DESC;",
+        )
+        .map_err(|e| e.to_string())?;
+    let filas = stmt
+        .query_map([], |r| {
+            Ok(BonificacionDto {
+                id: r.get(0)?,
+                fecha: r.get(1)?,
+                tarjeta_id: r.get(2)?,
+                entidad: r.get(3)?,
+                nombre_tarjeta: r.get(4)?,
+                monto: r.get(5)?,
+                divisa: r.get(6)?,
+                concepto: r.get(7)?,
+                gasto_id: r.get(8)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut lista = Vec::new();
+    for f in filas {
+        lista.push(f.map_err(|e| e.to_string())?);
+    }
+    Ok(lista)
+}
+
+/// Registra un crédito del emisor sobre una tarjeta. Reduce su deuda sin
+/// alterar el consumo que lo originó.
+#[tauri::command]
+fn crear_bonificacion(
+    fecha: String,
+    tarjeta_id: i64,
+    monto: f64,
+    divisa: String,
+    concepto: String,
+    gasto_id: Option<i64>,
+) -> Result<i64, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let divisa = if divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
+    let bonificacion = Bonificacion::nueva(Dinero::nuevo(monto, divisa)?, &concepto)?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let id = {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        registrar_bonificacion(
+            DatosBonificacion { fecha, tarjeta_id, bonificacion, gasto_id },
+            &mut almacen,
+        )?
+    };
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+#[tauri::command]
+fn eliminar_bonificacion(id: i64) -> Result<(), String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        revertir_bonificacion(id, &mut almacen)?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn liquidar_consumo_pendiente(id: i64, monto_liquidado: f64) -> Result<f64, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -1549,6 +1635,9 @@ fn main() {
             crear_cobro_efectivo_informal,
             eliminar_gasto,
             liquidar_consumo_pendiente,
+            obtener_bonificaciones,
+            crear_bonificacion,
+            eliminar_bonificacion,
             eliminar_transaccion_cuenta,
             eliminar_ingreso_informal,
             eliminar_ingreso

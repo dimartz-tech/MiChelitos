@@ -5,6 +5,7 @@
 //! quien abrió la transacción la deshace sin que el caso de uso tenga que
 //! compensar nada por su cuenta.
 
+use crate::dominio::bonificacion::Bonificacion;
 use crate::dominio::conversion::{Conversion, EstadoConversion};
 use crate::dominio::tarjeta::PoliticaLiquidacion;
 use crate::dominio::dinero::{Dinero, Divisa, TasaCambio};
@@ -172,6 +173,57 @@ impl RepositorioGastos for AlmacenSqlite<'_> {
             .map_err(fallo)?;
         if filas == 0 {
             return Err(ErrorAlmacen::NoEncontrado { entidad: "gasto", id: gasto_id });
+        }
+        Ok(())
+    }
+}
+
+impl RepositorioBonificaciones for AlmacenSqlite<'_> {
+    fn insertar_bonificacion(&mut self, b: &BonificacionAPersistir) -> Result<i64, ErrorAlmacen> {
+        self.tx
+            .execute(
+                "INSERT INTO bonificaciones (fecha, tarjeta_id, monto, divisa, concepto, gasto_id)
+                 VALUES (?, ?, ?, ?, ?, ?);",
+                params![
+                    b.fecha,
+                    b.tarjeta_id,
+                    b.bonificacion.monto().unidades(),
+                    b.bonificacion.monto().divisa().codigo(),
+                    b.bonificacion.concepto(),
+                    b.gasto_id,
+                ],
+            )
+            .map_err(fallo)?;
+        Ok(self.tx.last_insert_rowid())
+    }
+
+    fn obtener_bonificacion(&self, id: i64) -> Result<BonificacionGuardada, ErrorAlmacen> {
+        let fila: Option<(i64, f64, String, String)> = self
+            .tx
+            .query_row(
+                "SELECT tarjeta_id, monto, divisa, concepto FROM bonificaciones WHERE id = ?;",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()
+            .map_err(fallo)?;
+
+        let (tarjeta_id, monto, divisa, concepto) =
+            fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "bonificación", id })?;
+        let monto = Dinero::nuevo(monto, divisa_desde_texto(&divisa))
+            .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
+        let bonificacion = Bonificacion::nueva(monto, &concepto)
+            .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
+        Ok(BonificacionGuardada { id, tarjeta_id, bonificacion })
+    }
+
+    fn eliminar_bonificacion(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute("DELETE FROM bonificaciones WHERE id = ?;", [id])
+            .map_err(fallo)?;
+        if filas == 0 {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "bonificación", id });
         }
         Ok(())
     }
