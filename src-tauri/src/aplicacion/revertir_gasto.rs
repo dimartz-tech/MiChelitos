@@ -1,12 +1,15 @@
 //! Caso de uso: revertir un gasto ya registrado.
 //!
 //! Deshace el efecto sobre los saldos y elimina el registro, que es la
-//! conducta vigente de `eliminar_gasto`. Conserva dos asimetrías conocidas:
+//! conducta vigente de `eliminar_gasto`.
 //!
-//! * **H5** — la deuda de tarjeta se recorta en cero, cosa que no ocurre al
-//!   registrar, de modo que crear y revertir no son inversas exactas.
-//! * El borrado destruye el rastro. Sustituirlo por asientos de compensación
-//!   es la Fase 8 y depende de decidir H5.
+//! **Revertir es aplicar el negado de lo que se aplicó al registrar.** Ya no
+//! hay excepción para la tarjeta: al resolverse **H5** desapareció el recorte
+//! en cero, de modo que las dos operaciones son inversas exactas y una deuda
+//! que queda negativa expresa el saldo a favor que realmente existe.
+//!
+//! Queda abierto que el borrado destruye el rastro. Sustituirlo por asientos
+//! de compensación es la Fase 8; con H5 resuelto ya no depende de nada más.
 
 use super::ErrorAplicacion;
 use crate::dominio::gasto::{afectacion_de_gasto, nombre_caja, AfectacionSaldo, MetodoPago};
@@ -23,7 +26,7 @@ pub fn revertir_gasto(
     match afectacion_de_gasto(metodo, divisa, gasto.tarjeta_id, gasto.cuenta_ahorro_id) {
         AfectacionSaldo::Ninguna => {}
         AfectacionSaldo::DeudaTarjeta { tarjeta_id } => {
-            almacen.reducir_deuda_con_recorte(tarjeta_id, gasto.monto)?;
+            almacen.ajustar_deuda(tarjeta_id, gasto.monto.negado())?;
         }
         AfectacionSaldo::DebitoCuenta { cuenta_id } => {
             // Se devuelve lo que realmente salió: con conversión, el importe
@@ -113,35 +116,43 @@ mod tests {
     }
 
     #[test]
-    fn h5_si_medio_un_abono_la_reversion_recorta_en_cero_y_pierde_la_diferencia() {
+    fn si_medio_un_abono_la_reversion_deja_saldo_a_favor_en_vez_de_perderlo() {
+        // Este es el caso que fijaba H5. El titular pagó 200 a la tarjeta;
+        // ese dinero salió de su bolsillo de verdad. Al revertir el gasto mal
+        // registrado, la deuda queda negativa porque pagó más de lo que debía,
+        // que es exactamente lo que el banco le acreditaría.
         let mut a = almacen();
         let mut d = datos(150.0, MetodoPago::Tarjeta);
         d.tarjeta_id = Some(20);
         let id = registrar_gasto(d, &mut a).unwrap();
         assert_eq!(a.deuda_de(20), dop(250.0));
 
-        // El titular abona 200 antes de advertir el error de registro.
         a.ajustar_deuda(20, dop(-200.0)).unwrap();
         assert_eq!(a.deuda_de(20), dop(50.0));
 
         revertir_gasto(id, &mut a).unwrap();
 
-        // Correspondería 50 - 150 = -100. El recorte lo deja en cero y esos
-        // 100 desaparecen sin registro.
-        assert_eq!(a.deuda_de(20), dop(0.0));
+        assert_eq!(a.deuda_de(20), dop(-100.0), "50 - 150, sin recorte");
+        assert!(a.deuda_de(20).es_negativo(), "saldo a favor del titular");
     }
 
     #[test]
-    fn registrar_y_revertir_es_inverso_salvo_cuando_el_recorte_interviene() {
-        let mut a = almacen();
-        let mut d = datos(50.0, MetodoPago::Tarjeta);
-        d.tarjeta_id = Some(20);
-        let inicial = a.deuda_de(20);
+    fn registrar_y_revertir_es_inverso_tambien_por_debajo_de_cero() {
+        // La propiedad que H5 rompía: da igual desde qué deuda se parta, el
+        // par registrar/revertir devuelve el balance al punto exacto previo.
+        for inicial_unidades in [500.0, 0.0, -75.0] {
+            let mut a = almacen();
+            a.ajustar_deuda(20, dop(inicial_unidades - 100.0)).unwrap();
+            let inicial = a.deuda_de(20);
+            assert_eq!(inicial, dop(inicial_unidades));
 
-        let id = registrar_gasto(d, &mut a).unwrap();
-        revertir_gasto(id, &mut a).unwrap();
+            let mut d = datos(150.0, MetodoPago::Tarjeta);
+            d.tarjeta_id = Some(20);
+            let id = registrar_gasto(d, &mut a).unwrap();
+            revertir_gasto(id, &mut a).unwrap();
 
-        assert_eq!(a.deuda_de(20), inicial);
+            assert_eq!(a.deuda_de(20), inicial, "partiendo de {inicial_unidades}");
+        }
     }
 
     #[test]

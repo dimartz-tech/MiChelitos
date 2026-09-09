@@ -798,11 +798,14 @@ class AppUI {
                         ${tarjetas.map(t => {
                             const limiteTotalDop = t.limite_efectivo_pesos + t.limite_sobregiro_pesos;
                             const disponibleDop = t.disponible_pesos;
-                            const pctDop = limiteTotalDop > 0 ? Math.min((t.balance_pesos / limiteTotalDop) * 100, 100) : 0;
+                            const pctDop = this.porcentajeUso(t.balance_pesos, limiteTotalDop);
 
                             const limiteTotalUsd = t.limite_efectivo_dolares + t.limite_sobregiro_dolares;
                             const disponibleUsd = t.disponible_dolares;
-                            const pctUsd = limiteTotalUsd > 0 ? Math.min((t.balance_dolares / limiteTotalUsd) * 100, 100) : 0;
+                            const pctUsd = this.porcentajeUso(t.balance_dolares, limiteTotalUsd);
+
+                            const balDop = this.etiquetaBalanceTarjeta(t.balance_pesos, 'DOP');
+                            const balUsd = this.etiquetaBalanceTarjeta(t.balance_dolares, 'USD');
 
                             const tarjetaAlDia = (t.balance_corte_pesos <= 0 && t.balance_corte_dolares <= 0);
                             const tEscaped = JSON.stringify(t).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
@@ -827,7 +830,7 @@ class AppUI {
                                     <div>
                                         <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.2rem;">
                                             <span>🇩🇴 DOP (Uso: ${pctDop.toFixed(1)}%)</span>
-                                            <span>Uso: DOP ${this.formatMoney(t.balance_pesos)}</span>
+                                            <span style="color:${balDop.color};">${balDop.texto}</span>
                                         </div>
                                         <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden; margin-bottom:0.3rem;">
                                             <div style="width: ${pctDop}%; height:100%; background: ${pctDop > 85 ? '#ff453a' : 'var(--accent-primary)'};"></div>
@@ -842,7 +845,7 @@ class AppUI {
                                     <div>
                                         <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.2rem;">
                                             <span>🇺🇸 USD (Uso: ${pctUsd.toFixed(1)}%)</span>
-                                            <span>Uso: USD ${this.formatMoney(t.balance_dolares)}</span>
+                                            <span style="color:${balUsd.color};">${balUsd.texto}</span>
                                         </div>
                                         <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden; margin-bottom:0.3rem;">
                                             <div style="width: ${pctUsd}%; height:100%; background: ${pctUsd > 85 ? '#ff453a' : '#10b981'};"></div>
@@ -2448,11 +2451,26 @@ class AppUI {
             ? (esDolares ? corteDolares : cortePesos)
             : (esDolares ? balDolares : balPesos);
 
+        const etiqueta = tipo === 'corte' ? 'al corte' : 'actual';
+
+        // Con saldo a favor no hay nada que abonar: prefijar el negativo solo
+        // conseguiría que el envío fallara con "el monto debe ser mayor que
+        // cero", que no explica lo que de verdad ocurre.
+        if (Number(saldo) < 0) {
+            campoMonto.value = '0.00';
+            campoMonto.readOnly = true;
+            this.showToast(
+                `La tarjeta tiene ${divisa} ${this.formatMoney(Math.abs(saldo))} a favor. No hay saldo ${etiqueta} que abonar.`,
+                'info'
+            );
+            return;
+        }
+
         campoMonto.value = Number(saldo).toFixed(2);
         campoMonto.readOnly = true;
 
         if (Number(saldo) === 0) {
-            this.showToast(`No hay saldo ${tipo === 'corte' ? 'al corte' : 'actual'} en ${divisa}.`, 'info');
+            this.showToast(`No hay saldo ${etiqueta} en ${divisa}.`, 'info');
         }
     }
 
@@ -3253,6 +3271,23 @@ class AppUI {
     // --- FORMATEADOR ---
     formatMoney(val) {
         return parseFloat(val).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    /// Un balance de tarjeta negativo es saldo a favor del titular, no un uso
+    /// negativo. Rotularlo "Uso: DOP -100.00" invita a leerlo como un error.
+    etiquetaBalanceTarjeta(balance, divisa) {
+        const esAFavor = Number(balance) < 0;
+        return {
+            texto: `${esAFavor ? 'A favor' : 'Uso'}: ${divisa} ${this.formatMoney(Math.abs(balance))}`,
+            color: esAFavor ? '#10b981' : 'inherit',
+        };
+    }
+
+    /// Porcentaje de uso acotado a [0, 100] para dibujar la barra. Un saldo a
+    /// favor da negativo y una barra con anchura negativa no se renderiza.
+    porcentajeUso(balance, limiteTotal) {
+        if (!(limiteTotal > 0)) return 0;
+        return Math.min(Math.max((balance / limiteTotal) * 100, 0), 100);
     }
 }
 

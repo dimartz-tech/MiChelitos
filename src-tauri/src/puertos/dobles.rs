@@ -192,6 +192,13 @@ impl RepositorioTarjetas for AlmacenEnMemoria {
         Ok(())
     }
 
+    fn deuda(&self, tarjeta_id: i64, divisa: Divisa) -> Result<Dinero, ErrorAlmacen> {
+        if !self.tarjetas.contains(&tarjeta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
+        }
+        Ok(self.deuda_en(tarjeta_id, divisa))
+    }
+
     fn politica(&self, tarjeta_id: i64) -> Result<PoliticaLiquidacion, ErrorAlmacen> {
         if !self.tarjetas.contains(&tarjeta_id) {
             return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
@@ -200,22 +207,6 @@ impl RepositorioTarjetas for AlmacenEnMemoria {
             .politicas
             .get(&tarjeta_id)
             .unwrap_or(&PoliticaLiquidacion::EnDivisaDeOrigen))
-    }
-
-    fn reducir_deuda_con_recorte(
-        &mut self,
-        tarjeta_id: i64,
-        monto: Dinero,
-    ) -> Result<(), ErrorAlmacen> {
-        if !self.tarjetas.contains(&tarjeta_id) {
-            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
-        }
-        let clave = (tarjeta_id, monto.divisa());
-        let actual = self.deudas.entry(clave).or_insert_with(|| Dinero::cero(monto.divisa()));
-        let restado = actual.restar(&monto).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
-        // Réplica exacta del MAX(0.0, ...) de SQL: la diferencia se pierde.
-        *actual = if restado.es_negativo() { Dinero::cero(restado.divisa()) } else { restado };
-        Ok(())
     }
 }
 
