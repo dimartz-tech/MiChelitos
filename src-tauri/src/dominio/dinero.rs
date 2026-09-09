@@ -126,6 +126,15 @@ impl Dinero {
         self.centavos < 0
     }
 
+    /// El mismo importe con el signo invertido.
+    ///
+    /// Existe para expresar un movimiento inverso —revertir un cargo es
+    /// aplicar su negado— sin que quien lo hace tenga que construir el
+    /// importe de nuevo y arriesgarse a redondearlo dos veces.
+    pub fn negado(&self) -> Dinero {
+        Dinero { centavos: -self.centavos, divisa: self.divisa }
+    }
+
     pub fn sumar(&self, otro: &Dinero) -> Result<Dinero, ErrorDominio> {
         self.exigir_misma_divisa(otro)?;
         Ok(Dinero { centavos: self.centavos + otro.centavos, divisa: self.divisa })
@@ -298,6 +307,33 @@ mod tests {
         let r = dop(100.0).restar(&dop(150.0)).unwrap();
         assert_eq!(r.centavos(), -5_000);
         assert!(r.es_negativo());
+    }
+
+    #[test]
+    fn el_negado_invierte_el_signo_y_conserva_la_divisa() {
+        assert_eq!(dop(150.0).negado(), dop(-150.0));
+        assert_eq!(dop(-150.0).negado(), dop(150.0));
+        assert_eq!(dop(0.0).negado(), dop(0.0), "cero no tiene signo");
+
+        let usd = Dinero::nuevo(25.0, Divisa::Usd).unwrap();
+        assert_eq!(usd.negado().divisa(), Divisa::Usd);
+    }
+
+    #[test]
+    fn negar_dos_veces_devuelve_el_importe_original() {
+        // La propiedad de la que depende que revertir un cargo sea su inverso
+        // exacto: aplicar el negado no puede perder ni un centavo.
+        for unidades in [0.01, 1234.56, -99.99, 0.0] {
+            let d = dop(unidades);
+            assert_eq!(d.negado().negado(), d, "con {unidades}");
+        }
+    }
+
+    #[test]
+    fn sumar_el_negado_equivale_a_restar() {
+        let a = dop(1000.0);
+        let b = dop(250.5);
+        assert_eq!(a.sumar(&b.negado()).unwrap(), a.restar(&b).unwrap());
     }
 
     // --- Porcentaje: el único punto donde se redondea ---

@@ -243,6 +243,25 @@ impl RepositorioTarjetas for AlmacenSqlite<'_> {
         Ok(())
     }
 
+    fn deuda(&self, tarjeta_id: i64, divisa: Divisa) -> Result<Dinero, ErrorAlmacen> {
+        let columna = match divisa {
+            Divisa::Usd => "balance_dolares",
+            Divisa::Dop => "balance_pesos",
+        };
+        let balance: Option<f64> = self
+            .tx
+            .query_row(
+                &format!("SELECT {columna} FROM tarjetas WHERE id = ?;"),
+                [tarjeta_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(fallo)?;
+        let balance =
+            balance.ok_or(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id })?;
+        Dinero::nuevo(balance, divisa).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))
+    }
+
     fn politica(&self, tarjeta_id: i64) -> Result<PoliticaLiquidacion, ErrorAlmacen> {
         let codigo: Option<String> = self
             .tx
@@ -255,25 +274,6 @@ impl RepositorioTarjetas for AlmacenSqlite<'_> {
             .map_err(fallo)?
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id })?;
         Ok(PoliticaLiquidacion::desde_codigo(codigo.as_deref()))
-    }
-
-    fn reducir_deuda_con_recorte(
-        &mut self,
-        tarjeta_id: i64,
-        monto: Dinero,
-    ) -> Result<(), ErrorAlmacen> {
-        // El MAX(0.0, ...) es la conducta vigente al revertir (H5). Se
-        // conserva tal cual hasta que se decida corregirla.
-        let sql = match monto.divisa() {
-            Divisa::Usd => "UPDATE tarjetas SET balance_dolares = MAX(0.0, balance_dolares - ?) WHERE id = ?;",
-            Divisa::Dop => "UPDATE tarjetas SET balance_pesos = MAX(0.0, balance_pesos - ?) WHERE id = ?;",
-        };
-        let filas =
-            self.tx.execute(sql, params![monto.unidades(), tarjeta_id]).map_err(fallo)?;
-        if filas == 0 {
-            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
-        }
-        Ok(())
     }
 }
 
