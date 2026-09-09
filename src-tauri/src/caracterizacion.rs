@@ -6,7 +6,7 @@
 //! comportamiento es correcto: lo fijan.
 
 use crate::db_sql;
-use crate::{crear_gasto, eliminar_gasto, registrar_pago_tarjeta, GastoInput};
+use crate::{crear_gasto, crear_suscripcion, eliminar_gasto, procesar_suscripciones, registrar_pago_tarjeta, GastoInput};
 use rusqlite::{params, Connection};
 use std::sync::{Mutex, MutexGuard};
 
@@ -588,4 +588,166 @@ fn c21_una_transferencia_sin_cuenta_calcula_la_retencion_pero_no_debita() {
 
     assert_importe(costo_adicional(id), 20.0, "la retención sí se calcula");
     assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 100000.0, "ningún saldo se movió");
+}
+
+// =====================================================================
+//  Suscripciones — la regla de idempotencia del cobro automático
+// =====================================================================
+//
+// procesar_suscripciones lee la fecha del sistema directamente, que es lo que
+// el puerto Reloj existe para corregir. Mientras no se refactorice, estas
+// pruebas derivan sus valores del día de hoy igual que hace el código.
+
+fn dia_de_hoy() -> i32 {
+    use chrono::Datelike;
+    chrono::Local::now().day() as i32
+}
+
+fn hoy_formateado() -> String {
+    chrono::Local::now().format("%d/%m/%Y").to_string()
+}
+
+fn fijar_ultimo_pago(sub_id: i64, fecha: &str) {
+    conexion()
+        .execute("UPDATE suscripciones SET fecha_ultimo_pago = ? WHERE id = ?;", params![fecha, sub_id])
+        .expect("fijar fecha de último pago");
+}
+
+fn ultimo_pago(sub_id: i64) -> Option<String> {
+    conexion()
+        .query_row("SELECT fecha_ultimo_pago FROM suscripciones WHERE id = ?;", [sub_id], |r| r.get(0))
+        .expect("leer fecha de último pago")
+}
+
+#[test]
+fn s1_una_suscripcion_nunca_cobrada_se_cobra_al_llegar_su_dia() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    // Día 1: siempre alcanzado, sea cual sea la fecha de hoy.
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+
+    let mensajes = procesar_suscripciones().unwrap();
+
+    assert_eq!(mensajes.len(), 1, "debe generarse un cargo");
+    assert_importe(balances_tarjeta(tarjeta).0, 500.0, "la deuda sube");
+    assert_eq!(total_gastos(), 1, "se registra el gasto");
+    assert_eq!(ultimo_pago(sub), Some(hoy_formateado()), "queda marcada como cobrada");
+}
+
+#[test]
+fn s2_cobrada_este_mismo_mes_no_vuelve_a_cobrarse() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    fijar_ultimo_pago(sub, &hoy_formateado());
+
+    let mensajes = procesar_suscripciones().unwrap();
+
+    assert!(mensajes.is_empty(), "no debe cobrar dos veces en el mismo mes");
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "la deuda no se mueve");
+    assert_eq!(total_gastos(), 0);
+}
+
+#[test]
+fn s3_procesar_dos_veces_seguidas_no_duplica_el_cargo() {
+    // Es la garantía que sostiene que la app procese suscripciones en cada
+    // arranque sin cobrar de más.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+
+    procesar_suscripciones().unwrap();
+    let segunda = procesar_suscripciones().unwrap();
+
+    assert!(segunda.is_empty(), "el segundo procesamiento no cobra");
+    assert_importe(balances_tarjeta(tarjeta).0, 500.0, "un solo cargo");
+    assert_eq!(total_gastos(), 1);
+}
+
+#[test]
+fn s4_una_anual_cobrada_este_ano_no_vuelve_a_cobrarse() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Anual".into(), 3600.0, tarjeta, "anual".into(), 1, "DOP".into()).unwrap();
+    fijar_ultimo_pago(sub, &hoy_formateado());
+
+    assert!(procesar_suscripciones().unwrap().is_empty());
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "sin cargo");
+}
+
+#[test]
+fn s5_el_cargo_en_dolares_solo_mueve_el_balance_en_dolares() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(1000.0, 50.0);
+    crear_suscripcion("Plataforma".into(), 15.0, tarjeta, "mensual".into(), 1, "USD".into()).unwrap();
+
+    procesar_suscripciones().unwrap();
+
+    let (pesos, dolares) = balances_tarjeta(tarjeta);
+    assert_importe(dolares, 65.0, "sube la deuda en dólares");
+    assert_importe(pesos, 1000.0, "la deuda en pesos no se toca");
+}
+
+#[test]
+fn s6_borrar_y_recrear_reinicia_la_idempotencia_y_vuelve_a_cobrar() {
+    // ESTE es el motivo por el que hace falta poder editar: hoy la única
+    // manera de cambiar una suscripción es borrarla y crearla de nuevo, y eso
+    // pone fecha_ultimo_pago en NULL, con lo que el siguiente procesamiento
+    // cobra otra vez el mismo mes.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+
+    procesar_suscripciones().unwrap();
+    assert_importe(balances_tarjeta(tarjeta).0, 500.0, "primer cargo");
+
+    // El usuario quiere cambiar el monto: borra y vuelve a crear.
+    crate::eliminar_suscripcion(sub).unwrap();
+    crear_suscripcion("Plataforma".into(), 600.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+
+    procesar_suscripciones().unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 1100.0, "cobro duplicado en el mismo mes");
+    assert_eq!(total_gastos(), 2, "dos cargos donde debería haber uno");
+}
+
+#[test]
+fn s7_editar_una_suscripcion_conserva_la_idempotencia_y_no_recobra() {
+    // Contrapartida de S6: el comando de edición existe precisamente para
+    // evitar el cobro duplicado que provoca borrar y recrear.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+
+    procesar_suscripciones().unwrap();
+    assert_importe(balances_tarjeta(tarjeta).0, 500.0, "primer cargo");
+    let marca = ultimo_pago(sub);
+
+    crate::actualizar_suscripcion(sub, "Plataforma".into(), 600.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+
+    assert_eq!(ultimo_pago(sub), marca, "la marca de idempotencia se conserva");
+    procesar_suscripciones().unwrap();
+    assert_importe(balances_tarjeta(tarjeta).0, 500.0, "no vuelve a cobrar este mes");
+    assert_eq!(total_gastos(), 1, "un solo cargo, frente a los dos de S6");
+}
+
+#[test]
+fn s8_editar_no_altera_los_cargos_ya_realizados() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    procesar_suscripciones().unwrap();
+
+    crate::actualizar_suscripcion(sub, "Otro nombre".into(), 999.0, tarjeta, "anual".into(), 20, "USD".into()).unwrap();
+
+    let (monto, _, _) = ultimo_gasto();
+    assert_importe(monto, 500.0, "el gasto ya registrado mantiene su importe");
+    assert_importe(balances_tarjeta(tarjeta).0, 500.0, "y la deuda tampoco cambia");
+}
+
+#[test]
+fn s9_editar_una_suscripcion_inexistente_es_error() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    assert!(crate::actualizar_suscripcion(9999, "X".into(), 1.0, tarjeta, "mensual".into(), 1, "DOP".into()).is_err());
 }
