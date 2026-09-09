@@ -8,6 +8,7 @@ mod db_sql;
 mod db_nosql;
 
 mod adaptadores;
+mod aplicacion;
 mod dominio;
 mod puertos;
 
