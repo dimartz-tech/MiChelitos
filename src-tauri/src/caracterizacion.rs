@@ -751,3 +751,34 @@ fn s9_editar_una_suscripcion_inexistente_es_error() {
     let tarjeta = crear_tarjeta(0.0, 0.0);
     assert!(crate::actualizar_suscripcion(9999, "X".into(), 1.0, tarjeta, "mensual".into(), 1, "DOP".into()).is_err());
 }
+
+#[test]
+fn c22_una_divisa_no_admitida_se_normaliza_al_persistir() {
+    // CAMBIO DE CONDUCTA — Fase 1.7, 2026-09-09.
+    //
+    // Antes el comando insertaba en gastos.divisa el texto recibido tal cual,
+    // así que un valor como "EUR" quedaba almacenado. Al pasar por el tipo
+    // Dinero, que solo conoce DOP y USD, se normaliza a "DOP" — que es además
+    // como ya se interpretaba a efectos de saldo, según fija C16.
+    //
+    // Sin impacto sobre los datos existentes: la base solo contiene DOP y USD.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+
+    let entrada = GastoInput {
+        fecha: "09/09/2026".to_string(),
+        monto: 300.0,
+        divisa: "EUR".to_string(),
+        descripcion: "Compra en euros".to_string(),
+        categoria_id: id_categoria("Otros"),
+        metodo_pago: "tarjeta".to_string(),
+        es_lbtr: false,
+        tarjeta_id: Some(tarjeta),
+        cuenta_ahorro_id: None,
+    };
+    crear_gasto(entrada).unwrap();
+
+    let (_, divisa, _) = ultimo_gasto();
+    assert_eq!(divisa, "DOP", "se normaliza en lugar de almacenar 'EUR'");
+    assert_importe(balances_tarjeta(tarjeta).0, 300.0, "el saldo ya se trataba como pesos");
+}
