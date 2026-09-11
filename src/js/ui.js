@@ -2293,6 +2293,24 @@ class AppUI {
             return;
         }
 
+        // Un consumo con tarjeta tiene que decir con cuál. El backend ya lo
+        // rechaza, pero conviene decirlo aquí con el nombre del campo: si no
+        // hay ninguna tarjeta registrada el selector ni siquiera existe, y el
+        // mensaje de error genérico no daría ninguna pista.
+        if (met === 'tarjeta' && !(tar > 0)) {
+            // El selector se dibuja aunque no haya ninguna tarjeta, así que lo
+            // que distingue los dos casos es si ofrece alguna opción real.
+            const selectorTarjeta = document.getElementById('gas_tar');
+            const hayTarjetas = [...(selectorTarjeta?.options ?? [])].some(o => Number(o.value) > 0);
+            this.showToast(
+                hayTarjetas
+                    ? 'Indica con qué tarjeta se pagó el gasto.'
+                    : 'No hay tarjetas registradas: registra una antes de pagar con tarjeta.',
+                'error'
+            );
+            return;
+        }
+
         try {
             await AppAPI.crearGasto({
                 fecha: fec,

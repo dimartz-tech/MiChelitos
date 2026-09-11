@@ -56,11 +56,30 @@ Una exención de impuestos no exime de pagar un servicio. Si un pago de TSS se c
 **H2 — La divisa del gasto y la de la cuenta no se comparan.**
 `main.rs:316-323`. Un gasto en USD pagado por transferencia debita `monto + costo_adicional` de la cuenta indicada **sin verificar que esa cuenta sea en USD**. Si es una cuenta DOP, se le restan unidades de dólar de un saldo en pesos. Es exactamente la clase de error que el tipo `Dinero` de la Fase 0 existe para impedir.
 
-**H3 — El gasto en efectivo busca la cuenta por nombre literal.**
-`main.rs:327-331`. `UPDATE … WHERE nombre = 'Efectivo DOP'`. Si la fila no existe o fue renombrada, el `UPDATE` afecta a 0 filas y **devuelve `Ok`**: el gasto queda registrado y ningún saldo se mueve, sin aviso.
+**H3 — El gasto en efectivo busca la cuenta por nombre literal.** ✅ **RESUELTO**
+`main.rs:327-331`. `UPDATE … WHERE nombre = 'Efectivo DOP'`. Si la fila no existía o había sido renombrada, el `UPDATE` afectaba a 0 filas y **devolvía `Ok`**: el gasto quedaba registrado y ningún saldo se movía, sin aviso.
 
-**H4 — El pago con tarjeta sin `tarjeta_id` se registra igual.**
-`main.rs:299-313`. Si `metodo_pago == "tarjeta"` pero `tarjeta_id` es `None`, el `if let` no entra, el gasto se inserta y ninguna deuda se incrementa.
+Al ir a corregirlo se encontró que **el hallazgo tenía una vía de disparo alcanzable desde la propia interfaz**, no solo teórica. La guarda de `eliminar_cuenta` contaba dependientes así:
+
+```sql
+SELECT COUNT(*) FROM gastos WHERE cuenta_ahorro_id = ?
+```
+
+Para la caja de efectivo eso devolvía siempre **0**, porque los gastos en efectivo guardaban `cuenta_ahorro_id` nulo: se vinculaban por nombre en tiempo de escritura y no referenciaban nada. La caja parecía no tener dependientes y se podía borrar desde la aplicación. A partir de ahí, cada gasto en efectivo nuevo caía en el caso de H3.
+
+**Decisión: la caja se identifica por su papel, no por su texto.** Se añade `cuentas_ahorro.es_caja_efectivo` y el puerto expone `caja(divisa)`, cuyo fallo es un error y no un `Ok`. Con ello:
+
+- Renombrar la caja deja de desvincularla, porque el nombre ya no participa.
+- Si no hay caja, el gasto **no se registra** y se dice por qué. Un gasto que no se asienta en ninguna parte no es un registro válido.
+- Cada gasto en efectivo guarda la referencia real a la caja, y la migración rellena los históricos, que nunca la tuvieron.
+- `eliminar_cuenta` rechaza borrar una caja. La clave foránea no bastaba: está declarada `ON DELETE SET NULL`, así que habría desvinculado los gastos en silencio en lugar de impedir el borrado.
+
+**H4 — El pago con tarjeta sin `tarjeta_id` se registra igual.** ✅ **RESUELTO**
+`main.rs:299-313`. Si `metodo_pago == "tarjeta"` pero `tarjeta_id` era `None`, el `if let` no entraba, el gasto se insertaba y ninguna deuda se incrementaba: quedaba en la lista sin corresponderse con ningún saldo.
+
+**Decisión: rechazar en la escritura, tolerar en la lectura.** La regla vive en el dominio como `exigir_referencias`, aparte de `afectacion_de_gasto`. La separación es deliberada: `afectacion_de_gasto` interpreta también filas **ya guardadas**, y una regla nueva no debe volver irrecuperable un registro anterior. Validar es cosa de la escritura; leer tiene que seguir funcionando sobre lo que haya en la base, o un gasto heredado dejaría de poder revertirse.
+
+La transferencia sin cuenta **no** se valida: es un caso legítimo —un pago desde una cuenta que no se lleva en la aplicación— y su conducta sigue fijada en las pruebas de caracterización.
 
 **H5 — La reversión de tarjeta recorta en cero; la de cuenta no.** ✅ **RESUELTO**
 `main.rs:1340` usaba `MAX(0.0, balance_dolares - ?)`, mientras que la reversión de cuenta y la de efectivo suman sin límite. Consecuencia: **crear y luego eliminar un gasto de tarjeta no era una operación inversa exacta.** Si la deuda era 100 y se revertía un gasto de 150, el saldo quedaba en 0 en vez de −50, y esos 50 desaparecían sin registro.
@@ -239,7 +258,7 @@ Característica: Registro de gastos con retenciones y comisiones bancarias
   1.6  Implementar adaptadores::sqlite::gastos
   1.7  Reducir crear_gasto/eliminar_gasto a envoltorios en adaptadores::tauri
   1.8  Pruebas unitarias aisladas + Gherkin del vertical
-  1.9  Registrar H2–H5 en archivo_de_control.md como decisiones pendientes
+  1.9  Registrar H2 en archivo_de_control.md como decisión pendiente (H1 y H3–H5 resueltos)
        (H1 ya resuelto: comportamiento confirmado correcto)
 ```
 
@@ -255,7 +274,7 @@ Cada paso deja la aplicación compilando y con la suite en verde. El paso 1.7 es
 - [ ] Firmas de los comandos sin cambios: `api.js` y `ui.js` intactos
 - [ ] Pruebas de contrato pasando sobre SQLite y sobre el doble en memoria
 - [ ] Gherkin del vertical en verde
-- [ ] H2–H5 documentados en `archivo_de_control.md` con su decisión o su aplazamiento explícito
+- [ ] H2 documentado en `archivo_de_control.md` con su decisión o su aplazamiento explícito
 - [ ] Retención impositiva y comisión de servicio modeladas como conceptos separados, persistiendo su suma
 - [ ] `cargo build` sin advertencias nuevas
 
@@ -265,7 +284,7 @@ Cada paso deja la aplicación compilando y con la suite en verde. El paso 1.7 es
 
 | Riesgo | Probabilidad | Mitigación |
 |---|---|---|
-| Corregir H2–H5 sin querer durante la extracción | **Alta** | Las pruebas C6, C10, C11 y C12 fijan el comportamiento actual y fallarían |
+| Corregir H2–H5 sin querer durante la extracción | **Alta** | Las pruebas C6, C10, C11 y C12 fijan el comportamiento actual y fallarían. Funcionó: al resolver H3, H4 y H5 fueron esas mismas pruebas las que obligaron a declarar cada cambio de conducta en lugar de dejarlo pasar |
 | Fusionar de nuevo impuesto y comisión al persistir | Media | C5 y C6 verifican el total; las pruebas unitarias verifican cada concepto por separado |
 | El redondeo cambia al mover la fórmula | Media | C7 lo fija explícitamente; se conserva `f64` y `.round()` tal cual |
 | La reversión deja saldos distintos a los originales | Media | C12 y C13 comparan el saldo antes y después del ciclo completo |
@@ -276,7 +295,7 @@ Cada paso deja la aplicación compilando y con la suite en verde. El paso 1.7 es
 
 ## 9. Lo que esta fase NO hace
 
-* No corrige H2–H4. Los documenta y los cubre con pruebas. H1 quedó resuelto como comportamiento correcto y **H5 se corrigió después**, ya con las pruebas de caracterización en su sitio: fueron ellas las que obligaron a declarar el cambio de conducta en lugar de dejarlo pasar.
+* No corrige H2–H5. Los documenta y los cubre con pruebas. H1 quedó resuelto como comportamiento correcto; **H3, H4 y H5 se corrigieron después**, ya con las pruebas de caracterización en su sitio, que es lo que permitió cambiarlos sin adivinar qué se rompía.
 * No altera el esquema de la base de datos: `costo_adicional` sigue guardando la suma de retención y comisión.
 * No sustituye el `DELETE` por asientos de compensación — eso es la Fase 8. Con H5 resuelto ya no depende de ninguna decisión previa.
 * No toca el frontend. `ui.js` sigue con sus 2 874 líneas hasta la Fase 7.
