@@ -21,6 +21,12 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ErrorAlmacen {
     NoEncontrado { entidad: &'static str, id: i64 },
+    /// No hay caja de efectivo para esa divisa.
+    ///
+    /// Tiene variante propia porque no se identifica por id: la caja es un
+    /// papel, no una fila concreta. Antes esta situación no era un error sino
+    /// un `Ok` que no movía ningún saldo, que es lo que describía **H3**.
+    CajaDeEfectivoAusente { divisa: Divisa },
     Fallo(String),
 }
 
@@ -30,6 +36,11 @@ impl fmt::Display for ErrorAlmacen {
             ErrorAlmacen::NoEncontrado { entidad, id } => {
                 write!(f, "No se encontró {} con identificador {}.", entidad, id)
             }
+            ErrorAlmacen::CajaDeEfectivoAusente { divisa } => write!(
+                f,
+                "No hay una caja de efectivo en {}. Crea la cuenta de efectivo antes de registrar un gasto en esa divisa.",
+                divisa.codigo()
+            ),
             ErrorAlmacen::Fallo(detalle) => write!(f, "Error de almacenamiento: {}", detalle),
         }
     }
@@ -177,11 +188,14 @@ pub trait RepositorioCuentas {
     /// Suma `delta` al saldo. Un delta negativo lo debita.
     fn ajustar_saldo(&mut self, cuenta_id: i64, delta: Dinero) -> Result<(), ErrorAlmacen>;
 
-    /// Igual, pero localizando la cuenta por nombre, que es como el sistema
-    /// referencia hoy las cajas de efectivo. Es la causa de H3: si la fila no
-    /// existe, la conducta vigente es no hacer nada y no fallar.
-    fn ajustar_saldo_de_caja(&mut self, nombre: &str, delta: Dinero)
-        -> Result<(), ErrorAlmacen>;
+    /// Identificador de la caja de efectivo de esa divisa.
+    ///
+    /// Sustituye al antiguo `ajustar_saldo_de_caja(nombre, delta)`, que
+    /// localizaba la caja por su nombre literal y, si no la encontraba,
+    /// devolvía `Ok` sin mover nada (**H3**). Ahora la caja se identifica por
+    /// el papel que cumple, no por su texto, y su ausencia es un error: quien
+    /// registra un gasto en efectivo se entera de que no se asentó.
+    fn caja(&self, divisa: Divisa) -> Result<i64, ErrorAlmacen>;
 
     fn saldo(&self, cuenta_id: i64) -> Result<Dinero, ErrorAlmacen>;
 

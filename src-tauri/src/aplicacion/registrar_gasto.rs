@@ -11,7 +11,7 @@ use crate::dominio::cargos::cargos_de_transferencia;
 use crate::dominio::conversion::{Conversion, EstadoConversion};
 use crate::dominio::tarjeta::MONEDA_LOCAL;
 use crate::dominio::dinero::{Dinero, TasaCambio};
-use crate::dominio::gasto::{afectacion_de_gasto, nombre_caja, AfectacionSaldo, MetodoPago};
+use crate::dominio::gasto::{afectacion_de_gasto, exigir_referencias, AfectacionSaldo, MetodoPago};
 use crate::puertos::repositorios::*;
 
 #[derive(Debug, Clone)]
@@ -38,6 +38,10 @@ pub fn registrar_gasto(
     almacen: &mut impl AlmacenGastos,
 ) -> Result<i64, ErrorAplicacion> {
     let divisa = datos.monto.divisa();
+    // Se valida antes de tocar nada (H4): un consumo con tarjeta que no dice
+    // cuál es un dato incompleto, no un gasto que no afecta a ningún saldo.
+    exigir_referencias(datos.metodo, datos.tarjeta_id)?;
+
     let afectacion =
         afectacion_de_gasto(datos.metodo, divisa, datos.tarjeta_id, datos.cuenta_ahorro_id);
 
@@ -80,6 +84,12 @@ pub fn registrar_gasto(
         Dinero::cero(base_de_cargos.divisa())
     };
 
+    // Qué cuenta queda anotada en el gasto. Para el efectivo es la caja que
+    // se acaba de resolver: guardarla convierte el vínculo en una referencia
+    // real, que es la otra mitad de H3. Antes el gasto en efectivo no
+    // referenciaba nada y la caja parecía no tener dependientes.
+    let mut cuenta_anotada = datos.cuenta_ahorro_id;
+
     match afectacion {
         AfectacionSaldo::Ninguna => {}
         AfectacionSaldo::DeudaTarjeta { tarjeta_id } => {
@@ -90,7 +100,11 @@ pub fn registrar_gasto(
             almacen.ajustar_saldo(cuenta_id, negativo(total)?)?;
         }
         AfectacionSaldo::DebitoCaja { divisa } => {
-            almacen.ajustar_saldo_de_caja(nombre_caja(divisa), negativo(datos.monto)?)?;
+            // La caja se resuelve por su papel y su ausencia es un error,
+            // no un Ok silencioso (H3).
+            let caja = almacen.caja(divisa)?;
+            almacen.ajustar_saldo(caja, negativo(datos.monto)?)?;
+            cuenta_anotada = Some(caja);
         }
     }
 
@@ -102,7 +116,7 @@ pub fn registrar_gasto(
         metodo_pago: datos.metodo_texto,
         cargos,
         tarjeta_id: datos.tarjeta_id,
-        cuenta_ahorro_id: datos.cuenta_ahorro_id,
+        cuenta_ahorro_id: cuenta_anotada,
         estado_conversion,
     })?;
 
@@ -128,7 +142,7 @@ mod tests {
             .con_categoria(1, "Alimentación")
             .con_categoria(2, "Impuestos")
             .con_cuenta(10, "Cuenta Ahorros DOP", dop(100000.0))
-            .con_cuenta(11, "Efectivo DOP", dop(5000.0))
+            .con_caja(11, dop(5000.0))
             .con_tarjeta(20, dop(500.0))
     }
 
@@ -227,14 +241,20 @@ mod tests {
     }
 
     #[test]
-    fn h4_una_tarjeta_sin_identificador_registra_el_gasto_sin_mover_deuda() {
+    fn una_tarjeta_sin_identificador_se_rechaza_en_vez_de_registrarse() {
+        // Antes (H4) el gasto se insertaba y ninguna deuda subía. Quedaba en
+        // la lista de gastos sin corresponderse con ningún saldo.
         let mut a = almacen();
         let d = datos(900.0, MetodoPago::Tarjeta);
 
-        registrar_gasto(d, &mut a).unwrap();
+        let error = registrar_gasto(d, &mut a).unwrap_err();
 
+        assert!(
+            error.to_string().contains("tarjeta"),
+            "el mensaje dice qué falta: {error}"
+        );
+        assert_eq!(a.total_gastos(), 0, "no se guardó nada");
         assert_eq!(a.deuda_de(20), dop(500.0));
-        assert_eq!(a.total_gastos(), 1);
     }
 
     #[test]
@@ -248,16 +268,23 @@ mod tests {
     }
 
     #[test]
-    fn h3_si_la_caja_no_existe_el_gasto_se_registra_sin_mover_saldo() {
+    fn sin_caja_de_efectivo_el_gasto_no_se_registra_y_se_avisa() {
+        // Antes (H3) esto devolvía Ok: el gasto quedaba guardado y ningún
+        // saldo se movía. Un gasto que no se asienta en ninguna parte no es
+        // un registro válido, así que la operación falla entera.
         let mut a = AlmacenEnMemoria::nuevo()
             .con_categoria(1, "Alimentación")
             .con_cuenta(11, "Caja Chica DOP", dop(5000.0));
         let d = datos(1200.0, MetodoPago::Efectivo);
 
-        registrar_gasto(d, &mut a).unwrap();
+        let error = registrar_gasto(d, &mut a).unwrap_err();
 
-        assert_eq!(a.saldo_de(11), dop(5000.0));
-        assert_eq!(a.total_gastos(), 1);
+        assert!(
+            error.to_string().contains("caja de efectivo"),
+            "el mensaje dice qué falta: {error}"
+        );
+        assert_eq!(a.saldo_de(11), dop(5000.0), "ninguna cuenta se tocó");
+        assert_eq!(a.total_gastos(), 0, "tampoco se guardó el gasto");
     }
 
     #[test]
