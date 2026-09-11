@@ -62,10 +62,17 @@ Una exención de impuestos no exime de pagar un servicio. Si un pago de TSS se c
 **H4 — El pago con tarjeta sin `tarjeta_id` se registra igual.**
 `main.rs:299-313`. Si `metodo_pago == "tarjeta"` pero `tarjeta_id` es `None`, el `if let` no entra, el gasto se inserta y ninguna deuda se incrementa.
 
-**H5 — La reversión de tarjeta recorta en cero; la de cuenta no.**
-`main.rs:1340` usa `MAX(0.0, balance_dolares - ?)`, mientras que la reversión de cuenta (`1353`) y la de efectivo (`1360`) suman sin límite. Consecuencia: **crear y luego eliminar un gasto de tarjeta no siempre es una operación inversa exacta.** Si la deuda de la tarjeta es 100 y se revierte un gasto de 150, el saldo queda en 0 en vez de −50, y esos 50 desaparecen sin registro.
+**H5 — La reversión de tarjeta recorta en cero; la de cuenta no.** ✅ **RESUELTO**
+`main.rs:1340` usaba `MAX(0.0, balance_dolares - ?)`, mientras que la reversión de cuenta y la de efectivo suman sin límite. Consecuencia: **crear y luego eliminar un gasto de tarjeta no era una operación inversa exacta.** Si la deuda era 100 y se revertía un gasto de 150, el saldo quedaba en 0 en vez de −50, y esos 50 desaparecían sin registro.
 
-> **H5 es el hallazgo más serio** y refuerza la propuesta de §9.3 del plan: sustituir el borrado por **asientos de compensación**. Un `DELETE` que además recorta saldos no deja forma de auditar qué se perdió.
+Al ir a corregirlo apareció un segundo frente que el hallazgo original no recogía: **el mismo recorte estaba en `registrar_pago_tarjeta`**. Ese es el que podía perder dinero sin borrar nada — bastaba abonar más que el balance, cosa que ocurre al pagar el balance del corte mientras entran consumos nuevos, para que el exceso se descartara.
+
+**Decisión: permitir el saldo a favor.** Se retira el recorte de los dos sitios. Un balance negativo pasa a significar lo que significa en la realidad: el titular pagó de más y el emisor se lo acredita. Con ello:
+
+- Registrar y revertir vuelven a ser inversas exactas, desde cualquier balance de partida.
+- La invariante deja de estar escrita en SQL y aplicada a medias. No se sustituye por otra en el dominio: **no existe la regla "la deuda no baja de cero"**, porque no es cierta.
+- El puerto pierde `reducir_deuda_con_recorte` y gana un lector `deuda`, sin el cual el contrato no podía comprobar el efecto sobre SQLite, que es justo donde vivía el recorte.
+- La interfaz rotula el negativo como *A favor* en lugar de *Uso*, acota la barra de consumo a `[0, 100]` y, al elegir "abonar el balance actual" con saldo a favor, lo dice en vez de fallar con "el monto debe ser mayor que cero".
 
 ---
 
@@ -131,7 +138,7 @@ Se escriben **contra el código actual sin modificarlo** y deben pasar en verde 
 | C9 | Gasto en efectivo DOP | `"Efectivo DOP"` baja el monto exacto |
 | C10 | **Gasto en efectivo con la cuenta renombrada** | devuelve `Ok`, ningún saldo cambia → fija **H3** |
 | C11 | **Gasto con tarjeta y `tarjeta_id: None`** | se inserta, ninguna deuda cambia → fija **H4** |
-| C12 | **Crear y eliminar gasto de tarjeta de 150 con deuda previa 100** | balance final `0.0`, no `-50.0` → fija **H5** |
+| C12 | **Crear y eliminar gasto de tarjeta de 150 con deuda previa 100** | fijaba `0.0` por el recorte; tras resolver **H5** fija `-100.0`, el saldo a favor real |
 | C13 | Crear y eliminar gasto por transferencia | saldo de la cuenta vuelve al valor exacto inicial |
 | C14 | Fallo a mitad de la transacción | ningún saldo alterado, ningún gasto insertado |
 
@@ -269,8 +276,8 @@ Cada paso deja la aplicación compilando y con la suite en verde. El paso 1.7 es
 
 ## 9. Lo que esta fase NO hace
 
-* No corrige H2–H5. Los documenta y los cubre con pruebas. H1 quedó resuelto como comportamiento correcto.
+* No corrige H2–H4. Los documenta y los cubre con pruebas. H1 quedó resuelto como comportamiento correcto y **H5 se corrigió después**, ya con las pruebas de caracterización en su sitio: fueron ellas las que obligaron a declarar el cambio de conducta en lugar de dejarlo pasar.
 * No altera el esquema de la base de datos: `costo_adicional` sigue guardando la suma de retención y comisión.
-* No sustituye el `DELETE` por asientos de compensación — eso es la Fase 8, y depende de decidir H5.
+* No sustituye el `DELETE` por asientos de compensación — eso es la Fase 8. Con H5 resuelto ya no depende de ninguna decisión previa.
 * No toca el frontend. `ui.js` sigue con sus 2 874 líneas hasta la Fase 7.
 * No migra a enteros de centavos. Sigue pendiente de las pruebas de caracterización de cargos, que esta fase produce.

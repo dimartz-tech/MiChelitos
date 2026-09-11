@@ -53,7 +53,7 @@ pub fn verificar<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
     saldos_de_cuenta(a, s, quien);
     caja_por_nombre(a, s, quien);
     deuda_de_tarjeta(a, s, quien);
-    recorte_en_cero(a, s, quien);
+    saldo_a_favor(a, s, quien);
     divisas_incompatibles(a, s, quien);
 }
 
@@ -152,13 +152,19 @@ fn deuda_de_tarjeta<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
     );
 }
 
-fn recorte_en_cero<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
-    // H5: reducir por encima de la deuda la deja en cero, no en negativo.
+fn saldo_a_favor<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
+    // Resolución de H5: reducir por encima de la deuda la deja en negativo,
+    // no en cero. Ambas implementaciones deben coincidir en esto, porque es
+    // donde antes divergían el `MAX(0.0, ...)` de SQL y la aritmética exacta.
     let exceso = s.tarjeta_deuda.sumar(&dop(1000.0)).unwrap();
-    a.reducir_deuda_con_recorte(s.tarjeta_id, exceso).unwrap();
+    a.ajustar_deuda(s.tarjeta_id, exceso.negado()).unwrap();
+    assert_eq!(
+        a.deuda(s.tarjeta_id, exceso.divisa()).unwrap(),
+        dop(-1000.0),
+        "[{quien}] el exceso sobre la deuda queda como saldo a favor"
+    );
     // Se restituye la deuda sembrada para no arrastrar estado entre bloques.
-    a.ajustar_deuda(s.tarjeta_id, s.tarjeta_deuda).unwrap();
-    let _ = quien;
+    a.ajustar_deuda(s.tarjeta_id, exceso).unwrap();
 }
 
 fn divisas_incompatibles<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {

@@ -129,22 +129,25 @@ pub trait RepositorioBonificaciones {
 pub trait RepositorioTarjetas {
     /// Suma `delta` a la deuda de la divisa que el importe indica. Un delta
     /// negativo la reduce.
+    ///
+    /// **Un balance negativo es válido y significa saldo a favor del titular**
+    /// (resolución de **H5**). Antes existía un `reducir_deuda_con_recorte`
+    /// que aplicaba `MAX(0.0, ...)`: la deuda no bajaba de cero y el exceso
+    /// desaparecía sin registro. Como esa regla solo se aplicaba al reducir y
+    /// nunca al aumentar, registrar y revertir no eran inversas exactas.
+    ///
+    /// Ajustar la deuda es hoy la única vía, y es simétrica: lo que un delta
+    /// suma, su negado lo resta. Quien necesite tratar el saldo a favor de
+    /// forma distinta lo decide al leerlo, no al escribirlo.
     fn ajustar_deuda(&mut self, tarjeta_id: i64, delta: Dinero) -> Result<(), ErrorAlmacen>;
 
-    /// Reduce la deuda **sin permitir que baje de cero**.
+    /// Deuda vigente en la divisa indicada.
     ///
-    /// El recorte es la conducta vigente al revertir un gasto de tarjeta
-    /// (**H5**), implementada hoy como `MAX(0.0, ...)` en SQL. Al no aplicarse
-    /// también al registrar, crear y revertir dejan de ser operaciones
-    /// inversas exactas y la diferencia desaparece sin registro.
-    ///
-    /// Se le da método propio para que la asimetría sea visible en el
-    /// contrato en lugar de quedar enterrada en una consulta.
-    fn reducir_deuda_con_recorte(
-        &mut self,
-        tarjeta_id: i64,
-        monto: Dinero,
-    ) -> Result<(), ErrorAlmacen>;
+    /// Puede ser negativa: eso es saldo a favor del titular. Existe para que
+    /// el contrato pueda comprobar el efecto de `ajustar_deuda` sobre las dos
+    /// implementaciones; sin lector, la divergencia que causó **H5** solo era
+    /// observable en el doble y no en SQLite, que es donde vivía.
+    fn deuda(&self, tarjeta_id: i64, divisa: Divisa) -> Result<Dinero, ErrorAlmacen>;
 
     /// Cómo liquida esta tarjeta los consumos en divisa extranjera.
     fn politica(&self, tarjeta_id: i64) -> Result<PoliticaLiquidacion, ErrorAlmacen>;

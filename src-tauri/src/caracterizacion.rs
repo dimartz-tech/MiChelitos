@@ -375,7 +375,7 @@ fn c11_h4_un_gasto_con_tarjeta_sin_identificador_no_mueve_ninguna_deuda() {
 }
 
 #[test]
-fn c12_h5_la_reversion_de_tarjeta_recorta_en_cero_y_pierde_la_diferencia() {
+fn c12_la_reversion_de_tarjeta_deja_saldo_a_favor_en_vez_de_recortar() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(100.0, 0.0);
 
@@ -399,9 +399,10 @@ fn c12_h5_la_reversion_de_tarjeta_recorta_en_cero_y_pierde_la_diferencia() {
 
     eliminar_gasto(gasto).unwrap();
 
-    // Aritméticamente correspondería 50 - 150 = -100, pero MAX(0.0, ...) lo
-    // recorta y esos 100 desaparecen sin dejar registro.
-    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "recorte en cero (H5)");
+    // 50 - 150 = -100. Antes el MAX(0.0, ...) lo recortaba a cero y esos 100
+    // desaparecían sin registro; hoy quedan como saldo a favor, que es lo que
+    // el emisor acredita cuando se ha pagado de más.
+    assert_importe(balances_tarjeta(tarjeta).0, -100.0, "saldo a favor, sin recorte");
 }
 
 #[test]
@@ -564,8 +565,10 @@ fn c19_un_abono_sin_cuenta_de_origen_no_genera_comision() {
 }
 
 #[test]
-fn c20_h5_el_abono_superior_a_la_deuda_recorta_el_balance_en_cero() {
-    // Misma invariante escrita en SQL que en eliminar_gasto: MAX(0.0, ...).
+fn c20_el_abono_superior_a_la_deuda_deja_saldo_a_favor() {
+    // La otra mitad de H5, y la que perdía dinero sin borrar nada: bastaba
+    // abonar más que el balance —pagar el corte mientras entran consumos
+    // nuevos, o abonar de más a propósito— para que el exceso se descartara.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(500.0, 0.0);
 
@@ -579,7 +582,7 @@ fn c20_h5_el_abono_superior_a_la_deuda_recorta_el_balance_en_cero() {
     )
     .unwrap();
 
-    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "no queda saldo a favor");
+    assert_importe(balances_tarjeta(tarjeta).0, -300.0, "800 abonados sobre 500 de deuda");
 }
 
 #[test]
