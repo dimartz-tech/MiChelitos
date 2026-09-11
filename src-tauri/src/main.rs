@@ -715,14 +715,19 @@ fn registrar_pago_tarjeta(
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
+    // Sin recorte a cero (resolución de H5). Abonar por encima de la deuda
+    // deja el balance negativo, que es el saldo a favor que el emisor acredita
+    // de verdad. El `MAX(0.0, ...)` que había aquí descartaba esa diferencia
+    // en silencio, y a diferencia del caso de la reversión bastaba un abono
+    // normal para perderla: no hacía falta borrar nada.
     if divisa == "USD" {
         tx.execute(
-            "UPDATE tarjetas SET balance_dolares = MAX(0.0, balance_dolares - ?) WHERE id = ?;",
+            "UPDATE tarjetas SET balance_dolares = balance_dolares - ? WHERE id = ?;",
             (monto, id)
         ).map_err(|e| e.to_string())?;
     } else {
         tx.execute(
-            "UPDATE tarjetas SET balance_pesos = MAX(0.0, balance_pesos - ?) WHERE id = ?;",
+            "UPDATE tarjetas SET balance_pesos = balance_pesos - ? WHERE id = ?;",
             (monto, id)
         ).map_err(|e| e.to_string())?;
     }
@@ -1493,9 +1498,8 @@ fn liquidar_consumo_pendiente(id: i64, monto_liquidado: f64) -> Result<f64, Stri
 
 #[tauri::command]
 fn eliminar_gasto(id: i64) -> Result<(), String> {
-    // Traducción pura, igual que crear_gasto. La reversión y el recorte en
-    // cero de la deuda de tarjeta (H5) viven ahora en el caso de uso y en el
-    // puerto, no en esta consulta.
+    // Traducción pura, igual que crear_gasto. La reversión vive en el caso de
+    // uso y en el puerto, no en esta consulta.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     {

@@ -389,7 +389,9 @@ Un agregado es una **frontera de consistencia**: un grupo que cambia como una un
 
 Dos observaciones que se derivan de esto:
 
-**H5 es una invariante implementada en el lugar equivocado.** El `MAX(0.0, balance - ?)` de `main.rs:1340` es una regla de negocio —"la deuda no baja de cero"— escrita en SQL. Al vivir ahí, no se aplica en la creación (que sí permite cualquier valor), y de esa asimetría nace que crear y revertir no sean operaciones inversas. Como invariante de la raíz `Tarjeta`, se aplicaría siempre o nunca, pero nunca a medias.
+**H5 era una invariante implementada en el lugar equivocado.** El `MAX(0.0, balance - ?)` de `main.rs:1340` es una regla de negocio —"la deuda no baja de cero"— escrita en SQL. Al vivir ahí no se aplicaba en la creación, que sí admite cualquier valor, y de esa asimetría nacía que crear y revertir no fueran operaciones inversas.
+
+Llevarla al dominio obligó a enunciarla, y al enunciarla se vio que **es falsa**: la deuda de una tarjeta sí baja de cero, y cuando lo hace se llama saldo a favor. La invariante no se movió de sitio, se eliminó. Es el caso que mejor ilustra para qué sirve nombrar las fronteras: una regla que sobrevive enterrada en una consulta no sobrevive al enunciado.
 
 **`crear_gasto` cruza fronteras de agregado.** Modifica `Gasto` y además `CuentaAhorro` o `Tarjeta` en una sola transacción. El DDD ortodoxo prescribe una transacción por agregado y consistencia eventual entre ellos. **Aquí se decide no seguir esa prescripción**: es una aplicación local, de un solo usuario, sobre SQLite, donde la consistencia transaccional entre agregados es barata y la eventual sería una complicación gratuita. Lo que sí se adopta es **nombrar las fronteras**, para saber qué invariante pertenece a quién y cuáles deben cumplirse de forma síncrona.
 
