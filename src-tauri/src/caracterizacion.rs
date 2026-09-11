@@ -6,7 +6,7 @@
 //! comportamiento es correcto: lo fijan.
 
 use crate::db_sql;
-use crate::{crear_gasto, crear_suscripcion, eliminar_gasto, procesar_suscripciones, registrar_pago_tarjeta, GastoInput};
+use crate::{crear_gasto, crear_suscripcion, eliminar_cuenta, eliminar_gasto, procesar_suscripciones, registrar_pago_tarjeta, GastoInput};
 use rusqlite::{params, Connection};
 use std::sync::{Mutex, MutexGuard};
 
@@ -319,7 +319,7 @@ fn c9_el_gasto_en_efectivo_descuenta_de_la_caja_de_su_divisa() {
 // =====================================================================
 
 #[test]
-fn c10_h3_si_la_caja_fue_renombrada_el_gasto_se_registra_sin_mover_saldo() {
+fn c10_renombrar_la_caja_ya_no_impide_que_el_gasto_se_asiente() {
     let _g = entorno_aislado();
     conexion()
         .execute(
@@ -343,13 +343,77 @@ fn c10_h3_si_la_caja_fue_renombrada_el_gasto_se_registra_sin_mover_saldo() {
     };
     let resultado = crear_gasto(entrada);
 
-    assert!(resultado.is_ok(), "hoy no falla: el UPDATE afecta a 0 filas");
+    // Antes (H3) el UPDATE buscaba 'Efectivo DOP' por nombre, afectaba a 0
+    // filas y devolvía Ok: el gasto quedaba registrado y el saldo intacto.
+    // Ahora la caja se localiza por su papel, que el renombrado no altera.
+    assert!(resultado.is_ok());
     assert_eq!(total_gastos(), 1, "el gasto queda registrado");
-    assert_importe(balance_cuenta("Caja Chica DOP"), antes, "ningún saldo se movió");
+    assert_importe(
+        balance_cuenta("Caja Chica DOP"),
+        antes - 1200.0,
+        "el saldo sí se movió pese al renombrado",
+    );
 }
 
 #[test]
-fn c11_h4_un_gasto_con_tarjeta_sin_identificador_no_mueve_ninguna_deuda() {
+fn c10b_la_caja_de_efectivo_no_se_puede_eliminar() {
+    // La vía por la que H3 era alcanzable desde la interfaz: la guarda de
+    // eliminar_cuenta contaba gastos con cuenta_ahorro_id, y los gastos en
+    // efectivo lo tenían nulo porque se vinculaban por nombre. La caja se
+    // borraba sin que nada lo impidiera.
+    let _g = entorno_aislado();
+    let caja: i64 = conexion()
+        .query_row(
+            "SELECT id FROM cuentas_ahorro WHERE es_caja_efectivo = 1 AND divisa = 'DOP';",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    let error = eliminar_cuenta(caja).unwrap_err();
+
+    assert!(error.contains("caja de efectivo"), "explica por qué: {error}");
+    let sigue: i64 = conexion()
+        .query_row("SELECT COUNT(*) FROM cuentas_ahorro WHERE id = ?;", [caja], |r| r.get(0))
+        .unwrap();
+    assert_eq!(sigue, 1, "la caja sigue ahí");
+}
+
+#[test]
+fn c10c_los_gastos_en_efectivo_quedan_vinculados_a_la_caja_por_identificador() {
+    // Resolución de H3 en los datos: el gasto guarda la referencia real, no
+    // solo el texto del método de pago.
+    let _g = entorno_aislado();
+    let entrada = GastoInput {
+        fecha: "08/09/2026".to_string(),
+        monto: 1200.0,
+        divisa: "DOP".to_string(),
+        descripcion: "Almuerzo".to_string(),
+        categoria_id: id_categoria("Alimentación"),
+        metodo_pago: "efectivo".to_string(),
+        es_lbtr: false,
+        tarjeta_id: None,
+        cuenta_ahorro_id: None,
+        tasa_cambio: None,
+    };
+    let gasto = crear_gasto(entrada).unwrap();
+
+    let (cuenta, es_caja): (Option<i64>, i64) = conexion()
+        .query_row(
+            "SELECT g.cuenta_ahorro_id, COALESCE(c.es_caja_efectivo, 0)
+             FROM gastos g LEFT JOIN cuentas_ahorro c ON c.id = g.cuenta_ahorro_id
+             WHERE g.id = ?;",
+            [gasto],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+
+    assert!(cuenta.is_some(), "el gasto en efectivo referencia una cuenta");
+    assert_eq!(es_caja, 1, "y esa cuenta es la caja de efectivo");
+}
+
+#[test]
+fn c11_un_gasto_con_tarjeta_sin_identificador_se_rechaza() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(500.0, 100.0);
 
@@ -367,8 +431,12 @@ fn c11_h4_un_gasto_con_tarjeta_sin_identificador_no_mueve_ninguna_deuda() {
     };
     let resultado = crear_gasto(entrada);
 
-    assert!(resultado.is_ok(), "hoy se acepta sin tarjeta");
-    assert_eq!(total_gastos(), 1, "el gasto queda registrado");
+    // Antes (H4) esto devolvía Ok: el gasto se insertaba y ninguna deuda
+    // subía, de modo que aparecía en la lista sin corresponderse con ningún
+    // saldo. Ahora se rechaza antes de tocar nada.
+    let error = resultado.unwrap_err();
+    assert!(error.contains("tarjeta"), "el mensaje dice qué falta: {error}");
+    assert_eq!(total_gastos(), 0, "no se guardó nada");
     let (pesos, dolares) = balances_tarjeta(tarjeta);
     assert_importe(pesos, 500.0, "deuda en DOP sin cambios");
     assert_importe(dolares, 100.0, "deuda en USD sin cambios");

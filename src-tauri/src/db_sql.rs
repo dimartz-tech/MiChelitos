@@ -319,5 +319,39 @@ pub fn crear_esquema(conn: &Connection) -> Result<()> {
         []
     );
 
+    // --- Resolución de H3: la caja de efectivo deja de identificarse por su
+    // nombre. Buscarla con `WHERE nombre = 'Efectivo DOP'` hacía que un
+    // renombrado —o un borrado, que la guarda de `eliminar_cuenta` no impedía
+    // porque ningún gasto la referenciaba por id— dejara el gasto registrado
+    // sin mover ningún saldo, devolviendo `Ok`.
+    //
+    // Se sustituye por un papel explícito en la fila y por la referencia real
+    // en cada gasto. Las tres sentencias son idempotentes.
+    let _ = conn.execute(
+        "ALTER TABLE cuentas_ahorro ADD COLUMN es_caja_efectivo INTEGER NOT NULL DEFAULT 0;",
+        [],
+    );
+
+    // El nombre se usa una única vez, aquí, para marcar las cajas que ya
+    // existían. A partir de este punto el vínculo es el papel, no el texto.
+    conn.execute(
+        "UPDATE cuentas_ahorro SET es_caja_efectivo = 1
+         WHERE nombre IN ('Efectivo DOP', 'Efectivo USD');",
+        [],
+    )?;
+
+    // Los gastos en efectivo históricos no referenciaban la caja de ninguna
+    // forma: se vinculaban por nombre en tiempo de escritura y guardaban
+    // `cuenta_ahorro_id` nulo. Se les da la referencia que les corresponde
+    // según su divisa.
+    conn.execute(
+        "UPDATE gastos SET cuenta_ahorro_id = (
+             SELECT c.id FROM cuentas_ahorro c
+             WHERE c.es_caja_efectivo = 1 AND c.divisa = gastos.divisa
+         )
+         WHERE metodo_pago = 'efectivo' AND cuenta_ahorro_id IS NULL;",
+        [],
+    )?;
+
     Ok(())
 }

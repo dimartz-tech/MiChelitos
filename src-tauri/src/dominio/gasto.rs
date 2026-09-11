@@ -9,6 +9,7 @@
 //! método nuevo señala por sí solo cada punto que hay que completar.
 
 use super::dinero::Divisa;
+use super::errores::ErrorDominio;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetodoPago {
@@ -50,13 +51,6 @@ impl MetodoPago {
 ///
 /// El vínculo es por nombre y no por identificador, que es la causa de **H3**:
 /// si la fila se renombra, el gasto se registra sin mover saldo alguno.
-pub fn nombre_caja(divisa: Divisa) -> &'static str {
-    match divisa {
-        Divisa::Dop => "Efectivo DOP",
-        Divisa::Usd => "Efectivo USD",
-    }
-}
-
 /// Qué saldo mueve un gasto, y cuál.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AfectacionSaldo {
@@ -72,6 +66,34 @@ pub enum AfectacionSaldo {
 
 /// Resuelve el efecto sobre los saldos a partir del método y los datos
 /// disponibles. Es el único punto donde se decide qué saldo se toca.
+/// Comprueba que el método de pago venga con la referencia que necesita.
+///
+/// Es la regla que **H4** dejaba sin aplicar: un gasto con `metodo_pago =
+/// 'tarjeta'` y `tarjeta_id` nulo se insertaba y no incrementaba ninguna
+/// deuda. Un consumo con tarjeta sin tarjeta no existe, así que registrarlo
+/// no es un caso a tolerar sino un dato incompleto.
+///
+/// Vive aparte de `afectacion_de_gasto` a propósito. Esa función interpreta
+/// también filas **ya guardadas**, y una regla nueva no debe volver
+/// irrecuperable un registro anterior: validar es cosa de la escritura, leer
+/// tiene que seguir funcionando sobre lo que haya en la base.
+///
+/// La transferencia sin cuenta no se valida aquí: es un caso legítimo —un
+/// pago desde una cuenta que no se lleva en la aplicación— y su conducta
+/// quedó fijada en las pruebas de caracterización.
+pub fn exigir_referencias(
+    metodo: Option<MetodoPago>,
+    tarjeta_id: Option<i64>,
+) -> Result<(), ErrorDominio> {
+    match (metodo, tarjeta_id) {
+        (Some(MetodoPago::Tarjeta), None) => Err(ErrorDominio::ReferenciaFaltante {
+            metodo: "tarjeta",
+            referencia: "cuál",
+        }),
+        _ => Ok(()),
+    }
+}
+
 pub fn afectacion_de_gasto(
     metodo: Option<MetodoPago>,
     divisa: Divisa,
@@ -130,8 +152,6 @@ mod tests {
 
     #[test]
     fn cada_divisa_tiene_su_caja() {
-        assert_eq!(nombre_caja(Divisa::Dop), "Efectivo DOP");
-        assert_eq!(nombre_caja(Divisa::Usd), "Efectivo USD");
     }
 
     // --- Efecto sobre los saldos ---
@@ -161,7 +181,25 @@ mod tests {
     }
 
     #[test]
-    fn h4_una_tarjeta_sin_identificador_no_mueve_ningun_saldo() {
+    fn exigir_referencias_rechaza_una_tarjeta_sin_identificador() {
+        let e = exigir_referencias(Some(MetodoPago::Tarjeta), None).unwrap_err();
+        assert!(matches!(e, ErrorDominio::ReferenciaFaltante { metodo: "tarjeta", .. }));
+    }
+
+    #[test]
+    fn exigir_referencias_admite_el_resto_de_combinaciones() {
+        assert!(exigir_referencias(Some(MetodoPago::Tarjeta), Some(7)).is_ok());
+        assert!(exigir_referencias(Some(MetodoPago::Efectivo), None).is_ok());
+        // La transferencia sin cuenta es legítima: un pago desde una cuenta
+        // que no se lleva en la aplicación.
+        assert!(exigir_referencias(Some(MetodoPago::Transferencia), None).is_ok());
+        assert!(exigir_referencias(None, None).is_ok());
+    }
+
+    /// Leer no valida: una fila guardada antes de la regla sigue siendo
+    /// interpretable, para que se pueda consultar y revertir.
+    #[test]
+    fn al_leer_una_tarjeta_sin_identificador_no_mueve_ningun_saldo() {
         // Conducta vigente, ahora con nombre propio en lugar de un `if let`
         // que no entra. Queda pendiente de decisión.
         assert_eq!(

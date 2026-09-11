@@ -1286,6 +1286,27 @@ fn crear_cuenta(nombre: String, divisa: String, balance: f64) -> Result<i64, Str
 #[tauri::command]
 fn eliminar_cuenta(id: i64) -> Result<(), String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+
+    // Una caja de efectivo no se borra. Es el papel del que depende todo gasto
+    // en efectivo de su divisa, y la clave foránea no protege: está declarada
+    // ON DELETE SET NULL, así que borrarla desvincularía los gastos en
+    // silencio en lugar de impedir el borrado.
+    let es_caja: bool = conn
+        .query_row(
+            "SELECT es_caja_efectivo FROM cuentas_ahorro WHERE id = ?;",
+            [id],
+            |r| r.get::<_, i64>(0),
+        )
+        .map_err(|e| e.to_string())?
+        == 1;
+
+    if es_caja {
+        return Err(
+            "No se puede eliminar la caja de efectivo: es la cuenta donde se asientan todos los gastos en efectivo de su divisa."
+                .to_string(),
+        );
+    }
+
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM gastos WHERE cuenta_ahorro_id = ?;",
         [id],
