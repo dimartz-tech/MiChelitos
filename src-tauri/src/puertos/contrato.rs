@@ -20,7 +20,7 @@ pub struct Semilla {
     pub categoria_nombre: String,
     pub cuenta_id: i64,
     pub cuenta_saldo: Dinero,
-    pub caja_nombre: String,
+    pub caja_id: i64,
     pub caja_saldo: Dinero,
     pub tarjeta_id: i64,
     pub tarjeta_deuda: Dinero,
@@ -51,7 +51,7 @@ pub fn verificar<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
     ida_y_vuelta_del_gasto(a, s, quien);
     eliminacion(a, s, quien);
     saldos_de_cuenta(a, s, quien);
-    caja_por_nombre(a, s, quien);
+    caja_por_papel(a, s, quien);
     deuda_de_tarjeta(a, s, quien);
     saldo_a_favor(a, s, quien);
     divisas_incompatibles(a, s, quien);
@@ -131,14 +131,28 @@ fn saldos_de_cuenta<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
     );
 }
 
-fn caja_por_nombre<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
-    a.ajustar_saldo_de_caja(&s.caja_nombre, dop(-1200.0)).unwrap();
+fn caja_por_papel<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
+    // Resolución de H3: la caja se localiza por el papel que cumple, no por su
+    // nombre, y ambas implementaciones deben devolver la misma fila.
+    assert_eq!(
+        a.caja(Divisa::Dop).unwrap(),
+        s.caja_id,
+        "[{quien}] la caja en pesos es la cuenta marcada como tal"
+    );
 
-    // H3: una caja inexistente no falla y no mueve nada.
-    a.ajustar_saldo_de_caja("Caja Que No Existe", dop(-99999.0)).unwrap();
+    // Que la ausencia sea un error se comprueba en cada implementación por
+    // separado: el esquema real siembra las dos cajas, así que la suite
+    // compartida no puede montar el caso sin desmontar la semilla.
 
-    a.ajustar_saldo_de_caja(&s.caja_nombre, dop(1200.0)).unwrap();
-    let _ = quien;
+    let antes = a.saldo(s.caja_id).unwrap();
+    let caja = a.caja(Divisa::Dop).unwrap();
+    a.ajustar_saldo(caja, dop(-1200.0)).unwrap();
+    assert_eq!(
+        a.saldo(s.caja_id).unwrap(),
+        antes.restar(&dop(1200.0)).unwrap(),
+        "[{quien}] el ajuste llega a la caja"
+    );
+    a.ajustar_saldo(caja, dop(1200.0)).unwrap();
 }
 
 fn deuda_de_tarjeta<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {

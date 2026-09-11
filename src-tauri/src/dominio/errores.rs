@@ -10,6 +10,8 @@ pub enum ErrorDominio {
     FondosInsuficientes { disponible: f64, requerido: f64, divisa: Divisa },
     DivisaDesconocida { codigo: String },
     ConceptoVacio,
+    /// El método de pago exige una referencia que no se indicó.
+    ReferenciaFaltante { metodo: &'static str, referencia: &'static str },
 }
 
 impl fmt::Display for ErrorDominio {
@@ -20,6 +22,11 @@ impl fmt::Display for ErrorDominio {
                 "No se pueden combinar montos en {} y {}: indique una tasa de cambio para convertirlos.",
                 esperada.codigo(),
                 recibida.codigo()
+            ),
+            ErrorDominio::ReferenciaFaltante { metodo, referencia } => write!(
+                f,
+                "Un gasto pagado con {} debe indicar {}.",
+                metodo, referencia
             ),
             ErrorDominio::TasaDeCambioRequerida => write!(
                 f,

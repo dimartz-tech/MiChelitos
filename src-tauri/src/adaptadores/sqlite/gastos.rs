@@ -293,37 +293,19 @@ impl RepositorioCuentas for AlmacenSqlite<'_> {
         Ok(())
     }
 
-    fn ajustar_saldo_de_caja(
-        &mut self,
-        nombre: &str,
-        delta: Dinero,
-    ) -> Result<(), ErrorAlmacen> {
-        // Conducta vigente (H3): si la caja no existe, no se falla y ningún
-        // saldo se mueve.
-        let actual: Option<(i64, f64, String)> = self
-            .tx
+    fn caja(&self, divisa: Divisa) -> Result<i64, ErrorAlmacen> {
+        // Se busca por papel, no por nombre. Renombrar la caja ya no la
+        // desvincula, y si no hay ninguna la operación falla en lugar de
+        // devolver Ok sin mover nada (H3).
+        self.tx
             .query_row(
-                "SELECT id, balance_actual, divisa FROM cuentas_ahorro WHERE nombre = ?;",
-                [nombre],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                "SELECT id FROM cuentas_ahorro WHERE es_caja_efectivo = 1 AND divisa = ?;",
+                [divisa.codigo()],
+                |r| r.get(0),
             )
             .optional()
-            .map_err(fallo)?;
-
-        let Some((id, balance, divisa_texto)) = actual else {
-            return Ok(());
-        };
-
-        let saldo = Dinero::nuevo(balance, divisa_desde_texto(&divisa_texto))
-            .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
-        let nuevo = saldo.sumar(&delta).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
-        self.tx
-            .execute(
-                "UPDATE cuentas_ahorro SET balance_actual = ? WHERE id = ?;",
-                params![nuevo.unidades(), id],
-            )
-            .map_err(fallo)?;
-        Ok(())
+            .map_err(fallo)?
+            .ok_or(ErrorAlmacen::CajaDeEfectivoAusente { divisa })
     }
 
     fn saldo(&self, cuenta_id: i64) -> Result<Dinero, ErrorAlmacen> {
@@ -384,18 +366,57 @@ mod tests {
             .query_row("SELECT id FROM categorias WHERE nombre = 'Alimentación';", [], |r| r.get(0))
             .unwrap();
 
+        // La crea y la marca la propia inicialización del esquema.
+        let caja_id: i64 = conn
+            .query_row(
+                "SELECT id FROM cuentas_ahorro WHERE es_caja_efectivo = 1 AND divisa = 'DOP';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+
         let semilla = Semilla {
             categoria_id,
             categoria_nombre: "Alimentación".into(),
             cuenta_id,
             cuenta_saldo: dop(100000.0),
-            // La crea la propia inicialización del esquema.
-            caja_nombre: "Efectivo DOP".into(),
+            caja_id,
             caja_saldo: dop(0.0),
             tarjeta_id,
             tarjeta_deuda: dop(500.0),
         };
         (conn, semilla)
+    }
+
+    #[test]
+    fn sin_caja_marcada_el_adaptador_falla_en_vez_de_no_hacer_nada() {
+        // H3 en la implementación real: se retira el papel de caja y la
+        // consulta deja de devolver una fila. Antes esto era un Ok silencioso.
+        let (mut conn, _) = base_sembrada();
+        conn.execute("UPDATE cuentas_ahorro SET es_caja_efectivo = 0;", []).unwrap();
+        let tx = conn.transaction().unwrap();
+        let almacen = AlmacenSqlite::nuevo(&tx);
+
+        assert!(matches!(
+            almacen.caja(Divisa::Dop),
+            Err(ErrorAlmacen::CajaDeEfectivoAusente { divisa: Divisa::Dop })
+        ));
+    }
+
+    #[test]
+    fn renombrar_la_caja_ya_no_la_desvincula() {
+        // El caso concreto que H3 describía: con la búsqueda por nombre, esto
+        // dejaba los gastos en efectivo sin asentar y sin aviso.
+        let (mut conn, semilla) = base_sembrada();
+        conn.execute(
+            "UPDATE cuentas_ahorro SET nombre = 'Caja Chica' WHERE id = ?;",
+            [semilla.caja_id],
+        )
+        .unwrap();
+        let tx = conn.transaction().unwrap();
+        let almacen = AlmacenSqlite::nuevo(&tx);
+
+        assert_eq!(almacen.caja(Divisa::Dop).unwrap(), semilla.caja_id);
     }
 
     #[test]

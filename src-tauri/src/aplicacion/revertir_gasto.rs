@@ -12,7 +12,7 @@
 //! de compensación es la Fase 8; con H5 resuelto ya no depende de nada más.
 
 use super::ErrorAplicacion;
-use crate::dominio::gasto::{afectacion_de_gasto, nombre_caja, AfectacionSaldo, MetodoPago};
+use crate::dominio::gasto::{afectacion_de_gasto, AfectacionSaldo, MetodoPago};
 use crate::puertos::repositorios::*;
 
 pub fn revertir_gasto(
@@ -35,7 +35,8 @@ pub fn revertir_gasto(
             almacen.ajustar_saldo(cuenta_id, total)?;
         }
         AfectacionSaldo::DebitoCaja { divisa } => {
-            almacen.ajustar_saldo_de_caja(nombre_caja(divisa), gasto.monto)?;
+            let caja = almacen.caja(divisa)?;
+            almacen.ajustar_saldo(caja, gasto.monto)?;
         }
     }
 
@@ -58,7 +59,7 @@ mod tests {
         AlmacenEnMemoria::nuevo()
             .con_categoria(1, "Alimentación")
             .con_cuenta(10, "Cuenta Ahorros DOP", dop(100000.0))
-            .con_cuenta(11, "Efectivo DOP", dop(5000.0))
+            .con_caja(11, dop(5000.0))
             .con_tarjeta(20, dop(100.0))
     }
 
@@ -172,14 +173,30 @@ mod tests {
     }
 
     #[test]
-    fn revertir_un_gasto_sin_afectacion_solo_lo_elimina() {
+    fn una_fila_heredada_sin_tarjeta_sigue_siendo_reversible() {
+        // Registrar un gasto de tarjeta sin decir cuál ya se rechaza (H4),
+        // pero las filas guardadas antes de esa regla existen y tienen que
+        // poder revertirse: validar es cosa de la escritura, no de la
+        // lectura. Se inserta por el puerto para saltarse el caso de uso,
+        // que es justo lo que hizo la versión anterior del código.
         let mut a = almacen();
-        // Tarjeta sin identificador: no movió deuda al registrarse (H4).
-        let id = registrar_gasto(datos(900.0, MetodoPago::Tarjeta), &mut a).unwrap();
+        let id = a
+            .insertar(&GastoAPersistir {
+                fecha: "09/09/2026".into(),
+                monto: dop(900.0),
+                descripcion: "Compra heredada".into(),
+                categoria_id: 1,
+                metodo_pago: "tarjeta".into(),
+                cargos: dop(0.0),
+                tarjeta_id: None,
+                cuenta_ahorro_id: None,
+                estado_conversion: crate::dominio::conversion::EstadoConversion::NoAplica,
+            })
+            .unwrap();
 
         revertir_gasto(id, &mut a).unwrap();
 
-        assert_eq!(a.deuda_de(20), dop(100.0));
+        assert_eq!(a.deuda_de(20), dop(100.0), "no había deuda que deshacer");
         assert_eq!(a.total_gastos(), 0);
     }
 

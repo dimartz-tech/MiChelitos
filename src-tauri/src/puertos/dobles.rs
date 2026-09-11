@@ -30,6 +30,9 @@ pub struct AlmacenEnMemoria {
     /// por tarjeta el doble no podría representar el traslado entre divisas
     /// que ocurre al liquidar.
     pub deudas: HashMap<(i64, Divisa), Dinero>,
+    /// Qué cuenta hace de caja de efectivo en cada divisa. En el esquema real
+    /// es la columna `es_caja_efectivo`; aquí basta el índice.
+    pub cajas: HashMap<Divisa, i64>,
     pub tarjetas: std::collections::HashSet<i64>,
     pub politicas: HashMap<i64, PoliticaLiquidacion>,
     pub gastos: HashMap<i64, GastoGuardado>,
@@ -52,6 +55,17 @@ impl AlmacenEnMemoria {
 
     pub fn con_cuenta(mut self, id: i64, nombre: &str, saldo: Dinero) -> Self {
         self.cuentas.insert(id, CuentaEnMemoria { nombre: nombre.to_string(), saldo });
+        self
+    }
+
+    /// Cuenta que además hace de caja de efectivo de su divisa.
+    pub fn con_caja(mut self, id: i64, saldo: Dinero) -> Self {
+        let divisa = saldo.divisa();
+        self.cuentas.insert(
+            id,
+            CuentaEnMemoria { nombre: format!("Efectivo {}", divisa.codigo()), saldo },
+        );
+        self.cajas.insert(divisa, id);
         self
     }
 
@@ -221,17 +235,11 @@ impl RepositorioCuentas for AlmacenEnMemoria {
         Ok(())
     }
 
-    fn ajustar_saldo_de_caja(
-        &mut self,
-        nombre: &str,
-        delta: Dinero,
-    ) -> Result<(), ErrorAlmacen> {
-        // Réplica de la conducta vigente (H3): si la caja no existe, la
-        // operación no falla y ningún saldo se mueve.
-        if let Some(c) = self.cuentas.values_mut().find(|c| c.nombre == nombre) {
-            c.saldo = c.saldo.sumar(&delta).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
-        }
-        Ok(())
+    fn caja(&self, divisa: Divisa) -> Result<i64, ErrorAlmacen> {
+        self.cajas
+            .get(&divisa)
+            .copied()
+            .ok_or(ErrorAlmacen::CajaDeEfectivoAusente { divisa })
     }
 
     fn saldo(&self, cuenta_id: i64) -> Result<Dinero, ErrorAlmacen> {
@@ -259,7 +267,7 @@ mod tests {
             .con_categoria(1, "Alimentación")
             .con_categoria(2, "Impuestos")
             .con_cuenta(10, "Cuenta Ahorros DOP", dop(100000.0))
-            .con_cuenta(11, "Efectivo DOP", dop(5000.0))
+            .con_caja(11, dop(5000.0))
             .con_tarjeta(20, dop(500.0))
     }
 
@@ -355,18 +363,23 @@ mod tests {
     }
 
     #[test]
-    fn h3_ajustar_una_caja_inexistente_no_falla_ni_mueve_nada() {
-        let mut a = almacen();
-        let antes = a.saldo_de(11);
-        a.ajustar_saldo_de_caja("Caja Que No Existe", dop(-1200.0)).unwrap();
-        assert_eq!(a.saldo_de(11), antes, "ninguna caja se movió");
+    fn pedir_una_caja_que_no_existe_es_error() {
+        // Antes (H3) esto era un Ok que no movía nada.
+        let a = almacen();
+        assert!(matches!(
+            a.caja(Divisa::Usd),
+            Err(ErrorAlmacen::CajaDeEfectivoAusente { divisa: Divisa::Usd })
+        ));
     }
 
     #[test]
-    fn ajustar_la_caja_por_nombre_localiza_la_cuenta_correcta() {
+    fn la_caja_se_localiza_por_su_papel_y_no_por_su_nombre() {
         let mut a = almacen();
-        a.ajustar_saldo_de_caja("Efectivo DOP", dop(-1200.0)).unwrap();
-        assert_eq!(a.saldo_de_caja("Efectivo DOP").unwrap(), dop(3800.0));
+        let caja = a.caja(Divisa::Dop).unwrap();
+        assert_eq!(caja, 11);
+
+        a.ajustar_saldo(caja, dop(-1200.0)).unwrap();
+        assert_eq!(a.saldo_de(11), dop(3800.0));
         assert_eq!(a.saldo_de(10), dop(100000.0), "la otra cuenta no se toca");
     }
 
@@ -415,7 +428,7 @@ mod contrato_del_doble {
         let mut a = AlmacenEnMemoria::nuevo()
             .con_categoria(1, "Alimentación")
             .con_cuenta(10, "Cuenta Contrato", dop(100000.0))
-            .con_cuenta(11, "Efectivo DOP", dop(0.0))
+            .con_caja(11, dop(0.0))
             .con_tarjeta(20, dop(500.0));
 
         let semilla = Semilla {
@@ -423,7 +436,7 @@ mod contrato_del_doble {
             categoria_nombre: "Alimentación".into(),
             cuenta_id: 10,
             cuenta_saldo: dop(100000.0),
-            caja_nombre: "Efectivo DOP".into(),
+            caja_id: 11,
             caja_saldo: dop(0.0),
             tarjeta_id: 20,
             tarjeta_deuda: dop(500.0),
