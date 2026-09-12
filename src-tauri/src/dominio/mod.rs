@@ -8,4 +8,5 @@ pub mod conversion;
 pub mod dinero;
 pub mod errores;
 pub mod gasto;
+pub mod prestamo;
 pub mod tarjeta;

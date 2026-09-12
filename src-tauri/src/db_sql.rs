@@ -319,6 +319,50 @@ pub fn crear_esquema(conn: &Connection) -> Result<()> {
         []
     );
 
+    // --- Saldo vivo de financiamientos ---
+    //
+    // El pasivo de un préstamo se deducía de `monto_prestamo` y la fracción de
+    // cuotas pendientes. Eso supone amortización lineal, que nunca es el caso,
+    // y en una línea de crédito ni siquiera se aplicaba: al no tener cuotas
+    // contadas, el pasivo quedaba clavado en el monto desembolsado el primer
+    // día y ningún pago lo movía.
+    //
+    // Se sustituye por un saldo que se lleva. Las sentencias son idempotentes.
+    let _ = conn.execute("ALTER TABLE prestamos ADD COLUMN saldo_actual REAL;", []);
+    let _ = conn.execute("ALTER TABLE prestamos ADD COLUMN limite_credito REAL;", []);
+
+    // Relleno inicial: se parte del mismo valor que la interfaz venía
+    // mostrando, para que la migración no haga saltar el patrimonio. Es un
+    // punto de partida, no un dato bueno; se corrige declarando el saldo real
+    // del estado de cuenta, que es la única cifra que cuadra con el acreedor.
+    conn.execute(
+        "UPDATE prestamos SET saldo_actual = ROUND(
+             CASE
+                 WHEN cuotas_totales IS NULL OR cuotas_totales = 0 THEN monto_prestamo
+                 ELSE (CAST(cuotas_pendientes AS REAL) / cuotas_totales) * monto_prestamo
+             END, 2)
+         WHERE saldo_actual IS NULL;",
+        [],
+    )?;
+
+    // Libro de movimientos del financiamiento. Sin él, el saldo sería un
+    // número que muta sin rastro: no se podría reconstruir cómo llegó a valer
+    // lo que vale, ni distinguir una cuota de una corrección.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS movimientos_prestamo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prestamo_id INTEGER NOT NULL,
+            fecha TEXT NOT NULL,
+            tipo TEXT CHECK(tipo IN ('cuota', 'declaracion', 'disposicion')) NOT NULL,
+            monto REAL NOT NULL,
+            interes REAL NOT NULL DEFAULT 0.0,
+            capital REAL NOT NULL DEFAULT 0.0,
+            saldo_resultante REAL NOT NULL,
+            FOREIGN KEY (prestamo_id) REFERENCES prestamos(id) ON DELETE CASCADE
+        );",
+        [],
+    )?;
+
     // --- Resolución de H3: la caja de efectivo deja de identificarse por su
     // nombre. Buscarla con `WHERE nombre = 'Efectivo DOP'` hacía que un
     // renombrado —o un borrado, que la guarda de `eliminar_cuenta` no impedía

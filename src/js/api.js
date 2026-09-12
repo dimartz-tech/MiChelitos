@@ -262,6 +262,14 @@ const AppAPI = {
         return await invoke('pagar_cuota_prestamo', { id: Number(id) });
     },
 
+    async declararSaldoPrestamo(id, saldo) {
+        return await invoke('declarar_saldo_prestamo', { id: Number(id), saldo: Number(saldo) });
+    },
+
+    async obtenerMovimientosPrestamo(id) {
+        return await invoke('obtener_movimientos_prestamo', { id: Number(id) });
+    },
+
     async eliminarPrestamo(id) {
         return await invoke('eliminar_prestamo', { id: Number(id) });
     },
