@@ -345,6 +345,18 @@ pub fn crear_esquema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Vínculo con la tarjeta que cobra el financiamiento.
+    //
+    // Algunas facilidades no son productos independientes: viven bajo una
+    // tarjeta, comparten su ciclo de corte y se cobran dentro de su pago
+    // mínimo. Sin esta referencia, sus fechas habría que duplicarlas —y
+    // mantenerlas sincronizadas a mano— y nada advertiría de que su saldo y el
+    // balance de la tarjeta pueden solaparse.
+    let _ = conn.execute(
+        "ALTER TABLE prestamos ADD COLUMN tarjeta_id INTEGER REFERENCES tarjetas(id) ON DELETE SET NULL;",
+        [],
+    );
+
     // Libro de movimientos del financiamiento. Sin él, el saldo sería un
     // número que muta sin rastro: no se podría reconstruir cómo llegó a valer
     // lo que vale, ni distinguir una cuota de una corrección.

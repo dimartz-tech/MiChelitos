@@ -1239,3 +1239,136 @@ fn c39_el_limite_solo_se_admite_en_una_linea_revolvente() {
     assert!(con_limite("vehiculo").is_err(), "un amortizable no repone cupo");
     assert!(con_limite("flexible").is_ok());
 }
+
+// ---------------------------------------------------------------------------
+//  Vínculo con la tarjeta que cobra la facilidad (C40–C44)
+//
+//  Algunas líneas no son productos independientes: cuelgan de una tarjeta,
+//  comparten su ciclo de corte y se cobran dentro de su pago mínimo.
+// ---------------------------------------------------------------------------
+
+fn vincular_a_tarjeta(prestamo_id: i64, tarjeta_id: Option<i64>) -> Result<(), String> {
+    let (tasa, cuota, dia): (f64, f64, i32) = conexion()
+        .query_row(
+            "SELECT tasa_actual, monto_cuota, dia_pago FROM prestamos WHERE id = ?;",
+            [prestamo_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("leer condiciones");
+    crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
+        id: prestamo_id,
+        tasa_actual: tasa,
+        monto_cuota: cuota,
+        dia_pago: dia,
+        limite_credito: None,
+        tarjeta_id,
+    })
+}
+
+fn prestamo_por_id(id: i64) -> crate::Prestamo {
+    crate::obtener_prestamos()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.id == id)
+        .expect("financiamiento en la lista")
+}
+
+#[test]
+fn c40_una_facilidad_vinculada_toma_las_fechas_de_su_tarjeta() {
+    // Es la razón de ser del vínculo: no duplicar las fechas. Guardarlas dos
+    // veces obliga a sincronizarlas a mano, y se desincronizan.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0); // corte 15, límite de pago 5
+    let linea = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, Some(150_000.0));
+
+    // Antes de vincular manda su propio día, el que se registró: 25.
+    assert_eq!(prestamo_por_id(linea).dia_pago, 25);
+    assert_eq!(prestamo_por_id(linea).dia_corte, None);
+
+    vincular_a_tarjeta(linea, Some(tarjeta)).unwrap();
+
+    let p = prestamo_por_id(linea);
+    assert_eq!(p.dia_pago, 5, "vence cuando vence la tarjeta");
+    assert_eq!(p.dia_corte, Some(15), "corta cuando corta la tarjeta");
+    assert_eq!(p.tarjeta_nombre.as_deref(), Some("Tarjeta Ejemplo"));
+}
+
+#[test]
+fn c41_un_financiamiento_sin_vincular_conserva_su_propio_dia_de_pago() {
+    let _g = entorno_aislado();
+    let auto = crear_prestamo_de_prueba("vehiculo", 100_000.0, 12.0, 5_000.0, Some((100, 89)), None);
+
+    let p = prestamo_por_id(auto);
+    assert_eq!(p.dia_pago, 25, "el suyo, no el de ninguna tarjeta");
+    assert_eq!(p.dia_corte, None, "un préstamo suelto no tiene corte");
+    assert_eq!(p.tarjeta_id, None);
+}
+
+#[test]
+fn c42_desvincular_devuelve_el_financiamiento_a_sus_propias_fechas() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let linea = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, None);
+    vincular_a_tarjeta(linea, Some(tarjeta)).unwrap();
+    assert_eq!(prestamo_por_id(linea).dia_pago, 5);
+
+    vincular_a_tarjeta(linea, None).unwrap();
+
+    let p = prestamo_por_id(linea);
+    assert_eq!(p.dia_pago, 25, "vuelve el día registrado");
+    assert_eq!(p.dia_corte, None);
+}
+
+#[test]
+fn c43_actualizar_no_es_una_puerta_trasera_para_mover_el_saldo() {
+    // El saldo solo se mueve por una cuota o por una declaración, que dejan
+    // asiento. Si `actualizar_prestamo` pudiera tocarlo, habría una vía para
+    // cambiarlo sin rastro.
+    let _g = entorno_aislado();
+    let linea = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, None);
+    crate::pagar_cuota_prestamo(linea, Some("25/09/2026".into())).unwrap();
+    let saldo_antes = saldo_prestamo(linea);
+
+    crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
+        id: linea,
+        tasa_actual: 24.0,
+        monto_cuota: 7_000.0,
+        dia_pago: 10,
+        limite_credito: Some(200_000.0),
+        tarjeta_id: None,
+    })
+    .unwrap();
+
+    let p = prestamo_por_id(linea);
+    assert_importe(saldo_prestamo(linea), saldo_antes, "el saldo no se toca");
+    assert_importe(p.monto_prestamo, 100_000.0, "el desembolso original es histórico");
+    assert_importe(p.tasa_actual, 24.0, "las condiciones sí se corrigen");
+    assert_eq!(p.limite_credito, Some(200_000.0), "el límite se puede registrar después");
+    assert_eq!(
+        crate::obtener_movimientos_prestamo(linea).unwrap().len(),
+        1,
+        "no aparecen asientos nuevos"
+    );
+}
+
+#[test]
+fn c44_actualizar_rechaza_lo_que_no_tiene_sentido() {
+    let _g = entorno_aislado();
+    let auto = crear_prestamo_de_prueba("vehiculo", 100_000.0, 12.0, 5_000.0, Some((100, 89)), None);
+    let base = |limite, tarjeta, dia| crate::ActualizarPrestamoInput {
+        id: auto,
+        tasa_actual: 12.0,
+        monto_cuota: 5_000.0,
+        dia_pago: dia,
+        limite_credito: limite,
+        tarjeta_id: tarjeta,
+    };
+
+    assert!(crate::actualizar_prestamo(base(Some(50_000.0), None, 25)).is_err(),
+        "un amortizable no repone cupo");
+    assert!(crate::actualizar_prestamo(base(None, Some(999_999), 25)).is_err(),
+        "no se vincula a una tarjeta inexistente");
+    assert!(crate::actualizar_prestamo(base(None, None, 32)).is_err(),
+        "el día 32 no existe");
+    assert!(crate::actualizar_prestamo(base(None, None, 25)).is_ok());
+}

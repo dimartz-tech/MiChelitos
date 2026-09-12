@@ -733,6 +733,7 @@ class AppUI {
         const tarjetas = await AppAPI.obtenerTarjetas();
         const cuentas = await AppAPI.obtenerCuentas();
         const bonificaciones = await AppAPI.obtenerBonificaciones();
+        const prestamos = await AppAPI.obtenerPrestamos();
 
         const hoy = new Date();
         const hoyStr = hoy.getDate().toString().padStart(2, '0') + '/' + (hoy.getMonth() + 1).toString().padStart(2, '0') + '/' + hoy.getFullYear();
@@ -808,6 +809,13 @@ class AppUI {
                             const balUsd = this.etiquetaBalanceTarjeta(t.balance_dolares, 'USD');
 
                             const tarjetaAlDia = (t.balance_corte_pesos <= 0 && t.balance_corte_dolares <= 0);
+
+                            // Una facilidad que cuelga de esta tarjeta se cobra dentro de su
+                            // pago. Su saldo se contabiliza aparte en el patrimonio, así que
+                            // si además entrara en el balance de la tarjeta se contaría dos
+                            // veces. El aviso está aquí, junto al abono, porque es el momento
+                            // en que se decide qué cifra registrar.
+                            const facilidades = prestamos.filter(p => p.tarjeta_id === t.id);
                             const tEscaped = JSON.stringify(t).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
 
                             return `
@@ -825,6 +833,15 @@ class AppUI {
                                             `}
                                         </div>
                                     </div>
+
+                                    ${facilidades.length > 0 ? `
+                                        <div style="background:rgba(255,193,7,0.08); border:1px solid rgba(255,193,7,0.3); border-radius:var(--radius-sm); padding:0.5rem 0.6rem; font-size:0.7rem; color:var(--text-secondary);">
+                                            ⚠️ Esta tarjeta cobra
+                                            ${facilidades.map(f => `<strong>${f.institucion_financiera}</strong> (cuota DOP ${this.formatMoney(f.monto_cuota)})`).join(', ')}.
+                                            Al conciliar el balance, no incluyas la cuota si ya cuenta como saldo de la facilidad:
+                                            se duplicaría en el patrimonio.
+                                        </div>
+                                    ` : ''}
 
                                     <!-- Pesos Section -->
                                     <div>
@@ -1692,6 +1709,14 @@ class AppUI {
                                                 `}
                                             </td>
                                             <td>
+                                                ${p.tarjeta_nombre ? `
+                                                    <div style="font-size:0.7rem; color:var(--accent-primary); font-weight:bold;" title="Esta facilidad se cobra dentro del pago de la tarjeta.">
+                                                        💳 ${p.tarjeta_nombre}
+                                                    </div>
+                                                ` : ''}
+                                                ${p.dia_corte != null ? `
+                                                    <div style="font-size:0.7rem; color:var(--text-muted);">Corte día ${p.dia_corte}</div>
+                                                ` : ''}
                                                 Día ${p.dia_pago}
                                                 ${p.alerta_pago ? `
                                                     <br><span class="badge danger" style="padding:1px 6px; font-size:0.65rem; text-transform:none; margin-top:0.2rem;">${p.dias_pago_msg}</span>
@@ -1705,6 +1730,7 @@ class AppUI {
                                                         <button onclick="appUI.handlePagarCuota(${p.id})" class="btn" style="padding: 0.3rem 0.6rem; font-size:0.75rem; background: linear-gradient(135deg, var(--color-success), #059669); color: white;" title="Aplica la cuota: el interés del mes y el capital que amortiza.">Abonar</button>
                                                     ` : ''}
                                                     <button onclick="appUI.handleDeclararSaldo(${p.id}, ${p.saldo_actual})" class="btn" style="padding: 0.3rem 0.6rem; font-size:0.75rem;" title="Fija el saldo al que dice el estado de cuenta.">Conciliar</button>
+                                                    <button onclick='appUI.abrirEdicionPrestamo(${JSON.stringify(p).replace(/'/g, "&#39;")})' class="btn" style="padding: 0.3rem 0.6rem; font-size:0.75rem;" title="Corrige tasa, cuota, límite y la tarjeta que lo cobra.">Editar</button>
                                                     <button onclick="appUI.handleEliminarPrestamo(${p.id})" class="btn btn-danger" style="padding: 0.3rem 0.5rem; font-size:0.75rem;">🗑️</button>
                                                 </div>
                                             </td>
@@ -1719,9 +1745,18 @@ class AppUI {
                 </div>
             </div>
         `;
+
+        // El formulario se pinta con un tipo ya seleccionado, así que el
+        // `onchange` no llega a dispararse. Sin esta llamada, los campos
+        // condicionales se quedan en un estado que no corresponde al tipo
+        // mostrado — y el límite de la línea resultaba imposible de registrar.
+        this.toggleCamposPrestamos(document.getElementById('pre_tip')?.value ?? 'consumo');
     }
 
     toggleCamposPrestamos(val) {
+        // Se llama también al pintar el formulario, no solo desde el
+        // `onchange`: si el tipo llegara ya seleccionado, el campo de límite
+        // se quedaba oculto y no había forma de registrarlo.
         const container = document.getElementById('pre_campos_cuotas');
         const tot = document.getElementById('pre_tot');
         const pen = document.getElementById('pre_pen');
@@ -2390,6 +2425,123 @@ class AppUI {
             </div>
         `;
         document.body.appendChild(overlay);
+    }
+
+    /**
+     * Corrige las condiciones de un financiamiento ya registrado.
+     *
+     * Sin esta vía, cambiar la tasa, la cuota o el límite obligaba a borrar el
+     * registro y crearlo de nuevo — lo que se lleva por delante el libro de
+     * movimientos. El saldo no se edita aquí a propósito: tiene su propia vía
+     * en «Conciliar», que deja asiento de la diferencia.
+     */
+    async abrirEdicionPrestamo(p) {
+        const tarjetas = await AppAPI.obtenerTarjetas();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = `modal-pre-${p.id}`;
+        overlay.innerHTML = `
+            <div class="card" style="width: 460px; background: var(--bg-surface-opaque);">
+                <h3 style="font-family: var(--font-heading); margin-bottom:0.4rem;">✏️ Condiciones del financiamiento</h3>
+                <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
+                    ${p.institucion_financiera} — <strong style="text-transform:capitalize;">${p.tipo_prestamo}</strong><br>
+                    El saldo no se edita aquí: usa «Conciliar», que deja constancia de la diferencia.
+                </p>
+                <form onsubmit="appUI.handleEdicionPrestamo(event, ${p.id})">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edp_tas_${p.id}">Tasa anual (%)</label>
+                            <input type="number" step="0.01" id="edp_tas_${p.id}" class="form-control" value="${p.tasa_actual}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edp_cuo_${p.id}">Monto cuota</label>
+                            <input type="number" step="0.01" id="edp_cuo_${p.id}" class="form-control" value="${p.monto_cuota}" required>
+                        </div>
+                    </div>
+                    ${p.es_revolvente ? `
+                        <div class="form-group">
+                            <label for="edp_lim_${p.id}">Límite de crédito</label>
+                            <input type="number" step="0.01" id="edp_lim_${p.id}" class="form-control"
+                                   value="${p.limite_credito ?? ''}" placeholder="Sin declarar">
+                            <small style="font-size:0.7rem; color:var(--text-muted);">Al pagar, lo amortizado vuelve a quedar disponible.</small>
+                        </div>
+                    ` : ''}
+                    <div class="form-group">
+                        <label for="edp_tar_${p.id}">Tarjeta que lo cobra</label>
+                        <select id="edp_tar_${p.id}" class="form-control" onchange="appUI.avisarFechasDerivadas(${p.id})">
+                            <option value="">Ninguna — se paga por su cuenta</option>
+                            ${tarjetas.map(t => `
+                                <option value="${t.id}" data-pago="${t.fecha_limite_pago}" data-corte="${t.fecha_corte}" ${p.tarjeta_id === t.id ? 'selected' : ''}>
+                                    ${t.entidad} — ${t.nombre_tarjeta}
+                                </option>
+                            `).join('')}
+                        </select>
+                        <div id="edp_aviso_${p.id}" style="font-size:0.7rem; color:var(--text-secondary); margin-top:0.4rem;"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="edp_dia_${p.id}">Día de pago propio</label>
+                        <input type="number" min="1" max="31" id="edp_dia_${p.id}" class="form-control" value="${p.dia_pago}" required>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
+                        <button type="button" onclick="document.getElementById('modal-pre-${p.id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="submit" class="btn">Guardar</button>
+                    </div>
+                </form>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        this.avisarFechasDerivadas(p.id);
+    }
+
+    /**
+     * Explica que vincular una facilidad a una tarjeta le cede las fechas.
+     *
+     * Sin el aviso, el día de pago propio del financiamiento seguiría visible
+     * y editable mientras deja de tener efecto, que es la forma más fiable de
+     * que alguien lo corrija y no entienda por qué no cambia nada.
+     */
+    avisarFechasDerivadas(id) {
+        const select = document.getElementById(`edp_tar_${id}`);
+        const aviso = document.getElementById(`edp_aviso_${id}`);
+        const dia = document.getElementById(`edp_dia_${id}`);
+        if (!select || !aviso) return;
+
+        const opcion = select.selectedOptions[0];
+        const vinculada = select.value !== '';
+
+        if (vinculada) {
+            aviso.innerHTML = `Toma las fechas de la tarjeta: <strong>corte día ${opcion.dataset.corte}</strong>,
+                               <strong>pago día ${opcion.dataset.pago}</strong>. El día propio de abajo queda sin efecto.`;
+            if (dia) dia.disabled = true;
+        } else {
+            aviso.textContent = '';
+            if (dia) dia.disabled = false;
+        }
+    }
+
+    async handleEdicionPrestamo(e, id) {
+        e.preventDefault();
+        const limiteCampo = document.getElementById(`edp_lim_${id}`);
+        const limiteTexto = limiteCampo ? limiteCampo.value : '';
+        const tarjeta = document.getElementById(`edp_tar_${id}`).value;
+
+        try {
+            await AppAPI.actualizarPrestamo({
+                id: Number(id),
+                tasa_actual: Number(document.getElementById(`edp_tas_${id}`).value),
+                monto_cuota: Number(document.getElementById(`edp_cuo_${id}`).value),
+                dia_pago: Number(document.getElementById(`edp_dia_${id}`).value),
+                // En blanco significa «no declarado», que no es lo mismo que cero.
+                limite_credito: limiteTexto === '' ? null : Number(limiteTexto),
+                tarjeta_id: tarjeta === '' ? null : Number(tarjeta),
+            });
+            this.showToast("Condiciones actualizadas.");
+            document.getElementById(`modal-pre-${id}`)?.remove();
+            await this.render('prestamos');
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
     }
 
     previsualizarTasa(id, montoOrigen) {
