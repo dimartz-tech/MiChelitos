@@ -187,7 +187,15 @@ pub struct Prestamo {
     saldo_actual: f64,
     /// Solo en líneas revolventes, y solo si se ha declarado.
     limite_credito: Option<f64>,
+    /// Tarjeta que cobra este financiamiento, si es una facilidad suya.
+    tarjeta_id: Option<i64>,
     // Enriquecidos
+    /// Nombre de la tarjeta vinculada, para no consultarla desde la vista.
+    tarjeta_nombre: Option<String>,
+    /// Día de corte. Es el de la tarjeta cuando la facilidad cuelga de una:
+    /// no se guarda aparte porque mantener dos copias sincronizadas a mano es
+    /// justo la clase de dato que se desincroniza.
+    dia_corte: Option<i32>,
     /// Cupo por disponer. `None` cuando no es revolvente o falta el límite.
     disponible: Option<f64>,
     es_revolvente: bool,
@@ -1057,7 +1065,11 @@ fn guardar_capital(data: Value) -> Result<(), String> {
 fn obtener_prestamos() -> Result<Vec<Prestamo>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT id, tipo_prestamo, monto_prestamo, institucion_financiera, tasa_actual, cuotas_totales, cuotas_pendientes, monto_cuota, dia_pago, saldo_actual, limite_credito FROM prestamos ORDER BY id DESC;"
+        "SELECT p.id, p.tipo_prestamo, p.monto_prestamo, p.institucion_financiera, p.tasa_actual,
+                p.cuotas_totales, p.cuotas_pendientes, p.monto_cuota, p.dia_pago, p.saldo_actual,
+                p.limite_credito, p.tarjeta_id, t.nombre_tarjeta, t.fecha_corte, t.fecha_limite_pago
+         FROM prestamos p LEFT JOIN tarjetas t ON t.id = p.tarjeta_id
+         ORDER BY p.id DESC;"
     ).map_err(|e| e.to_string())?;
 
     let hoy = Local::now();
@@ -1075,6 +1087,15 @@ fn obtener_prestamos() -> Result<Vec<Prestamo>, String> {
         let dia_pago: i32 = row.get(8)?;
         let saldo_actual: f64 = row.get::<_, Option<f64>>(9)?.unwrap_or(monto_prestamo);
         let limite_credito: Option<f64> = row.get(10)?;
+        let tarjeta_id: Option<i64> = row.get(11)?;
+        let tarjeta_nombre: Option<String> = row.get(12)?;
+        let dia_corte: Option<i32> = row.get(13)?;
+        let vencimiento_de_la_tarjeta: Option<i32> = row.get(14)?;
+
+        // Una facilidad que cuelga de una tarjeta se paga cuando se paga la
+        // tarjeta. Su `dia_pago` propio deja de mandar: sería una segunda
+        // copia de un dato que ya vive en otro sitio.
+        let dia_pago = vencimiento_de_la_tarjeta.unwrap_or(dia_pago);
 
         // El cupo liberado solo tiene sentido en una línea revolvente: es lo
         // que hace visible que pagar devuelve capacidad de disponer.
@@ -1127,6 +1148,9 @@ fn obtener_prestamos() -> Result<Vec<Prestamo>, String> {
             dia_pago,
             saldo_actual,
             limite_credito,
+            tarjeta_id,
+            tarjeta_nombre,
+            dia_corte,
             disponible,
             es_revolvente,
             alerta_pago,
@@ -1209,6 +1233,74 @@ fn crear_prestamo(input: PrestamoInput) -> Result<i64, String> {
     ).map_err(|e| e.to_string())?;
 
     Ok(conn.last_insert_rowid())
+}
+
+#[derive(Deserialize)]
+struct ActualizarPrestamoInput {
+    id: i64,
+    tasa_actual: f64,
+    monto_cuota: f64,
+    dia_pago: i32,
+    limite_credito: Option<f64>,
+    tarjeta_id: Option<i64>,
+}
+
+/// Corrige las condiciones de un financiamiento ya registrado.
+///
+/// Existe porque los datos que definen un financiamiento **cambian**: la tasa
+/// se revisa, la cuota se recalcula y el límite de una línea se amplía. Sin
+/// esta vía, corregir cualquiera de ellos obligaba a borrar el registro y
+/// crearlo de nuevo, lo que se lleva por delante el libro de movimientos.
+///
+/// Deliberadamente **no** toca dos campos. `monto_prestamo` es un hecho
+/// histórico, el desembolso original, y no se reescribe. `saldo_actual` tiene
+/// su propia vía en `declarar_saldo_prestamo`, que deja asiento de la
+/// diferencia; permitir editarlo aquí sería una puerta trasera para moverlo
+/// sin dejar rastro.
+#[tauri::command]
+fn actualizar_prestamo(input: ActualizarPrestamoInput) -> Result<(), String> {
+    if !(1..=31).contains(&input.dia_pago) {
+        return Err("El día de pago debe ser un día válido del mes (1-31).".to_string());
+    }
+
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+
+    let tipo: String = conn
+        .query_row("SELECT tipo_prestamo FROM prestamos WHERE id = ?;", [input.id], |r| r.get(0))
+        .map_err(|_| format!("No se encontró el financiamiento {}.", input.id))?;
+
+    let es_revolvente = TipoPrestamo::desde_codigo(&tipo)
+        .map(|t| t.es_revolvente())
+        .unwrap_or(false);
+    if input.limite_credito.is_some() && !es_revolvente {
+        return Err("Solo una línea revolvente tiene límite de crédito.".to_string());
+    }
+
+    if let Some(tarjeta_id) = input.tarjeta_id {
+        let existe: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tarjetas WHERE id = ?;", [tarjeta_id], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        if existe == 0 {
+            return Err(format!("No se encontró la tarjeta {}.", tarjeta_id));
+        }
+    }
+
+    conn.execute(
+        "UPDATE prestamos SET tasa_actual = ?, monto_cuota = ?, dia_pago = ?,
+                              limite_credito = ?, tarjeta_id = ?
+         WHERE id = ?;",
+        (
+            input.tasa_actual,
+            input.monto_cuota,
+            input.dia_pago,
+            input.limite_credito,
+            input.tarjeta_id,
+            input.id,
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 /// Lee saldo, tasa y cuota de un financiamiento dentro de una transacción.
@@ -1841,6 +1933,7 @@ fn main() {
             obtener_prestamos,
             crear_prestamo,
             pagar_cuota_prestamo,
+            actualizar_prestamo,
             declarar_saldo_prestamo,
             obtener_movimientos_prestamo,
             eliminar_prestamo,
