@@ -1101,3 +1101,141 @@ fn c33_una_bonificacion_sin_concepto_o_en_cero_se_rechaza() {
         "Cashback".into(), None).is_err(), "cero no es una bonificación");
     assert_importe(deuda_pesos(tarjeta), 10000.0, "ningún saldo se movió");
 }
+
+// ---------------------------------------------------------------------------
+//  Saldo vivo de financiamientos (C34–C39)
+//
+//  El pasivo se deducía de `monto_prestamo` y la fracción de cuotas
+//  pendientes. En una línea revolvente, que no tiene cuotas contadas, esa
+//  fracción no existía y el pasivo quedaba clavado en el monto desembolsado.
+// ---------------------------------------------------------------------------
+
+/// Registra un financiamiento. `cuotas` a `None` lo hace una línea revolvente.
+fn crear_prestamo_de_prueba(
+    tipo: &str,
+    monto: f64,
+    tasa: f64,
+    cuota: f64,
+    cuotas: Option<(i32, i32)>,
+    limite: Option<f64>,
+) -> i64 {
+    let (totales, pendientes) = match cuotas {
+        Some((t, p)) => (Some(t), Some(p)),
+        None => (None, None),
+    };
+    let c = conexion();
+    c.execute(
+        "INSERT INTO prestamos (tipo_prestamo, monto_prestamo, institucion_financiera,
+                                tasa_actual, cuotas_totales, cuotas_pendientes,
+                                monto_cuota, dia_pago, saldo_actual, limite_credito)
+         VALUES (?, ?, 'Banco Ejemplo', ?, ?, ?, ?, 25, ?, ?);",
+        params![tipo, monto, tasa, totales, pendientes, cuota, monto, limite],
+    )
+    .expect("insertar financiamiento de prueba");
+    c.last_insert_rowid()
+}
+
+fn saldo_prestamo(id: i64) -> f64 {
+    conexion()
+        .query_row("SELECT saldo_actual FROM prestamos WHERE id = ?;", [id], |r| r.get(0))
+        .expect("leer saldo")
+}
+
+fn cuotas_pendientes(id: i64) -> Option<i32> {
+    conexion()
+        .query_row("SELECT cuotas_pendientes FROM prestamos WHERE id = ?;", [id], |r| r.get(0))
+        .expect("leer cuotas")
+}
+
+#[test]
+fn c34_pagar_una_cuota_de_la_linea_revolvente_baja_el_saldo() {
+    // El caso que motivó todo: antes el comando llevaba
+    // `WHERE cuotas_pendientes IS NOT NULL` y la línea nunca se tocaba.
+    let _g = entorno_aislado();
+    // 100 000 al 12 % anual: 1 % mensual = 1 000 de interés, 4 000 de capital.
+    let id = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, Some(150_000.0));
+
+    crate::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
+
+    assert_importe(saldo_prestamo(id), 96_000.0, "el saldo baja por el capital, no por la cuota");
+}
+
+#[test]
+fn c35_la_cuota_no_reduce_la_deuda_por_su_importe_entero() {
+    let _g = entorno_aislado();
+    let id = crear_prestamo_de_prueba("vehiculo", 100_000.0, 12.0, 5_000.0, Some((100, 89)), None);
+
+    crate::pagar_cuota_prestamo(id, Some("17/09/2026".into())).unwrap();
+
+    assert_importe(saldo_prestamo(id), 96_000.0, "5 000 de cuota amortizan 4 000");
+    assert_eq!(cuotas_pendientes(id), Some(88), "el contador sí baja de uno en uno");
+}
+
+#[test]
+fn c36_cada_cuota_queda_asentada_con_su_desglose() {
+    let _g = entorno_aislado();
+    let id = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, Some(150_000.0));
+
+    crate::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
+    crate::pagar_cuota_prestamo(id, Some("25/10/2026".into())).unwrap();
+
+    let movimientos = crate::obtener_movimientos_prestamo(id).unwrap();
+    assert_eq!(movimientos.len(), 2, "un asiento por cuota");
+
+    // Vienen en orden descendente: el más reciente primero.
+    let ultimo = &movimientos[0];
+    assert_eq!(ultimo.tipo, "cuota");
+    assert_importe(ultimo.interes, 960.0, "1 % de 96 000");
+    assert_importe(ultimo.capital, 4_040.0, "5 000 - 960");
+    assert_importe(ultimo.saldo_resultante, 91_960.0, "saldo tras la segunda cuota");
+    assert_importe(saldo_prestamo(id), ultimo.saldo_resultante, "el saldo es el del asiento");
+}
+
+#[test]
+fn c37_declarar_el_saldo_del_estado_lo_fija_y_deja_constancia_de_la_diferencia() {
+    // La estimación por cuotas nunca cuadra al centavo con el acreedor. La
+    // declaración corrige, pero no en silencio.
+    let _g = entorno_aislado();
+    let id = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, Some(150_000.0));
+    crate::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
+    assert_importe(saldo_prestamo(id), 96_000.0, "estimación");
+
+    crate::declarar_saldo_prestamo(id, 96_250.75, Some("30/09/2026".into())).unwrap();
+
+    assert_importe(saldo_prestamo(id), 96_250.75, "manda el estado de cuenta");
+    let movimientos = crate::obtener_movimientos_prestamo(id).unwrap();
+    assert_eq!(movimientos[0].tipo, "declaracion");
+    assert_importe(movimientos[0].monto, 250.75, "la diferencia queda registrada");
+}
+
+#[test]
+fn c38_una_cuota_que_no_cubre_el_interes_hace_crecer_la_deuda() {
+    // No se recorta en cero. Es la misma decisión que en H5: un saldo que se
+    // mueve en la dirección incómoda se muestra, no se descarta.
+    let _g = entorno_aislado();
+    let id = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 500.0, None, Some(150_000.0));
+
+    crate::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
+
+    assert_importe(saldo_prestamo(id), 100_500.0, "500 de cuota contra 1 000 de interés");
+}
+
+#[test]
+fn c39_el_limite_solo_se_admite_en_una_linea_revolvente() {
+    let _g = entorno_aislado();
+    let con_limite = |tipo: &str| crate::crear_prestamo(crate::PrestamoInput {
+        tipo_prestamo: tipo.into(),
+        monto_prestamo: 100_000.0,
+        institucion_financiera: "Banco Ejemplo".into(),
+        tasa_actual: 12.0,
+        cuotas_totales: Some(60),
+        cuotas_pendientes: Some(60),
+        monto_cuota: 5_000.0,
+        dia_pago: 25,
+        saldo_actual: None,
+        limite_credito: Some(150_000.0),
+    });
+
+    assert!(con_limite("vehiculo").is_err(), "un amortizable no repone cupo");
+    assert!(con_limite("flexible").is_ok());
+}

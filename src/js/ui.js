@@ -1619,6 +1619,17 @@ class AppUI {
 
                         <div class="form-row">
                             <div class="form-group">
+                                <label for="pre_sal" title="Capital que se debe hoy. En blanco si el financiamiento acaba de desembolsarse.">Saldo actual</label>
+                                <input type="number" step="0.01" id="pre_sal" class="form-control" placeholder="Igual al monto">
+                            </div>
+                            <div id="pre_grupo_limite" class="form-group" style="display:none;">
+                                <label for="pre_lim" title="Cupo aprobado. Al pagar, la diferencia con el saldo vuelve a quedar disponible.">Límite de crédito</label>
+                                <input type="number" step="0.01" id="pre_lim" class="form-control" placeholder="0.00">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
                                 <label for="pre_cuo">Monto Cuota *</label>
                                 <input type="number" step="0.01" id="pre_cuo" class="form-control" placeholder="0.00" required>
                             </div>
@@ -1641,7 +1652,7 @@ class AppUI {
                                 <thead>
                                     <tr>
                                         <th>Banco / Préstamo</th>
-                                        <th>Monto Inicial</th>
+                                        <th>Saldo actual</th>
                                         <th>Tasa</th>
                                         <th>Cuota</th>
                                         <th>Restantes</th>
@@ -1656,7 +1667,21 @@ class AppUI {
                                                 <strong style="text-transform:capitalize;">${p.tipo_prestamo}</strong><br>
                                                 <span style="font-size:0.75rem; color:var(--text-secondary);">${p.institucion_financiera}</span>
                                             </td>
-                                            <td class="amount">DOP ${this.formatMoney(p.monto_prestamo)}</td>
+                                            <td class="amount">
+                                                DOP ${this.formatMoney(p.saldo_actual)}
+                                                <div style="font-size:0.7rem; color:var(--text-muted); font-weight:normal;">
+                                                    de DOP ${this.formatMoney(p.monto_prestamo)}
+                                                </div>
+                                                ${p.disponible != null ? `
+                                                    <div style="font-size:0.7rem; color:#10b981; font-weight:bold;">
+                                                        Disponible: DOP ${this.formatMoney(p.disponible)}
+                                                    </div>
+                                                ` : p.es_revolvente ? `
+                                                    <div style="font-size:0.7rem; color:var(--text-muted); font-weight:normal; font-style:italic;">
+                                                        Sin límite declarado
+                                                    </div>
+                                                ` : ''}
+                                            </td>
                                             <td>${p.tasa_actual}%</td>
                                             <td class="amount expense">DOP ${this.formatMoney(p.monto_cuota)}</td>
                                             <td>
@@ -1676,9 +1701,10 @@ class AppUI {
                                             </td>
                                             <td>
                                                 <div style="display:flex; gap:0.4rem; align-items:center;">
-                                                    ${p.tipo_prestamo !== 'flexible' && p.cuotas_pendientes > 0 ? `
-                                                        <button onclick="appUI.handlePagarCuota(${p.id})" class="btn" style="padding: 0.3rem 0.6rem; font-size:0.75rem; background: linear-gradient(135deg, var(--color-success), #059669); color: white;">Abonar</button>
+                                                    ${p.es_revolvente || p.cuotas_pendientes > 0 ? `
+                                                        <button onclick="appUI.handlePagarCuota(${p.id})" class="btn" style="padding: 0.3rem 0.6rem; font-size:0.75rem; background: linear-gradient(135deg, var(--color-success), #059669); color: white;" title="Aplica la cuota: el interés del mes y el capital que amortiza.">Abonar</button>
                                                     ` : ''}
+                                                    <button onclick="appUI.handleDeclararSaldo(${p.id}, ${p.saldo_actual})" class="btn" style="padding: 0.3rem 0.6rem; font-size:0.75rem;" title="Fija el saldo al que dice el estado de cuenta.">Conciliar</button>
                                                     <button onclick="appUI.handleEliminarPrestamo(${p.id})" class="btn btn-danger" style="padding: 0.3rem 0.5rem; font-size:0.75rem;">🗑️</button>
                                                 </div>
                                             </td>
@@ -1700,16 +1726,24 @@ class AppUI {
         const tot = document.getElementById('pre_tot');
         const pen = document.getElementById('pre_pen');
 
+        // El límite solo significa algo donde hay cupo que reponer; el backend
+        // rechaza un amortizable que lo traiga, así que la vista no lo ofrece.
+        const grupoLimite = document.getElementById('pre_grupo_limite');
+        const lim = document.getElementById('pre_lim');
+
         if (val === 'flexible') {
             container.style.display = 'none';
             tot.required = false;
             pen.required = false;
             tot.value = '';
             pen.value = '';
+            if (grupoLimite) grupoLimite.style.display = 'block';
         } else {
             container.style.display = 'grid';
             tot.required = true;
             pen.required = true;
+            if (grupoLimite) grupoLimite.style.display = 'none';
+            if (lim) lim.value = '';
         }
     }
 
@@ -1739,16 +1773,11 @@ class AppUI {
         const TASA_USD_A_DOP = 60.0;
         const totalTarjetas = tarjetas.reduce((sum, t) => sum + t.balance_pesos + (t.balance_dolares * TASA_USD_A_DOP), 0);
         
-        let totalPrestamos = 0.0;
-        prestamos.forEach(p => {
-            if (p.tipo_prestamo === 'flexible') {
-                totalPrestamos += p.monto_prestamo;
-            } else {
-                if (p.cuotas_totales > 0) {
-                    totalPrestamos += (p.cuotas_pendientes / p.cuotas_totales) * p.monto_prestamo;
-                }
-            }
-        });
+        // El pasivo es el saldo que se lleva, no una fracción del monto
+        // original. La fracción suponía amortización lineal —falsa en todo
+        // préstamo real— y en una línea revolvente ni se aplicaba: sin cuotas
+        // contadas, el pasivo se quedaba en el monto desembolsado para siempre.
+        const totalPrestamos = prestamos.reduce((sum, p) => sum + p.saldo_actual, 0);
 
         const totalPasivos = totalTarjetas + totalPrestamos;
         const patrimonioNeto = totalActivos - totalPasivos;
@@ -2920,6 +2949,11 @@ class AppUI {
         const pen = document.getElementById('pre_pen') && document.getElementById('pre_pen').value ? Number(document.getElementById('pre_pen').value) : null;
         const cuo = Number(document.getElementById('pre_cuo').value);
         const dia = Number(document.getElementById('pre_dia').value);
+        const salTexto = document.getElementById('pre_sal')?.value ?? '';
+        const limTexto = document.getElementById('pre_lim')?.value ?? '';
+        // En blanco significa "no declarado", que no es lo mismo que cero.
+        const sal = salTexto === '' ? null : Number(salTexto);
+        const lim = tip === 'flexible' && limTexto !== '' ? Number(limTexto) : null;
 
         try {
             await AppAPI.crearPrestamo({
@@ -2930,12 +2964,44 @@ class AppUI {
                 cuotas_totales: tot,
                 cuotas_pendientes: pen,
                 monto_cuota: cuo,
-                dia_pago: dia
+                dia_pago: dia,
+                saldo_actual: sal,
+                limite_credito: lim
             });
             this.showToast("Financiamiento registrado con éxito.");
             await this.render('prestamos');
         } catch (err) {
             // Captura y presentación de la excepción del backend de Rust
+            this.showToast(err.toString(), 'error');
+        }
+    }
+
+    /**
+     * Fija el saldo al del estado de cuenta.
+     *
+     * La aplicación estima el saldo cuota a cuota, y ninguna estimación cuadra
+     * al centavo con el acreedor: comisiones, seguros y días de gracia no
+     * entran en la fórmula. Esta es la vía para corregirlo, y la diferencia
+     * queda asentada como un movimiento propio en lugar de aplicarse a ciegas.
+     */
+    async handleDeclararSaldo(id, saldoActual) {
+        const respuesta = prompt(
+            `Saldo que muestra el estado de cuenta (la aplicación estima DOP ${this.formatMoney(saldoActual)}):`,
+            Number(saldoActual).toFixed(2)
+        );
+        if (respuesta === null) return;
+
+        const saldo = Number(respuesta);
+        if (!Number.isFinite(saldo)) {
+            this.showToast("El saldo debe ser un número.", 'error');
+            return;
+        }
+
+        try {
+            await AppAPI.declararSaldoPrestamo(id, saldo);
+            this.showToast("Saldo conciliado con el estado de cuenta.");
+            await this.render('prestamos');
+        } catch (err) {
             this.showToast(err.toString(), 'error');
         }
     }
