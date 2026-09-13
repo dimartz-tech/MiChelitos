@@ -4,7 +4,99 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.3.5 (Versión Actual) - 2026-08-17
+## 🚀 Versión 1.6.0 (Versión Actual) - 2026-09-13
+**Financiamientos con saldo vivo, vinculados a la tarjeta que los cobra, y vista de pasivos agrupada por acreedor.**
+
+### 🏦 Financiamientos
+* **El pasivo deja de deducirse y pasa a llevarse**:
+  * El saldo de cada financiamiento se registra y se actualiza, en lugar de calcularse a partir del monto original y la fracción de cuotas pendientes.
+  * Esa fórmula suponía amortización lineal —falsa en todo préstamo real, donde las primeras cuotas son casi todo interés— y en una línea de crédito ni siquiera se aplicaba: al no tener cuotas contadas, el pasivo quedaba fijado en el monto desembolsado y ningún pago lo movía.
+* **Reparto de la cuota entre interés y capital**:
+  * Al abonar, el saldo baja por el capital que la cuota amortiza, no por su importe íntegro. El interés del período se calcula sobre el saldo vigente y se redondea al centavo.
+  * Se admite el capital negativo —cuota que no cubre el interés, deuda que crece— y el que excede el saldo. Ninguno se recorta: un saldo que se mueve en la dirección incómoda debe verse.
+* **Libro de movimientos**:
+  * Cada cuota queda asentada con su desglose y el saldo resultante, de modo que el saldo pueda reconstruirse en lugar de ser un número que muta sin rastro.
+* **Conciliación contra el estado de cuenta**:
+  * Nueva acción para fijar el saldo al que declara el acreedor. La estimación cuota a cuota nunca cuadra al centavo —comisiones, seguros y días de gracia quedan fuera de la fórmula—, y la corrección se asienta con la diferencia que introdujo en vez de aplicarse en silencio.
+* **Edición de condiciones**:
+  * Tasa, cuota, día de pago, límite y tarjeta vinculada son corregibles sin borrar y recrear el registro, que destruía el libro de movimientos.
+  * El monto original no se reescribe por ser un hecho histórico, y el saldo solo se mueve por su vía propia.
+* **Líneas de crédito revolventes**:
+  * Registro del límite aprobado y cálculo del cupo disponible como la diferencia con el saldo, que es lo que hace visible que abonar libera capacidad de disponer.
+
+### 💳 Facilidades acopladas a una tarjeta
+* **Vínculo entre un financiamiento y la tarjeta que lo cobra**:
+  * Algunas facilidades no son productos independientes: viven bajo una tarjeta, comparten su ciclo y se cobran dentro de su pago.
+  * Al vincularlas, el día de corte y el de vencimiento se derivan de la tarjeta en lugar de guardarse por duplicado, porque dos copias mantenidas a mano se desincronizan.
+* **Aviso de doble conteo**:
+  * El saldo de una facilidad y el balance de su tarjeta pueden solaparse. La aplicación lo advierte en el punto donde se decide qué cifra registrar, junto al abono y a la conciliación.
+
+### 🎨 Vista de pasivos
+* **Agrupación por acreedor**:
+  * Las facilidades se dibujan dentro de la tarjeta que las cobra, sangradas y unidas por una guía; los financiamientos sueltos van en su propio grupo. El vínculo pasa a ser posición en vez de una línea de texto.
+* **Resumen de cabecera**:
+  * Pasivo total, carga mensual, cupo disponible y próximo vencimiento, con el desglose por naturaleza del pasivo en una sola barra.
+* **Menú de acciones por fila**, que releva a los cuatro botones que ocupaban cada línea del listado.
+
+### 🛠️ Correcciones de conducta
+* **La caja de efectivo se identifica por su papel, no por su nombre**:
+  * Se localizaba con una comparación de texto literal. Si la fila se renombraba o se eliminaba —cosa que la guarda de borrado no impedía, porque ningún gasto la referenciaba por identificador—, el gasto quedaba registrado sin mover ningún saldo y la operación devolvía éxito.
+  * Los gastos en efectivo históricos reciben la referencia real que les corresponde y su ausencia pasa a ser un error visible.
+* **Un pago con tarjeta exige indicar la tarjeta**:
+  * Antes, un gasto con método «tarjeta» y sin tarjeta indicada se registraba igual y ninguna deuda se incrementaba.
+
+---
+
+## 🚀 Versión 1.5.0 - 2026-09-09
+**Conversión de divisa con tasa declarada, bonificaciones, edición de suscripciones y saldo a favor en tarjetas.**
+
+### 💱 Conversión de divisa y liquidación
+* **Gasto en divisa con tasa declarada**:
+  * Un consumo en una divisa distinta a la de la cuenta que lo paga se registra indicando la tasa aplicable, y la tasa deja de vivir dentro del texto de la descripción para ser un dato propio.
+* **Consumos pendientes de liquidación**:
+  * Un consumo cuyo importe definitivo aún no ha fijado el emisor se registra como pendiente y se cierra después indicando el importe cargado; la tasa se deduce de él, porque el emisor comunica cuánto cargó y nunca a qué tasa lo hizo.
+  * Se contemplan dos políticas de liquidación según el emisor: la que mantiene el cargo en la divisa de origen y la que lo traduce a moneda local.
+
+### 🎁 Bonificaciones
+* **Registro de cashback, promociones y recompensas** como crédito independiente aplicado a una tarjeta, que es la forma en que los emisores los acreditan: no como un descuento sobre el consumo sino como un abono posterior.
+
+### 💳 Tarjetas
+* **Límite ajustado por el titular**:
+  * Algunas emisoras permiten fijar un límite propio por debajo del aprobado. El cupo efectivo pasa a ser el menor de los dos.
+* **El balance admite saldo a favor**:
+  * Se retira el recorte a cero que impedía que la deuda bajara de cero, tanto al revertir un gasto como al registrar un abono.
+  * Ese recorte descartaba en silencio el exceso: bastaba abonar más que el balance —al pagar el balance del corte mientras entran consumos nuevos— para que la diferencia desapareciera sin registro. Un balance negativo significa ahora lo que significa en la realidad, que el titular pagó de más.
+  * Registrar y revertir vuelven a ser operaciones inversas exactas desde cualquier balance de partida.
+
+### 🔄 Suscripciones
+* **Edición de suscripciones** conservando la marca de idempotencia, de modo que corregir una no provoque un cargo duplicado en el ciclo.
+
+### 🔒 Privacidad del repositorio
+* Retirada de rutas locales, detalles de configuración de acceso y datos de autoría del repositorio público; los importes de las pruebas pasan a ser sintéticos, conservando la propiedad matemática que cada prueba verifica.
+
+---
+
+## 🚀 Versión 1.4.0 - 2026-09-08
+**Pago al corte, unificación del redondeo al centavo y núcleo de dominio con pruebas de caracterización.**
+
+### 💳 Tarjetas
+* **Pago al corte y pago del balance actual**:
+  * El abono a una tarjeta puede fijarse al balance del corte o al balance vigente, sin teclear la cifra.
+
+### 🏛️ Cargos y retenciones
+* **Una sola política de redondeo para la retención del 0.20 %**:
+  * La retención se calculaba en tres lugares distintos con dos criterios de redondeo, que era el origen de una deriva de fracciones de centavo en los saldos. Pasa a cobrarse al centavo desde un único punto.
+* **La exención impositiva de la TSS no exime de la comisión de servicio**:
+  * Se ratificó que la retención por transferencia es un tributo del que la TSS está exenta, mientras que la comisión LBTR es un cargo por servicio que sí aplica. Son dos conceptos con reglas distintas y así quedan separados.
+
+### 🏗️ Arquitectura y pruebas
+* **Núcleo de dominio con importes en centavos enteros**, que elimina la aritmética en coma flotante de los saldos y concentra en un solo punto el único cálculo donde puede perderse precisión.
+* **Puertos de repositorio, adaptador SQLite y suite de contrato compartida**, verificada contra la implementación real y contra un doble en memoria.
+* **Pruebas de caracterización** que fijan la conducta vigente antes de modificarla, para que ningún cambio de comportamiento pase inadvertido durante la reestructuración.
+
+---
+
+## 🚀 Versión 1.3.5 - 2026-08-17
 **Alta de tarjetas de crédito con límites bimoneda y respaldos automáticos pre-migración.**
 
 ### 💳 Módulo de Tarjetas y Registros
