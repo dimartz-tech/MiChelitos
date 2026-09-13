@@ -14,6 +14,9 @@ pub enum ErrorDominio {
     ReferenciaFaltante { metodo: &'static str, referencia: &'static str },
     /// Origen y destino de una transferencia son la misma cuenta.
     TransferenciaALaMismaCuenta { cuenta_id: i64 },
+    /// Sale un importe y entra otro distinto, sin cambio de divisa que lo
+    /// explique.
+    ImportesNoCuadran { sale: f64, entra: f64, divisa: Divisa },
 }
 
 impl fmt::Display for ErrorDominio {
@@ -24,6 +27,13 @@ impl fmt::Display for ErrorDominio {
                 "No se pueden combinar montos en {} y {}: indique una tasa de cambio para convertirlos.",
                 esperada.codigo(),
                 recibida.codigo()
+            ),
+            ErrorDominio::ImportesNoCuadran { sale, entra, divisa } => write!(
+                f,
+                "Salen {:.2} {} y entran {:.2}: sin cambio de divisa los importes deben coincidir. Si la diferencia es una comisión, indíquela en el cargo.",
+                sale,
+                divisa.codigo(),
+                entra
             ),
             ErrorDominio::TransferenciaALaMismaCuenta { cuenta_id } => write!(
                 f,

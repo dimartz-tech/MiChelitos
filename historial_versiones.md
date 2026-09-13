@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.7.0 (Versión Actual) - 2026-09-13
+## 🚀 Versión 1.8.0 (Versión Actual) - 2026-09-13
+**Revertir una transferencia vuelve a ser exacto, y el dinero deja de poder aparecer o desaparecer entre cuentas.**
+
+### 🔁 Transferencias
+* **La reversión deshace exactamente lo que hizo la transferencia**:
+  * Antes el origen recuperaba el importe completo pero al destino solo se le descontaba hasta dejarlo en cero. Si el destino ya había gastado parte de lo recibido, la diferencia no se descontaba y **el patrimonio quedaba inflado**.
+  * Revertir significa que la transferencia nunca ocurrió, de modo que ambas cuentas vuelven al estado que tenían. Si el destino queda en negativo, eso informa de que faltan movimientos por registrar en esa cuenta, y ocultarlo tras un cero borraba justamente esa señal.
+* **Los importes deben cuadrar cuando no hay cambio de divisa**:
+  * Salir un importe y entrar otro distinto hacía aparecer o desaparecer dinero entre las dos cuentas sin que nada lo advirtiera. La diferencia solo puede ser una comisión, y para eso existe el campo de cargo; el mensaje de error lo indica.
+
+### 🏦 Cuentas
+* **Una cuenta que participa en transferencias no se elimina**:
+  * Antes se eliminaba y su historial de transferencias se iba con ella en silencio, dejando además a la contraparte con el dinero recibido sin constancia de dónde había salido.
+
+---
+
+## 🚀 Versión 1.7.0 - 2026-09-13
 **Transferencias entre cuentas con invariantes propias, y aviso de divisa en el formulario.**
 
 ### 🔁 Transferencias

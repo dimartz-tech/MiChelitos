@@ -243,23 +243,6 @@ impl RepositorioCuentas for AlmacenEnMemoria {
             .ok_or(ErrorAlmacen::CajaDeEfectivoAusente { divisa })
     }
 
-    fn reducir_saldo_con_recorte(
-        &mut self,
-        cuenta_id: i64,
-        monto: Dinero,
-    ) -> Result<(), ErrorAlmacen> {
-        let cuenta = self
-            .cuentas
-            .get_mut(&cuenta_id)
-            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })?;
-        let restado =
-            cuenta.saldo.restar(&monto).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
-        // Réplica exacta del MAX(0.0, ...) de SQL: la diferencia se pierde.
-        cuenta.saldo =
-            if restado.es_negativo() { Dinero::cero(restado.divisa()) } else { restado };
-        Ok(())
-    }
-
     fn es_caja(&self, cuenta_id: i64) -> Result<bool, ErrorAlmacen> {
         if !self.cuentas.contains_key(&cuenta_id) {
             return Err(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id });

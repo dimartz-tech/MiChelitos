@@ -1463,10 +1463,14 @@ fn c47_revertir_una_transferencia_devuelve_el_monto_y_el_cargo_al_origen() {
 }
 
 #[test]
-fn c48_h10_la_reversion_recorta_el_destino_en_cero_y_pierde_la_diferencia() {
-    // Misma forma que H5, en otro vertical: el origen se restituye sin límite
-    // pero al destino se le aplica MAX(0.0, ...). Si el destino gastó lo
-    // recibido antes de advertirse el error, la diferencia desaparece.
+fn c48_h10_la_reversion_devuelve_los_dos_saldos_aunque_el_destino_quede_negativo() {
+    // **H10 resuelto.** Antes el origen se restituía sin límite pero al
+    // destino se le aplicaba MAX(0.0, ...), de modo que el total repartido
+    // entre las dos cuentas subía y el patrimonio quedaba inflado.
+    //
+    // Revertir significa «esta transferencia nunca ocurrió»: las dos cuentas
+    // vuelven al estado que tenían. Si el destino ya gastó lo recibido, el
+    // negativo informa de que faltan movimientos por registrar allí.
     let _g = entorno_aislado();
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
@@ -1482,9 +1486,8 @@ fn c48_h10_la_reversion_recorta_el_destino_en_cero_y_pierde_la_diferencia() {
 
     crate::eliminar_transaccion_cuenta(ultima_transferencia()).unwrap();
 
-    // Correspondería 3 000 - 8 000 = -5 000. El recorte lo deja en cero.
-    assert_importe(saldo_cuenta_id(destino), 0.0, "recorte en cero (H10)");
-    assert_importe(saldo_cuenta_id(origen), 50_000.0, "el origen sí se restituye entero");
+    assert_importe(saldo_cuenta_id(destino), -5_000.0, "3 000 - 8 000, sin recorte");
+    assert_importe(saldo_cuenta_id(origen), 50_000.0, "y el origen se restituye entero");
 }
 
 #[test]
@@ -1535,10 +1538,11 @@ fn c50_h12_el_importe_de_destino_se_interpreta_en_la_divisa_de_su_cuenta() {
 }
 
 #[test]
-fn c51_h13_borrar_una_cuenta_arrastra_sus_transferencias_sin_revertir_saldos() {
-    // La guarda de eliminar_cuenta cuenta gastos, no transferencias, y la
-    // clave foránea es ON DELETE CASCADE: el historial se va en silencio y la
-    // contraparte se queda con el dinero recibido.
+fn c51_h13_una_cuenta_con_transferencias_no_se_puede_eliminar() {
+    // **H13 resuelto.** Antes la guarda contaba gastos pero no transferencias,
+    // y como la clave foránea es ON DELETE CASCADE el historial se iba en
+    // silencio, dejando a la contraparte con el dinero recibido sin
+    // constancia de dónde había salido.
     let _g = entorno_aislado();
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
@@ -1548,10 +1552,11 @@ fn c51_h13_borrar_una_cuenta_arrastra_sus_transferencias_sin_revertir_saldos() {
     .unwrap();
     assert_eq!(total_transferencias(), 1);
 
-    crate::eliminar_cuenta(origen).unwrap();
+    let error = crate::eliminar_cuenta(origen).unwrap_err();
 
-    assert_eq!(total_transferencias(), 0, "el historial desapareció (H13)");
-    assert_importe(saldo_cuenta_id(destino), 8_000.0, "y la contraparte conserva lo recibido");
+    assert!(error.contains("transferencias"), "explica por qué: {error}");
+    assert_eq!(total_transferencias(), 1, "el historial sigue ahí");
+    assert_importe(saldo_cuenta_id(origen), 42_000.0, "y la cuenta también");
 }
 
 #[test]
