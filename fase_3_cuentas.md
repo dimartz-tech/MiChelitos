@@ -63,6 +63,12 @@ La guarda de `eliminar_cuenta` cuenta los **gastos** que referencian la cuenta, 
 
 Fijado por **C51**.
 
+### H14 — Los importes pueden no cuadrar dentro de la misma divisa
+
+Apareció al construir el tipo, no al leer el código: dentro de una misma divisa nada impide acreditar al destino algo distinto de lo que salió del origen. El cargo no lo explica —ese sale aparte, a cuenta del origen—, de modo que la diferencia **hace aparecer o desaparecer dinero entre las dos cuentas**.
+
+No se corrige al extraer. `Transferencia` lo admite y lo expone con `importes_cuadran()` y `descuadre()`, para que el caso de uso pueda actuar cuando se decida qué hacer. Rechazarlo en el constructor habría sido cambiar la conducta durante una extracción, que es justo lo que el protocolo prohíbe.
+
 ### Lo que no es un hallazgo
 
 **Una transferencia puede dejar el origen en negativo.** No se comprueban fondos. Se fija como conducta vigente en **C53** sin llamarlo defecto: decidir si un sobregiro es legítimo corresponde al titular y a su banco, no al tipo de dato.
@@ -97,17 +103,43 @@ Una prueba de caracterización que no falla cuando la conducta cambia no fija na
 
 ---
 
-## 5. Lo que viene, y en qué orden
+## 5. El dominio (3.2)
 
-1. **3.1 — Caracterización.** Cerrado por este documento y por C45–C54.
-2. **3.2 — Dominio.** `dominio::cuenta` con la transferencia como operación con invariantes propias: origen distinto de destino, divisa del importe coherente con la cuenta que lo recibe, y el cargo imputado a un lado concreto.
+`dominio::cuenta` convierte la transferencia en un tipo que **no se puede construir mal**.
+
+`ExtremoCuenta` lleva el identificador **y la divisa** de cada lado. Esa es la pieza que lo hace posible: sin la divisa a mano no hay nada contra lo que validar el importe.
+
+`Transferencia::nueva` rechaza lo que no sería una transferencia:
+
+| Condición | Hallazgo que cierra |
+|---|---|
+| Origen y destino distintos | **H11** |
+| Cada importe en la divisa de su extremo | **H12** |
+| El cargo en la divisa del origen, porque lo paga el origen | — |
+| Importes positivos, cargo no negativo | — |
+
+**H12 no se corrige: se vuelve irrepresentable.** No hay forma de acreditar pesos a una cuenta en dólares si el tipo lo impide. Es el mismo camino por el que se cerró H2.
+
+Dos métodos concentran reglas que estaban repartidas:
+
+* `debito_al_origen()` devuelve el importe **más el cargo**, ya con signo negativo. Que el cargo lo pague el origen estaba duplicado entre el comando que transfiere y el que revierte; ahora se dice una vez.
+* `tasa()` devuelve `None` cuando no hay cambio de divisa, en vez del `1.0` que el código actual guarda y que no significa nada.
+
+Y una propiedad que hace de red: **aplicar el débito y el crédito conserva el dinero salvo el cargo.** Si esa igualdad se rompe, la transferencia dejó de serlo.
+
+---
+
+## 6. Lo que viene, y en qué orden
+
+1. ~~**3.1 — Caracterización.**~~ Cerrado por C45–C54.
+2. ~~**3.2 — Dominio.**~~ Cerrado por `dominio::cuenta`.
 3. **3.3 — Puertos.** `RepositorioTransferencias` junto al `RepositorioCuentas` que ya existe, más el doble en memoria y la incorporación al contrato compartido.
 4. **3.4 — Casos de uso.** `TransferirEntreCuentas` y `RevertirTransferencia` sobre los puertos.
 5. **3.5 — Adaptador y traducción.** Los seis comandos quedan reducidos a traducción, como ocurrió con `crear_gasto` en la Fase 1.7.
-6. **Decisión de H10 a H13**, por separado y cada una explícita.
+6. **Decisión de H10, H13 y H14**, por separado y cada una explícita.
 
-**H12 desaparece por construcción** en cuanto el importe sea un `Dinero`: no hay forma de acreditar pesos a una cuenta en dólares si el tipo lo impide. Es el mismo camino por el que se cerró H2, y por eso no aparece arriba como corrección: no se arregla, se vuelve irrepresentable.
+**H11 y H12 quedan cerrados por el tipo.** No habrá que acordarse de comprobarlos.
 
-**H11 y H13 son invariantes de guarda** y se resuelven en el caso de uso.
+**H13 es una invariante de guarda** y se resuelve en el caso de uso de borrado.
 
-**H10 requiere tu decisión**, porque tiene la misma forma que H5 pero no necesariamente la misma respuesta.
+**H10 y H14 requieren tu decisión.** H10 tiene la misma forma que H5 pero no necesariamente la misma respuesta: allí lo que quedaba en negativo era una deuda y significaba saldo a favor; aquí sería una cuenta de ahorro, y eso es un sobregiro. H14 es nuevo y hay al menos tres respuestas razonables — rechazar el descuadre, admitirlo asentando la diferencia como un cargo, o admitirlo y avisar.
