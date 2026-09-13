@@ -197,7 +197,87 @@ pub trait RepositorioCuentas {
     /// registra un gasto en efectivo se entera de que no se asentó.
     fn caja(&self, divisa: Divisa) -> Result<i64, ErrorAlmacen>;
 
+    /// Reduce el saldo **sin permitir que baje de cero**.
+    ///
+    /// El recorte es la conducta vigente al revertir una transferencia
+    /// (**H10**), implementada hoy como `MAX(0.0, ...)` en SQL sobre la cuenta
+    /// de destino, mientras el origen se restituye sin límite. De esa
+    /// asimetría nace que transferir y revertir no sean inversas exactas.
+    ///
+    /// Tiene método propio, y no un `ajustar_saldo` con delta negativo, para
+    /// que la asimetría sea visible en el contrato en lugar de quedar
+    /// enterrada en una consulta. Es el mismo tratamiento que recibió H5 antes
+    /// de resolverse.
+    fn reducir_saldo_con_recorte(
+        &mut self,
+        cuenta_id: i64,
+        monto: Dinero,
+    ) -> Result<(), ErrorAlmacen>;
+
     fn saldo(&self, cuenta_id: i64) -> Result<Dinero, ErrorAlmacen>;
 
     fn divisa(&self, cuenta_id: i64) -> Result<Divisa, ErrorAlmacen>;
+
+    /// Si la cuenta cumple el papel de caja de efectivo de su divisa.
+    ///
+    /// La clave foránea no protege a la caja: está declarada
+    /// `ON DELETE SET NULL`, de modo que borrarla desvincularía sus gastos en
+    /// silencio en lugar de impedir el borrado. La protección tiene que ser
+    /// una guarda explícita, y por eso el puerto expone la pregunta.
+    fn es_caja(&self, cuenta_id: i64) -> Result<bool, ErrorAlmacen>;
+
+    /// Cuántos gastos referencian la cuenta. Es la guarda vigente del borrado.
+    fn gastos_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen>;
+
+    fn eliminar_cuenta(&mut self, cuenta_id: i64) -> Result<(), ErrorAlmacen>;
 }
+
+/// Datos de una transferencia tal como se guardan.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransferenciaGuardada {
+    pub id: i64,
+    pub fecha: String,
+    pub origen_id: i64,
+    pub destino_id: i64,
+    pub monto_origen: Dinero,
+    pub monto_destino: Dinero,
+    pub cargo: Dinero,
+    pub descripcion: String,
+}
+
+/// Lo que hay que persistir de una transferencia recién hecha.
+pub struct TransferenciaAPersistir {
+    pub fecha: String,
+    pub origen_id: i64,
+    pub destino_id: i64,
+    pub monto_origen: Dinero,
+    pub monto_destino: Dinero,
+    /// Deducida de los dos importes. `None` cuando no cruza divisas.
+    pub tasa: Option<f64>,
+    pub cargo: Dinero,
+    pub descripcion: String,
+}
+
+pub trait RepositorioTransferencias {
+    fn insertar_transferencia(
+        &mut self,
+        datos: TransferenciaAPersistir,
+    ) -> Result<i64, ErrorAlmacen>;
+
+    fn obtener_transferencia(&self, id: i64) -> Result<TransferenciaGuardada, ErrorAlmacen>;
+
+    fn eliminar_transferencia(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+
+    /// Cuántas transferencias tienen la cuenta en alguno de sus extremos.
+    ///
+    /// La guarda de borrado no lo consulta hoy (**H13**), y como la clave
+    /// foránea es `ON DELETE CASCADE`, borrar la cuenta se lleva su historial
+    /// en silencio. El puerto lo expone para que el caso de uso pueda
+    /// decidirlo cuando se resuelva el hallazgo.
+    fn transferencias_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen>;
+}
+
+/// Persistencia que necesita una operación sobre transferencias.
+pub trait AlmacenTransferencias: RepositorioCuentas + RepositorioTransferencias {}
+
+impl<T> AlmacenTransferencias for T where T: RepositorioCuentas + RepositorioTransferencias {}

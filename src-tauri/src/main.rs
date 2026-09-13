@@ -26,6 +26,8 @@ use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::gastos::AlmacenSqlite;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
 use aplicacion::revertir_gasto::revertir_gasto;
+use aplicacion::transferir::{revertir_transferencia, transferir, DatosTransferencia};
+use puertos::repositorios::RepositorioCuentas;
 use dominio::tarjeta::{LimitesDivisa, PoliticaLiquidacion, MONEDA_LOCAL};
 use aplicacion::liquidar_gasto::liquidar_gasto;
 use aplicacion::registrar_bonificacion::{registrar_bonificacion, revertir_bonificacion, DatosBonificacion};
@@ -1583,39 +1585,17 @@ fn crear_cuenta(nombre: String, divisa: String, balance: f64) -> Result<i64, Str
 
 #[tauri::command]
 fn eliminar_cuenta(id: i64) -> Result<(), String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    // Traducción pura. La guarda —que hoy solo mira los gastos, H13— vive en
+    // el caso de uso.
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // Una caja de efectivo no se borra. Es el papel del que depende todo gasto
-    // en efectivo de su divisa, y la clave foránea no protege: está declarada
-    // ON DELETE SET NULL, así que borrarla desvincularía los gastos en
-    // silencio en lugar de impedir el borrado.
-    let es_caja: bool = conn
-        .query_row(
-            "SELECT es_caja_efectivo FROM cuentas_ahorro WHERE id = ?;",
-            [id],
-            |r| r.get::<_, i64>(0),
-        )
-        .map_err(|e| e.to_string())?
-        == 1;
-
-    if es_caja {
-        return Err(
-            "No se puede eliminar la caja de efectivo: es la cuenta donde se asientan todos los gastos en efectivo de su divisa."
-                .to_string(),
-        );
+    {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        aplicacion::transferir::eliminar_cuenta(id, &mut almacen)?;
     }
 
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM gastos WHERE cuenta_ahorro_id = ?;",
-        [id],
-        |r| r.get(0)
-    ).map_err(|e| e.to_string())?;
-
-    if count > 0 {
-        return Err("No se puede eliminar la cuenta porque tiene transferencias registradas en gastos.".to_string());
-    }
-
-    conn.execute("DELETE FROM cuentas_ahorro WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1629,25 +1609,32 @@ fn transferir_entre_cuentas(
     cargo: f64,
     descripcion: String
 ) -> Result<(), String> {
+    // Traducción pura: la operación y sus invariantes viven en el dominio y
+    // en el caso de uso. Aquí solo se abre la transacción, se convierten los
+    // números en importes de la divisa que corresponde a cada cuenta, y se
+    // confirma o se deshace.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
-        (monto_origen + cargo, origen_id)
-    ).map_err(|e| e.to_string())?;
+    {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        // Las divisas son un hecho de cada cuenta: se leen, no se declaran.
+        let divisa_origen = almacen.divisa(origen_id)?;
+        let divisa_destino = almacen.divisa(destino_id)?;
 
-    tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
-        (monto_destino, destino_id)
-    ).map_err(|e| e.to_string())?;
-
-    let tasa_cambio = if monto_origen > 0.0 { monto_destino / monto_origen } else { 1.0 };
-    tx.execute(
-        "INSERT INTO transacciones_cuentas (fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, tasa_cambio, cargo, descripcion)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
-        (fecha, origen_id, destino_id, monto_origen, monto_destino, tasa_cambio, cargo, &descripcion)
-    ).map_err(|e| e.to_string())?;
+        transferir(
+            DatosTransferencia {
+                fecha,
+                origen_id,
+                destino_id,
+                monto_origen: Dinero::nuevo(monto_origen, divisa_origen)?,
+                monto_destino: Dinero::nuevo(monto_destino, divisa_destino)?,
+                cargo: Dinero::nuevo(cargo, divisa_origen)?,
+                descripcion,
+            },
+            &mut almacen,
+        )?;
+    }
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -1831,27 +1818,16 @@ fn eliminar_gasto(id: i64) -> Result<(), String> {
 
 #[tauri::command]
 fn eliminar_transaccion_cuenta(id: i64) -> Result<(), String> {
+    // Traducción pura. El recorte en cero del destino (H10) vive ahora en el
+    // caso de uso y en el puerto, no en esta consulta.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    
-    let (origen_id, destino_id, monto_origen, monto_destino, cargo): (i64, i64, f64, f64, f64) = tx.query_row(
-        "SELECT cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, cargo FROM transacciones_cuentas WHERE id = ?;",
-        [id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-    ).map_err(|e| e.to_string())?;
-    
-    tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
-        (monto_origen + cargo, origen_id)
-    ).map_err(|e| e.to_string())?;
-    
-    tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = MAX(0.0, balance_actual - ?) WHERE id = ?;",
-        (monto_destino, destino_id)
-    ).map_err(|e| e.to_string())?;
-    
-    tx.execute("DELETE FROM transacciones_cuentas WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
-    
+
+    {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        revertir_transferencia(id, &mut almacen)?;
+    }
+
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
