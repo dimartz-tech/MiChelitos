@@ -2268,6 +2268,16 @@ class AppUI {
             </div>
 
             <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:1.5rem; margin-bottom: 2rem;">
+                <!-- Respaldo -->
+                <div class="card" style="height:fit-content;">
+                    <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">🛟 Respaldo de la base</h3>
+                    <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
+                        La aplicación respalda sola antes de modificar el esquema. Usa esto cuando vayas a hacer algo arriesgado a mano — conciliar varios saldos o cargar un estado — y quieras una red antes.
+                    </p>
+                    <button onclick="appUI.handleCrearRespaldo(this)" class="btn" style="width:100%;">Respaldar ahora</button>
+                    <div id="respaldo_resultado" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.75rem; word-break:break-all;"></div>
+                </div>
+
                 <!-- Categorías -->
                 <div class="card" style="height:fit-content;">
                     <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">🏷️ Categorías de Gastos</h3>
@@ -3481,6 +3491,30 @@ class AppUI {
             } catch (err) {
                 this.showToast(err.toString(), 'error');
             }
+        }
+    }
+
+    /**
+     * Toma un respaldo bajo demanda.
+     *
+     * Se deshabilita el botón mientras corre: un `VACUUM INTO` sobre una base
+     * grande tarda, y sin esto se acumularían copias por impaciencia.
+     */
+    async handleCrearRespaldo(boton) {
+        const salida = document.getElementById('respaldo_resultado');
+        boton.disabled = true;
+        const textoOriginal = boton.textContent;
+        boton.textContent = 'Respaldando…';
+        try {
+            const ruta = await AppAPI.crearRespaldo();
+            this.showToast('Respaldo creado y verificado.');
+            if (salida) salida.textContent = ruta;
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+            if (salida) salida.textContent = '';
+        } finally {
+            boton.disabled = false;
+            boton.textContent = textoOriginal;
         }
     }
 
