@@ -4,7 +4,20 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.9.0 (Versión Actual) - 2026-09-13
+## 🚀 Versión 1.10.0 (Versión Actual) - 2026-09-13
+**Todos los importes caen en un centavo exacto, y la conversión se verifica en vez de darse por buena.**
+
+### 💰 Precisión de los importes
+* **Los importes se normalizan al centavo**:
+  * El núcleo trabaja en centavos enteros desde la reestructuración, pero la base seguía guardándolos como números con coma. Eso permitió que se colara un tercer decimal —residuo de cuando la retención se calculaba en varios sitios con criterios de redondeo distintos—: el gasto quedaba con fracción de centavo y el saldo de la cuenta heredaba la deriva al debitarse.
+* **La conversión se acepta solo cuando es verificable**:
+  * Al terminar, la migración comprueba que no queda ni un importe fuera de centavo y falla si lo hay. Una diferencia sin explicar detiene el proceso en lugar de quedar absorbida por el redondeo.
+* **Las tasas conservan su precisión**:
+  * Tasas de cambio, tasas de interés y porcentajes de retención quedan fuera de la normalización. No son importes, y redondearlos a dos decimales los inutilizaría para reconstruir la operación que documentan.
+
+---
+
+## 🚀 Versión 1.9.0 - 2026-09-13
 **Migraciones versionadas: la preparación del esquema deja de declarar éxito cuando falla.**
 
 ### 🗄️ Preparación del almacenamiento
