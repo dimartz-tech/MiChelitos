@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.8.0 (Versión Actual) - 2026-09-13
+## 🚀 Versión 1.9.0 (Versión Actual) - 2026-09-13
+**Migraciones versionadas: la preparación del esquema deja de declarar éxito cuando falla.**
+
+### 🗄️ Preparación del almacenamiento
+* **La base lleva su versión de esquema**:
+  * Se registra dentro del propio archivo. Sin ella no había forma de distinguir «este cambio ya se aplicó» de «este cambio no se pudo aplicar», que era la ambigüedad que hacía razonable descartar los errores.
+* **Los errores dejan de descartarse**:
+  * Antes los cambios de esquema se aplicaban ignorando cualquier fallo. El patrón nació para tolerar una condición esperada —la columna ya existe— pero descartaba también los fallos reales, de modo que la aplicación podía arrancar contra un esquema incompleto y el problema aparecía después, en la primera consulta que tocara una columna ausente.
+  * Ahora la condición esperada se comprueba de antemano y cualquier otro fallo se propaga indicando qué migración y qué etapa lo produjeron.
+* **Cada migración se aplica entera o no se aplica**:
+  * Los cambios y el registro de la nueva versión ocurren juntos. Un fallo a mitad deja la base en la última versión completa, no en un estado intermedio sin nombre.
+* **Una base más nueva que la aplicación se rechaza sin tocarla**, con un aviso que indica actualizar la aplicación.
+* **Las semillas se separan de las migraciones**: los registros que el sistema necesita para operar dejan de ir mezclados con los cambios de estructura y las transformaciones de datos históricos.
+
+---
+
+## 🚀 Versión 1.8.0 - 2026-09-13
 **Revertir una transferencia vuelve a ser exacto, y el dinero deja de poder aparecer o desaparecer entre cuentas.**
 
 ### 🔁 Transferencias

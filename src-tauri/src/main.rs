@@ -5,6 +5,7 @@
 )]
 
 mod db_sql;
+mod migraciones;
 mod respaldo;
 mod db_nosql;
 
