@@ -1488,25 +1488,40 @@ fn c48_h10_la_reversion_recorta_el_destino_en_cero_y_pierde_la_diferencia() {
 }
 
 #[test]
-fn c49_h11_una_transferencia_de_una_cuenta_a_si_misma_se_acepta() {
-    // No se comprueba que origen y destino difieran. El saldo queda alterado
-    // exactamente por el cargo, y el asiento no representa nada real.
+fn c49_h11_una_transferencia_de_una_cuenta_a_si_misma_se_rechaza() {
+    // **Conducta corregida en la Fase 3.** Antes se aceptaba: la operación
+    // restaba `monto + cargo` y sumaba `monto` sobre la misma fila, dejando el
+    // saldo alterado por el cargo y un asiento que no representaba nada.
+    //
+    // El tipo `Transferencia` ya no admite construirla, de modo que H11 no se
+    // comprueba en ningún sitio: dejó de ser representable. La prueba cambia
+    // de sentido a propósito, y el cambio queda registrado aquí en vez de
+    // pasar inadvertido.
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
 
-    crate::transferir_entre_cuentas(
+    let error = crate::transferir_entre_cuentas(
         "13/09/2026".into(), cuenta, cuenta, 8_000.0, 8_000.0, 100.0, "A sí misma".into(),
     )
-    .unwrap();
+    .unwrap_err();
 
-    assert_importe(saldo_cuenta_id(cuenta), 49_900.0, "solo se pierde el cargo (H11)");
-    assert_eq!(total_transferencias(), 1, "y queda un asiento sin sentido");
+    assert!(error.contains("dos cuentas distintas"), "explica por qué: {error}");
+    assert_importe(saldo_cuenta_id(cuenta), 50_000.0, "ningún saldo se movió");
+    assert_eq!(total_transferencias(), 0, "ni quedó asiento");
 }
 
 #[test]
-fn c50_h12_no_se_comprueba_que_el_importe_de_destino_sea_de_su_divisa() {
-    // Se acredita el importe tal cual a una cuenta en otra divisa. Aquí se
-    // acreditan 6 000 "dólares" a una cuenta USD cuando eran pesos.
+fn c50_h12_el_importe_de_destino_se_interpreta_en_la_divisa_de_su_cuenta() {
+    // **Matiz importante sobre H12.** El dominio impide construir una
+    // transferencia cuyo importe lleve la divisa equivocada, pero eso cierra
+    // el error del *programador*, no el del *usuario*: el formulario pide dos
+    // números sueltos y la divisa se deduce de la cuenta elegida, así que no
+    // hay ninguna declaración que contradecir.
+    //
+    // Quien teclea 6 000 pensando en pesos y elige una cuenta en dólares
+    // acredita seis mil dólares. Sigue siendo la conducta vigente y la prueba
+    // la fija. La mitigación es de interfaz: mostrar la divisa junto a cada
+    // importe y avisar cuando la transferencia cruza divisas.
     let _g = entorno_aislado();
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
     let destino = crear_cuenta("Cuenta Ahorros USD", "USD", 0.0);

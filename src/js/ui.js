@@ -923,7 +923,7 @@ class AppUI {
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Cuenta Débito (Opcional)</label>
                                                 <select id="pag_cuenta_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;">
                                                     <option value="">-- Ninguna (Efectivo/Otro) --</option>
-                                                    ${cuentas.map(c => `<option value="${c.id}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
+                                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
                                                 </select>
                                             </div>
                                             <div style="flex:1;">
@@ -1196,25 +1196,27 @@ class AppUI {
                             </div>
                             <div class="form-group">
                                 <label for="tra_ori">Cuenta Origen *</label>
-                                <select id="tra_ori" class="form-control" required>
+                                <select id="tra_ori" class="form-control" onchange="appUI.rotularDivisasTransferencia()" required>
                                     <option value="" disabled selected>Seleccione...</option>
-                                    ${cuentas.map(c => `<option value="${c.id}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
+                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
                                 </select>
                             </div>
                             <div class="form-group">
                                 <label for="tra_des">Cuenta Destino *</label>
-                                <select id="tra_des" class="form-control" required>
+                                <select id="tra_des" class="form-control" onchange="appUI.rotularDivisasTransferencia()" required>
                                     <option value="" disabled selected>Seleccione...</option>
-                                    ${cuentas.map(c => `<option value="${c.id}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
+                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
                                 </select>
                             </div>
+                            <div id="tra_aviso_divisas" style="display:none; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:var(--radius-sm); padding:0.6rem 0.75rem; font-size:0.72rem; color:var(--text-secondary); margin-bottom:1rem; line-height:1.5;"></div>
+
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label for="tra_mon_ori">Monto Débito (Origen) *</label>
+                                    <label for="tra_mon_ori">Monto Débito (Origen) <span id="tra_div_ori" style="color:var(--accent-primary);"></span> *</label>
                                     <input type="number" id="tra_mon_ori" step="0.01" class="form-control" placeholder="0.00" required>
                                 </div>
                                 <div class="form-group">
-                                    <label for="tra_mon_des">Monto Crédito (Destino) *</label>
+                                    <label for="tra_mon_des">Monto Crédito (Destino) <span id="tra_div_des" style="color:var(--accent-primary);"></span> *</label>
                                     <input type="number" id="tra_mon_des" step="0.01" class="form-control" placeholder="0.00" required>
                                 </div>
                             </div>
@@ -1371,7 +1373,7 @@ class AppUI {
                                 <label for="efe_ret_ori">Cuenta Origen (Banco) *</label>
                                 <select id="efe_ret_ori" class="form-control" required>
                                     <option value="" disabled selected>Seleccione cuenta...</option>
-                                    ${cuentasAhorro.map(c => `<option value="${c.id}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
+                                    ${cuentasAhorro.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
                                 </select>
                             </div>
                             <div class="form-row">
@@ -3189,6 +3191,40 @@ class AppUI {
             } catch (err) {
                 this.showToast(err.toString(), 'error');
             }
+        }
+    }
+
+    /**
+     * Rotula cada importe con la divisa de su cuenta, y avisa si cruzan.
+     *
+     * El formulario pide dos números sueltos: la divisa de cada uno se deduce
+     * de la cuenta elegida, no se declara. El backend no puede detectar que
+     * quien teclea 6 000 pensando en pesos ha elegido una cuenta en dólares,
+     * porque no hay ninguna declaración que contradecir — acreditará seis mil
+     * dólares. Decir la divisa junto al campo es lo único que ataja ese error
+     * donde se comete.
+     */
+    rotularDivisasTransferencia() {
+        const divisaDe = (id) => document.getElementById(id)?.selectedOptions?.[0]?.dataset?.divisa ?? '';
+        const origen = divisaDe('tra_ori');
+        const destino = divisaDe('tra_des');
+
+        const rotulo = (id, divisa) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = divisa ? `en ${divisa}` : '';
+        };
+        rotulo('tra_div_ori', origen);
+        rotulo('tra_div_des', destino);
+
+        const aviso = document.getElementById('tra_aviso_divisas');
+        if (!aviso) return;
+
+        if (origen && destino && origen !== destino) {
+            aviso.style.display = 'block';
+            aviso.innerHTML = `⚠️ Esta transferencia cruza divisas: el débito va en <strong>${origen}</strong> y el crédito en <strong>${destino}</strong>. Comprueba que cada importe esté en su divisa — la tasa se deduce de los dos.`;
+        } else {
+            aviso.style.display = 'none';
+            aviso.innerHTML = '';
         }
     }
 

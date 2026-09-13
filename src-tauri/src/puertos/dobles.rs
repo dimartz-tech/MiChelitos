@@ -40,6 +40,7 @@ pub struct AlmacenEnMemoria {
     /// Cuando está activo, `insertar` falla. Sirve para provocar un fallo
     /// después de que los saldos ya se hayan movido.
     pub bonificaciones: HashMap<i64, BonificacionGuardada>,
+    pub transferencias: HashMap<i64, TransferenciaGuardada>,
     pub falla_al_insertar: bool,
 }
 
@@ -240,6 +241,44 @@ impl RepositorioCuentas for AlmacenEnMemoria {
             .get(&divisa)
             .copied()
             .ok_or(ErrorAlmacen::CajaDeEfectivoAusente { divisa })
+    }
+
+    fn reducir_saldo_con_recorte(
+        &mut self,
+        cuenta_id: i64,
+        monto: Dinero,
+    ) -> Result<(), ErrorAlmacen> {
+        let cuenta = self
+            .cuentas
+            .get_mut(&cuenta_id)
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })?;
+        let restado =
+            cuenta.saldo.restar(&monto).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
+        // Réplica exacta del MAX(0.0, ...) de SQL: la diferencia se pierde.
+        cuenta.saldo =
+            if restado.es_negativo() { Dinero::cero(restado.divisa()) } else { restado };
+        Ok(())
+    }
+
+    fn es_caja(&self, cuenta_id: i64) -> Result<bool, ErrorAlmacen> {
+        if !self.cuentas.contains_key(&cuenta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id });
+        }
+        Ok(self.cajas.values().any(|&id| id == cuenta_id))
+    }
+
+    fn gastos_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
+        if !self.cuentas.contains_key(&cuenta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id });
+        }
+        Ok(self.gastos.values().filter(|g| g.cuenta_ahorro_id == Some(cuenta_id)).count() as i64)
+    }
+
+    fn eliminar_cuenta(&mut self, cuenta_id: i64) -> Result<(), ErrorAlmacen> {
+        self.cuentas
+            .remove(&cuenta_id)
+            .map(|_| ())
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
     }
 
     fn saldo(&self, cuenta_id: i64) -> Result<Dinero, ErrorAlmacen> {
@@ -443,5 +482,54 @@ mod contrato_del_doble {
         };
 
         verificar(&mut a, &semilla, "en memoria");
+    }
+}
+
+impl RepositorioTransferencias for AlmacenEnMemoria {
+    fn insertar_transferencia(
+        &mut self,
+        datos: TransferenciaAPersistir,
+    ) -> Result<i64, ErrorAlmacen> {
+        if self.falla_al_insertar {
+            return Err(ErrorAlmacen::Fallo("fallo simulado al insertar".into()));
+        }
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.transferencias.insert(
+            id,
+            TransferenciaGuardada {
+                id,
+                fecha: datos.fecha,
+                origen_id: datos.origen_id,
+                destino_id: datos.destino_id,
+                monto_origen: datos.monto_origen,
+                monto_destino: datos.monto_destino,
+                cargo: datos.cargo,
+                descripcion: datos.descripcion,
+            },
+        );
+        Ok(id)
+    }
+
+    fn obtener_transferencia(&self, id: i64) -> Result<TransferenciaGuardada, ErrorAlmacen> {
+        self.transferencias
+            .get(&id)
+            .cloned()
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "transferencia", id })
+    }
+
+    fn eliminar_transferencia(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.transferencias
+            .remove(&id)
+            .map(|_| ())
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "transferencia", id })
+    }
+
+    fn transferencias_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
+        Ok(self
+            .transferencias
+            .values()
+            .filter(|t| t.origen_id == cuenta_id || t.destino_id == cuenta_id)
+            .count() as i64)
     }
 }
