@@ -9,7 +9,6 @@ use crate::dominio::bonificacion::Bonificacion;
 use crate::dominio::conversion::{Conversion, EstadoConversion};
 use crate::dominio::tarjeta::PoliticaLiquidacion;
 use crate::dominio::dinero::{Dinero, Divisa, TasaCambio};
-use crate::dominio::errores::ErrorDominio;
 use crate::puertos::repositorios::*;
 use rusqlite::{params, OptionalExtension, Transaction};
 
@@ -379,9 +378,9 @@ mod tests {
 
     /// Base en memoria con el esquema real. No depende de HOME ni toca disco.
     fn base_sembrada() -> (Connection, Semilla) {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         conn.execute("PRAGMA foreign_keys = ON;", []).unwrap();
-        db_sql::crear_esquema(&conn).unwrap();
+        db_sql::crear_esquema(&mut conn).unwrap();
 
         conn.execute(
             "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES ('Cuenta Contrato', 'DOP', 100000.0);",
