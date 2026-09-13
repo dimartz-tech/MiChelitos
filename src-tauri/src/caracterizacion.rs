@@ -1569,3 +1569,100 @@ fn c54_revertir_dos_veces_la_misma_transferencia_falla_la_segunda() {
     assert!(crate::eliminar_transaccion_cuenta(id).is_err(), "no se revierte dos veces");
     assert_importe(saldo_cuenta_id(origen), 50_000.0, "sin doble restitución");
 }
+
+// ---------------------------------------------------------------------------
+//  Riesgo de los errores descartados en la preparación del esquema (C55–C56)
+//
+//  `inicializar_db` aplica sus migraciones con `let _ = conn.execute(...)`.
+//  Ese patrón nació para tolerar una condición esperada —la columna ya
+//  existe—, pero descarta **cualquier** error, no solo ese. Estas pruebas
+//  demuestran que la distinción importa: existe un estado en el que la
+//  preparación declara éxito y deja el esquema inservible.
+// ---------------------------------------------------------------------------
+
+/// Aísla el entorno **sin** inicializar la base, para poder sembrarla antes.
+fn entorno_sin_inicializar() -> (MutexGuard<'static, ()>, String) {
+    let guarda = ENTORNO.lock().unwrap_or_else(|e| e.into_inner());
+    let raiz = raiz_temporal();
+    std::fs::create_dir_all(&raiz).expect("crear raíz temporal");
+    std::env::set_var("HOME", &raiz);
+
+    let ruta = db_sql::obtener_ruta_db();
+    assert!(
+        ruta.starts_with(raiz.to_str().unwrap()),
+        "ABORTADO: las pruebas apuntarían a la base real ({})",
+        ruta
+    );
+    let _ = std::fs::remove_file(&ruta);
+    if let Some(padre) = std::path::Path::new(&ruta).parent() {
+        std::fs::create_dir_all(padre).expect("crear directorio de la base");
+    }
+    (guarda, ruta)
+}
+
+#[test]
+fn c55_inicializar_declara_exito_sobre_un_esquema_que_no_pudo_migrar() {
+    // Se siembra una base en la que `tarjetas` es una VISTA. Es el estado en
+    // que quedaría tras una migración a medias o una base tocada a mano.
+    //
+    //   · CREATE TABLE IF NOT EXISTS sobre una vista no falla: no hace nada.
+    //   · El ALTER TABLE siguiente sí falla: no se puede añadir una columna
+    //     a una vista. Ese error se descarta.
+    let (_g, ruta) = entorno_sin_inicializar();
+    {
+        let c = Connection::open(&ruta).expect("abrir base sembrada");
+        c.execute_batch(
+            "CREATE TABLE origen (id INTEGER PRIMARY KEY, entidad TEXT);
+             CREATE VIEW tarjetas AS SELECT id, entidad FROM origen;",
+        )
+        .expect("sembrar la vista");
+    }
+
+    let resultado = db_sql::inicializar_db();
+
+    assert!(
+        resultado.is_ok(),
+        "conducta vigente: la preparación se declara exitosa pese a no haber podido migrar"
+    );
+
+    // Y sin embargo el esquema quedó inservible: faltan las columnas que todo
+    // el vertical de tarjetas da por hechas.
+    let c = Connection::open(&ruta).unwrap();
+    let columnas: Vec<String> = c
+        .prepare("SELECT name FROM pragma_table_info('tarjetas');")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+
+    assert!(
+        !columnas.iter().any(|c| c == "balance_pesos"),
+        "la columna no se creó, como se esperaba de una migración fallida"
+    );
+    assert_eq!(columnas, vec!["id", "entidad"], "el esquema quedó como estaba");
+}
+
+#[test]
+fn c56_el_fallo_solo_aparece_despues_al_consultar_y_no_al_preparar() {
+    // La consecuencia de C55: el error no se manifiesta donde ocurre —en la
+    // preparación— sino más tarde, en la primera consulta que toque una
+    // columna ausente. Sin versionado de esquema no hay nada entre ambos
+    // momentos que detecte la inconsistencia.
+    let (_g, ruta) = entorno_sin_inicializar();
+    {
+        let c = Connection::open(&ruta).expect("abrir base sembrada");
+        c.execute_batch(
+            "CREATE TABLE origen (id INTEGER PRIMARY KEY, entidad TEXT);
+             CREATE VIEW tarjetas AS SELECT id, entidad FROM origen;",
+        )
+        .unwrap();
+    }
+
+    db_sql::inicializar_db().expect("la preparación no se queja");
+
+    assert!(
+        crate::obtener_tarjetas().is_err(),
+        "el fallo emerge aquí, lejos de su causa"
+    );
+}
