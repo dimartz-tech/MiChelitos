@@ -309,35 +309,6 @@ impl RepositorioCuentas for AlmacenSqlite<'_> {
             .ok_or(ErrorAlmacen::CajaDeEfectivoAusente { divisa })
     }
 
-    fn reducir_saldo_con_recorte(
-        &mut self,
-        cuenta_id: i64,
-        monto: Dinero,
-    ) -> Result<(), ErrorAlmacen> {
-        // El MAX(0.0, ...) es la conducta vigente al revertir (H10). Se
-        // conserva tal cual hasta que se decida corregirla.
-        let actual = self.saldo(cuenta_id)?;
-        if actual.divisa() != monto.divisa() {
-            return Err(ErrorAlmacen::Fallo(
-                ErrorDominio::DivisasIncompatibles {
-                    esperada: actual.divisa(),
-                    recibida: monto.divisa(),
-                }
-                .to_string(),
-            ));
-        }
-        let restado = actual.restar(&monto).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
-        let nuevo = if restado.es_negativo() { Dinero::cero(restado.divisa()) } else { restado };
-
-        self.tx
-            .execute(
-                "UPDATE cuentas_ahorro SET balance_actual = ? WHERE id = ?;",
-                params![nuevo.unidades(), cuenta_id],
-            )
-            .map_err(fallo)?;
-        Ok(())
-    }
-
     fn es_caja(&self, cuenta_id: i64) -> Result<bool, ErrorAlmacen> {
         let marca: Option<i64> = self
             .tx

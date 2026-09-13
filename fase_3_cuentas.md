@@ -165,18 +165,50 @@ Al reducir `eliminar_cuenta` a traducción se perdió la protección de la caja 
 
 **H11 queda cerrado por el tipo.** **H12, a medias**: cerrado en el código, mitigado en la interfaz, imposible de cerrar del todo mientras el importe sea un número suelto sin divisa declarada.
 
-### Las tres decisiones abiertas
+### Las tres decisiones, resueltas
 
-**H10 — el recorte al revertir.** Tiene la misma forma que H5 pero **la consecuencia contraria**, y eso conviene verlo con números:
+Se decidieron con evidencia de la base real, no por analogía.
 
-```
-origen 50 000 → transfiere 8 000 → origen 42 000 · destino 8 000
-se gastan 5 000 del destino      → origen 42 000 · destino 3 000   (total 45 000)
-se revierte                       → origen 50 000 · destino 0      (total 50 000)
-```
+**H10 — el recorte al revertir. Decisión: reversión simétrica.**
 
-El origen recupera los 8 000 completos y al destino solo se le quitan 3 000, porque el recorte impide el resto. **Cinco mil aparecen de la nada: el patrimonio queda inflado.** En H5 el recorte te quitaba un saldo a favor que sí tenías —subestimaba—; aquí te regala uno que no existe. No es la misma decisión.
+Revertir significa *«esta transferencia nunca ocurrió»*. No es devolver el dinero —eso sería otra transferencia, un hecho nuevo—, sino retirar un registro mal hecho. Si nunca ocurrió, las dos cuentas deben quedar exactamente como estaban.
 
-**H13 — el borrado que arrastra el historial.** El puerto ya expone la consulta que falta; es una guarda, no un rediseño.
+En el caso corriente —revertir enseguida, para corregir— el recorte y la simetría dan lo mismo, porque el destino todavía tiene el dinero. Solo divergen cuando el destino ya gastó parte, y ahí el negativo **informa**:
 
-**H14 — el descuadre dentro de la misma divisa.** Al menos tres respuestas razonables: rechazarlo, admitirlo asentando la diferencia como un cargo, o admitirlo y avisar.
+> Si la transferencia nunca ocurrió, el destino nunca tuvo ese dinero. Haberlo gastado significa que **faltan movimientos por registrar en esa cuenta**, y eso es lo que un saldo negativo señala.
+
+El recorte ocultaba esa señal y además inflaba el patrimonio. La decisión es coherente con **C53**, que ya admitía que una transferencia dejara el origen en negativo sin llamarlo defecto.
+
+**H13 — el borrado que arrastra el historial. Decisión: bloquear.**
+
+Una cuenta que participó en alguna transferencia no se borra. Misma forma que la guarda de gastos que ya existía, y el mensaje dice qué se perdería. Afecta a 9 de las 11 cuentas registradas, pero la alternativa era destruir historial en silencio y dejar a la contraparte con dinero sin procedencia.
+
+**H14 — el descuadre en la misma divisa. Decisión: rechazar.**
+
+Sin cambio de divisa, lo que sale y lo que entra tienen que coincidir. La diferencia solo puede ser una comisión —y para eso está el cargo, que sale aparte, a cuenta del origen— o un error de tecleo. El mensaje de error orienta hacia el cargo en vez de limitarse a rechazar.
+
+La evidencia decidió el riesgo: de **25 transferencias registradas, todas en la misma divisa, ninguna tiene descuadre**. Rechazarlo no invalida nada del historial ni bloquea ningún flujo en uso.
+
+### Que las correcciones están fijadas
+
+Cada una se comprobó revirtiéndola y verificando que fallan sus pruebas, no otras:
+
+| Mutación | Pruebas que fallaron |
+|---|---|
+| Volver a recortar el destino al revertir | 2 — la del caso de uso y C48 |
+| Quitar la guarda de transferencias | 2 — la del caso de uso y C51 |
+| Admitir el descuadre | 3 — dos del dominio y una del caso de uso |
+
+---
+
+## 8. Estado final
+
+**La Fase 3 está cerrada.** Los cinco hallazgos del vertical —H10 a H14— están resueltos:
+
+| | Cómo se cerró |
+|---|---|
+| **H10** | Corregido: reversión simétrica |
+| **H11** | Irrepresentable: el tipo no lo construye |
+| **H12** | Irrepresentable en el código; mitigado en la interfaz para la mitad que depende de lo que se teclea |
+| **H13** | Corregido: guarda de borrado |
+| **H14** | Corregido: los importes deben cuadrar |

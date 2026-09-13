@@ -82,6 +82,19 @@ impl Transferencia {
             return Err(ErrorDominio::MontoInvalido { valor: cargo.unidades() });
         }
 
+        // H14, resuelto: sin cambio de divisa, lo que sale y lo que entra
+        // tienen que coincidir. La diferencia no puede ser otra cosa que una
+        // comisión —y para eso está el cargo, que sale aparte— o un error de
+        // tecleo. Admitirla hacía aparecer o desaparecer dinero entre las dos
+        // cuentas sin que nada lo dijera.
+        if origen.divisa == destino.divisa && monto_origen != monto_destino {
+            return Err(ErrorDominio::ImportesNoCuadran {
+                sale: monto_origen.unidades(),
+                entra: monto_destino.unidades(),
+                divisa: origen.divisa,
+            });
+        }
+
         Ok(Transferencia { origen, destino, monto_origen, monto_destino, cargo })
     }
 
@@ -138,28 +151,6 @@ impl Transferencia {
         TasaCambio::nueva(cociente).map(Some)
     }
 
-    /// Si los dos importes cuadran cuando no hay cambio de divisa.
-    ///
-    /// **Documenta H14 sin decidirlo.** Dentro de una misma divisa, acreditar
-    /// al destino algo distinto de lo que salió del origen hace aparecer o
-    /// desaparecer dinero, y hoy nada lo impide. Se expone como pregunta para
-    /// que el caso de uso pueda actuar cuando se decida qué hacer; el tipo no
-    /// lo rechaza, porque corregirlo aquí sería cambiar la conducta durante
-    /// una extracción.
-    pub fn importes_cuadran(&self) -> bool {
-        self.cruza_divisas() || self.monto_origen == self.monto_destino
-    }
-
-    /// Diferencia entre lo que salió y lo que entró, en la misma divisa.
-    ///
-    /// `None` cuando hay cambio de divisa, porque restar importes de divisas
-    /// distintas no significa nada.
-    pub fn descuadre(&self) -> Result<Option<Dinero>, ErrorDominio> {
-        if self.cruza_divisas() {
-            return Ok(None);
-        }
-        Ok(Some(self.monto_origen.restar(&self.monto_destino)?))
-    }
 }
 
 fn exigir_divisa(esperada: Divisa, importe: Dinero) -> Result<(), ErrorDominio> {
@@ -326,41 +317,55 @@ mod tests {
         assert_eq!(t.tasa().unwrap(), None);
     }
 
-    // --- H14: descuadre dentro de la misma divisa ---
+    // --- H14, resuelto: los importes tienen que cuadrar ---
 
     #[test]
-    fn h14_los_importes_pueden_no_cuadrar_en_la_misma_divisa_y_el_tipo_lo_admite() {
-        // Conducta vigente: nada lo impide. El tipo lo deja construir y lo
-        // expone; corregirlo aquí sería cambiar la conducta durante una
-        // extracción.
-        let t = Transferencia::nueva(
+    fn h14_sin_cambio_de_divisa_los_importes_deben_coincidir() {
+        // Antes se admitía y 500 desaparecían entre las dos cuentas sin que
+        // nada lo dijera. La diferencia solo puede ser una comisión —y para
+        // eso está el cargo, que sale aparte— o un error de tecleo.
+        let r = Transferencia::nueva(
+            cuenta_dop(1), cuenta_dop(2), dop(8_000.0), dop(7_500.0), dop(0.0),
+        );
+
+        assert_eq!(
+            r,
+            Err(ErrorDominio::ImportesNoCuadran {
+                sale: 8_000.0,
+                entra: 7_500.0,
+                divisa: Divisa::Dop
+            })
+        );
+    }
+
+    #[test]
+    fn el_mensaje_del_descuadre_dice_donde_va_la_comision() {
+        let error = Transferencia::nueva(
             cuenta_dop(1), cuenta_dop(2), dop(8_000.0), dop(7_500.0), dop(0.0),
         )
-        .unwrap();
+        .unwrap_err()
+        .to_string();
 
-        assert!(!t.importes_cuadran(), "500 desaparecen entre las dos cuentas");
-        assert_eq!(t.descuadre().unwrap(), Some(dop(500.0)));
+        assert!(error.contains("comisión"), "orienta hacia el cargo: {error}");
+        assert!(error.contains("cargo"), "y lo nombra: {error}");
     }
 
     #[test]
-    fn una_transferencia_que_cuadra_no_tiene_descuadre() {
-        let t = Transferencia::nueva(
-            cuenta_dop(1), cuenta_dop(2), dop(8_000.0), dop(8_000.0), dop(100.0),
+    fn el_cargo_no_cuenta_como_descuadre_porque_sale_aparte() {
+        // Salen 8 000 y entran 8 000; los 100 del cargo se cobran además, al
+        // origen, y no rompen la igualdad.
+        assert!(Transferencia::nueva(
+            cuenta_dop(1), cuenta_dop(2), dop(8_000.0), dop(8_000.0), dop(100.0)
         )
-        .unwrap();
-
-        assert!(t.importes_cuadran());
-        assert_eq!(t.descuadre().unwrap(), Some(dop(0.0)), "el cargo no es descuadre");
+        .is_ok());
     }
 
     #[test]
-    fn con_cambio_de_divisa_la_pregunta_por_el_descuadre_no_aplica() {
-        let t = Transferencia::nueva(
-            cuenta_dop(1), cuenta_usd(2), dop(6_000.0), usd(100.0), dop(0.0),
+    fn con_cambio_de_divisa_los_importes_no_tienen_por_que_coincidir() {
+        // Es lo normal: seis mil pesos se convierten en cien dólares.
+        assert!(Transferencia::nueva(
+            cuenta_dop(1), cuenta_usd(2), dop(6_000.0), usd(100.0), dop(0.0)
         )
-        .unwrap();
-
-        assert!(t.importes_cuadran(), "no hay nada que cuadrar entre divisas distintas");
-        assert_eq!(t.descuadre().unwrap(), None);
+        .is_ok());
     }
 }
