@@ -12,6 +12,8 @@ pub enum ErrorDominio {
     ConceptoVacio,
     /// El método de pago exige una referencia que no se indicó.
     ReferenciaFaltante { metodo: &'static str, referencia: &'static str },
+    /// Origen y destino de una transferencia son la misma cuenta.
+    TransferenciaALaMismaCuenta { cuenta_id: i64 },
 }
 
 impl fmt::Display for ErrorDominio {
@@ -22,6 +24,11 @@ impl fmt::Display for ErrorDominio {
                 "No se pueden combinar montos en {} y {}: indique una tasa de cambio para convertirlos.",
                 esperada.codigo(),
                 recibida.codigo()
+            ),
+            ErrorDominio::TransferenciaALaMismaCuenta { cuenta_id } => write!(
+                f,
+                "Una transferencia necesita dos cuentas distintas; se indicó la {} en ambos extremos.",
+                cuenta_id
             ),
             ErrorDominio::ReferenciaFaltante { metodo, referencia } => write!(
                 f,
