@@ -4,7 +4,21 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.6.1 (Versión Actual) - 2026-09-13
+## 🚀 Versión 1.7.0 (Versión Actual) - 2026-09-13
+**Transferencias entre cuentas con invariantes propias, y aviso de divisa en el formulario.**
+
+### 🔁 Transferencias
+* **Una transferencia a la misma cuenta deja de aceptarse**:
+  * Antes se registraba: restaba el importe más el cargo y sumaba el importe sobre la misma fila, dejando el saldo alterado por el cargo y un asiento que no representaba ningún movimiento. Ahora no se puede ni construir.
+* **Los importes van en la divisa de su cuenta, por construcción**:
+  * Ningún camino del código puede acreditar un importe en una divisa que no sea la de la cuenta que lo recibe.
+* **Aviso al cruzar divisas**:
+  * El formulario rotula cada importe con la divisa de su cuenta y advierte cuando el débito y el crédito van en divisas distintas. Es la mitad del problema que el código no puede resolver: los importes se teclean como números sueltos y su divisa se deduce de la cuenta elegida, así que no hay ninguna declaración que el sistema pueda contradecir.
+* **La caja de efectivo sigue sin poder eliminarse**, ahora comprobado antes que la guarda de gastos para que el rechazo explique el motivo real.
+
+---
+
+## 🚀 Versión 1.6.1 - 2026-09-13
 **Respaldo consistente y verificado antes de modificar el esquema.**
 
 ### 🛟 Respaldo de la base

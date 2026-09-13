@@ -9,6 +9,7 @@ use crate::dominio::bonificacion::Bonificacion;
 use crate::dominio::conversion::{Conversion, EstadoConversion};
 use crate::dominio::tarjeta::PoliticaLiquidacion;
 use crate::dominio::dinero::{Dinero, Divisa, TasaCambio};
+use crate::dominio::errores::ErrorDominio;
 use crate::puertos::repositorios::*;
 use rusqlite::{params, OptionalExtension, Transaction};
 
@@ -308,6 +309,70 @@ impl RepositorioCuentas for AlmacenSqlite<'_> {
             .ok_or(ErrorAlmacen::CajaDeEfectivoAusente { divisa })
     }
 
+    fn reducir_saldo_con_recorte(
+        &mut self,
+        cuenta_id: i64,
+        monto: Dinero,
+    ) -> Result<(), ErrorAlmacen> {
+        // El MAX(0.0, ...) es la conducta vigente al revertir (H10). Se
+        // conserva tal cual hasta que se decida corregirla.
+        let actual = self.saldo(cuenta_id)?;
+        if actual.divisa() != monto.divisa() {
+            return Err(ErrorAlmacen::Fallo(
+                ErrorDominio::DivisasIncompatibles {
+                    esperada: actual.divisa(),
+                    recibida: monto.divisa(),
+                }
+                .to_string(),
+            ));
+        }
+        let restado = actual.restar(&monto).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
+        let nuevo = if restado.es_negativo() { Dinero::cero(restado.divisa()) } else { restado };
+
+        self.tx
+            .execute(
+                "UPDATE cuentas_ahorro SET balance_actual = ? WHERE id = ?;",
+                params![nuevo.unidades(), cuenta_id],
+            )
+            .map_err(fallo)?;
+        Ok(())
+    }
+
+    fn es_caja(&self, cuenta_id: i64) -> Result<bool, ErrorAlmacen> {
+        let marca: Option<i64> = self
+            .tx
+            .query_row(
+                "SELECT es_caja_efectivo FROM cuentas_ahorro WHERE id = ?;",
+                [cuenta_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(fallo)?;
+        let marca = marca.ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })?;
+        Ok(marca == 1)
+    }
+
+    fn gastos_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
+        self.tx
+            .query_row(
+                "SELECT COUNT(*) FROM gastos WHERE cuenta_ahorro_id = ?;",
+                [cuenta_id],
+                |r| r.get(0),
+            )
+            .map_err(fallo)
+    }
+
+    fn eliminar_cuenta(&mut self, cuenta_id: i64) -> Result<(), ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute("DELETE FROM cuentas_ahorro WHERE id = ?;", [cuenta_id])
+            .map_err(fallo)?;
+        if filas == 0 {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id });
+        }
+        Ok(())
+    }
+
     fn saldo(&self, cuenta_id: i64) -> Result<Dinero, ErrorAlmacen> {
         let fila: Option<(f64, String)> = self
             .tx
@@ -463,5 +528,91 @@ mod tests {
 
         assert_eq!(saldo, 100000.0, "el saldo vuelve a su valor original");
         assert_eq!(gastos, 0, "ningún gasto persistió");
+    }
+}
+
+impl RepositorioTransferencias for AlmacenSqlite<'_> {
+    fn insertar_transferencia(
+        &mut self,
+        datos: TransferenciaAPersistir,
+    ) -> Result<i64, ErrorAlmacen> {
+        // La columna de tasa es NOT NULL y el esquema no distingue "no
+        // aplica"; se guarda 1.0 cuando no cruza divisas, que es la conducta
+        // vigente. El dominio sí distingue: devuelve `None`.
+        self.tx
+            .execute(
+                "INSERT INTO transacciones_cuentas
+                 (fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, tasa_cambio, cargo, descripcion)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+                params![
+                    datos.fecha,
+                    datos.origen_id,
+                    datos.destino_id,
+                    datos.monto_origen.unidades(),
+                    datos.monto_destino.unidades(),
+                    datos.tasa.unwrap_or(1.0),
+                    datos.cargo.unidades(),
+                    datos.descripcion,
+                ],
+            )
+            .map_err(fallo)?;
+        Ok(self.tx.last_insert_rowid())
+    }
+
+    fn obtener_transferencia(&self, id: i64) -> Result<TransferenciaGuardada, ErrorAlmacen> {
+        let fila: Option<(String, i64, i64, f64, f64, f64, Option<String>)> = self
+            .tx
+            .query_row(
+                "SELECT fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, cargo, descripcion
+                 FROM transacciones_cuentas WHERE id = ?;",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+            )
+            .optional()
+            .map_err(fallo)?;
+
+        let (fecha, origen_id, destino_id, monto_origen, monto_destino, cargo, descripcion) =
+            fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "transferencia", id })?;
+
+        // Los importes se reconstruyen en la divisa de su propia cuenta, que
+        // es lo único que los hace comparables con los saldos que mueven.
+        let divisa_origen = self.divisa(origen_id)?;
+        let divisa_destino = self.divisa(destino_id)?;
+        let construir = |valor: f64, divisa| {
+            Dinero::nuevo(valor, divisa).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))
+        };
+
+        Ok(TransferenciaGuardada {
+            id,
+            fecha,
+            origen_id,
+            destino_id,
+            monto_origen: construir(monto_origen, divisa_origen)?,
+            monto_destino: construir(monto_destino, divisa_destino)?,
+            cargo: construir(cargo, divisa_origen)?,
+            descripcion: descripcion.unwrap_or_default(),
+        })
+    }
+
+    fn eliminar_transferencia(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute("DELETE FROM transacciones_cuentas WHERE id = ?;", [id])
+            .map_err(fallo)?;
+        if filas == 0 {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "transferencia", id });
+        }
+        Ok(())
+    }
+
+    fn transferencias_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
+        self.tx
+            .query_row(
+                "SELECT COUNT(*) FROM transacciones_cuentas
+                 WHERE cuenta_origen_id = ? OR cuenta_destino_id = ?;",
+                [cuenta_id, cuenta_id],
+                |r| r.get(0),
+            )
+            .map_err(fallo)
     }
 }

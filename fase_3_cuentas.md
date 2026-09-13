@@ -129,17 +129,54 @@ Y una propiedad que hace de red: **aplicar el débito y el crédito conserva el 
 
 ---
 
-## 6. Lo que viene, y en qué orden
+## 6. Puertos, casos de uso y traducción (3.3 – 3.5)
+
+`RepositorioTransferencias` se suma a `RepositorioCuentas`, y el trait compuesto `AlmacenTransferencias` expresa lo que una operación sobre transferencias necesita. El adaptador SQLite y el doble en memoria lo implementan; el doble replica las rarezas en lugar de idealizarlas.
+
+Dos métodos del puerto existen para que los hallazgos **se vean en el contrato** en vez de quedar enterrados en una consulta:
+
+* `reducir_saldo_con_recorte` — el `MAX(0.0, …)` de **H10**, con nombre propio.
+* `transferencias_que_referencian` — lo que la guarda de borrado **no** consulta (**H13**), listo para cuando se decida.
+
+Los casos de uso `transferir`, `revertir_transferencia` y `eliminar_cuenta` orquestan sobre los puertos, y los tres comandos quedan reducidos a traducción: abrir la transacción, convertir números en importes de la divisa que corresponde a cada cuenta, y confirmar o deshacer.
+
+### Un matiz sobre H12 que apareció al conectarlo
+
+`Transferencia::nueva` impide construir un importe con la divisa equivocada, de modo que **ningún camino del código puede producir H12**. Pero eso cierra el error del *programador*, no el del *usuario*.
+
+El formulario pide dos números sueltos y la divisa de cada uno **se deduce de la cuenta elegida, no se declara**. No hay ninguna declaración que el dominio pueda contradecir: quien teclea 6 000 pensando en pesos y elige una cuenta en dólares acredita seis mil dólares, y el sistema no tiene forma de saberlo.
+
+Esa mitad se mitiga donde se comete el error. El formulario ahora rotula cada importe con la divisa de su cuenta y avisa cuando la transferencia cruza divisas. **C50 cambió de nombre para decir esto**, en vez de dar por cerrado algo que no lo está.
+
+### Una guarda que se cayó y volvió
+
+Al reducir `eliminar_cuenta` a traducción se perdió la protección de la caja de efectivo. Lo detectó C10b al fallar. Vuelve como `es_caja` en el puerto, comprobada **antes** que la de gastos: una caja con gastos daría el mensaje genérico y dejaría creer que basta con borrar los gastos.
+
+---
+
+## 7. Lo que viene, y en qué orden
 
 1. ~~**3.1 — Caracterización.**~~ Cerrado por C45–C54.
 2. ~~**3.2 — Dominio.**~~ Cerrado por `dominio::cuenta`.
-3. **3.3 — Puertos.** `RepositorioTransferencias` junto al `RepositorioCuentas` que ya existe, más el doble en memoria y la incorporación al contrato compartido.
-4. **3.4 — Casos de uso.** `TransferirEntreCuentas` y `RevertirTransferencia` sobre los puertos.
-5. **3.5 — Adaptador y traducción.** Los seis comandos quedan reducidos a traducción, como ocurrió con `crear_gasto` en la Fase 1.7.
-6. **Decisión de H10, H13 y H14**, por separado y cada una explícita.
+3. ~~**3.3 — Puertos.**~~ ~~**3.4 — Casos de uso.**~~ ~~**3.5 — Traducción.**~~ Cerrados.
+4. **Decisión de H10, H13 y H14**, por separado y cada una explícita.
 
-**H11 y H12 quedan cerrados por el tipo.** No habrá que acordarse de comprobarlos.
+**La extracción está completa.** Lo que queda son decisiones, no trabajo de estructura.
 
-**H13 es una invariante de guarda** y se resuelve en el caso de uso de borrado.
+**H11 queda cerrado por el tipo.** **H12, a medias**: cerrado en el código, mitigado en la interfaz, imposible de cerrar del todo mientras el importe sea un número suelto sin divisa declarada.
 
-**H10 y H14 requieren tu decisión.** H10 tiene la misma forma que H5 pero no necesariamente la misma respuesta: allí lo que quedaba en negativo era una deuda y significaba saldo a favor; aquí sería una cuenta de ahorro, y eso es un sobregiro. H14 es nuevo y hay al menos tres respuestas razonables — rechazar el descuadre, admitirlo asentando la diferencia como un cargo, o admitirlo y avisar.
+### Las tres decisiones abiertas
+
+**H10 — el recorte al revertir.** Tiene la misma forma que H5 pero **la consecuencia contraria**, y eso conviene verlo con números:
+
+```
+origen 50 000 → transfiere 8 000 → origen 42 000 · destino 8 000
+se gastan 5 000 del destino      → origen 42 000 · destino 3 000   (total 45 000)
+se revierte                       → origen 50 000 · destino 0      (total 50 000)
+```
+
+El origen recupera los 8 000 completos y al destino solo se le quitan 3 000, porque el recorte impide el resto. **Cinco mil aparecen de la nada: el patrimonio queda inflado.** En H5 el recorte te quitaba un saldo a favor que sí tenías —subestimaba—; aquí te regala uno que no existe. No es la misma decisión.
+
+**H13 — el borrado que arrastra el historial.** El puerto ya expone la consulta que falta; es una guarda, no un rediseño.
+
+**H14 — el descuadre dentro de la misma divisa.** Al menos tres respuestas razonables: rechazarlo, admitirlo asentando la diferencia como un cargo, o admitirlo y avisar.
