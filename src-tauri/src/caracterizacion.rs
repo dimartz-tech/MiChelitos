@@ -12,19 +12,29 @@ use std::sync::{Mutex, MutexGuard};
 
 static ENTORNO: Mutex<()> = Mutex::new(());
 
+/// Toma la guarda del entorno compartido.
+///
+/// Existe porque **más de un módulo de prueba muta `HOME`**, y un mutex por
+/// módulo solo serializaría cada uno consigo mismo. Mientras la ruta de la
+/// base se resuelva desde una variable de entorno, esta guarda es lo único
+/// que impide que dos pruebas se pisen el directorio.
+pub(crate) fn bloquear_entorno() -> MutexGuard<'static, ()> {
+    ENTORNO.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn raiz_temporal() -> std::path::PathBuf {
     std::env::temp_dir().join("michelitos-caracterizacion")
 }
 
 /// Aísla el proceso de la base de datos real y entrega una base vacía recién
-/// inicializada.
+/// inicializada, sin respaldos heredados de otra prueba.
 ///
 /// Las pruebas se serializan mediante un mutex porque el código bajo prueba
 /// resuelve la ruta de la base desde `HOME`, que es estado global del proceso.
 /// Esa dependencia global es precisamente lo que la Fase 1 elimina al
 /// introducir repositorios inyectables.
 fn entorno_aislado() -> MutexGuard<'static, ()> {
-    let guarda = ENTORNO.lock().unwrap_or_else(|e| e.into_inner());
+    let guarda = bloquear_entorno();
 
     let raiz = raiz_temporal();
     std::fs::create_dir_all(&raiz).expect("crear raíz temporal");
@@ -40,6 +50,7 @@ fn entorno_aislado() -> MutexGuard<'static, ()> {
     );
 
     let _ = std::fs::remove_file(&ruta);
+    let _ = std::fs::remove_dir_all(crate::respaldo::directorio_de_respaldos());
     db_sql::inicializar_db().expect("inicializar base de prueba");
 
     guarda
@@ -1582,7 +1593,7 @@ fn c54_revertir_dos_veces_la_misma_transferencia_falla_la_segunda() {
 
 /// Aísla el entorno **sin** inicializar la base, para poder sembrarla antes.
 fn entorno_sin_inicializar() -> (MutexGuard<'static, ()>, String) {
-    let guarda = ENTORNO.lock().unwrap_or_else(|e| e.into_inner());
+    let guarda = bloquear_entorno();
     let raiz = raiz_temporal();
     std::fs::create_dir_all(&raiz).expect("crear raíz temporal");
     std::env::set_var("HOME", &raiz);
@@ -1594,6 +1605,7 @@ fn entorno_sin_inicializar() -> (MutexGuard<'static, ()>, String) {
         ruta
     );
     let _ = std::fs::remove_file(&ruta);
+    let _ = std::fs::remove_dir_all(crate::respaldo::directorio_de_respaldos());
     if let Some(padre) = std::path::Path::new(&ruta).parent() {
         std::fs::create_dir_all(padre).expect("crear directorio de la base");
     }
@@ -1665,4 +1677,39 @@ fn c56_el_fallo_solo_aparece_despues_al_consultar_y_no_al_preparar() {
         crate::obtener_tarjetas().is_err(),
         "el fallo emerge aquí, lejos de su causa"
     );
+}
+
+#[test]
+fn c57_preparar_el_esquema_respalda_antes_de_tocar_una_base_existente() {
+    // La garantía que da valor a todo lo demás: cuando hay algo que perder,
+    // hay una copia verificada antes de modificar nada.
+    let (_g, ruta) = entorno_sin_inicializar();
+
+    // Instalación nueva: no hay nada que respaldar.
+    db_sql::inicializar_db().expect("preparar base nueva");
+    assert!(
+        crate::respaldo::directorio_de_respaldos().read_dir().map(|d| d.count()).unwrap_or(0) == 0,
+        "una instalación nueva no genera respaldos: no hay nada que perder"
+    );
+
+    // Ahora sí hay datos, y el archivo cambia.
+    crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    assert!(std::path::Path::new(&ruta).exists());
+
+    db_sql::inicializar_db().expect("preparar base existente");
+
+    let respaldos: Vec<_> = crate::respaldo::directorio_de_respaldos()
+        .read_dir()
+        .expect("leer respaldos")
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(respaldos.len(), 1, "se tomó exactamente un respaldo");
+
+    // Y el respaldo es una base utilizable con los datos dentro.
+    let copia = Connection::open(respaldos[0].path()).expect("abrir el respaldo");
+    let cuentas: i64 = copia
+        .query_row("SELECT COUNT(*) FROM cuentas_ahorro WHERE nombre = 'Cuenta Ahorros DOP';",
+                   [], |r| r.get(0))
+        .expect("consultar el respaldo");
+    assert_eq!(cuentas, 1, "los datos están en la copia");
 }

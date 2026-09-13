@@ -42,6 +42,10 @@ const AppAPI = {
     },
 
     // --- CUENTAS DE AHORRO ---
+    async crearRespaldo() {
+        return await invoke('crear_respaldo');
+    },
+
     async obtenerCuentas() {
         return await invoke('obtener_cuentas');
     },
