@@ -1372,3 +1372,200 @@ fn c44_actualizar_rechaza_lo_que_no_tiene_sentido() {
         "el día 32 no existe");
     assert!(crate::actualizar_prestamo(base(None, None, 25)).is_ok());
 }
+
+// ---------------------------------------------------------------------------
+//  Fase 3.1 — Caracterización del vertical de Cuentas (C45–C54)
+//
+//  Fija la conducta vigente de transferencias y borrados ANTES de extraer el
+//  vertical a puertos y casos de uso. Cuatro de estas pruebas documentan
+//  hallazgos —H10 a H13— y afirman lo que el sistema hace hoy, no lo que
+//  debería hacer. Cambiar cualquiera de ellas exige una decisión explícita.
+// ---------------------------------------------------------------------------
+
+fn saldo_cuenta_id(id: i64) -> f64 {
+    conexion()
+        .query_row("SELECT balance_actual FROM cuentas_ahorro WHERE id = ?;", [id], |r| r.get(0))
+        .expect("leer saldo de cuenta")
+}
+
+fn total_transferencias() -> i64 {
+    conexion()
+        .query_row("SELECT COUNT(*) FROM transacciones_cuentas;", [], |r| r.get(0))
+        .expect("contar transferencias")
+}
+
+fn ultima_transferencia() -> i64 {
+    conexion()
+        .query_row("SELECT MAX(id) FROM transacciones_cuentas;", [], |r| r.get(0))
+        .expect("última transferencia")
+}
+
+#[test]
+fn c45_una_transferencia_mueve_los_dos_saldos_y_cobra_el_cargo_al_origen() {
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
+    let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
+
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 100.0, "Traspaso".into(),
+    )
+    .unwrap();
+
+    assert_importe(saldo_cuenta_id(origen), 41_900.0, "sale el monto y el cargo");
+    assert_importe(saldo_cuenta_id(destino), 18_000.0, "entra solo el monto");
+    assert_eq!(total_transferencias(), 1);
+}
+
+#[test]
+fn c46_la_tasa_se_deduce_dividiendo_los_dos_importes() {
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
+    let destino = crear_cuenta("Cuenta Ahorros USD", "USD", 0.0);
+
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), origen, destino, 6_000.0, 100.0, 0.0, "Compra de divisa".into(),
+    )
+    .unwrap();
+
+    let tasa: f64 = conexion()
+        .query_row("SELECT tasa_cambio FROM transacciones_cuentas WHERE id = ?;",
+                   [ultima_transferencia()], |r| r.get(0))
+        .unwrap();
+    assert_importe(tasa, 100.0 / 6_000.0, "monto_destino / monto_origen");
+}
+
+#[test]
+fn c47_revertir_una_transferencia_devuelve_el_monto_y_el_cargo_al_origen() {
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
+    let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 100.0, "Traspaso".into(),
+    )
+    .unwrap();
+
+    crate::eliminar_transaccion_cuenta(ultima_transferencia()).unwrap();
+
+    assert_importe(saldo_cuenta_id(origen), 50_000.0, "restitución exacta con cargo");
+    assert_importe(saldo_cuenta_id(destino), 10_000.0, "restitución exacta");
+    assert_eq!(total_transferencias(), 0);
+}
+
+#[test]
+fn c48_h10_la_reversion_recorta_el_destino_en_cero_y_pierde_la_diferencia() {
+    // Misma forma que H5, en otro vertical: el origen se restituye sin límite
+    // pero al destino se le aplica MAX(0.0, ...). Si el destino gastó lo
+    // recibido antes de advertirse el error, la diferencia desaparece.
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
+    let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 0.0, "Traspaso".into(),
+    )
+    .unwrap();
+
+    // El titular gasta 5 000 del destino antes de darse cuenta del error.
+    conexion()
+        .execute("UPDATE cuentas_ahorro SET balance_actual = 3000.0 WHERE id = ?;", [destino])
+        .unwrap();
+
+    crate::eliminar_transaccion_cuenta(ultima_transferencia()).unwrap();
+
+    // Correspondería 3 000 - 8 000 = -5 000. El recorte lo deja en cero.
+    assert_importe(saldo_cuenta_id(destino), 0.0, "recorte en cero (H10)");
+    assert_importe(saldo_cuenta_id(origen), 50_000.0, "el origen sí se restituye entero");
+}
+
+#[test]
+fn c49_h11_una_transferencia_de_una_cuenta_a_si_misma_se_acepta() {
+    // No se comprueba que origen y destino difieran. El saldo queda alterado
+    // exactamente por el cargo, y el asiento no representa nada real.
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
+
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), cuenta, cuenta, 8_000.0, 8_000.0, 100.0, "A sí misma".into(),
+    )
+    .unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 49_900.0, "solo se pierde el cargo (H11)");
+    assert_eq!(total_transferencias(), 1, "y queda un asiento sin sentido");
+}
+
+#[test]
+fn c50_h12_no_se_comprueba_que_el_importe_de_destino_sea_de_su_divisa() {
+    // Se acredita el importe tal cual a una cuenta en otra divisa. Aquí se
+    // acreditan 6 000 "dólares" a una cuenta USD cuando eran pesos.
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
+    let destino = crear_cuenta("Cuenta Ahorros USD", "USD", 0.0);
+
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), origen, destino, 6_000.0, 6_000.0, 0.0, "Sin convertir".into(),
+    )
+    .unwrap();
+
+    assert_importe(saldo_cuenta_id(destino), 6_000.0, "seis mil dólares donde había pesos (H12)");
+}
+
+#[test]
+fn c51_h13_borrar_una_cuenta_arrastra_sus_transferencias_sin_revertir_saldos() {
+    // La guarda de eliminar_cuenta cuenta gastos, no transferencias, y la
+    // clave foránea es ON DELETE CASCADE: el historial se va en silencio y la
+    // contraparte se queda con el dinero recibido.
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
+    let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 0.0, "Traspaso".into(),
+    )
+    .unwrap();
+    assert_eq!(total_transferencias(), 1);
+
+    crate::eliminar_cuenta(origen).unwrap();
+
+    assert_eq!(total_transferencias(), 0, "el historial desapareció (H13)");
+    assert_importe(saldo_cuenta_id(destino), 8_000.0, "y la contraparte conserva lo recibido");
+}
+
+#[test]
+fn c52_una_cuenta_con_gastos_asociados_no_se_puede_eliminar() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
+    crear_gasto(transferencia(1_000.0, "Alimentación", "Compra", cuenta)).unwrap();
+
+    assert!(crate::eliminar_cuenta(cuenta).is_err(), "la guarda sí cubre los gastos");
+}
+
+#[test]
+fn c53_una_transferencia_puede_dejar_el_origen_en_negativo() {
+    // No se comprueban fondos. Se fija como conducta vigente: decidir si un
+    // sobregiro es legítimo corresponde al titular, no a esta prueba.
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
+
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), origen, destino, 5_000.0, 5_000.0, 0.0, "Sobregiro".into(),
+    )
+    .unwrap();
+
+    assert_importe(saldo_cuenta_id(origen), -4_000.0, "el origen queda en negativo");
+}
+
+#[test]
+fn c54_revertir_dos_veces_la_misma_transferencia_falla_la_segunda() {
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
+    let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 0.0, "Traspaso".into(),
+    )
+    .unwrap();
+    let id = ultima_transferencia();
+
+    crate::eliminar_transaccion_cuenta(id).unwrap();
+
+    assert!(crate::eliminar_transaccion_cuenta(id).is_err(), "no se revierte dos veces");
+    assert_importe(saldo_cuenta_id(origen), 50_000.0, "sin doble restitución");
+}
