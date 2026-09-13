@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 2;
+pub const VERSION_OBJETIVO: u32 = 3;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -103,6 +103,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 2,
             nombre: "transformaciones históricas",
             aplicar: crate::db_sql::migracion_2_transformaciones,
+        },
+        Migracion {
+            version: 3,
+            nombre: "importes en centavos exactos",
+            aplicar: crate::db_sql::migracion_3_centavos_exactos,
         },
     ]
 }
@@ -271,6 +276,15 @@ pub fn paso(
 mod tests {
     use super::*;
 
+    #[test]
+    fn deja_constancia_de_la_version_de_sqlite_empaquetada() {
+        // DROP COLUMN necesita 3.35 y RENAME COLUMN 3.25. La versión que
+        // importa es la que rusqlite compila dentro del binario, no la del
+        // sqlite3 del sistema.
+        println!("SQLite empaquetada: {}", rusqlite::version());
+        assert!(rusqlite::version_number() >= 3_035_000, "hace falta 3.35 o superior");
+    }
+
     fn base_en_memoria() -> Connection {
         Connection::open_in_memory().unwrap()
     }
@@ -415,5 +429,132 @@ mod tests {
             }
             otro => panic!("se esperaba un fallo, no {otro:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_centavos {
+    use super::*;
+    use crate::db_sql::COLUMNAS_DE_DINERO;
+
+    fn base_migrada() -> Connection {
+        let mut c = Connection::open_in_memory().unwrap();
+        ejecutar(&mut c).unwrap();
+        c
+    }
+
+    fn fuera_de_centavo(c: &Connection, tabla: &str, columna: &str) -> i64 {
+        c.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM {t} WHERE {c} IS NOT NULL
+                 AND ABS({c} * 100 - ROUND({c} * 100)) > 1e-6;",
+                t = tabla,
+                c = columna
+            ),
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn un_importe_con_fraccion_de_centavo_queda_en_el_centavo_mas_cercano() {
+        // Reproduce la forma del caso real: un gasto por transferencia cuyo
+        // importe arrastra un tercer decimal.
+        // Se migra entero y después se siembra el valor torcido, para poder
+        // aplicar la migración 3 a mano y observar su efecto.
+        let mut c = base_migrada();
+        c.execute_batch(
+            "INSERT INTO categorias (nombre) VALUES ('Prueba');
+             INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago)
+             VALUES ('13/09/2026', 1234.567, 'DOP', 'Con fracción', 1, 'transferencia');",
+        )
+        .unwrap();
+        assert_eq!(fuera_de_centavo(&c, "gastos", "monto"), 1, "sembrado fuera de centavo");
+
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_3_centavos_exactos(&tx).unwrap();
+        tx.commit().unwrap();
+
+        let monto: f64 =
+            c.query_row("SELECT monto FROM gastos;", [], |r| r.get(0)).unwrap();
+        assert!((monto - 1234.57).abs() < 1e-9, "al centavo más cercano, obtenido {monto}");
+        assert_eq!(fuera_de_centavo(&c, "gastos", "monto"), 0);
+    }
+
+    #[test]
+    fn las_tasas_no_se_redondean_al_centavo() {
+        // La distinción que hace explícita la lista: una tasa de 58.9642 sirve
+        // para reconstruir una conversión; redondeada a 58.96 deja de servir.
+        let mut c = base_migrada();
+        c.execute_batch(
+            "INSERT INTO prestamos (tipo_prestamo, monto_prestamo, institucion_financiera,
+                                    tasa_actual, monto_cuota, dia_pago)
+             VALUES ('consumo', 1000.0, 'Banco Ejemplo', 18.755, 100.0, 5);",
+        )
+        .unwrap();
+
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_3_centavos_exactos(&tx).unwrap();
+        tx.commit().unwrap();
+
+        let tasa: f64 = c.query_row("SELECT tasa_actual FROM prestamos;", [], |r| r.get(0)).unwrap();
+        assert!((tasa - 18.755).abs() < 1e-9, "la tasa conserva su precisión: {tasa}");
+    }
+
+    #[test]
+    fn ninguna_columna_de_dinero_queda_fuera_de_centavo_tras_migrar() {
+        let c = base_migrada();
+
+        for (tabla, columna) in COLUMNAS_DE_DINERO {
+            let existe: i64 = c
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name = ?;", tabla),
+                    [columna],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if existe == 0 {
+                continue;
+            }
+            assert_eq!(
+                fuera_de_centavo(&c, tabla, columna),
+                0,
+                "{}.{} debería estar en centavos exactos",
+                tabla,
+                columna
+            );
+        }
+    }
+
+    #[test]
+    fn la_lista_de_dinero_no_incluye_ninguna_tasa() {
+        // Una tasa en esta lista perdería precisión en silencio. La prueba lo
+        // impide de forma que no dependa de que alguien lo recuerde.
+        for (tabla, columna) in COLUMNAS_DE_DINERO {
+            assert!(
+                !columna.contains("tasa") && !columna.contains("porcentaje"),
+                "{}.{} parece una tasa y no debería redondearse al centavo",
+                tabla,
+                columna
+            );
+        }
+    }
+
+    #[test]
+    fn la_verificacion_falla_si_queda_un_importe_fuera_de_centavo() {
+        // Se comprueba que la red existe: si el redondeo no hubiera alcanzado
+        // a una columna, la migración no se daría por buena.
+        let mut c = base_migrada();
+        c.execute_batch(
+            "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual)
+             VALUES ('Cuenta Ejemplo', 'DOP', 100.005);",
+        )
+        .unwrap();
+
+        let tx = c.transaction().unwrap();
+        let resultado = super::super::db_sql::verificar_centavos_exactos_para_pruebas(&tx);
+
+        assert!(resultado.is_err(), "la verificación tiene que rechazarlo");
     }
 }

@@ -437,6 +437,146 @@ pub fn migracion_2_transformaciones(tx: &Transaction) -> Result<(), ErrorMigraci
     Ok(())
 }
 
+
+/// Columnas que guardan **dinero**, y por tanto deben caer en centavos exactos.
+///
+/// La lista es explícita a propósito. Barrer todas las columnas `REAL` habría
+/// arrastrado las **tasas** —`tasa_actual`, `tasa_cambio`, `tasa_conversion`,
+/// `porcentaje_retencion`—, que no son importes y cuya precisión es
+/// justamente lo que no hay que recortar: una tasa de 58.9642 redondeada a dos
+/// decimales deja de servir para reconstruir una conversión.
+pub const COLUMNAS_DE_DINERO: &[(&str, &str)] = &[
+    ("cuentas_ahorro", "balance_actual"),
+    ("gastos", "monto"),
+    ("gastos", "costo_adicional"),
+    ("gastos", "monto_liquidado"),
+    ("ingresos", "monto_total"),
+    ("ingresos", "monto_retenido"),
+    ("ingresos", "monto_recibido"),
+    ("ingresos_informales", "monto"),
+    ("ingresos_informales", "monto_recibido"),
+    ("pagos_tarjeta", "monto_pagado"),
+    ("prestamos", "monto_prestamo"),
+    ("prestamos", "monto_cuota"),
+    ("prestamos", "saldo_actual"),
+    ("prestamos", "limite_credito"),
+    ("suscripciones", "monto"),
+    ("tarjetas", "limite"),
+    ("tarjetas", "balance_actual"),
+    ("tarjetas", "balance_pesos"),
+    ("tarjetas", "balance_dolares"),
+    ("tarjetas", "limite_pesos"),
+    ("tarjetas", "limite_dolares"),
+    ("tarjetas", "limite_sobregiro_pesos"),
+    ("tarjetas", "limite_sobregiro_dolares"),
+    ("tarjetas", "balance_corte_pesos"),
+    ("tarjetas", "balance_corte_dolares"),
+    ("tarjetas", "limite_ajustado_pesos"),
+    ("tarjetas", "limite_ajustado_dolares"),
+    ("transacciones_cuentas", "monto_origen"),
+    ("transacciones_cuentas", "monto_destino"),
+    ("transacciones_cuentas", "cargo"),
+    ("movimientos_prestamo", "monto"),
+    ("movimientos_prestamo", "interes"),
+    ("movimientos_prestamo", "capital"),
+    ("movimientos_prestamo", "saldo_resultante"),
+    ("bonificaciones", "monto"),
+];
+
+const MIG3: &str = "importes en centavos exactos";
+
+/// Migración 3 — todos los importes caen en un centavo exacto.
+///
+/// El dominio trabaja en centavos enteros desde la Fase 1, pero la base seguía
+/// guardando los importes como números con coma. Eso permitió que se colara un
+/// tercer decimal, residuo de cuando el 0.20 % se calculaba en tres sitios con
+/// dos criterios de redondeo distintos (H8): el gasto quedaba con fracción de
+/// centavo y el saldo de la cuenta heredaba la deriva al debitarse.
+///
+/// Esta migración los lleva al centavo más cercano. **No oculta la
+/// diferencia**: al terminar comprueba que no queda ni un importe fuera de
+/// centavo y falla si lo hay, de modo que la conversión se acepta solo cuando
+/// es verificable, en vez de darse por buena porque no falló.
+///
+/// Es el paso previo a cambiar el tipo de las columnas: hacerlo con valores ya
+/// exactos convierte ese cambio en una operación sin pérdida.
+pub fn migracion_3_centavos_exactos(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    for (tabla, columna) in COLUMNAS_DE_DINERO {
+        // Una columna puede no existir: las heredadas del esquema de una sola
+        // divisa desaparecieron, y las nuevas no están en bases antiguas.
+        if !tabla_existe(tx, tabla)? || !columna_existe_en(tx, tabla, columna)? {
+            continue;
+        }
+
+        migraciones::paso(
+            tx,
+            MIG3,
+            &format!("redondear {}.{} al centavo", tabla, columna),
+            &format!(
+                "UPDATE {t} SET {c} = ROUND({c}, 2)
+                 WHERE {c} IS NOT NULL AND ABS({c} * 100 - ROUND({c} * 100)) > 1e-6;",
+                t = tabla,
+                c = columna
+            ),
+        )?;
+    }
+
+    verificar_centavos_exactos(tx)
+}
+
+/// Comprueba que no queda ni un importe fuera de centavo.
+///
+/// Es la condición que hace la conversión **aceptable**: sin ella, redondear
+/// sería una operación que se da por buena porque no falló, que es
+/// precisamente la clase de silencio que este proyecto viene retirando.
+fn verificar_centavos_exactos(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    for (tabla, columna) in COLUMNAS_DE_DINERO {
+        if !tabla_existe(tx, tabla)? || !columna_existe_en(tx, tabla, columna)? {
+            continue;
+        }
+
+        let fuera: i64 = tx
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM {t}
+                     WHERE {c} IS NOT NULL AND ABS({c} * 100 - ROUND({c} * 100)) > 1e-6;",
+                    t = tabla,
+                    c = columna
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+
+        if fuera > 0 {
+            return Err(ErrorMigracion::Fallo {
+                version: 3,
+                migracion: MIG3,
+                etapa: format!("verificar {}.{}", tabla, columna),
+                causa: format!("quedan {} importes fuera de centavo", fuera),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Acceso a la verificación desde las pruebas del ejecutor.
+#[cfg(test)]
+pub fn verificar_centavos_exactos_para_pruebas(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    verificar_centavos_exactos(tx)
+}
+
+fn tabla_existe(tx: &Transaction, tabla: &str) -> Result<bool, ErrorMigracion> {
+    let n: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?;",
+            [tabla],
+            |r| r.get(0),
+        )
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+    Ok(n > 0)
+}
+
 /// Semillas de sistema: los registros que la aplicación necesita para operar.
 ///
 /// Van aparte de las migraciones porque no describen una versión del esquema
