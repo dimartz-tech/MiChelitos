@@ -5,6 +5,7 @@
 )]
 
 mod db_sql;
+mod respaldo;
 mod db_nosql;
 
 mod adaptadores;
@@ -1533,6 +1534,18 @@ fn eliminar_cliente(id: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// Toma un respaldo bajo demanda y devuelve dónde quedó.
+///
+/// Los respaldos automáticos solo se toman al preparar el esquema. Este
+/// comando existe para el momento en que se va a hacer algo arriesgado a mano
+/// —conciliar varios saldos, cargar un estado— y se quiere una red antes.
+#[tauri::command]
+fn crear_respaldo() -> Result<String, String> {
+    respaldo::respaldar("manual")
+        .map(|r| r.to_string_lossy().to_string())
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn obtener_cuentas() -> Result<Vec<CuentaAhorro>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
@@ -1940,6 +1953,7 @@ fn main() {
             obtener_clientes,
             crear_cliente,
             eliminar_cliente,
+            crear_respaldo,
             obtener_cuentas,
             crear_cuenta,
             eliminar_cuenta,
