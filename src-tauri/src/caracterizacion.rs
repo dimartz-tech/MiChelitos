@@ -1602,13 +1602,17 @@ fn c54_revertir_dos_veces_la_misma_transferencia_falla_la_segunda() {
 }
 
 // ---------------------------------------------------------------------------
-//  Riesgo de los errores descartados en la preparación del esquema (C55–C56)
+//  Errores en la preparación del esquema (C55–C56)
 //
-//  `inicializar_db` aplica sus migraciones con `let _ = conn.execute(...)`.
-//  Ese patrón nació para tolerar una condición esperada —la columna ya
-//  existe—, pero descarta **cualquier** error, no solo ese. Estas pruebas
-//  demuestran que la distinción importa: existe un estado en el que la
-//  preparación declara éxito y deja el esquema inservible.
+//  Antes, `inicializar_db` aplicaba sus migraciones con
+//  `let _ = conn.execute(...)`: el patrón nació para tolerar una condición
+//  esperada —la columna ya existe— pero descartaba cualquier error. Estas
+//  pruebas documentaban que existía un estado en el que la preparación
+//  declaraba éxito y dejaba el esquema inservible.
+//
+//  **Resuelto por el ejecutor de migraciones versionadas.** Ahora la condición
+//  esperada se comprueba y el fallo se propaga con su causa. Las pruebas
+//  cambian de sentido y lo dicen.
 // ---------------------------------------------------------------------------
 
 /// Aísla el entorno **sin** inicializar la base, para poder sembrarla antes.
@@ -1632,71 +1636,51 @@ fn entorno_sin_inicializar() -> (MutexGuard<'static, ()>, String) {
     (guarda, ruta)
 }
 
-#[test]
-fn c55_inicializar_declara_exito_sobre_un_esquema_que_no_pudo_migrar() {
-    // Se siembra una base en la que `tarjetas` es una VISTA. Es el estado en
-    // que quedaría tras una migración a medias o una base tocada a mano.
-    //
-    //   · CREATE TABLE IF NOT EXISTS sobre una vista no falla: no hace nada.
-    //   · El ALTER TABLE siguiente sí falla: no se puede añadir una columna
-    //     a una vista. Ese error se descarta.
-    let (_g, ruta) = entorno_sin_inicializar();
-    {
-        let c = Connection::open(&ruta).expect("abrir base sembrada");
-        c.execute_batch(
-            "CREATE TABLE origen (id INTEGER PRIMARY KEY, entidad TEXT);
-             CREATE VIEW tarjetas AS SELECT id, entidad FROM origen;",
-        )
-        .expect("sembrar la vista");
-    }
-
-    let resultado = db_sql::inicializar_db();
-
-    assert!(
-        resultado.is_ok(),
-        "conducta vigente: la preparación se declara exitosa pese a no haber podido migrar"
-    );
-
-    // Y sin embargo el esquema quedó inservible: faltan las columnas que todo
-    // el vertical de tarjetas da por hechas.
-    let c = Connection::open(&ruta).unwrap();
-    let columnas: Vec<String> = c
-        .prepare("SELECT name FROM pragma_table_info('tarjetas');")
-        .unwrap()
-        .query_map([], |r| r.get(0))
-        .unwrap()
-        .map(|r| r.unwrap())
-        .collect();
-
-    assert!(
-        !columnas.iter().any(|c| c == "balance_pesos"),
-        "la columna no se creó, como se esperaba de una migración fallida"
-    );
-    assert_eq!(columnas, vec!["id", "entidad"], "el esquema quedó como estaba");
+/// Siembra una base en la que `tarjetas` es una VISTA.
+///
+/// Es el estado en que quedaría tras una migración a medias o una base tocada
+/// a mano: `CREATE TABLE IF NOT EXISTS` no falla sobre una vista —no hace
+/// nada— y el `ALTER` siguiente no puede aplicarse.
+fn sembrar_esquema_inservible(ruta: &str) {
+    let c = Connection::open(ruta).expect("abrir base sembrada");
+    c.execute_batch(
+        "CREATE TABLE origen (id INTEGER PRIMARY KEY, entidad TEXT);
+         CREATE VIEW tarjetas AS SELECT id, entidad FROM origen;",
+    )
+    .expect("sembrar la vista");
 }
 
 #[test]
-fn c56_el_fallo_solo_aparece_despues_al_consultar_y_no_al_preparar() {
-    // La consecuencia de C55: el error no se manifiesta donde ocurre —en la
-    // preparación— sino más tarde, en la primera consulta que toque una
-    // columna ausente. Sin versionado de esquema no hay nada entre ambos
-    // momentos que detecte la inconsistencia.
+fn c55_inicializar_falla_sobre_un_esquema_que_no_puede_migrar() {
+    // **Conducta corregida.** Antes devolvía `Ok` y la aplicación arrancaba
+    // contra un esquema al que le faltaban ocho columnas.
     let (_g, ruta) = entorno_sin_inicializar();
-    {
-        let c = Connection::open(&ruta).expect("abrir base sembrada");
-        c.execute_batch(
-            "CREATE TABLE origen (id INTEGER PRIMARY KEY, entidad TEXT);
-             CREATE VIEW tarjetas AS SELECT id, entidad FROM origen;",
-        )
+    sembrar_esquema_inservible(&ruta);
+
+    let error = db_sql::inicializar_db().unwrap_err().to_string();
+
+    assert!(error.contains("tarjetas"), "nombra la estructura: {error}");
+    assert!(error.contains("view"), "y dice qué encontró: {error}");
+    assert!(error.contains("sin modificar"), "y que no tocó nada: {error}");
+}
+
+#[test]
+fn c56_el_fallo_aparece_donde_ocurre_y_la_base_no_avanza_de_version() {
+    // **Conducta corregida.** Antes el fallo emergía lejos de su causa, en la
+    // primera consulta que tocara una columna ausente. Ahora se detiene en la
+    // preparación y la versión de esquema no avanza, de modo que un reintento
+    // parte de un estado con nombre.
+    let (_g, ruta) = entorno_sin_inicializar();
+    sembrar_esquema_inservible(&ruta);
+
+    assert!(db_sql::inicializar_db().is_err(), "se queja donde ocurre");
+
+    let c = Connection::open(&ruta).unwrap();
+    assert_eq!(crate::migraciones::version_de(&c).unwrap(), 0, "la versión no avanzó");
+    let categorias: i64 = c
+        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE name='categorias';", [], |r| r.get(0))
         .unwrap();
-    }
-
-    db_sql::inicializar_db().expect("la preparación no se queja");
-
-    assert!(
-        crate::obtener_tarjetas().is_err(),
-        "el fallo emerge aquí, lejos de su causa"
-    );
+    assert_eq!(categorias, 0, "ni quedó a medias lo que la migración alcanzó a crear");
 }
 
 #[test]
@@ -1732,4 +1716,43 @@ fn c57_preparar_el_esquema_respalda_antes_de_tocar_una_base_existente() {
                    [], |r| r.get(0))
         .expect("consultar el respaldo");
     assert_eq!(cuentas, 1, "los datos están en la copia");
+}
+
+#[test]
+#[ignore = "simulación manual sobre una copia de una base histórica"]
+fn simulacion_base_historica() {
+    // La ruta llega por `MICHELITOS_SIMULACION` en vez de por `HOME`: cambiar
+    // `HOME` rompe a rustup y el propio `cargo test` deja de arrancar.
+    let ruta = std::env::var("MICHELITOS_SIMULACION")
+        .expect("indique MICHELITOS_SIMULACION con la ruta de una COPIA");
+    let mut c = Connection::open(&ruta).expect("abrir copia");
+    let antes: Vec<i64> = ["gastos", "cuentas_ahorro", "tarjetas", "transacciones_cuentas"]
+        .iter()
+        .map(|t| c.query_row(&format!("SELECT COUNT(*) FROM {};", t), [], |r| r.get(0)).unwrap())
+        .collect();
+
+    let informe = crate::migraciones::ejecutar(&mut c).expect("migrar base histórica");
+    db_sql::sembrar(&c).expect("sembrar");
+    println!("versión final: {}", crate::migraciones::version_de(&c).unwrap());
+
+    let despues: Vec<i64> = ["gastos", "cuentas_ahorro", "tarjetas", "transacciones_cuentas"]
+        .iter()
+        .map(|t| c.query_row(&format!("SELECT COUNT(*) FROM {};", t), [], |r| r.get(0)).unwrap())
+        .collect();
+
+    println!("informe: {:?}", informe);
+    println!("filas antes:   {:?}", antes);
+    println!("filas después: {:?}", despues);
+    assert_eq!(antes, despues, "ninguna fila se perdió ni apareció");
+    assert_eq!(informe.version_final, crate::migraciones::VERSION_OBJETIVO);
+
+    let integridad: String = c.query_row("PRAGMA integrity_check;", [], |r| r.get(0)).unwrap();
+    assert_eq!(integridad, "ok");
+    let rotas: i64 =
+        c.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check;", [], |r| r.get(0)).unwrap();
+    assert_eq!(rotas, 0, "sin referencias rotas");
+
+    // Segunda pasada: nada que aplicar.
+    let segunda = crate::migraciones::ejecutar(&mut c).expect("segunda pasada");
+    assert!(segunda.aplicadas.is_empty(), "no se repite nada");
 }
