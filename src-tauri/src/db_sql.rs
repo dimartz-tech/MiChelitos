@@ -33,7 +33,28 @@ fn columna_existe(conn: &Connection, tabla: &str, columna: &str) -> bool {
     false
 }
 
+/// Prepara el almacenamiento: respalda, crea lo que falte y migra.
+///
+/// **Respalda antes de tocar nada.** Si la base ya existe y ha cambiado desde
+/// el último respaldo, se toma uno consistente y verificado; si no se puede
+/// tomar, la preparación se detiene sin haber modificado el esquema. Migrar
+/// sin red es precisamente el riesgo del que esto protege, de modo que un
+/// fallo aquí es motivo para no continuar, no para seguir con una advertencia.
+///
+/// La preparación de una instalación nueva no respalda nada: no hay nada que
+/// perder todavía.
 pub fn inicializar_db() -> Result<()> {
+    if let Err(e) = crate::respaldo::respaldar_si_hace_falta("antes de preparar el esquema") {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "No se preparó la base porque antes no se pudo respaldar. {}",
+            e
+        )));
+    }
+
+    inicializar_esquema()
+}
+
+fn inicializar_esquema() -> Result<()> {
     let conn = obtener_conexion()?;
     crear_esquema(&conn)
 }

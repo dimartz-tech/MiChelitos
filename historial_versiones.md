@@ -4,7 +4,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.6.0 (Versión Actual) - 2026-09-13
+## 🚀 Versión 1.6.1 (Versión Actual) - 2026-09-13
+**Respaldo consistente y verificado antes de modificar el esquema.**
+
+### 🛟 Respaldo de la base
+* **Copia consistente en lugar de copia del archivo**:
+  * El respaldo se toma con el mecanismo propio de SQLite, que escribe una base nueva y completa desde una vista coherente de la actual. Copiar el archivo directamente solo produce un respaldo válido si nadie está escribiendo, y eso no se puede garantizar desde fuera.
+* **Verificación antes de darlo por bueno**:
+  * Cada respaldo se abre y se comprueban su integridad y sus relaciones. Si no las supera, se descarta: una copia que nunca se ha abierto no es un respaldo, es un archivo.
+* **Automático antes de tocar el esquema**:
+  * Al preparar el almacenamiento se respalda primero, y **si el respaldo no se puede tomar la preparación se detiene** sin haber modificado nada. Una instalación nueva no genera respaldos, porque todavía no hay nada que perder, y una base que no ha cambiado desde el último tampoco.
+* **Respaldo bajo demanda** desde Ajustes, para antes de conciliar saldos o cargar un estado a mano.
+* Los respaldos se guardan fuera del directorio de la base, con marca de tiempo y motivo en el nombre, conservando los diez más recientes.
+
+---
+
+## 🚀 Versión 1.6.0 - 2026-09-13
 **Financiamientos con saldo vivo, vinculados a la tarjeta que los cobra, y vista de pasivos agrupada por acreedor.**
 
 ### 🏦 Financiamientos
