@@ -73,11 +73,18 @@ pub fn transferir(
 
 /// Deshace una transferencia y elimina su asiento.
 ///
-/// **No es la inversa exacta de `transferir`** y eso es deliberado en esta
-/// fase: al origen se le restituye todo, pero al destino se le descuenta con
-/// recorte en cero (**H10**). Si el destino ya gastó parte de lo recibido, la
-/// diferencia no se descuenta y el patrimonio queda inflado. Se conserva la
-/// conducta vigente; corregirla es una decisión aparte.
+/// **Es la inversa exacta de `transferir`** (resolución de **H10**): las dos
+/// cuentas vuelven al estado que tenían, porque revertir significa *«esta
+/// transferencia nunca ocurrió»*. No es devolver el dinero —eso sería otra
+/// transferencia, un hecho nuevo—, sino retirar un registro mal hecho.
+///
+/// Antes el destino se descontaba con recorte en cero mientras el origen se
+/// restituía entero, de modo que el total repartido entre ambas cuentas
+/// **subía**: el patrimonio quedaba inflado.
+///
+/// Si el destino ya gastó lo recibido, el saldo queda negativo, y eso informa
+/// en lugar de estorbar: dice que hay movimientos sin registrar en esa cuenta.
+/// Ocultarlo tras un cero borraba justamente esa señal.
 pub fn revertir_transferencia(
     id: i64,
     almacen: &mut impl AlmacenTransferencias,
@@ -86,7 +93,7 @@ pub fn revertir_transferencia(
 
     let devolucion = t.monto_origen.sumar(&t.cargo)?;
     almacen.ajustar_saldo(t.origen_id, devolucion)?;
-    almacen.reducir_saldo_con_recorte(t.destino_id, t.monto_destino)?;
+    almacen.ajustar_saldo(t.destino_id, t.monto_destino.negado())?;
 
     almacen.eliminar_transferencia(id)?;
     Ok(())
@@ -101,11 +108,10 @@ pub fn revertir_transferencia(
 /// primero porque explica mejor el rechazo: una caja con gastos daría el
 /// mensaje genérico y dejaría creer que basta con borrar los gastos.
 ///
-/// **Conserva H13**: la segunda guarda cuenta los gastos que apuntan a la
-/// cuenta, pero no las transferencias. Como la clave foránea de éstas sí es
-/// `ON DELETE CASCADE`, borrar una cuenta con transferencias se lleva su
-/// historial en silencio. El puerto ya expone
-/// `transferencias_que_referencian` para cuando se decida cerrarlo.
+/// La tercera guarda cierra **H13**: una cuenta que participó en alguna
+/// transferencia tampoco se borra. Su clave foránea es `ON DELETE CASCADE`, de
+/// modo que borrarla se llevaba por delante esos asientos **y** dejaba a la
+/// contraparte con el dinero recibido sin constancia de dónde salió.
 pub fn eliminar_cuenta(
     cuenta_id: i64,
     almacen: &mut impl AlmacenTransferencias,
@@ -123,6 +129,13 @@ pub fn eliminar_cuenta(
                 .into(),
         )));
     }
+    if almacen.transferencias_que_referencian(cuenta_id)? > 0 {
+        return Err(ErrorAplicacion::Almacen(ErrorAlmacen::Fallo(
+            "No se puede eliminar la cuenta porque participa en transferencias registradas: borrarla se llevaría ese historial."
+                .into(),
+        )));
+    }
+
     almacen.eliminar_cuenta(cuenta_id)?;
     Ok(())
 }
@@ -218,9 +231,15 @@ mod tests {
     }
 
     #[test]
-    fn h10_si_el_destino_gasto_lo_recibido_la_reversion_infla_el_patrimonio() {
-        // Conducta vigente. El origen recupera todo y al destino solo se le
-        // quita lo que tiene: la diferencia no desaparece, se inventa.
+    fn h10_si_el_destino_gasto_lo_recibido_el_saldo_queda_negativo() {
+        // **H10 resuelto.** Antes el destino se recortaba en cero mientras el
+        // origen se restituía entero, y el total repartido entre las dos
+        // cuentas subía: el patrimonio quedaba inflado.
+        //
+        // Ahora el negativo se muestra, y dice algo cierto: si la
+        // transferencia nunca ocurrió, el destino nunca tuvo ese dinero, así
+        // que gastarlo significa que faltan movimientos por registrar en esa
+        // cuenta. Ocultarlo tras un cero borraba justamente esa señal.
         let mut a = almacen();
         let id = transferir(datos(dop(8_000.0), dop(8_000.0), dop(0.0)), &mut a).unwrap();
         a.ajustar_saldo(11, dop(-15_000.0)).unwrap(); // el destino queda en 3 000
@@ -230,13 +249,12 @@ mod tests {
         revertir_transferencia(id, &mut a).unwrap();
 
         assert_eq!(a.saldo_de(10), dop(50_000.0), "el origen recupera todo");
-        assert_eq!(a.saldo_de(11), dop(0.0), "recorte en cero (H10)");
+        assert_eq!(a.saldo_de(11), dop(-5_000.0), "y el destino devuelve todo");
 
         let total_despues = a.saldo_de(10).sumar(&a.saldo_de(11)).unwrap();
         assert_eq!(
-            total_despues.restar(&total_antes).unwrap(),
-            dop(5_000.0),
-            "cinco mil aparecidos de la nada"
+            total_despues, total_antes,
+            "el total no cambia: revertir no crea ni destruye dinero"
         );
     }
 
@@ -268,15 +286,20 @@ mod tests {
     }
 
     #[test]
-    fn h14_un_descuadre_dentro_de_la_misma_divisa_se_admite() {
-        // Conducta vigente: salen 8 000 y entran 7 500. El caso de uso no lo
-        // impide; el tipo lo expone para cuando se decida.
+    fn h14_un_descuadre_dentro_de_la_misma_divisa_se_rechaza() {
+        // **H14 resuelto.** Antes salían 8 000 y entraban 7 500, y los 500 de
+        // diferencia desaparecían entre las dos cuentas sin que nada lo
+        // dijera. La diferencia solo puede ser una comisión —y para eso está
+        // el cargo, que sale aparte— o un error de tecleo.
         let mut a = almacen();
 
-        transferir(datos(dop(8_000.0), dop(7_500.0), dop(0.0)), &mut a).unwrap();
+        let error = transferir(datos(dop(8_000.0), dop(7_500.0), dop(0.0)), &mut a)
+            .unwrap_err()
+            .to_string();
 
-        assert_eq!(a.saldo_de(10), dop(42_000.0));
-        assert_eq!(a.saldo_de(11), dop(17_500.0), "500 desaparecidos");
+        assert!(error.contains("comisión"), "orienta hacia el cargo: {error}");
+        assert_eq!(a.saldo_de(10), dop(50_000.0), "ningún saldo se movió");
+        assert_eq!(a.saldo_de(11), dop(10_000.0));
     }
 
     #[test]
@@ -291,12 +314,25 @@ mod tests {
     }
 
     #[test]
-    fn h13_borrar_una_cuenta_no_mira_sus_transferencias() {
-        // Conducta vigente: la guarda solo cuenta gastos.
+    fn h13_una_cuenta_con_transferencias_no_se_borra() {
+        // **H13 resuelto.** Antes se borraba: la clave foránea es
+        // ON DELETE CASCADE, así que el historial se iba en silencio y la
+        // contraparte conservaba el dinero recibido sin constancia de dónde
+        // había salido.
         let mut a = almacen();
         transferir(datos(dop(8_000.0), dop(8_000.0), dop(0.0)), &mut a).unwrap();
-        assert_eq!(a.transferencias_que_referencian(10).unwrap(), 1);
 
-        assert!(eliminar_cuenta(10, &mut a).is_ok(), "se borra igual (H13)");
+        let error = eliminar_cuenta(10, &mut a).unwrap_err().to_string();
+
+        assert!(error.contains("transferencias"), "explica por qué: {error}");
+        assert!(error.contains("historial"), "y qué se perdería: {error}");
+    }
+
+    #[test]
+    fn una_cuenta_sin_nada_que_la_referencie_si_se_borra() {
+        // La guarda no puede volverse un candado: una cuenta limpia se borra.
+        let mut a = almacen();
+
+        assert!(eliminar_cuenta(11, &mut a).is_ok());
     }
 }

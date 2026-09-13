@@ -186,6 +186,14 @@ impl<T> AlmacenBonificaciones for T where T: RepositorioBonificaciones + Reposit
 
 pub trait RepositorioCuentas {
     /// Suma `delta` al saldo. Un delta negativo lo debita.
+    ///
+    /// **Un saldo negativo es válido** (resolución de **H10**). Antes existía
+    /// un `reducir_saldo_con_recorte` que aplicaba `MAX(0.0, ...)` al revertir
+    /// una transferencia, mientras el origen se restituía sin límite. Como el
+    /// recorte solo actuaba en un extremo, revertir no deshacía la operación:
+    /// inflaba el total repartido entre las dos cuentas.
+    ///
+    /// Ajustar el saldo es hoy la única vía, y es simétrica.
     fn ajustar_saldo(&mut self, cuenta_id: i64, delta: Dinero) -> Result<(), ErrorAlmacen>;
 
     /// Identificador de la caja de efectivo de esa divisa.
@@ -196,23 +204,6 @@ pub trait RepositorioCuentas {
     /// el papel que cumple, no por su texto, y su ausencia es un error: quien
     /// registra un gasto en efectivo se entera de que no se asentó.
     fn caja(&self, divisa: Divisa) -> Result<i64, ErrorAlmacen>;
-
-    /// Reduce el saldo **sin permitir que baje de cero**.
-    ///
-    /// El recorte es la conducta vigente al revertir una transferencia
-    /// (**H10**), implementada hoy como `MAX(0.0, ...)` en SQL sobre la cuenta
-    /// de destino, mientras el origen se restituye sin límite. De esa
-    /// asimetría nace que transferir y revertir no sean inversas exactas.
-    ///
-    /// Tiene método propio, y no un `ajustar_saldo` con delta negativo, para
-    /// que la asimetría sea visible en el contrato en lugar de quedar
-    /// enterrada en una consulta. Es el mismo tratamiento que recibió H5 antes
-    /// de resolverse.
-    fn reducir_saldo_con_recorte(
-        &mut self,
-        cuenta_id: i64,
-        monto: Dinero,
-    ) -> Result<(), ErrorAlmacen>;
 
     fn saldo(&self, cuenta_id: i64) -> Result<Dinero, ErrorAlmacen>;
 
