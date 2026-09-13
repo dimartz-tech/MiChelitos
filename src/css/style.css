@@ -585,3 +585,17 @@ body.light-theme .btn-secondary {
         grid-template-columns: 1fr;
     }
 }
+
+/* --- FILAS DE PASIVO (financiamientos agrupados por acreedor) --- */
+.fila-pasivo:hover {
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.fila-pasivo:last-of-type {
+    border-bottom: none;
+}
+
+.fila-pasivo button:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.06);
+}
