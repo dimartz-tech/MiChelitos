@@ -2336,13 +2336,17 @@ class AppUI {
                     <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Registra tus cuentas bancarias en Pesos o Dólares.</p>
                     
                     <form id="form-add-cuenta" onsubmit="appUI.handleAgregarCuenta(event)" style="display:flex; flex-direction:column; gap:0.4rem; margin-bottom: 1rem;">
-                        <input type="text" id="cue_aj_nom" class="form-control" placeholder="Nombre de la Cuenta (Ej. BHD Ahorro)..." required style="padding:0.4rem 0.6rem;">
+                        <input type="text" id="cue_aj_nom" class="form-control" placeholder="Nombre de la Cuenta..." required style="padding:0.4rem 0.6rem;">
                         <div style="display:flex; gap:0.4rem;">
+                            <input type="text" id="cue_aj_ent" class="form-control" placeholder="Entidad..." style="flex:1.5; padding:0.4rem 0.6rem;">
                             <select id="cue_aj_div" class="form-control" style="flex:1; padding:0.4rem 0.6rem;">
                                 <option value="DOP" selected>DOP</option>
                                 <option value="USD">USD</option>
                             </select>
-                            <input type="number" id="cue_aj_bal" class="form-control" placeholder="Balance Inicial..." step="0.01" value="0.00" required style="flex:1.5; padding:0.4rem 0.6rem;">
+                        </div>
+                        <div style="display:flex; gap:0.4rem;">
+                            <input type="number" id="cue_aj_bal" class="form-control" placeholder="Balance Inicial..." step="0.01" value="0.00" required style="flex:1; padding:0.4rem 0.6rem;">
+                            <input type="number" id="cue_aj_com" class="form-control" placeholder="Comisión impuestos..." step="0.01" min="0" title="Tarifa fija que cobra la entidad por pagar impuestos desde esta cuenta. En blanco si no hay ninguna pactada: no es lo mismo que cero." style="flex:1; padding:0.4rem 0.6rem;">
                         </div>
                         <button type="submit" class="btn" style="padding:0.4rem; font-size:0.85rem; background: linear-gradient(135deg, var(--accent-primary), #00cdac); color:white;">🚀 Registrar Cuenta</button>
                     </form>
@@ -2351,10 +2355,16 @@ class AppUI {
                         ${cuentas.length > 0 ? cuentas.map(c => `
                             <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.5rem 0.8rem; border-radius:var(--radius-sm); display:flex; justify-content:space-between; align-items:center;">
                                 <div>
-                                    <strong>${c.nombre}</strong><br>
+                                    <strong>${c.nombre}</strong>
+                                    ${c.entidad ? `<span style="font-size:0.7rem; color:var(--text-muted);"> · ${c.entidad}</span>` : ''}
+                                    <br>
                                     <span style="font-size:0.75rem; color:var(--accent-primary); font-weight:bold;">${c.divisa} ${this.formatMoney(c.balance_actual)}</span>
+                                    ${c.comision_pago_impuestos != null ? `<span style="font-size:0.7rem; color:var(--color-warning);" title="Tarifa fija por pagar impuestos desde esta cuenta"> · 🧾 ${this.formatMoney(c.comision_pago_impuestos)}</span>` : ''}
                                 </div>
-                                <button onclick="appUI.handleEliminarCuenta(${c.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
+                                <div style="display:flex; gap:0.3rem;">
+                                    <button onclick='appUI.abrirEdicionCuenta(${JSON.stringify(c).replace(/'/g, "&#39;")})' class="btn" style="padding:0.2rem 0.4rem; font-size:0.75rem;">✏️</button>
+                                    <button onclick="appUI.handleEliminarCuenta(${c.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
+                                </div>
                             </div>
                         `).join('') : `
                             <p style="color:var(--text-muted); text-align:center; padding:1rem; font-size:0.75rem;">No hay cuentas registradas.</p>
@@ -3173,9 +3183,54 @@ class AppUI {
         const nom = document.getElementById('cue_aj_nom').value;
         const div = document.getElementById('cue_aj_div').value;
         const bal = Number(document.getElementById('cue_aj_bal').value);
+        const ent = document.getElementById('cue_aj_ent').value;
+        // Un campo en blanco es «no declarada», no cero: se envía nulo para
+        // que la ausencia siga siendo distinguible de una tarifa gratuita.
+        const comTexto = document.getElementById('cue_aj_com').value;
+        const com = comTexto.trim() === '' ? null : Number(comTexto);
         try {
-            await AppAPI.crearCuenta(nom, div, bal);
+            await AppAPI.crearCuenta(nom, div, bal, ent, com);
             this.showToast("Cuenta de ahorro registrada.");
+            await this.render('ajustes');
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
+    }
+
+    /**
+     * Corrige los datos que el titular declara sobre una cuenta.
+     *
+     * No ofrece el balance a propósito: moverlo sin dejar rastro sería la
+     * única forma de que un saldo cambiara sin un asiento detrás.
+     */
+    async abrirEdicionCuenta(cuenta) {
+        const nombre = prompt(`Nombre de la cuenta:`, cuenta.nombre);
+        if (nombre === null) return;
+
+        const entidad = prompt(
+            `Entidad con la que se mantiene «${nombre.trim()}»:`,
+            cuenta.entidad || ''
+        );
+        if (entidad === null) return;
+
+        const comisionActual = cuenta.comision_pago_impuestos != null
+            ? String(cuenta.comision_pago_impuestos)
+            : '';
+        const comision = prompt(
+            `Comisión fija por pago de impuestos desde esta cuenta.\n\nDéjalo vacío si la entidad no tiene una tarifa pactada; eso no es lo mismo que declarar cero.`,
+            comisionActual
+        );
+        if (comision === null) return;
+
+        const valor = comision.trim() === '' ? null : Number(comision);
+        if (valor !== null && !(valor >= 0)) {
+            this.showToast("La comisión debe ser un número mayor o igual que cero.", "error");
+            return;
+        }
+
+        try {
+            await AppAPI.actualizarCuenta(cuenta.id, nombre, entidad, valor);
+            this.showToast("Cuenta actualizada.");
             await this.render('ajustes');
         } catch (err) {
             this.showToast(err.toString(), 'error');

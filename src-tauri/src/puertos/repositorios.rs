@@ -205,6 +205,13 @@ pub trait RepositorioCuentas {
     /// registra un gasto en efectivo se entera de que no se asentó.
     fn caja(&self, divisa: Divisa) -> Result<i64, ErrorAlmacen>;
 
+    /// Tarifa fija que esta cuenta paga por el servicio de pago de impuestos.
+    ///
+    /// `None` significa que no hay tarifa pactada, no que sea cero: de esa
+    /// distinción depende si la operación paga el porcentaje ordinario o el
+    /// precio fijo del servicio.
+    fn comision_pago_impuestos(&self, cuenta_id: i64) -> Result<Option<Dinero>, ErrorAlmacen>;
+
     fn saldo(&self, cuenta_id: i64) -> Result<Dinero, ErrorAlmacen>;
 
     fn divisa(&self, cuenta_id: i64) -> Result<Divisa, ErrorAlmacen>;

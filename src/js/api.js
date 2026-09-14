@@ -50,8 +50,23 @@ const AppAPI = {
         return await invoke('obtener_cuentas');
     },
 
-    async crearCuenta(nombre, divisa, balance) {
-        return await invoke('crear_cuenta', { nombre, divisa, balance: Number(balance) });
+    async crearCuenta(nombre, divisa, balance, entidad, comisionPagoImpuestos) {
+        return await invoke('crear_cuenta', {
+            nombre,
+            divisa,
+            balance: Number(balance),
+            entidad: entidad || null,
+            comisionPagoImpuestos: comisionPagoImpuestos ?? null
+        });
+    },
+
+    async actualizarCuenta(id, nombre, entidad, comisionPagoImpuestos) {
+        return await invoke('actualizar_cuenta', {
+            id: Number(id),
+            nombre,
+            entidad: entidad || null,
+            comisionPagoImpuestos: comisionPagoImpuestos ?? null
+        });
     },
 
     async eliminarCuenta(id) {
