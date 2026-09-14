@@ -184,6 +184,39 @@ pub trait AlmacenBonificaciones: RepositorioBonificaciones + RepositorioTarjetas
 
 impl<T> AlmacenBonificaciones for T where T: RepositorioBonificaciones + RepositorioTarjetas {}
 
+/// Un abono a tarjeta tal como quedó guardado, con todo lo que movió.
+///
+/// Las tres últimas son opcionales porque un abono puede haberse registrado
+/// sin cuenta de la que debitar. En ese caso no hubo movimiento de cuenta ni
+/// comisión, y revertirlo solo afecta a la deuda de la tarjeta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PagoGuardado {
+    pub id: i64,
+    pub tarjeta_id: i64,
+    pub monto: Dinero,
+    pub cuenta_ahorro_id: Option<i64>,
+    /// Tasa aplicada al convertir. `None` o 1.0 significan sin conversión.
+    pub tasa_cambio: Option<f64>,
+    pub gasto_comision_id: Option<i64>,
+}
+
+pub trait RepositorioPagosTarjeta {
+    fn obtener_pago(&self, pago_id: i64) -> Result<PagoGuardado, ErrorAlmacen>;
+    fn eliminar_pago(&mut self, pago_id: i64) -> Result<(), ErrorAlmacen>;
+}
+
+/// Persistencia que necesita revertir un abono: el abono, la deuda que
+/// restituye, la cuenta a la que devuelve el dinero y el gasto de comisión.
+pub trait AlmacenAbonos:
+    RepositorioPagosTarjeta + RepositorioTarjetas + RepositorioCuentas + RepositorioGastos
+{
+}
+
+impl<T> AlmacenAbonos for T where
+    T: RepositorioPagosTarjeta + RepositorioTarjetas + RepositorioCuentas + RepositorioGastos
+{
+}
+
 pub trait RepositorioCuentas {
     /// Suma `delta` al saldo. Un delta negativo lo debita.
     ///

@@ -50,6 +50,14 @@ const AppAPI = {
         return await invoke('obtener_cuentas');
     },
 
+    async obtenerAbonosTarjeta(tarjetaId) {
+        return await invoke('obtener_abonos_tarjeta', { tarjetaId: Number(tarjetaId) });
+    },
+
+    async revertirAbonoTarjeta(id) {
+        return await invoke('revertir_abono_tarjeta', { id: Number(id) });
+    },
+
     async crearCuenta(nombre, divisa, balance, entidad, comisionPagoImpuestos) {
         return await invoke('crear_cuenta', {
             nombre,
