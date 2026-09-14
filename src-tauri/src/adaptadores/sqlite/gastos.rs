@@ -343,6 +343,30 @@ impl RepositorioCuentas for AlmacenSqlite<'_> {
         Ok(())
     }
 
+    fn comision_pago_impuestos(&self, cuenta_id: i64) -> Result<Option<Dinero>, ErrorAlmacen> {
+        // Dos niveles de ausencia distintos: que no exista la cuenta es un
+        // error, que exista sin tarifa pactada es un `None` legítimo.
+        let fila: Option<(Option<f64>, String)> = self
+            .tx
+            .query_row(
+                "SELECT comision_pago_impuestos, divisa FROM cuentas_ahorro WHERE id = ?;",
+                [cuenta_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(fallo)?;
+
+        let (tarifa, divisa) =
+            fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })?;
+
+        tarifa
+            .map(|t| {
+                Dinero::nuevo(t, divisa_desde_texto(&divisa))
+                    .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))
+            })
+            .transpose()
+    }
+
     fn saldo(&self, cuenta_id: i64) -> Result<Dinero, ErrorAlmacen> {
         let fila: Option<(f64, String)> = self
             .tx
