@@ -6,7 +6,7 @@
 //! comportamiento es correcto: lo fijan.
 
 use crate::db_sql;
-use crate::{crear_gasto, crear_suscripcion, eliminar_cuenta, eliminar_gasto, procesar_suscripciones, registrar_pago_tarjeta, GastoInput};
+use crate::{crear_gasto, crear_suscripcion, eliminar_cuenta, eliminar_gasto, procesar_suscripciones, registrar_pago_tarjeta, revertir_abono_tarjeta, GastoInput};
 use rusqlite::{params, Connection};
 use std::sync::{Mutex, MutexGuard};
 
@@ -166,6 +166,12 @@ fn ultimo_gasto() -> (f64, String, f64) {
 }
 
 /// Constructor con los valores por defecto de una transferencia ordinaria.
+fn ultimo_abono() -> i64 {
+    conexion()
+        .query_row("SELECT MAX(id) FROM pagos_tarjeta;", [], |r| r.get(0))
+        .expect("leer último abono")
+}
+
 fn declarar_comision_de_impuestos(cuenta_id: i64, tarifa: f64) {
     conexion()
         .execute(
@@ -1819,3 +1825,107 @@ fn c63_la_tarifa_es_fija_y_no_depende_del_monto() {
     // Con la retención ordinaria habrían salido 1 000 pesos en vez de 75.
     assert_importe(saldo_cuenta_id(cuenta), 499_925.0, "misma tarifa que en un pago pequeño");
 }
+
+// ---------------------------------------------------------------------------
+//  Reversión de un abono a tarjeta
+//
+//  Recorre el camino entero porque es donde vive el riesgo: el caso de uso ya
+//  está probado con el doble, pero lo que hacía imposible revertir era que el
+//  registro no guardara de qué cuenta salió el dinero. Estas pruebas verifican
+//  que ahora lo guarda y que deshacerlo devuelve todo a su sitio.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn c64_registrar_y_revertir_un_abono_deja_tarjeta_y_cuenta_como_estaban() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(30_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
+
+    registrar_pago_tarjeta(
+        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+    )
+    .unwrap();
+    assert_importe(balances_tarjeta(tarjeta).0, 18_000.0, "la deuda bajó");
+    assert_importe(saldo_cuenta_id(cuenta), 87_976.0, "salieron 12 000 + 24");
+
+    let abono = ultimo_abono();
+    revertir_abono_tarjeta(abono).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 30_000.0, "la deuda vuelve");
+    assert_importe(saldo_cuenta_id(cuenta), 100_000.0, "y el dinero también");
+    assert_eq!(total_gastos(), 0, "la comisión deja de existir");
+}
+
+#[test]
+fn c65_revertir_un_abono_en_divisa_devuelve_los_pesos_que_salieron() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 500.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
+
+    registrar_pago_tarjeta(
+        tarjeta, "14/09/2026".to_string(), 100.0, "USD".to_string(), Some(cuenta), 60.0,
+    )
+    .unwrap();
+    assert_importe(balances_tarjeta(tarjeta).1, 400.0, "la deuda en dólares bajó");
+    assert_importe(saldo_cuenta_id(cuenta), 93_988.0, "salieron 6 000 + 12");
+
+    revertir_abono_tarjeta(ultimo_abono()).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).1, 500.0, "vuelve en dólares");
+    assert_importe(saldo_cuenta_id(cuenta), 100_000.0, "y a la cuenta vuelven pesos");
+}
+
+#[test]
+fn c66_revertir_un_abono_sin_cuenta_solo_repone_la_deuda() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(30_000.0, 0.0);
+
+    registrar_pago_tarjeta(
+        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), None, 0.0,
+    )
+    .unwrap();
+
+    revertir_abono_tarjeta(ultimo_abono()).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 30_000.0, "la deuda vuelve entera");
+    assert_eq!(total_gastos(), 0, "nunca hubo comisión que borrar");
+}
+
+#[test]
+fn c67_revertir_un_abono_que_dejo_saldo_a_favor_lo_deshace_sin_recorte() {
+    // El caso que motivó todo esto: un abono mayor que la deuda. Con el
+    // recorte de antes el dinero salía de la cuenta y no llegaba a la tarjeta,
+    // y no había forma de deshacerlo.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 500_000.0);
+
+    registrar_pago_tarjeta(
+        tarjeta, "14/09/2026".to_string(), 5_000.0, "USD".to_string(), Some(cuenta), 59.9,
+    )
+    .unwrap();
+    assert_importe(balances_tarjeta(tarjeta).1, -5_000.0, "queda saldo a favor, no cero");
+
+    revertir_abono_tarjeta(ultimo_abono()).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).1, 0.0, "el saldo a favor se deshace");
+    assert_importe(saldo_cuenta_id(cuenta), 500_000.0, "y el dinero vuelve entero");
+}
+
+#[test]
+fn c68_revertir_dos_veces_falla_la_segunda_sin_duplicar_la_devolucion() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(30_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
+    registrar_pago_tarjeta(
+        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+    )
+    .unwrap();
+    let abono = ultimo_abono();
+
+    revertir_abono_tarjeta(abono).unwrap();
+    assert!(revertir_abono_tarjeta(abono).is_err(), "el abono ya no existe");
+
+    assert_importe(saldo_cuenta_id(cuenta), 100_000.0, "sin doble devolución");
+}
+

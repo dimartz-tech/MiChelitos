@@ -277,6 +277,48 @@ impl RepositorioTarjetas for AlmacenSqlite<'_> {
     }
 }
 
+impl RepositorioPagosTarjeta for AlmacenSqlite<'_> {
+    fn obtener_pago(&self, pago_id: i64) -> Result<PagoGuardado, ErrorAlmacen> {
+        let fila: Option<(i64, f64, String, Option<i64>, Option<f64>, Option<i64>)> = self
+            .tx
+            .query_row(
+                "SELECT tarjeta_id, monto_pagado, divisa, cuenta_ahorro_id, tasa_cambio,
+                        gasto_comision_id
+                 FROM pagos_tarjeta WHERE id = ?;",
+                [pago_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            )
+            .optional()
+            .map_err(fallo)?;
+
+        let (tarjeta_id, monto, divisa, cuenta_ahorro_id, tasa_cambio, gasto_comision_id) =
+            fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "abono", id: pago_id })?;
+
+        let monto = Dinero::nuevo(monto, divisa_desde_texto(&divisa))
+            .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
+
+        Ok(PagoGuardado {
+            id: pago_id,
+            tarjeta_id,
+            monto,
+            cuenta_ahorro_id,
+            tasa_cambio,
+            gasto_comision_id,
+        })
+    }
+
+    fn eliminar_pago(&mut self, pago_id: i64) -> Result<(), ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute("DELETE FROM pagos_tarjeta WHERE id = ?;", [pago_id])
+            .map_err(fallo)?;
+        if filas == 0 {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "abono", id: pago_id });
+        }
+        Ok(())
+    }
+}
+
 impl RepositorioCuentas for AlmacenSqlite<'_> {
     fn ajustar_saldo(&mut self, cuenta_id: i64, delta: Dinero) -> Result<(), ErrorAlmacen> {
         // La divisa se comprueba aquí y no en SQL. El esquema guarda un solo

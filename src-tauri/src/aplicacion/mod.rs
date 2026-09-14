@@ -5,6 +5,7 @@ pub mod liquidar_gasto;
 pub mod registrar_bonificacion;
 pub mod registrar_gasto;
 pub mod revertir_gasto;
+pub mod revertir_pago_tarjeta;
 pub mod transferir;
 
 use crate::dominio::errores::ErrorDominio;
