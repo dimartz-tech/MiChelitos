@@ -4,7 +4,25 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.11.0 (Versión Actual) - 2026-09-14
+## 🚀 Versión 1.12.0 (Versión Actual) - 2026-09-14
+**Los abonos a tarjeta se pueden deshacer.**
+
+### 💳 Tarjetas de Crédito
+* **Reversión de abonos**:
+  * Cada tarjeta muestra sus abonos registrados y permite deshacer uno. La operación repone la deuda, devuelve a la cuenta el importe con su comisión y elimina el gasto que la recogía.
+  * La confirmación **enumera los tres efectos**, porque un abono no es una fila: deshacerlo mueve tres cosas a la vez.
+  * **Sin recorte en ninguno de los dos extremos.** Si el abono había dejado saldo a favor, deshacerlo lo devuelve exactamente a cero; si deja la tarjeta por encima de su límite, ese es el estado verdadero. Es la misma resolución que cerró H5 y H10.
+  * Un abono registrado sin cuenta no movió ningún saldo de ahorro, y la interfaz lo dice en lugar de dejar esperando una devolución que no va a llegar.
+
+### 🗄️ Base de Datos
+* **Migración 5 — vínculo del abono con lo que lo pagó**: `pagos_tarjeta` gana `cuenta_ahorro_id`, `tasa_cambio` y `gasto_comision_id`.
+  * Un abono guardaba solo la tarjeta, la fecha, el importe y la divisa. Todo lo demás que movía quedaba fuera, y por eso **no existía reversión: no había forma de saber qué deshacer**.
+  * Los abonos anteriores se vinculan con su comisión mediante una reconstrucción **exacta**, no aproximada: la comisión es el 0.20 % del importe ya convertido, de modo que conociendo la tasa se reconstruye el céntimo. La migración **verifica que ninguna comisión quedó atada a dos abonos** y falla si no puede garantizarlo.
+  * La tasa vivía dentro del texto de la descripción de la comisión —el mismo defecto que se corrigió en los gastos (H9)—. Se lee una sola vez, para rellenar la columna, y nunca más.
+
+---
+
+## 🚀 Versión 1.11.0 - 2026-09-14
 **Las cuentas declaran su entidad y su tarifa por pago de impuestos; la exención alcanza a la DGII.**
 
 ### 🏦 Cuentas de Ahorro

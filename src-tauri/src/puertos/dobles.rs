@@ -43,12 +43,55 @@ pub struct AlmacenEnMemoria {
     /// después de que los saldos ya se hayan movido.
     pub bonificaciones: HashMap<i64, BonificacionGuardada>,
     pub transferencias: HashMap<i64, TransferenciaGuardada>,
+    pub pagos: HashMap<i64, PagoGuardado>,
     pub falla_al_insertar: bool,
 }
 
 impl AlmacenEnMemoria {
     pub fn nuevo() -> Self {
         AlmacenEnMemoria { siguiente_id: 1, ..Default::default() }
+    }
+
+    /// Siembra un abono ya registrado, para poder revertirlo. Devuelve su id.
+    ///
+    /// No mueve saldos: el abono ya ocurrió, y la prueba coloca por separado
+    /// el estado que dejó. Así se distingue lo que la reversión deshace de lo
+    /// que la siembra dio por hecho.
+    pub fn con_pago(
+        &mut self,
+        tarjeta_id: i64,
+        monto: Dinero,
+        cuenta_ahorro_id: Option<i64>,
+        tasa_cambio: Option<f64>,
+        gasto_comision_id: Option<i64>,
+    ) -> i64 {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.pagos.insert(
+            id,
+            PagoGuardado { id, tarjeta_id, monto, cuenta_ahorro_id, tasa_cambio, gasto_comision_id },
+        );
+        id
+    }
+
+    /// Un gasto sin más contexto que su importe, para lo que solo necesita
+    /// comprobar que se borra.
+    pub fn con_gasto_suelto(&mut self, monto: Dinero) -> i64 {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.gastos.insert(
+            id,
+            GastoGuardado {
+                id,
+                monto,
+                metodo_pago: "transferencia".to_string(),
+                cargos: Dinero::cero(monto.divisa()),
+                tarjeta_id: None,
+                cuenta_ahorro_id: None,
+                estado_conversion: EstadoConversion::NoAplica,
+            },
+        );
+        id
     }
 
     pub fn con_categoria(mut self, id: i64, nombre: &str) -> Self {
@@ -177,6 +220,22 @@ impl RepositorioGastos for AlmacenEnMemoria {
             .remove(&gasto_id)
             .map(|_| ())
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "gasto", id: gasto_id })
+    }
+}
+
+impl RepositorioPagosTarjeta for AlmacenEnMemoria {
+    fn obtener_pago(&self, pago_id: i64) -> Result<PagoGuardado, ErrorAlmacen> {
+        self.pagos
+            .get(&pago_id)
+            .cloned()
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "abono", id: pago_id })
+    }
+
+    fn eliminar_pago(&mut self, pago_id: i64) -> Result<(), ErrorAlmacen> {
+        self.pagos
+            .remove(&pago_id)
+            .map(|_| ())
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "abono", id: pago_id })
     }
 }
 

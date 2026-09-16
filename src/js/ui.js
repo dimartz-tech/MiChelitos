@@ -934,6 +934,10 @@ class AppUI {
                                         </div>
                                     </form>
 
+                                    <!-- Abonos registrados -->
+                                    <button onclick="appUI.alternarAbonos(${t.id})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">🧾 Abonos registrados</button>
+                                    <div id="abonos_${t.id}" hidden style="font-size:0.75rem;"></div>
+
                                     <!-- Configurar límites -->
                                     <button onclick="appUI.abrirEdicionLimitesTarjeta('${tEscaped}')" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">⚙️ Configurar Límites / Corte</button>
                                 </div>
@@ -2996,6 +3000,83 @@ class AppUI {
 
         if (Number(saldo) === 0) {
             this.showToast(`No hay saldo ${etiqueta} en ${divisa}.`, 'info');
+        }
+    }
+
+    /**
+     * Despliega los abonos de una tarjeta para poder deshacer uno.
+     *
+     * Se cargan al abrir y no al pintar la vista: son un histórico que casi
+     * nunca se mira, y traerlos para las siete tarjetas a la vez sería pagar
+     * siempre por lo que se usa de vez en cuando.
+     */
+    async alternarAbonos(id) {
+        const caja = document.getElementById(`abonos_${id}`);
+        if (!caja) return;
+
+        if (!caja.hidden) {
+            caja.hidden = true;
+            return;
+        }
+
+        caja.hidden = false;
+        caja.innerHTML = `<p style="color:var(--text-muted); padding:0.5rem;">Cargando…</p>`;
+
+        try {
+            const abonos = await AppAPI.obtenerAbonosTarjeta(id);
+            if (abonos.length === 0) {
+                caja.innerHTML = `<p style="color:var(--text-muted); padding:0.5rem;">Sin abonos registrados.</p>`;
+                return;
+            }
+
+            caja.innerHTML = abonos.map(a => {
+                // Un abono sin cuenta no movió ningún saldo de ahorro, y
+                // deshacerlo tampoco lo hará. Decirlo evita que alguien
+                // espere una devolución que no va a llegar.
+                const origen = a.cuenta_nombre
+                    ? a.cuenta_nombre
+                    : 'sin cuenta asociada';
+                const tasa = a.tasa_cambio && a.tasa_cambio !== 1
+                    ? ` · tasa ${a.tasa_cambio}`
+                    : '';
+                return `
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-color);">
+                        <div>
+                            <strong>${a.divisa} ${this.formatMoney(a.monto_pagado)}</strong>
+                            <div style="font-size:0.7rem; color:var(--text-muted);">${a.fecha_pago} · ${origen}${tasa}</div>
+                        </div>
+                        <button onclick="appUI.handleRevertirAbono(${a.id}, ${id})" class="btn btn-danger" style="padding:0.2rem 0.45rem; font-size:0.7rem;" title="Deshacer este abono">↩︎</button>
+                    </div>`;
+            }).join('');
+        } catch (err) {
+            caja.innerHTML = `<p style="color:var(--color-danger); padding:0.5rem;">${err.toString()}</p>`;
+        }
+    }
+
+    /**
+     * Deshace un abono, avisando de todo lo que va a mover.
+     *
+     * La confirmación enumera los tres efectos porque un abono no es una
+     * fila: revertirlo repone deuda, devuelve dinero y borra la comisión.
+     */
+    async handleRevertirAbono(abonoId, tarjetaId) {
+        const confirmado = confirm(
+            "¿Deshacer este abono?\n\n" +
+            "Se repondrá la deuda de la tarjeta, volverá a la cuenta el importe con su comisión, " +
+            "y se eliminará el gasto que la recogía.\n\n" +
+            "El registro del abono desaparece."
+        );
+        if (!confirmado) return;
+
+        try {
+            const resumen = await AppAPI.revertirAbonoTarjeta(abonoId);
+            this.showToast(resumen);
+            await this.render('tarjetas');
+            // Se vuelve a abrir el desplegable para que se vea el resultado
+            // en lugar de dejar al usuario frente a una tarjeta cerrada.
+            await this.alternarAbonos(tarjetaId);
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
         }
     }
 
