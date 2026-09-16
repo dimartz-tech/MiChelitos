@@ -19,11 +19,15 @@
 //! el tiempo. El dominio expresa *que existe esa clase de tarifa y cuándo se
 //! aplica*; cuánto cobra cada banco es un dato del titular.
 
-use super::dinero::{Dinero, Divisa};
+use super::dinero::{Dinero, Divisa, Porcentaje};
 use super::errores::ErrorDominio;
 
-/// Tasa de la retención impositiva sobre transferencias (0.20 %).
-pub const TASA_RETENCION: f64 = 0.002;
+/// Retención impositiva sobre transferencias: 20 puntos básicos, 0.20 %.
+///
+/// Se declara en puntos básicos y no como `0.002` porque de ella sale un
+/// importe que se guarda: `0.002` no existe exactamente en coma flotante, y
+/// cada céntimo producido a partir de ese valor heredaba su error.
+pub const TASA_RETENCION: Porcentaje = Porcentaje::puntos_basicos(20);
 
 /// Comisión de servicio del carril LBTR, denominada en pesos.
 pub const COMISION_LBTR: f64 = 100.00;
