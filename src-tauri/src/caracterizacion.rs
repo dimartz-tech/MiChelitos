@@ -6,7 +6,7 @@
 //! comportamiento es correcto: lo fijan.
 
 use crate::db_sql;
-use crate::{crear_gasto, crear_suscripcion, eliminar_cuenta, eliminar_gasto, procesar_suscripciones, registrar_pago_tarjeta, revertir_abono_tarjeta, GastoInput};
+use crate::{crear_gasto, crear_suscripcion, eliminar_cuenta, eliminar_gasto, procesar_suscripciones, registrar_pago_tarjeta, revertir_abono_tarjeta, GastoInput, crear_ingreso, marcar_ingreso_pagado, eliminar_ingreso, actualizar_ingreso, crear_ingreso_informal, marcar_informal_pagado, eliminar_ingreso_informal, crear_cobro_efectivo_informal, IngresoInput};
 use rusqlite::{params, Connection};
 use std::sync::{Mutex, MutexGuard};
 
@@ -1927,5 +1927,232 @@ fn c68_revertir_dos_veces_falla_la_segunda_sin_duplicar_la_devolucion() {
     assert!(revertir_abono_tarjeta(abono).is_err(), "el abono ya no existe");
 
     assert_importe(saldo_cuenta_id(cuenta), 100_000.0, "sin doble devolución");
+}
+
+// ===========================================================================
+//  FASE 4.1 — Caracterización del vertical de Ingresos
+//
+//  Fija la conducta vigente antes de extraer nada. Cinco de estas pruebas
+//  documentan defectos, no aciertos: se escriben para que la extracción no
+//  los corrija por accidente y para que corregirlos sea una decisión visible.
+//
+//  Tres de los cinco son **reapariciones** de defectos ya resueltos en otros
+//  verticales —el redondeo a unidades de H8, la cuenta localizada por su
+//  nombre de H3, el recorte a cero de H5 y H10—. Que el mismo error viva en
+//  cuatro sitios distintos es, en sí, el hallazgo más informativo: no había
+//  nada compartido que impidiera repetirlo.
+// ===========================================================================
+
+fn factura(numero: &str, monto: f64, retencion: f64) -> IngresoInput {
+    IngresoInput {
+        numero_factura: numero.to_string(),
+        rnc_cliente: "000000000".to_string(),
+        nombre_cliente: "Cliente Ejemplo".to_string(),
+        fecha_emision: "16/09/2026".to_string(),
+        monto_total: monto,
+        porcentaje_retencion: retencion,
+    }
+}
+
+fn retencion_de(id: i64) -> f64 {
+    conexion()
+        .query_row("SELECT monto_retenido FROM ingresos WHERE id = ?;", params![id], |r| r.get(0))
+        .expect("leer retención")
+}
+
+fn estatus_de(id: i64) -> String {
+    conexion()
+        .query_row("SELECT estatus FROM ingresos WHERE id = ?;", params![id], |r| r.get(0))
+        .expect("leer estatus")
+}
+
+// --- Emisión y retención ---
+
+#[test]
+fn c70_la_factura_calcula_su_retencion_al_emitirse() {
+    let _g = entorno_aislado();
+    let id = crear_ingreso(factura("A-001", 10_000.0, 15.0)).unwrap();
+
+    assert_importe(retencion_de(id), 1_500.0, "15 % de 10 000");
+    assert_eq!(estatus_de(id), "emitida");
+}
+
+#[test]
+fn c71_h16_la_retencion_se_redondea_a_unidades_y_no_a_centavos() {
+    // Conducta vigente: `.round()` sobre pesos, no sobre centavos. El 15 % de
+    // 1 234.56 son 185.184, que deberían ser 185.18 y quedan en 185.00.
+    //
+    // Es el mismo defecto que H8 corrigió para la retención del 0.20 % en
+    // gastos, viviendo aquí sin corregir porque no hay nada compartido.
+    let _g = entorno_aislado();
+    let id = crear_ingreso(factura("A-002", 1_234.56, 15.0)).unwrap();
+
+    assert_importe(retencion_de(id), 185.0, "redondeo a unidades (H16)");
+}
+
+#[test]
+fn c72_el_numero_de_factura_no_se_puede_repetir_ni_cambiando_mayusculas() {
+    let _g = entorno_aislado();
+    crear_ingreso(factura("A-003", 1_000.0, 15.0)).unwrap();
+
+    assert!(crear_ingreso(factura("a-003", 2_000.0, 15.0)).is_err(), "compara sin distinguir");
+}
+
+#[test]
+fn c73_el_cliente_se_crea_una_sola_vez_por_rnc() {
+    let _g = entorno_aislado();
+    crear_ingreso(factura("A-004", 1_000.0, 15.0)).unwrap();
+    crear_ingreso(factura("A-005", 2_000.0, 15.0)).unwrap();
+
+    let clientes: i64 = conexion()
+        .query_row("SELECT COUNT(*) FROM clientes;", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(clientes, 1, "el segundo reutiliza el cliente del primero");
+}
+
+#[test]
+fn c74_h16_la_correccion_de_una_factura_repite_el_mismo_redondeo() {
+    let _g = entorno_aislado();
+    let id = crear_ingreso(factura("A-006", 1_000.0, 15.0)).unwrap();
+
+    actualizar_ingreso(id, "A-006".into(), 1, "16/09/2026".into(), 1_234.56, 15.0).unwrap();
+
+    assert_importe(retencion_de(id), 185.0, "mismo redondeo que al crear");
+}
+
+// --- Cobro ---
+
+#[test]
+fn c75_cobrar_una_factura_acredita_la_cuenta_indicada() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso(factura("A-007", 10_000.0, 15.0)).unwrap();
+
+    marcar_ingreso_pagado(id, "Cuenta Ahorros DOP".into(), "16/09/2026".into(), 8_500.0).unwrap();
+
+    assert_eq!(estatus_de(id), "pagada");
+    assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "entra el neto recibido");
+}
+
+#[test]
+fn c76_h17_si_la_cuenta_no_existe_la_factura_se_cobra_igual_y_sin_aviso() {
+    // Conducta vigente: la cuenta se localiza por su nombre literal y el
+    // resultado se descarta con `let _ =`. Es H3 otra vez, en otro vertical.
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso(factura("A-008", 10_000.0, 15.0)).unwrap();
+
+    marcar_ingreso_pagado(id, "Cuenta Que No Existe".into(), "16/09/2026".into(), 8_500.0)
+        .unwrap();
+
+    assert_eq!(estatus_de(id), "pagada", "la factura consta cobrada");
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "y ningún saldo se movió (H17)");
+}
+
+#[test]
+fn c77_h18_cobrar_una_factura_inexistente_no_falla() {
+    // El `UPDATE` afecta a cero filas y devuelve `Ok`.
+    let _g = entorno_aislado();
+    crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+
+    let r = marcar_ingreso_pagado(404, "Cuenta Ahorros DOP".into(), "16/09/2026".into(), 100.0);
+
+    assert!(r.is_ok(), "no distingue entre cobrar y no encontrar (H18)");
+}
+
+#[test]
+fn c78_h19_el_importe_se_acredita_sin_mirar_la_divisa_de_la_cuenta() {
+    // `ingresos` no tiene columna de divisa: el importe es implícitamente en
+    // pesos, pero la cuenta destino puede ser en dólares. Es H2 otra vez.
+    let _g = entorno_aislado();
+    let cuenta_usd = crear_cuenta("Cuenta Ahorros USD", "USD", 100.0);
+    let id = crear_ingreso(factura("A-009", 10_000.0, 15.0)).unwrap();
+
+    marcar_ingreso_pagado(id, "Cuenta Ahorros USD".into(), "16/09/2026".into(), 8_500.0).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta_usd), 8_600.0, "pesos sumados a dólares (H19)");
+}
+
+// --- Borrado ---
+
+#[test]
+fn c79_borrar_una_factura_cobrada_revierte_el_abono() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso(factura("A-010", 10_000.0, 15.0)).unwrap();
+    marcar_ingreso_pagado(id, "Cuenta Ahorros DOP".into(), "16/09/2026".into(), 8_500.0).unwrap();
+
+    eliminar_ingreso(id).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "el saldo vuelve donde estaba");
+}
+
+#[test]
+fn c80_h20_borrar_una_factura_recorta_el_saldo_en_cero() {
+    // Conducta vigente: `MAX(0.0, ...)`. Si el dinero ya se gastó, revertir
+    // deja la cuenta en cero y la diferencia desaparece sin registro. Es el
+    // mismo recorte que H5 y H10 retiraron en tarjetas y transferencias.
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+    let id = crear_ingreso(factura("A-011", 10_000.0, 15.0)).unwrap();
+    marcar_ingreso_pagado(id, "Cuenta Ahorros DOP".into(), "16/09/2026".into(), 8_500.0).unwrap();
+    // El titular gasta lo cobrado antes de advertir el error de registro.
+    conexion()
+        .execute("UPDATE cuentas_ahorro SET balance_actual = 500.0 WHERE id = ?;", params![cuenta])
+        .unwrap();
+
+    eliminar_ingreso(id).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 0.0, "recorte en cero (H20)");
+}
+
+// --- Ingresos informales ---
+
+#[test]
+fn c81_un_cobro_informal_en_efectivo_entra_en_la_caja_de_su_divisa() {
+    // La caja de efectivo la siembra `inicializar_db`; crearla aquí violaría
+    // la unicidad del nombre, así que se parte de la que ya existe.
+    let _g = entorno_aislado();
+    let antes = balance_cuenta("Efectivo DOP");
+
+    crear_cobro_efectivo_informal("16/09/2026".into(), "Trabajo suelto".into(), 2_000.0, "DOP".into())
+        .unwrap();
+
+    assert_importe(balance_cuenta("Efectivo DOP"), antes + 2_000.0, "la caja recibe el importe");
+}
+
+#[test]
+fn c82_h17_el_informal_comparte_la_busqueda_por_nombre() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), 2_000.0).unwrap();
+
+    marcar_informal_pagado(id, "Cuenta Que No Existe".into(), "16/09/2026".into(), 2_000.0)
+        .unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "ningún saldo se movió");
+}
+
+#[test]
+fn c83_borrar_un_informal_cobrado_revierte_su_abono() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), 2_000.0).unwrap();
+    marcar_informal_pagado(id, "Cuenta Ahorros DOP".into(), "16/09/2026".into(), 2_000.0).unwrap();
+
+    eliminar_ingreso_informal(id).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "el saldo vuelve donde estaba");
+}
+
+#[test]
+fn c84_un_informal_sin_cobrar_no_mueve_ningun_saldo_al_borrarse() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), 2_000.0).unwrap();
+
+    eliminar_ingreso_informal(id).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "nunca entró, nada sale");
 }
 
