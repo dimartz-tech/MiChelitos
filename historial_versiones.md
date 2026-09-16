@@ -4,7 +4,27 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.13.0 (Versión Actual) - 2026-09-16
+## 🚀 Versión 1.13.1 (Versión Actual) - 2026-09-16
+**Caracterización del vertical de Ingresos: quince pruebas y cinco defectos documentados.**
+
+### 🧪 Pruebas
+* **Fase 4.1** fija la conducta vigente de facturas, cobros e ingresos informales antes de extraer nada.
+* Cinco de las quince pruebas **documentan defectos, no aciertos**. Existen para que la extracción no los corrija por accidente y para que corregirlos sea después una decisión visible.
+
+### 🔍 Defectos documentados (sin corregir)
+* **H16** — La retención se redondea a **unidades**, no a céntimos: el 15 % de 1 234.56 queda en 185.00 en lugar de 185.18.
+* **H17** — La cuenta de depósito se localiza por su nombre literal y el resultado se descarta: si no coincide, la factura queda cobrada y ningún saldo se mueve, sin aviso.
+* **H18** — Cobrar una factura inexistente devuelve éxito.
+* **H19** — El importe se acredita sin mirar la divisa de la cuenta: `ingresos` no tiene columna de divisa, y el destino puede ser una cuenta en dólares.
+* **H20** — El borrado revierte con recorte a cero: si lo cobrado ya se gastó, la diferencia desaparece sin registro.
+
+### 📌 Observación de fondo
+* **Tres de los cinco son reapariciones** de defectos ya resueltos en otros verticales: H16 repite H8, H17 repite H3, y H20 repite H5 y H10.
+* Que el mismo error viva en cuatro sitios distintos es más informativo que cualquiera por separado: no había nada compartido que impidiera repetirlo. Es el argumento del plan para extraer un dominio — que una regla exista **una sola vez** y su corrección alcance a todos.
+
+---
+
+## 🚀 Versión 1.13.0 - 2026-09-16
 **El abono a tarjeta pasa a ser caso de uso, y llega la prueba Gherkin del encargo inicial.**
 
 ### 💳 Tarjetas de Crédito
