@@ -166,6 +166,15 @@ fn ultimo_gasto() -> (f64, String, f64) {
 }
 
 /// Constructor con los valores por defecto de una transferencia ordinaria.
+fn declarar_comision_de_impuestos(cuenta_id: i64, tarifa: f64) {
+    conexion()
+        .execute(
+            "UPDATE cuentas_ahorro SET comision_pago_impuestos = ? WHERE id = ?;",
+            params![tarifa, cuenta_id],
+        )
+        .expect("declarar comisión de impuestos");
+}
+
 fn transferencia(monto: f64, categoria: &str, descripcion: &str, cuenta_id: i64) -> GastoInput {
     GastoInput {
         fecha: "08/09/2026".to_string(),
@@ -1755,4 +1764,58 @@ fn simulacion_base_historica() {
     // Segunda pasada: nada que aplicar.
     let segunda = crate::migraciones::ejecutar(&mut c).expect("segunda pasada");
     assert!(segunda.aplicadas.is_empty(), "no se repite nada");
+}
+
+// ---------------------------------------------------------------------------
+//  Comisión fija por el servicio de pago de impuestos
+//
+//  Recorre el camino entero —comando, caso de uso, adaptador SQLite— porque la
+//  regla vive en el dominio pero la tarifa vive en una columna: probar solo el
+//  dominio dejaría sin verificar que el adaptador la lee.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn c60_un_pago_de_impuestos_cobra_la_tarifa_de_la_cuenta_y_no_retiene() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Corriente DOP", "DOP", 100_000.0);
+    declarar_comision_de_impuestos(cuenta, 75.0);
+
+    crear_gasto(transferencia(10_000.0, "Impuestos", "Pago DGII", cuenta)).unwrap();
+
+    // Sale el importe más la tarifa; ni un céntimo de retención.
+    assert_importe(saldo_cuenta_id(cuenta), 89_925.0, "10 000 + 75 de servicio");
+}
+
+#[test]
+fn c61_la_tarifa_no_alcanza_a_los_gastos_que_no_son_impuestos() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Corriente DOP", "DOP", 100_000.0);
+    declarar_comision_de_impuestos(cuenta, 75.0);
+
+    crear_gasto(transferencia(10_000.0, "Alimentación", "Compra", cuenta)).unwrap();
+
+    // Retención ordinaria del 0.20 %, sin rastro de la tarifa.
+    assert_importe(saldo_cuenta_id(cuenta), 89_980.0, "10 000 + 20 de retención");
+}
+
+#[test]
+fn c62_sin_tarifa_declarada_un_pago_de_impuestos_no_paga_comision() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
+
+    crear_gasto(transferencia(10_000.0, "Impuestos", "Pago DGII", cuenta)).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 90_000.0, "exento y sin tarifa pactada");
+}
+
+#[test]
+fn c63_la_tarifa_es_fija_y_no_depende_del_monto() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Corriente DOP", "DOP", 1_000_000.0);
+    declarar_comision_de_impuestos(cuenta, 75.0);
+
+    crear_gasto(transferencia(500_000.0, "Impuestos", "Pago DGII", cuenta)).unwrap();
+
+    // Con la retención ordinaria habrían salido 1 000 pesos en vez de 75.
+    assert_importe(saldo_cuenta_id(cuenta), 499_925.0, "misma tarifa que en un pago pequeño");
 }
