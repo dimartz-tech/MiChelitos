@@ -4,7 +4,29 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.12.0 (Versión Actual) - 2026-09-14
+## 🚀 Versión 1.13.0 (Versión Actual) - 2026-09-16
+**El abono a tarjeta pasa a ser caso de uso, y llega la prueba Gherkin del encargo inicial.**
+
+### 💳 Tarjetas de Crédito
+* **Registro de abono extraído a caso de uso**:
+  * El comando de Tauri queda reducido a traducción: las reglas viven en el dominio y el caso de uso, no en 86 líneas de SQL.
+  * **La tasa de cambio se exige solo cuando las divisas difieren**, y se rechaza nombrando la causa. Antes, abonar en dólares desde una cuenta en pesos sin tasa llegaba hasta el adaptador y fallaba con un error de divisas incompatibles, que no dice qué falta.
+  * El abono se guarda **completo, con su vínculo a la comisión**. El comando anterior lo insertaba y lo enlazaba después con un `UPDATE`: entre las dos sentencias existía una fila sin vínculo.
+
+### ⚠️ Cambio de conducta declarado (H15)
+* El comando aplicaba la tasa **aunque no hubiera cambio de divisa**: un abono en pesos desde una cuenta en pesos con una tasa de 60 debitaba sesenta veces el importe.
+* Era conducta conocida y conservada a propósito en la Fase 1, pero **ninguna prueba la cubría** y el campo de tasa está siempre visible en la interfaz, así que era alcanzable tecleando.
+* Deja de ocurrir. Queda declarado y fijado por prueba en lugar de pasar inadvertido.
+
+### 🧪 Pruebas
+* **Prueba Gherkin de caso de uso**, pedida en el encargo inicial y pendiente desde entonces: cuatro escenarios en español sobre el abono multidivisa.
+  * Es la única prueba del proyecto **legible sin saber Rust**, para que quien decide si una regla es correcta pueda comprobarlo sin fiarse de la traducción.
+  * **Intérprete propio en lugar de la caja `cucumber`**: el proyecto mantiene cero dependencias nuevas desde la Fase 0, y cuatro escenarios caben en un archivo auditable de cabo a rabo.
+  * Tres salvaguardas contra una prueba que pase por no ejecutar nada: el intérprete tiene sus propias pruebas, un paso no reconocido entra en pánico, y una prueba estructural exige que los cuatro escenarios existan con sus pasos.
+
+---
+
+## 🚀 Versión 1.12.0 - 2026-09-14
 **Los abonos a tarjeta se pueden deshacer.**
 
 ### 💳 Tarjetas de Crédito

@@ -200,7 +200,24 @@ pub struct PagoGuardado {
     pub gasto_comision_id: Option<i64>,
 }
 
+/// Un abono a punto de guardarse, con todo lo que la operación movió.
+///
+/// Se construye entero antes de insertarlo, incluido el vínculo al gasto de
+/// comisión. El comando anterior insertaba el abono primero y lo completaba
+/// después con un `UPDATE`, de modo que entre las dos sentencias existía un
+/// abono sin vínculo; aquí esa fila intermedia no llega a existir.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PagoAPersistir {
+    pub tarjeta_id: i64,
+    pub fecha: String,
+    pub monto: Dinero,
+    pub cuenta_ahorro_id: Option<i64>,
+    pub tasa_cambio: Option<f64>,
+    pub gasto_comision_id: Option<i64>,
+}
+
 pub trait RepositorioPagosTarjeta {
+    fn insertar_pago(&mut self, pago: &PagoAPersistir) -> Result<i64, ErrorAlmacen>;
     fn obtener_pago(&self, pago_id: i64) -> Result<PagoGuardado, ErrorAlmacen>;
     fn eliminar_pago(&mut self, pago_id: i64) -> Result<(), ErrorAlmacen>;
 }
