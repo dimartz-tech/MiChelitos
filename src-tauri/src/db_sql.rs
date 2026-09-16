@@ -636,6 +636,108 @@ pub fn migracion_4_identidad_de_cuentas(tx: &Transaction) -> Result<(), ErrorMig
     Ok(())
 }
 
+const MIG5: &str = "vínculo del abono con lo que lo pagó";
+
+/// Ata cada abono a tarjeta con la cuenta que lo pagó y su comisión.
+///
+/// Un abono guardaba solo la tarjeta, la fecha, el importe y la divisa. Todo
+/// lo demás que la operación movía —de qué cuenta salió el dinero, a qué tasa
+/// se convirtió, qué gasto recogió la comisión— quedaba fuera. Por eso no
+/// existía reversión: no había forma de saber qué deshacer.
+///
+/// La tasa, además, vivía dentro del texto de la descripción de la comisión,
+/// que es el mismo defecto que se corrigió en los gastos (**H9**). Aquí se lee
+/// esa descripción **una sola vez**, para rellenar la columna, y nunca más.
+pub fn migracion_5_vinculo_de_abonos(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::anadir_columna(
+        tx, MIG5, "pagos_tarjeta", "cuenta_ahorro_id",
+        "INTEGER REFERENCES cuentas_ahorro(id) ON DELETE SET NULL",
+    )?;
+    migraciones::anadir_columna(tx, MIG5, "pagos_tarjeta", "tasa_cambio", "REAL")?;
+    migraciones::anadir_columna(
+        tx, MIG5, "pagos_tarjeta", "gasto_comision_id",
+        "INTEGER REFERENCES gastos(id) ON DELETE SET NULL",
+    )?;
+
+    // El emparejamiento es exacto, no aproximado: la comisión es el 0.20 % del
+    // importe ya convertido, de modo que conociendo la tasa se reconstruye el
+    // céntimo. La tolerancia de medio céntimo absorbe que los importes
+    // antiguos se guardaran sin redondear.
+    //
+    // Un abono sin comisión —pagado sin cuenta de la que debitar— no encuentra
+    // pareja y conserva sus columnas nulas, que es lo correcto: no hubo
+    // movimiento de cuenta que deshacer.
+    migraciones::paso(
+        tx,
+        MIG5,
+        "vincular abonos históricos con su comisión",
+        "WITH comisiones AS (
+             SELECT g.id, g.fecha, g.monto, g.cuenta_ahorro_id,
+                    CASE WHEN INSTR(g.descripcion, '(Tasa ') > 0
+                         THEN CAST(REPLACE(
+                                  SUBSTR(g.descripcion, INSTR(g.descripcion, '(Tasa ') + 6),
+                                  ')', '') AS REAL)
+                         ELSE 1.0 END AS tasa
+             FROM gastos g
+             WHERE g.descripcion LIKE 'Comisión 0.20% Pago Tarjeta%'
+         )
+         UPDATE pagos_tarjeta SET
+             gasto_comision_id = (
+                 SELECT c.id FROM comisiones c
+                 WHERE c.fecha = pagos_tarjeta.fecha_pago
+                   AND ABS(c.monto - pagos_tarjeta.monto_pagado * c.tasa * 0.002) < 0.005
+             ),
+             cuenta_ahorro_id = (
+                 SELECT c.cuenta_ahorro_id FROM comisiones c
+                 WHERE c.fecha = pagos_tarjeta.fecha_pago
+                   AND ABS(c.monto - pagos_tarjeta.monto_pagado * c.tasa * 0.002) < 0.005
+             ),
+             tasa_cambio = (
+                 SELECT c.tasa FROM comisiones c
+                 WHERE c.fecha = pagos_tarjeta.fecha_pago
+                   AND ABS(c.monto - pagos_tarjeta.monto_pagado * c.tasa * 0.002) < 0.005
+             )
+         WHERE gasto_comision_id IS NULL;",
+    )?;
+
+    verificar_vinculos_unicos(tx)
+}
+
+/// Comprueba que ninguna comisión quedó atada a dos abonos.
+///
+/// Sin esto, el emparejamiento sería una operación que se da por buena porque
+/// no falló. Si dos abonos reclamaran el mismo gasto, revertir uno dejaría al
+/// otro apuntando a una fila borrada.
+fn verificar_vinculos_unicos(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    let duplicados: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM (
+                 SELECT gasto_comision_id FROM pagos_tarjeta
+                 WHERE gasto_comision_id IS NOT NULL
+                 GROUP BY gasto_comision_id HAVING COUNT(*) > 1
+             );",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| ErrorMigracion::Fallo {
+            version: 0,
+            migracion: MIG5,
+            etapa: "comprobar unicidad del vínculo".to_string(),
+            causa: e.to_string(),
+        })?;
+
+    if duplicados > 0 {
+        return Err(ErrorMigracion::EstructuraInesperada {
+            migracion: MIG5,
+            detalle: format!(
+                "{} comisiones quedaron atadas a más de un abono; el vínculo no es fiable",
+                duplicados
+            ),
+        });
+    }
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;

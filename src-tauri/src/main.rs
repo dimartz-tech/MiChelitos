@@ -27,6 +27,7 @@ use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::gastos::AlmacenSqlite;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
 use aplicacion::revertir_gasto::revertir_gasto;
+use aplicacion::revertir_pago_tarjeta::revertir_pago_tarjeta;
 use aplicacion::transferir::{revertir_transferencia, transferir, DatosTransferencia};
 use puertos::repositorios::RepositorioCuentas;
 use dominio::tarjeta::{LimitesDivisa, PoliticaLiquidacion, MONEDA_LOCAL};
@@ -756,10 +757,16 @@ fn registrar_pago_tarjeta(
         ).map_err(|e| e.to_string())?;
     }
 
+    // El abono se inserta antes de la comisión para tener su identificador, y
+    // se completa después con el vínculo al gasto. Sin estas tres columnas no
+    // habría forma de revertirlo: el registro no sabría de qué cuenta salió el
+    // dinero, a qué tasa se convirtió ni qué gasto recogió la comisión.
     tx.execute(
-        "INSERT INTO pagos_tarjeta (tarjeta_id, fecha_pago, monto_pagado, divisa) VALUES (?, ?, ?, ?);",
-        (id, &fecha, monto, &divisa)
+        "INSERT INTO pagos_tarjeta (tarjeta_id, fecha_pago, monto_pagado, divisa, cuenta_ahorro_id, tasa_cambio)
+         VALUES (?, ?, ?, ?, ?, ?);",
+        (id, &fecha, monto, &divisa, cuenta_ahorro_id, if tasa_cambio > 0.0 { Some(tasa_cambio) } else { None })
     ).map_err(|e| e.to_string())?;
+    let pago_id = tx.last_insert_rowid();
 
     if let Some(c_id) = cuenta_ahorro_id {
         let divisa_pago = if divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
@@ -796,10 +803,97 @@ fn registrar_pago_tarjeta(
             (&fecha, comision.unidades(), comision.divisa().codigo(), &descripcion, c_id),
         )
         .map_err(|e| e.to_string())?;
+
+        let gasto_id = tx.last_insert_rowid();
+        tx.execute(
+            "UPDATE pagos_tarjeta SET gasto_comision_id = ? WHERE id = ?;",
+            (gasto_id, pago_id),
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AbonoTarjeta {
+    id: i64,
+    fecha_pago: String,
+    monto_pagado: f64,
+    divisa: String,
+    cuenta_ahorro_id: Option<i64>,
+    cuenta_nombre: Option<String>,
+    tasa_cambio: Option<f64>,
+}
+
+/// Abonos registrados a una tarjeta, del más reciente al más antiguo.
+#[tauri::command]
+fn obtener_abonos_tarjeta(tarjeta_id: i64) -> Result<Vec<AbonoTarjeta>, String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT p.id, p.fecha_pago, p.monto_pagado, p.divisa, p.cuenta_ahorro_id,
+                    c.nombre, p.tasa_cambio
+             FROM pagos_tarjeta p
+             LEFT JOIN cuentas_ahorro c ON c.id = p.cuenta_ahorro_id
+             WHERE p.tarjeta_id = ?
+             ORDER BY p.id DESC;",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([tarjeta_id], |row| {
+            Ok(AbonoTarjeta {
+                id: row.get(0)?,
+                fecha_pago: row.get(1)?,
+                monto_pagado: row.get(2)?,
+                divisa: row.get(3)?,
+                cuenta_ahorro_id: row.get(4)?,
+                cuenta_nombre: row.get(5)?,
+                tasa_cambio: row.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+    for r in rows {
+        list.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(list)
+}
+
+/// Deshace un abono a tarjeta.
+///
+/// Traducción pura: la reversión vive en el caso de uso, igual que la de los
+/// gastos. Devuelve lo que se deshizo para que la interfaz pueda decirlo en
+/// vez de limitarse a confirmar que algo pasó.
+#[tauri::command]
+fn revertir_abono_tarjeta(id: i64) -> Result<String, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let resumen = {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        let r = revertir_pago_tarjeta(id, &mut almacen)?;
+        match r.devuelto_a_la_cuenta {
+            Some(d) => format!(
+                "Se repusieron {} {:.2} a la deuda y volvieron {} {:.2} a la cuenta.",
+                r.deuda_restituida.divisa().codigo(),
+                r.deuda_restituida.unidades(),
+                d.divisa().codigo(),
+                d.unidades()
+            ),
+            None => format!(
+                "Se repusieron {} {:.2} a la deuda. El abono no tenía cuenta asociada.",
+                r.deuda_restituida.divisa().codigo(),
+                r.deuda_restituida.unidades()
+            ),
+        }
+    };
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(resumen)
 }
 
 // --- COMANDOS: SUSCRIPCIONES ---
@@ -2003,6 +2097,8 @@ fn main() {
             eliminar_cliente,
             crear_respaldo,
             obtener_cuentas,
+            revertir_abono_tarjeta,
+            obtener_abonos_tarjeta,
             crear_cuenta,
             actualizar_cuenta,
             eliminar_cuenta,
