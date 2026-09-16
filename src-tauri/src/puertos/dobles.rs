@@ -19,6 +19,8 @@ use std::collections::HashMap;
 pub struct CuentaEnMemoria {
     pub nombre: String,
     pub saldo: Dinero,
+    /// Tarifa fija por pago de impuestos. `None` = ninguna pactada.
+    pub comision_impuestos: Option<Dinero>,
 }
 
 #[derive(Default)]
@@ -55,7 +57,18 @@ impl AlmacenEnMemoria {
     }
 
     pub fn con_cuenta(mut self, id: i64, nombre: &str, saldo: Dinero) -> Self {
-        self.cuentas.insert(id, CuentaEnMemoria { nombre: nombre.to_string(), saldo });
+        self.cuentas.insert(
+            id,
+            CuentaEnMemoria { nombre: nombre.to_string(), saldo, comision_impuestos: None },
+        );
+        self
+    }
+
+    /// Cuenta cuya entidad cobra una tarifa fija por pagar impuestos.
+    pub fn con_comision_de_impuestos(mut self, id: i64, tarifa: Dinero) -> Self {
+        if let Some(c) = self.cuentas.get_mut(&id) {
+            c.comision_impuestos = Some(tarifa);
+        }
         self
     }
 
@@ -64,7 +77,11 @@ impl AlmacenEnMemoria {
         let divisa = saldo.divisa();
         self.cuentas.insert(
             id,
-            CuentaEnMemoria { nombre: format!("Efectivo {}", divisa.codigo()), saldo },
+            CuentaEnMemoria {
+                nombre: format!("Efectivo {}", divisa.codigo()),
+                saldo,
+                comision_impuestos: None,
+            },
         );
         self.cajas.insert(divisa, id);
         self
@@ -261,6 +278,13 @@ impl RepositorioCuentas for AlmacenEnMemoria {
         self.cuentas
             .remove(&cuenta_id)
             .map(|_| ())
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
+    }
+
+    fn comision_pago_impuestos(&self, cuenta_id: i64) -> Result<Option<Dinero>, ErrorAlmacen> {
+        self.cuentas
+            .get(&cuenta_id)
+            .map(|c| c.comision_impuestos)
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
     }
 

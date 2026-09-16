@@ -78,8 +78,22 @@ pub fn registrar_gasto(
 
     let cargos = if datos.metodo.is_some_and(|m| m.devenga_cargos()) {
         let categoria = almacen.nombre(datos.categoria_id)?.unwrap_or_default();
-        cargos_de_transferencia(base_de_cargos, &categoria, &datos.descripcion, datos.es_lbtr)?
-            .total()?
+        // La tarifa fija por pagar impuestos la pone la cuenta que paga, de
+        // modo que solo hay tarifa si hay cuenta de la que salga el dinero.
+        let tarifa = match afectacion {
+            AfectacionSaldo::DebitoCuenta { cuenta_id } => {
+                almacen.comision_pago_impuestos(cuenta_id)?
+            }
+            _ => None,
+        };
+        cargos_de_transferencia(
+            base_de_cargos,
+            &categoria,
+            &datos.descripcion,
+            datos.es_lbtr,
+            tarifa,
+        )?
+        .total()?
     } else {
         Dinero::cero(base_de_cargos.divisa())
     };

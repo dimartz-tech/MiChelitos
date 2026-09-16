@@ -159,6 +159,10 @@ pub struct CuentaAhorro {
     nombre: String,
     divisa: String,
     balance_actual: f64,
+    /// Entidad con la que se mantiene la cuenta. La declara el titular.
+    entidad: Option<String>,
+    /// Tarifa fija por el servicio de pago de impuestos, si la hay pactada.
+    comision_pago_impuestos: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1552,13 +1556,18 @@ fn crear_respaldo() -> Result<String, String> {
 #[tauri::command]
 fn obtener_cuentas() -> Result<Vec<CuentaAhorro>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, nombre, divisa, balance_actual FROM cuentas_ahorro ORDER BY nombre ASC;").map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, nombre, divisa, balance_actual, entidad, comision_pago_impuestos
+         FROM cuentas_ahorro ORDER BY nombre ASC;"
+    ).map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], |row| {
         Ok(CuentaAhorro {
             id: row.get(0)?,
             nombre: row.get(1)?,
             divisa: row.get(2)?,
             balance_actual: row.get(3)?,
+            entidad: row.get(4)?,
+            comision_pago_impuestos: row.get(5)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -1570,18 +1579,80 @@ fn obtener_cuentas() -> Result<Vec<CuentaAhorro>, String> {
 }
 
 #[tauri::command]
-fn crear_cuenta(nombre: String, divisa: String, balance: f64) -> Result<i64, String> {
+fn crear_cuenta(
+    nombre: String,
+    divisa: String,
+    balance: f64,
+    entidad: Option<String>,
+    comision_pago_impuestos: Option<f64>,
+) -> Result<i64, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let nombre_clean = nombre.trim();
     if nombre_clean.is_empty() {
         return Err("El nombre de la cuenta no puede estar vacío.".to_string());
     }
+    let (entidad, comision) = depurar_datos_de_cuenta(entidad, comision_pago_impuestos)?;
 
     conn.execute(
-        "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES (?, ?, ?);",
-        (nombre_clean, divisa, balance)
+        "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual, entidad, comision_pago_impuestos)
+         VALUES (?, ?, ?, ?, ?);",
+        (nombre_clean, divisa, balance, entidad, comision)
     ).map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
+}
+
+/// Normaliza los dos datos declarativos de una cuenta.
+///
+/// Una cadena en blanco y un campo sin rellenar significan lo mismo —no lo ha
+/// declarado— y ambos se guardan como nulo, para que la ausencia tenga una
+/// sola representación. Una tarifa negativa se rechaza: sería un banco que
+/// paga por cobrar.
+fn depurar_datos_de_cuenta(
+    entidad: Option<String>,
+    comision: Option<f64>,
+) -> Result<(Option<String>, Option<f64>), String> {
+    let entidad = entidad
+        .map(|e| e.trim().to_string())
+        .filter(|e| !e.is_empty());
+
+    if let Some(c) = comision {
+        if !c.is_finite() || c < 0.0 {
+            return Err("La comisión por pago de impuestos no puede ser negativa.".to_string());
+        }
+    }
+
+    Ok((entidad, comision))
+}
+
+/// Actualiza los datos declarativos de una cuenta.
+///
+/// No toca el balance: para eso están las transferencias y los movimientos,
+/// que dejan rastro. Aquí solo se corrigen el nombre, la entidad y la tarifa,
+/// que son cosas que el titular sabe y el sistema no puede deducir.
+#[tauri::command]
+fn actualizar_cuenta(
+    id: i64,
+    nombre: String,
+    entidad: Option<String>,
+    comision_pago_impuestos: Option<f64>,
+) -> Result<(), String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let nombre_clean = nombre.trim();
+    if nombre_clean.is_empty() {
+        return Err("El nombre de la cuenta no puede estar vacío.".to_string());
+    }
+    let (entidad, comision) = depurar_datos_de_cuenta(entidad, comision_pago_impuestos)?;
+
+    let filas = conn.execute(
+        "UPDATE cuentas_ahorro SET nombre = ?, entidad = ?, comision_pago_impuestos = ?
+         WHERE id = ?;",
+        (nombre_clean, entidad, comision, id)
+    ).map_err(|e| e.to_string())?;
+
+    if filas == 0 {
+        return Err(format!("No se encontró la cuenta {}.", id));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1933,6 +2004,7 @@ fn main() {
             crear_respaldo,
             obtener_cuentas,
             crear_cuenta,
+            actualizar_cuenta,
             eliminar_cuenta,
             transferir_entre_cuentas,
             obtener_transacciones_cuentas,

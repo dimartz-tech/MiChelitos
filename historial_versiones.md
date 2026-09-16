@@ -4,7 +4,32 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.10.0 (Versión Actual) - 2026-09-13
+## 🚀 Versión 1.11.0 (Versión Actual) - 2026-09-14
+**Las cuentas declaran su entidad y su tarifa por pago de impuestos; la exención alcanza a la DGII.**
+
+### 🏦 Cuentas de Ahorro
+* **Entidad y tarifa declarables**:
+  * Cada cuenta puede indicar con qué entidad se mantiene y qué comisión fija cobra esa entidad por el servicio de pago de impuestos.
+  * Ambos datos son opcionales y nacen vacíos. Dejar la tarifa en blanco significa **que no hay ninguna pactada**, que no es lo mismo que declarar cero: la distinción se conserva de extremo a extremo y decide si la operación paga el porcentaje ordinario o el precio fijo del servicio.
+* **Edición de cuentas**:
+  * Se añadió la corrección de nombre, entidad y tarifa sobre cuentas ya registradas. Sin ella los datos nuevos habrían quedado fuera del alcance de las cuentas existentes, que son todas.
+  * La edición **no ofrece el balance**: moverlo sin un asiento detrás sería la única vía por la que un saldo cambiaría sin dejar rastro.
+
+### 🏛️ Cargos e Impuestos
+* **Comisión fija por pago de impuestos**:
+  * Cuando la cuenta de origen declara una tarifa y el gasto pertenece a la categoría de impuestos, se cobra ese importe fijo en lugar de que la operación quede sin comisión.
+  * Es un **precio de servicio**, no un impuesto: se acumula con la comisión del carril LBTR si la operación además lo usa, y no crece con el monto.
+  * La tarifa concreta no está escrita en el programa. El sistema expresa que esa clase de tarifa existe y cuándo se aplica; cuánto cobra cada entidad es un dato del titular.
+* **Exención ampliada a la DGII**:
+  * La exención de la retención del 0.20 % pasa a reconocer tanto a la TSS como a la DGII. Sigue exigiendo las dos condiciones a la vez —categoría de impuestos y mención del organismo— porque la categoría por sí sola incluiría pagos a terceros que sí retienen.
+
+### 🗄️ Base de Datos
+* **Migración 4 — identidad y comisiones de las cuentas**: añade `entidad` y `comision_pago_impuestos` a `cuentas_ahorro`, ambas nulas.
+  * No se rellenan automáticamente **a propósito**: deducir la entidad a partir del nombre que el titular dio a cada cuenta exigiría escribir en el repositorio el mapa de con qué bancos opera.
+
+---
+
+## 🚀 Versión 1.10.0 - 2026-09-13
 **Todos los importes caen en un centavo exacto, y la conversión se verifica en vez de darse por buena.**
 
 ### 💰 Precisión de los importes

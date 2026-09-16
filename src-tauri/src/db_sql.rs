@@ -610,6 +610,32 @@ pub fn sembrar(conn: &Connection) -> Result<()> {
 ///
 /// Separarlo permite levantar una base en memoria en las pruebas del
 /// adaptador, sin depender de `HOME` ni tocar disco.
+const MIG4: &str = "identidad y comisiones de las cuentas";
+
+/// Da a cada cuenta una entidad emisora y su comisión por pago de impuestos.
+///
+/// Las dos columnas quedan **vacías a propósito**. Rellenarlas exigiría
+/// deducir el banco a partir del nombre que el titular le puso a la cuenta, y
+/// eso significaría escribir en el repositorio —que es público— el mapa de con
+/// qué entidades opera. La entidad es un dato suyo, no del programa: la
+/// declara él desde la interfaz.
+///
+/// `comision_pago_impuestos` es nula mientras no se declare, y nulo no
+/// significa cero: significa «esta cuenta no tiene una comisión fija pactada»,
+/// que es distinto de «cobra cero». La diferencia importa porque de ella
+/// depende si se aplica la retención ordinaria o el precio fijo del servicio.
+pub fn migracion_4_identidad_de_cuentas(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::anadir_columna(tx, MIG4, "cuentas_ahorro", "entidad", "TEXT")?;
+    migraciones::anadir_columna(
+        tx,
+        MIG4,
+        "cuentas_ahorro",
+        "comision_pago_impuestos",
+        "REAL",
+    )?;
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
