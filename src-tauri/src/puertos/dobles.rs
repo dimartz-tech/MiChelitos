@@ -45,6 +45,9 @@ pub struct AlmacenEnMemoria {
     pub transferencias: HashMap<i64, TransferenciaGuardada>,
     pub pagos: HashMap<i64, PagoGuardado>,
     pub falla_al_insertar: bool,
+    /// Cuando está activo, `ajustar_deuda` falla. Permite comprobar que un
+    /// fallo a mitad de operación no deja saldos alterados.
+    pub falla_al_ajustar_deuda: bool,
 }
 
 impl AlmacenEnMemoria {
@@ -224,6 +227,26 @@ impl RepositorioGastos for AlmacenEnMemoria {
 }
 
 impl RepositorioPagosTarjeta for AlmacenEnMemoria {
+    fn insertar_pago(&mut self, pago: &PagoAPersistir) -> Result<i64, ErrorAlmacen> {
+        if !self.tarjetas.contains(&pago.tarjeta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: pago.tarjeta_id });
+        }
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.pagos.insert(
+            id,
+            PagoGuardado {
+                id,
+                tarjeta_id: pago.tarjeta_id,
+                monto: pago.monto,
+                cuenta_ahorro_id: pago.cuenta_ahorro_id,
+                tasa_cambio: pago.tasa_cambio,
+                gasto_comision_id: pago.gasto_comision_id,
+            },
+        );
+        Ok(id)
+    }
+
     fn obtener_pago(&self, pago_id: i64) -> Result<PagoGuardado, ErrorAlmacen> {
         self.pagos
             .get(&pago_id)
@@ -274,6 +297,9 @@ impl RepositorioBonificaciones for AlmacenEnMemoria {
 
 impl RepositorioTarjetas for AlmacenEnMemoria {
     fn ajustar_deuda(&mut self, tarjeta_id: i64, delta: Dinero) -> Result<(), ErrorAlmacen> {
+        if self.falla_al_ajustar_deuda {
+            return Err(ErrorAlmacen::Fallo("fallo simulado al guardar la tarjeta".into()));
+        }
         if !self.tarjetas.contains(&tarjeta_id) {
             return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
         }

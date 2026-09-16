@@ -278,6 +278,27 @@ impl RepositorioTarjetas for AlmacenSqlite<'_> {
 }
 
 impl RepositorioPagosTarjeta for AlmacenSqlite<'_> {
+    fn insertar_pago(&mut self, pago: &PagoAPersistir) -> Result<i64, ErrorAlmacen> {
+        self.tx
+            .execute(
+                "INSERT INTO pagos_tarjeta
+                     (tarjeta_id, fecha_pago, monto_pagado, divisa, cuenta_ahorro_id,
+                      tasa_cambio, gasto_comision_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?);",
+                params![
+                    pago.tarjeta_id,
+                    pago.fecha,
+                    pago.monto.unidades(),
+                    pago.monto.divisa().codigo(),
+                    pago.cuenta_ahorro_id,
+                    pago.tasa_cambio,
+                    pago.gasto_comision_id,
+                ],
+            )
+            .map_err(fallo)?;
+        Ok(self.tx.last_insert_rowid())
+    }
+
     fn obtener_pago(&self, pago_id: i64) -> Result<PagoGuardado, ErrorAlmacen> {
         let fila: Option<(i64, f64, String, Option<i64>, Option<f64>, Option<i64>)> = self
             .tx

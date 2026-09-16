@@ -16,6 +16,10 @@ mod puertos;
 
 #[cfg(test)]
 mod caracterizacion;
+#[cfg(test)]
+mod gherkin;
+#[cfg(test)]
+mod caso_de_uso_gherkin;
 
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
@@ -27,6 +31,7 @@ use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::gastos::AlmacenSqlite;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
 use aplicacion::revertir_gasto::revertir_gasto;
+use aplicacion::registrar_pago_tarjeta::{registrar_pago_tarjeta as registrar_pago_tarjeta_caso, DatosPago};
 use aplicacion::revertir_pago_tarjeta::revertir_pago_tarjeta;
 use aplicacion::transferir::{revertir_transferencia, transferir, DatosTransferencia};
 use puertos::repositorios::RepositorioCuentas;
@@ -737,79 +742,34 @@ fn registrar_pago_tarjeta(
     cuenta_ahorro_id: Option<i64>,
     tasa_cambio: f64
 ) -> Result<(), String> {
+    // Traducción pura, igual que crear_gasto. Toda la regla —cuándo hace falta
+    // la tasa, qué sale de la cuenta, cómo se enlaza la comisión— vive en el
+    // caso de uso y en el dominio, no en esta función.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // Sin recorte a cero (resolución de H5). Abonar por encima de la deuda
-    // deja el balance negativo, que es el saldo a favor que el emisor acredita
-    // de verdad. El `MAX(0.0, ...)` que había aquí descartaba esa diferencia
-    // en silencio, y a diferencia del caso de la reversión bastaba un abono
-    // normal para perderla: no hacía falta borrar nada.
-    if divisa == "USD" {
-        tx.execute(
-            "UPDATE tarjetas SET balance_dolares = balance_dolares - ? WHERE id = ?;",
-            (monto, id)
-        ).map_err(|e| e.to_string())?;
-    } else {
-        tx.execute(
-            "UPDATE tarjetas SET balance_pesos = balance_pesos - ? WHERE id = ?;",
-            (monto, id)
-        ).map_err(|e| e.to_string())?;
-    }
-
-    // El abono se inserta antes de la comisión para tener su identificador, y
-    // se completa después con el vínculo al gasto. Sin estas tres columnas no
-    // habría forma de revertirlo: el registro no sabría de qué cuenta salió el
-    // dinero, a qué tasa se convirtió ni qué gasto recogió la comisión.
-    tx.execute(
-        "INSERT INTO pagos_tarjeta (tarjeta_id, fecha_pago, monto_pagado, divisa, cuenta_ahorro_id, tasa_cambio)
-         VALUES (?, ?, ?, ?, ?, ?);",
-        (id, &fecha, monto, &divisa, cuenta_ahorro_id, if tasa_cambio > 0.0 { Some(tasa_cambio) } else { None })
-    ).map_err(|e| e.to_string())?;
-    let pago_id = tx.last_insert_rowid();
-
-    if let Some(c_id) = cuenta_ahorro_id {
-        let divisa_pago = if divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
-        let monto_pago = Dinero::nuevo(monto, divisa_pago)?;
-
-        // Importe que realmente sale de la cuenta. Cuando media una tasa de
-        // cambio, la conversión se redondea a centavos antes de comisionar.
-        let (debitado, descripcion) = if tasa_cambio > 0.0 {
-            let en_pesos = match divisa_pago {
-                Divisa::Usd => monto_pago.convertir(Divisa::Dop, TasaCambio::nueva(tasa_cambio)?)?,
-                // Conducta vigente: si llega una tasa con un abono ya en pesos,
-                // el código la aplicaba igualmente. Se conserva.
-                Divisa::Dop => Dinero::nuevo(monto * tasa_cambio, Divisa::Dop)?,
-            };
-            (en_pesos, format!("Comisión 0.20% Pago Tarjeta (Tasa {})", tasa_cambio))
-        } else {
-            (monto_pago, "Comisión 0.20% Pago Tarjeta".to_string())
-        };
-
-        // Misma regla de redondeo que crear_gasto: una sola política para el
-        // 0.20 % en todo el sistema.
-        let comision = debitado.porcentaje(TASA_RETENCION)?;
-        let total = debitado.sumar(&comision)?;
-
-        tx.execute(
-            "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE id = ?;",
-            (total.unidades(), c_id),
-        )
+    let categoria = tx
+        .query_row("SELECT id FROM categorias WHERE nombre = 'Otros' LIMIT 1;", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
 
-        tx.execute(
-            "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id, cuenta_ahorro_id)
-             VALUES (?, ?, ?, ?, (SELECT id FROM categorias WHERE nombre = 'Otros' LIMIT 1), 'transferencia', 0.0, NULL, ?);",
-            (&fecha, comision.unidades(), comision.divisa().codigo(), &descripcion, c_id),
-        )
-        .map_err(|e| e.to_string())?;
-
-        let gasto_id = tx.last_insert_rowid();
-        tx.execute(
-            "UPDATE pagos_tarjeta SET gasto_comision_id = ? WHERE id = ?;",
-            (gasto_id, pago_id),
-        )
-        .map_err(|e| e.to_string())?;
+    {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        registrar_pago_tarjeta_caso(
+            DatosPago {
+                tarjeta_id: id,
+                fecha,
+                monto: Dinero::nuevo(monto, Divisa::desde_codigo(&divisa)?)?,
+                cuenta_ahorro_id,
+                // Una tasa de cero es como la interfaz dice «no aplica».
+                tasa_cambio: if tasa_cambio > 0.0 {
+                    Some(TasaCambio::nueva(tasa_cambio)?)
+                } else {
+                    None
+                },
+            },
+            categoria,
+            &mut almacen,
+        )?;
     }
 
     tx.commit().map_err(|e| e.to_string())?;
