@@ -283,8 +283,8 @@ impl RepositorioPagosTarjeta for AlmacenSqlite<'_> {
             .execute(
                 "INSERT INTO pagos_tarjeta
                      (tarjeta_id, fecha_pago, monto_pagado, divisa, cuenta_ahorro_id,
-                      tasa_cambio, gasto_comision_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?);",
+                      tasa_cambio, gasto_comision_id, monto_debitado, comision)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
                 params![
                     pago.tarjeta_id,
                     pago.fecha,
@@ -293,6 +293,8 @@ impl RepositorioPagosTarjeta for AlmacenSqlite<'_> {
                     pago.cuenta_ahorro_id,
                     pago.tasa_cambio,
                     pago.gasto_comision_id,
+                    pago.monto_debitado.map(|d| d.unidades()),
+                    pago.comision.map(|c| c.unidades()),
                 ],
             )
             .map_err(fallo)?;
@@ -300,23 +302,45 @@ impl RepositorioPagosTarjeta for AlmacenSqlite<'_> {
     }
 
     fn obtener_pago(&self, pago_id: i64) -> Result<PagoGuardado, ErrorAlmacen> {
-        let fila: Option<(i64, f64, String, Option<i64>, Option<f64>, Option<i64>)> = self
+        // La divisa del débito es la de la cuenta que pagó, de modo que se
+        // trae en la misma consulta en vez de deducirla después.
+        type Fila = (i64, f64, String, Option<i64>, Option<f64>, Option<i64>, Option<f64>, Option<f64>, Option<String>);
+        let fila: Option<Fila> = self
             .tx
             .query_row(
-                "SELECT tarjeta_id, monto_pagado, divisa, cuenta_ahorro_id, tasa_cambio,
-                        gasto_comision_id
-                 FROM pagos_tarjeta WHERE id = ?;",
+                "SELECT p.tarjeta_id, p.monto_pagado, p.divisa, p.cuenta_ahorro_id,
+                        p.tasa_cambio, p.gasto_comision_id, p.monto_debitado, p.comision,
+                        c.divisa
+                 FROM pagos_tarjeta p
+                 LEFT JOIN cuentas_ahorro c ON c.id = p.cuenta_ahorro_id
+                 WHERE p.id = ?;",
                 [pago_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+                |r| {
+                    Ok((
+                        r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?,
+                        r.get(6)?, r.get(7)?, r.get(8)?,
+                    ))
+                },
             )
             .optional()
             .map_err(fallo)?;
 
-        let (tarjeta_id, monto, divisa, cuenta_ahorro_id, tasa_cambio, gasto_comision_id) =
+        let (tarjeta_id, monto, divisa, cuenta_ahorro_id, tasa_cambio, gasto_comision_id,
+             debitado, comision, divisa_cuenta) =
             fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "abono", id: pago_id })?;
 
         let monto = Dinero::nuevo(monto, divisa_desde_texto(&divisa))
             .map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
+
+        let divisa_cuenta = divisa_cuenta.as_deref().map(divisa_desde_texto);
+        let importe_de_cuenta = |v: Option<f64>| -> Result<Option<Dinero>, ErrorAlmacen> {
+            match (v, divisa_cuenta) {
+                (Some(x), Some(d)) => Dinero::nuevo(x, d)
+                    .map(Some)
+                    .map_err(|e| ErrorAlmacen::Fallo(e.to_string())),
+                _ => Ok(None),
+            }
+        };
 
         Ok(PagoGuardado {
             id: pago_id,
@@ -324,6 +348,8 @@ impl RepositorioPagosTarjeta for AlmacenSqlite<'_> {
             monto,
             cuenta_ahorro_id,
             tasa_cambio,
+            monto_debitado: importe_de_cuenta(debitado)?,
+            comision: importe_de_cuenta(comision)?,
             gasto_comision_id,
         })
     }
