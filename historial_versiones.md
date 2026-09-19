@@ -4,7 +4,30 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.13.1 (Versión Actual) - 2026-09-16
+## 🚀 Versión 1.14.0 (Versión Actual) - 2026-09-16
+**El céntimo se decide en aritmética entera, no en coma flotante.**
+
+### 🧮 Núcleo monetario
+* **`dividir_redondeando` es ahora el único lugar del sistema donde se decide un céntimo.** Redondea la mitad alejándose de cero, en enteros.
+* **La regla anterior no era la que decía ser.** `f64::round()` aplica «mitad alejándose de cero» sobre el valor binario, que no es el decimal escrito: `1.005` se guarda como 1.00499… y bajaba a 1.00, mientras que `2.675` —cuyo error se cancela al multiplicar por 100— subía a 2.68. Dos importes de la misma forma, en direcciones opuestas, por un accidente de representación.
+* **`Porcentaje`**: tipo nuevo, entero en millonésimas de la fracción. La retención pasa a declararse como `Porcentaje::puntos_basicos(20)` en vez de `0.002`, que no existe exactamente en binario.
+* **`TasaCambio`** pasa a mil-millonésimas enteras. Necesita más escala que un porcentaje porque una tasa y su recíproca viven en órdenes de magnitud distintos: 60 pesos por dólar es 0.0166… dólares por peso, un decimal periódico.
+* `porcentaje()` y `convertir()` calculan con `i128` y redondean una sola vez, al final.
+
+### 📏 Tolerancia de representación: 0.01 centavos
+* Se declara y se **hace cumplir por prueba** una desviación máxima de 0.01 centavos atribuible a representar una tasa, medida sobre un importe de referencia de 10 000 unidades.
+* **Acota una de las dos fuentes de desviación, no las dos.** El redondeo final al céntimo no es un error sino una decisión: el 0.20 % de 8 967.90 son 1 793.58 centavos, y hay que cobrar 1 793 o 1 794. Ese residuo llega a medio centavo por definición y ningún límite lo reduce.
+* **La tolerancia obligó a subir la escala de los porcentajes** de millonésimas a mil-millonésimas: a la escala anterior, una tasa cuantizada desviaba hasta 0.5 centavos sobre el importe de referencia, cincuenta veces el límite.
+* Las tasas que el sistema declara en puntos básicos se representan **exactas**, sin residuo: toda la desviación que queda en ellas es la del redondeo final.
+
+### 📌 Alcance, dicho con precisión
+* Esto retira la coma flotante de la **generación** de importes derivados —retenciones, comisiones, conversiones, intereses—, que es donde estaba el riesgo real.
+* **No la retira de la entrada ni de la persistencia**: `Dinero::nuevo` sigue recibiendo `f64`, y SQLite sigue guardando `REAL`. Cerrar esa frontera es trabajo posterior.
+* Ningún importe ya calculado cambia de valor. Las pruebas de caracterización pasan sin tocarse.
+
+---
+
+## 🚀 Versión 1.13.1 - 2026-09-16
 **Caracterización del vertical de Ingresos: quince pruebas y cinco defectos documentados.**
 
 ### 🧪 Pruebas

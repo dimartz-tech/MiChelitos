@@ -304,7 +304,10 @@ mod tests {
         .unwrap();
 
         let tasa = t.tasa().unwrap().expect("cruza divisas");
-        assert!((tasa.valor() - 100.0 / 6_000.0).abs() < 1e-12);
+        // La tolerancia es la de la escala de la tasa, no la de `f64`. 100/6000
+        // es un decimal periódico: no cabe exacto en ninguna escala finita, y
+        // por eso los importes son lo autoritativo y la tasa un acompañante.
+        assert!((tasa.valor() - 100.0 / 6_000.0).abs() < 1e-9);
     }
 
     #[test]
