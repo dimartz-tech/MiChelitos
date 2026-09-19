@@ -24,12 +24,42 @@ const CENTAVOS_POR_UNIDAD: f64 = 100.0;
 /// se rechaza en lugar de saturar en silencio.
 const MAX_CENTAVOS_EXACTOS: f64 = 9_007_199_254_740_991.0;
 
-/// Escala de los porcentajes: millonésimas de la fracción.
+/// Desviación máxima admitida por **representar una tasa**: 0.01 centavos.
 ///
-/// Seis decimales cubren de sobra lo que un porcentaje necesita expresar: una
-/// retención de 0.20 %, un cashback de 3 %, un interés mensual. Más precisión
-/// en un porcentaje no significa nada.
-pub const ESCALA_TASA: i64 = 1_000_000;
+/// Acota una de las dos fuentes de desviación del sistema, y conviene no
+/// confundirlas:
+///
+/// * **El redondeo final al céntimo** no es un error sino una decisión. El
+///   0.20 % de 89.6790 son 1 793.58 centavos: 0.58 de centavo no existe, y hay
+///   que cobrar 1 793 o 1 794. Ese residuo llega a medio centavo **por
+///   definición** y ningún límite puede reducirlo; lo que sí puede exigirse es
+///   que la decisión sea explícita y siempre la misma, que es lo que hace
+///   `dividir_redondeando`.
+///
+/// * **La representación de la tasa** sí es evitable. Una tasa guardada con
+///   escala finita desplaza el resultado, y ese desplazamiento **sí** puede
+///   acotarse eligiendo la escala. Es lo que esta constante gobierna.
+pub const TOLERANCIA_REPRESENTACION_CENTAVOS: f64 = 0.01;
+
+/// Importe con el que se mide si una escala honra la tolerancia.
+///
+/// Diez mil unidades: el orden de magnitud de una operación corriente aquí.
+/// La desviación por representación crece con el importe, de modo que la
+/// tolerancia solo tiene sentido referida a una magnitud declarada.
+pub const IMPORTE_DE_REFERENCIA_CENTAVOS: i64 = 1_000_000;
+
+/// Escala de los porcentajes: mil-millonésimas de la fracción.
+///
+/// **La escala la fija la tolerancia, no la comodidad.** Seis decimales
+/// parecían de sobra para expresar un 0.20 %, y lo son para *escribirlo*; pero
+/// sobre el importe de referencia una tasa cuantizada a millonésimas desvía
+/// hasta 0.5 centavos, cincuenta veces la tolerancia. A mil-millonésimas el
+/// desvío cae a 0.0005 centavos.
+///
+/// Coincide con la escala de las tasas de cambio, y no por casualidad: ambas
+/// producen importes que se guardan, y la tolerancia que se les exige es la
+/// misma.
+pub const ESCALA_TASA: i64 = 1_000_000_000;
 
 /// Escala de las tasas de cambio: mil-millonésimas.
 ///
@@ -82,8 +112,13 @@ pub struct Porcentaje {
 
 impl Porcentaje {
     /// Puntos básicos: 20 pb = 0.20 % = fracción 0.002.
+    ///
+    /// Un punto básico es una diezmilésima, de modo que a escala de
+    /// mil-millonésimas son 100 000 unidades. Se construye con una
+    /// multiplicación entera: la conversión es **exacta**, sin residuo de
+    /// representación, que es la razón de declarar así las tasas del sistema.
     pub const fn puntos_basicos(pb: i64) -> Porcentaje {
-        Porcentaje { millonesimas: pb * 100 }
+        Porcentaje { millonesimas: pb * (ESCALA_TASA / 10_000) }
     }
 
     /// Desde una fracción decimal (0.002 para el 0.20 %).
@@ -525,6 +560,89 @@ mod tests {
         assert_eq!(dop(54_321.09).porcentaje(Porcentaje::puntos_basicos(20)).unwrap(), dop(108.64));
         assert_eq!(dop(10_000.50).porcentaje(Porcentaje::puntos_basicos(20)).unwrap(), dop(20.00));
         assert_eq!(usd(150.00).porcentaje(Porcentaje::puntos_basicos(20)).unwrap(), usd(0.30));
+    }
+
+    // --- La tolerancia de representación, exigida ---
+
+    /// Desvío en centavos que una escala provoca sobre el importe de
+    /// referencia, por no poder representar una tasa exactamente.
+    fn desvio_por_representacion(escala: i64) -> f64 {
+        // Una tasa cae como mucho a media unidad de escala de su valor real.
+        let error_de_tasa = 0.5 / escala as f64;
+        IMPORTE_DE_REFERENCIA_CENTAVOS as f64 * error_de_tasa
+    }
+
+    #[test]
+    fn las_escalas_honran_la_tolerancia_de_representacion() {
+        // Esta es la prueba que **fija el límite**. Si alguien bajara una
+        // escala por comodidad, aquí se entera antes de que un importe se
+        // desvíe.
+        for (escala, nombre) in [(ESCALA_TASA, "porcentajes"), (ESCALA_TASA_CAMBIO, "tasas")] {
+            let desvio = desvio_por_representacion(escala);
+            assert!(
+                desvio <= TOLERANCIA_REPRESENTACION_CENTAVOS,
+                "la escala de {nombre} desvía {desvio} ¢, por encima de {} ¢",
+                TOLERANCIA_REPRESENTACION_CENTAVOS
+            );
+        }
+    }
+
+    #[test]
+    fn una_escala_de_millonesimas_no_habria_bastado() {
+        // Deja constancia de por qué la escala es la que es. Seis decimales
+        // bastan para *escribir* un 0.20 %, pero no para representarlo dentro
+        // de la tolerancia sobre un importe corriente.
+        assert!(
+            desvio_por_representacion(1_000_000) > TOLERANCIA_REPRESENTACION_CENTAVOS,
+            "si esto deja de ser cierto, la justificación de la escala cambió"
+        );
+    }
+
+    #[test]
+    fn las_tasas_declaradas_del_sistema_no_tienen_residuo_de_representacion() {
+        // Un punto básico cabe exacto en la escala, así que las tasas que el
+        // sistema declara —la retención, los cashback— no aportan desviación
+        // ninguna: toda la que queda es la del redondeo final.
+        for pb in [1_i64, 20, 100, 300, 500, 1500, 10_000] {
+            let p = Porcentaje::puntos_basicos(pb);
+            let exacta = Porcentaje::desde_fraccion(pb as f64 / 10_000.0).unwrap();
+            assert_eq!(p, exacta, "{pb} pb no se representa exacto");
+        }
+    }
+
+    #[test]
+    fn una_tasa_derivada_se_mantiene_dentro_de_la_tolerancia() {
+        // El interés mensual de un préstamo es un decimal periódico: no cabe
+        // exacto en ninguna escala. Lo que sí se exige es que su desviación
+        // sobre el importe de referencia quede bajo la tolerancia.
+        let mensual = 30.95 / 100.0 / 12.0; // 0.0257916666…
+        let p = Porcentaje::desde_fraccion(mensual).unwrap();
+
+        let referencia = Dinero::de_centavos(IMPORTE_DE_REFERENCIA_CENTAVOS, Divisa::Dop);
+        let calculado = referencia.porcentaje(p).unwrap().centavos() as f64;
+        let exacto = IMPORTE_DE_REFERENCIA_CENTAVOS as f64 * mensual;
+
+        // Se descuenta el medio centavo del redondeo final, que no es error.
+        let desvio = (calculado - exacto).abs() - 0.5;
+        assert!(
+            desvio <= TOLERANCIA_REPRESENTACION_CENTAVOS,
+            "desvío de representación {desvio} ¢ sobre la tolerancia"
+        );
+    }
+
+    #[test]
+    fn el_residuo_del_redondeo_final_llega_a_medio_centavo_y_eso_es_correcto() {
+        // La otra cara del límite: no se puede exigir 0.01 ¢ al redondeo
+        // final, porque su residuo es medio centavo por definición. Confundir
+        // ambas cosas llevaría a rechazar comisiones corrientes.
+        let importe = dop(8_967.90);
+        let comision = importe.porcentaje(Porcentaje::puntos_basicos(20)).unwrap();
+
+        let exacto = importe.centavos() as f64 * 0.002;
+        let residuo = (comision.centavos() as f64 - exacto).abs();
+
+        assert!(residuo > TOLERANCIA_REPRESENTACION_CENTAVOS, "residuo real de una comisión");
+        assert!(residuo <= 0.5, "pero nunca más de medio centavo");
     }
 
     #[test]
