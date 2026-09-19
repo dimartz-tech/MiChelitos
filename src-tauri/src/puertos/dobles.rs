@@ -68,11 +68,47 @@ impl AlmacenEnMemoria {
         tasa_cambio: Option<f64>,
         gasto_comision_id: Option<i64>,
     ) -> i64 {
+        // Sin conversión, lo debitado es el propio importe; la comisión se
+        // siembra al 0.20 %, que es lo que el registro habría guardado.
+        let debitado = cuenta_ahorro_id.map(|_| monto);
+        let comision = debitado.map(|d| {
+            d.porcentaje(crate::dominio::cargos::TASA_RETENCION).expect("comisión sembrada")
+        });
+        self.con_pago_detallado(
+            tarjeta_id, monto, cuenta_ahorro_id, tasa_cambio, debitado, comision,
+            gasto_comision_id,
+        )
+    }
+
+    /// Siembra un abono diciendo exactamente qué debitó y qué cobró.
+    ///
+    /// Permite construir el caso que motivó el tramo 2: un abono cuyo importe
+    /// guardado **no** coincide con lo que hoy se recalcularía.
+    #[allow(clippy::too_many_arguments)]
+    pub fn con_pago_detallado(
+        &mut self,
+        tarjeta_id: i64,
+        monto: Dinero,
+        cuenta_ahorro_id: Option<i64>,
+        tasa_cambio: Option<f64>,
+        monto_debitado: Option<Dinero>,
+        comision: Option<Dinero>,
+        gasto_comision_id: Option<i64>,
+    ) -> i64 {
         let id = self.siguiente_id;
         self.siguiente_id += 1;
         self.pagos.insert(
             id,
-            PagoGuardado { id, tarjeta_id, monto, cuenta_ahorro_id, tasa_cambio, gasto_comision_id },
+            PagoGuardado {
+                id,
+                tarjeta_id,
+                monto,
+                cuenta_ahorro_id,
+                tasa_cambio,
+                monto_debitado,
+                comision,
+                gasto_comision_id,
+            },
         );
         id
     }
@@ -241,6 +277,8 @@ impl RepositorioPagosTarjeta for AlmacenEnMemoria {
                 monto: pago.monto,
                 cuenta_ahorro_id: pago.cuenta_ahorro_id,
                 tasa_cambio: pago.tasa_cambio,
+                monto_debitado: pago.monto_debitado,
+                comision: pago.comision,
                 gasto_comision_id: pago.gasto_comision_id,
             },
         );

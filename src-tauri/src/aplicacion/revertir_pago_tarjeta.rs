@@ -11,11 +11,25 @@
 //! deuda deja la tarjeta por encima de su límite, o si restituir el dinero a la
 //! cuenta la deja donde estaba antes, eso es el estado verdadero. Es la misma
 //! resolución que cerró H5 y H10.
+//!
+//! ## Se devuelve lo guardado, no lo recalculado
+//!
+//! La primera versión de este caso de uso **recalculaba** lo que había salido
+//! de la cuenta, y lo argumentaba: el cálculo es el mismo que al registrar, de
+//! modo que no hacía falta guardarlo. Era el argumento equivocado.
+//!
+//! Deshacer una operación es reponer **lo que ocurrió**, no lo que hoy
+//! creemos que debió ocurrir. Si la regla de redondeo cambia —como acaba de
+//! cambiar—, o si un importe se corrigió a mano, recalcular devuelve una cifra
+//! distinta de la que salió y la reversión deja un residuo silencioso.
+//!
+//! No es hipotético: al revertir un abono real cuya comisión se había
+//! guardado sin redondear, hubo que partir del valor **almacenado** porque
+//! recalcular habría devuelto otro. La regla que este módulo defendía no
+//! sirvió en el único caso en que se puso a prueba.
 
 use super::ErrorAplicacion;
-use crate::dominio::cargos::TASA_RETENCION;
-use crate::dominio::dinero::{Dinero, TasaCambio};
-use crate::dominio::tarjeta::MONEDA_LOCAL;
+use crate::dominio::dinero::Dinero;
 use crate::puertos::repositorios::*;
 
 /// Lo que la reversión deshizo, para poder contarlo.
@@ -37,14 +51,25 @@ pub fn revertir_pago_tarjeta(
     // 1. La deuda vuelve a subir. Un abono la redujo; deshacerlo la repone.
     almacen.ajustar_deuda(pago.tarjeta_id, pago.monto)?;
 
-    // 2. El dinero vuelve a la cuenta, si alguna lo pagó.
-    let devuelto = match pago.cuenta_ahorro_id {
-        None => None,
-        Some(cuenta_id) => {
-            let total = total_debitado(&pago)?;
+    // 2. El dinero vuelve a la cuenta, si alguna lo pagó. El importe sale de
+    //    lo que el abono guardó, no de volver a calcularlo.
+    let devuelto = match (pago.cuenta_ahorro_id, pago.monto_debitado) {
+        (Some(cuenta_id), Some(debitado)) => {
+            let comision = pago.comision.unwrap_or_else(|| Dinero::cero(debitado.divisa()));
+            let total = debitado.sumar(&comision)?;
             almacen.ajustar_saldo(cuenta_id, total)?;
             Some(total)
         }
+        // Un abono con cuenta pero sin débito guardado no puede revertirse a
+        // ciegas: adivinar el importe es justo lo que este módulo dejó de
+        // hacer. Se dice qué falta en lugar de devolver una cifra inventada.
+        (Some(_), None) => {
+            return Err(ErrorAplicacion::Almacen(ErrorAlmacen::Fallo(format!(
+                "el abono {} no guarda cuánto debitó de la cuenta; no puede revertirse sin inventar el importe",
+                pago_id
+            ))))
+        }
+        (None, _) => None,
     };
 
     // 3. La comisión deja de existir como gasto. Se borra antes que el abono
@@ -58,27 +83,6 @@ pub fn revertir_pago_tarjeta(
     almacen.eliminar_pago(pago_id)?;
 
     Ok(AbonoRevertido { deuda_restituida: pago.monto, devuelto_a_la_cuenta: devuelto })
-}
-
-/// Reconstruye lo que salió de la cuenta: el importe convertido más su
-/// comisión.
-///
-/// Se recalcula en vez de leerse del gasto de comisión porque el cálculo es el
-/// mismo que al registrar —una sola política de redondeo para el 0.20 % en
-/// todo el sistema— y porque así la reversión no depende de que el gasto siga
-/// existiendo ni de que su importe no se haya tocado a mano.
-fn total_debitado(pago: &PagoGuardado) -> Result<Dinero, ErrorAplicacion> {
-    let debitado = match pago.tasa_cambio {
-        // Una tasa de 1 es la ausencia de conversión escrita como número, y
-        // así llegan los abonos que no cruzaron divisa.
-        Some(tasa) if tasa > 0.0 && tasa != 1.0 => {
-            pago.monto.convertir(MONEDA_LOCAL, TasaCambio::nueva(tasa)?)?
-        }
-        _ => pago.monto,
-    };
-
-    let comision = debitado.porcentaje(TASA_RETENCION)?;
-    Ok(debitado.sumar(&comision)?)
 }
 
 #[cfg(test)]
@@ -138,16 +142,61 @@ mod tests {
     #[test]
     fn un_abono_en_divisa_devuelve_a_la_cuenta_los_pesos_que_salieron() {
         let mut a = almacen();
-        // 100 USD a tasa 60 son 6 000 pesos, más 12 de comisión.
+        // 100 USD a tasa 60 son 6 000 pesos, más 12 de comisión. El abono
+        // guarda el débito **en la divisa de la cuenta**, que es lo que esa
+        // cuenta tiene que recibir de vuelta.
         a.ajustar_deuda(20, usd(-100.0)).unwrap();
         a.ajustar_saldo(10, dop(-6_012.0)).unwrap();
-        let pago = a.con_pago(20, usd(100.0), Some(10), Some(60.0), None);
+        let pago = a.con_pago_detallado(
+            20, usd(100.0), Some(10), Some(60.0), Some(dop(6_000.0)), Some(dop(12.0)), None,
+        );
 
         let r = revertir_pago_tarjeta(pago, &mut a).unwrap();
 
         assert_eq!(a.deuda_en(20, Divisa::Usd), usd(0.0), "la deuda vuelve en dólares");
         assert_eq!(a.saldo_de(10), dop(100_000.0), "y a la cuenta vuelven pesos");
         assert_eq!(r.devuelto_a_la_cuenta, Some(dop(6_012.0)));
+    }
+
+    #[test]
+    fn se_devuelve_lo_que_salio_aunque_hoy_se_calcularia_distinto() {
+        // **La prueba que justifica el tramo 2.** El abono guarda un débito
+        // que no coincide con lo que se obtendría recalculándolo: 100 USD a
+        // tasa 59.9 darían 5 990.00, pero de la cuenta salieron 5 989.50.
+        //
+        // Ocurre de verdad cuando la regla de redondeo cambia o cuando un
+        // importe se corrigió a mano. Recalcular devolvería 5 990.00 y dejaría
+        // medio peso de residuo que nadie vería.
+        let mut a = almacen();
+        a.ajustar_deuda(20, usd(-100.0)).unwrap();
+        a.ajustar_saldo(10, dop(-6_001.48)).unwrap();
+        let pago = a.con_pago_detallado(
+            20, usd(100.0), Some(10), Some(59.9),
+            Some(dop(5_989.50)), Some(dop(11.98)), None,
+        );
+
+        let r = revertir_pago_tarjeta(pago, &mut a).unwrap();
+
+        assert_eq!(r.devuelto_a_la_cuenta, Some(dop(6_001.48)), "lo guardado, no lo recalculado");
+        assert_eq!(a.saldo_de(10), dop(100_000.0), "la cuenta vuelve exacta");
+    }
+
+    #[test]
+    fn un_abono_con_cuenta_pero_sin_debito_guardado_se_niega_a_adivinar() {
+        // Antes este caso se resolvía recalculando. Ahora se dice qué falta,
+        // porque devolver una cifra inventada a una cuenta real es peor que
+        // no devolver nada.
+        let mut a = almacen();
+        a.ajustar_deuda(20, dop(-3_000.0)).unwrap();
+        let pago = a.con_pago_detallado(20, dop(3_000.0), Some(10), None, None, None, None);
+
+        let r = revertir_pago_tarjeta(pago, &mut a);
+
+        assert!(r.is_err(), "no se revierte a ciegas");
+        assert!(
+            format!("{}", r.unwrap_err()).contains("no guarda cuánto debitó"),
+            "el error dice qué falta"
+        );
     }
 
     #[test]

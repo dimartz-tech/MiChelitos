@@ -738,6 +738,51 @@ fn verificar_vinculos_unicos(tx: &Transaction) -> Result<(), ErrorMigracion> {
     Ok(())
 }
 
+const MIG6: &str = "el abono guarda lo que debitó";
+
+/// Guarda en el abono el importe debitado y su comisión.
+///
+/// Hasta ahora el abono guardaba el importe pagado y la tasa, y **revertirlo
+/// obligaba a recalcular** lo que había salido de la cuenta. Recalcular
+/// devuelve lo que hoy creemos que debió salir, no lo que salió: si la regla
+/// de redondeo cambia, o el importe se corrigió a mano, la reversión deja un
+/// residuo silencioso.
+///
+/// El relleno usa **el importe y la tasa**, no la comisión. Derivar el débito
+/// dividiendo la comisión entre 0.002 solo es exacto mientras la comisión
+/// conserve sus decimales: una vez redondeada al céntimo, la división se
+/// desvía —42.77 / 0.002 da 21 385.00 para un débito real de 21 384.61—.
+///
+/// Para las filas anteriores a esta columna el valor es una **reconstrucción**,
+/// no un registro: se calcula como se calculó entonces. Es lo mejor
+/// disponible, y a partir de aquí deja de hacer falta.
+pub fn migracion_6_abono_guarda_lo_debitado(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::anadir_columna(tx, MIG6, "pagos_tarjeta", "monto_debitado", "REAL")?;
+    migraciones::anadir_columna(tx, MIG6, "pagos_tarjeta", "comision", "REAL")?;
+
+    migraciones::paso(
+        tx,
+        MIG6,
+        "reconstruir el débito de los abonos anteriores",
+        "UPDATE pagos_tarjeta SET
+             monto_debitado = ROUND(monto_pagado * COALESCE(NULLIF(tasa_cambio, 0), 1.0), 2)
+         WHERE cuenta_ahorro_id IS NOT NULL AND monto_debitado IS NULL;",
+    )?;
+
+    // La comisión sí se toma del gasto que la recogió: ahí está el importe
+    // que de verdad se cobró, sin reconstruir nada.
+    migraciones::paso(
+        tx,
+        MIG6,
+        "tomar la comisión del gasto que la recogió",
+        "UPDATE pagos_tarjeta SET
+             comision = (SELECT g.monto FROM gastos g WHERE g.id = pagos_tarjeta.gasto_comision_id)
+         WHERE gasto_comision_id IS NOT NULL AND comision IS NULL;",
+    )?;
+
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
