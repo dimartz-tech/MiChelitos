@@ -109,6 +109,8 @@ pub fn registrar_pago_tarjeta(
         monto: datos.monto,
         cuenta_ahorro_id: datos.cuenta_ahorro_id,
         tasa_cambio: datos.tasa_cambio.map(|t| t.valor()),
+        monto_debitado: debitado,
+        comision,
         gasto_comision_id: gasto_id,
     })?;
 
