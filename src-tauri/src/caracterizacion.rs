@@ -64,6 +64,14 @@ fn conexion() -> Connection {
 
 /// Comparación de importes con tolerancia, para no depender de la
 /// representación binaria exacta de los f64.
+/// Un motivo válido para las pruebas que borran un movimiento.
+///
+/// Las correcciones exigen una explicación de cierta longitud, así que las
+/// pruebas la proporcionan igual que lo haría el titular.
+fn motivo_de_prueba() -> String {
+    "Corrección de prueba automatizada del sistema".to_string()
+}
+
 fn assert_importe(obtenido: f64, esperado: f64, contexto: &str) {
     assert!(
         (obtenido - esperado).abs() < 1e-9,
@@ -491,7 +499,7 @@ fn c12_la_reversion_de_tarjeta_deja_saldo_a_favor_en_vez_de_recortar() {
     // El usuario abona 200 antes de darse cuenta del error de registro.
     fijar_balance_tarjeta(tarjeta, 50.0, 0.0);
 
-    eliminar_gasto(gasto).unwrap();
+    eliminar_gasto(gasto, motivo_de_prueba()).unwrap();
 
     // 50 - 150 = -100. Antes el MAX(0.0, ...) lo recortaba a cero y esos 100
     // desaparecían sin registro; hoy quedan como saldo a favor, que es lo que
@@ -507,7 +515,7 @@ fn c13_la_reversion_de_una_transferencia_restituye_el_saldo_exacto() {
     let gasto = crear_gasto(transferencia(10000.0, "Alimentación", "Compra", cuenta)).unwrap();
     assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 89980.0, "saldo tras el gasto");
 
-    eliminar_gasto(gasto).unwrap();
+    eliminar_gasto(gasto, motivo_de_prueba()).unwrap();
 
     assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 100000.0, "saldo restituido");
     assert_eq!(total_gastos(), 0, "el gasto se borra, no se anula");
@@ -944,7 +952,7 @@ fn c25_revertir_un_gasto_convertido_restituye_el_saldo_exacto() {
     entrada.tasa_cambio = Some(60.0);
     let id = crear_gasto(entrada).unwrap();
 
-    eliminar_gasto(id).unwrap();
+    eliminar_gasto(id, motivo_de_prueba()).unwrap();
 
     assert_importe(balance_cuenta("Cuenta Ahorros DOP"), 100000.0, "restitución al centavo");
 }
@@ -1470,7 +1478,7 @@ fn c47_revertir_una_transferencia_devuelve_el_monto_y_el_cargo_al_origen() {
     )
     .unwrap();
 
-    crate::eliminar_transaccion_cuenta(ultima_transferencia()).unwrap();
+    crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
 
     assert_importe(saldo_cuenta_id(origen), 50_000.0, "restitución exacta con cargo");
     assert_importe(saldo_cuenta_id(destino), 10_000.0, "restitución exacta");
@@ -1499,7 +1507,7 @@ fn c48_h10_la_reversion_devuelve_los_dos_saldos_aunque_el_destino_quede_negativo
         .execute("UPDATE cuentas_ahorro SET balance_actual = 3000.0 WHERE id = ?;", [destino])
         .unwrap();
 
-    crate::eliminar_transaccion_cuenta(ultima_transferencia()).unwrap();
+    crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
 
     assert_importe(saldo_cuenta_id(destino), -5_000.0, "3 000 - 8 000, sin recorte");
     assert_importe(saldo_cuenta_id(origen), 50_000.0, "y el origen se restituye entero");
@@ -1610,9 +1618,9 @@ fn c54_revertir_dos_veces_la_misma_transferencia_falla_la_segunda() {
     .unwrap();
     let id = ultima_transferencia();
 
-    crate::eliminar_transaccion_cuenta(id).unwrap();
+    crate::eliminar_transaccion_cuenta(id, motivo_de_prueba()).unwrap();
 
-    assert!(crate::eliminar_transaccion_cuenta(id).is_err(), "no se revierte dos veces");
+    assert!(crate::eliminar_transaccion_cuenta(id, motivo_de_prueba()).is_err(), "no se revierte dos veces");
     assert_importe(saldo_cuenta_id(origen), 50_000.0, "sin doble restitución");
 }
 
@@ -1849,7 +1857,7 @@ fn c64_registrar_y_revertir_un_abono_deja_tarjeta_y_cuenta_como_estaban() {
     assert_importe(saldo_cuenta_id(cuenta), 87_976.0, "salieron 12 000 + 24");
 
     let abono = ultimo_abono();
-    revertir_abono_tarjeta(abono).unwrap();
+    revertir_abono_tarjeta(abono, motivo_de_prueba()).unwrap();
 
     assert_importe(balances_tarjeta(tarjeta).0, 30_000.0, "la deuda vuelve");
     assert_importe(saldo_cuenta_id(cuenta), 100_000.0, "y el dinero también");
@@ -1869,7 +1877,7 @@ fn c65_revertir_un_abono_en_divisa_devuelve_los_pesos_que_salieron() {
     assert_importe(balances_tarjeta(tarjeta).1, 400.0, "la deuda en dólares bajó");
     assert_importe(saldo_cuenta_id(cuenta), 93_988.0, "salieron 6 000 + 12");
 
-    revertir_abono_tarjeta(ultimo_abono()).unwrap();
+    revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
 
     assert_importe(balances_tarjeta(tarjeta).1, 500.0, "vuelve en dólares");
     assert_importe(saldo_cuenta_id(cuenta), 100_000.0, "y a la cuenta vuelven pesos");
@@ -1885,7 +1893,7 @@ fn c66_revertir_un_abono_sin_cuenta_solo_repone_la_deuda() {
     )
     .unwrap();
 
-    revertir_abono_tarjeta(ultimo_abono()).unwrap();
+    revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
 
     assert_importe(balances_tarjeta(tarjeta).0, 30_000.0, "la deuda vuelve entera");
     assert_eq!(total_gastos(), 0, "nunca hubo comisión que borrar");
@@ -1906,7 +1914,7 @@ fn c67_revertir_un_abono_que_dejo_saldo_a_favor_lo_deshace_sin_recorte() {
     .unwrap();
     assert_importe(balances_tarjeta(tarjeta).1, -5_000.0, "queda saldo a favor, no cero");
 
-    revertir_abono_tarjeta(ultimo_abono()).unwrap();
+    revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
 
     assert_importe(balances_tarjeta(tarjeta).1, 0.0, "el saldo a favor se deshace");
     assert_importe(saldo_cuenta_id(cuenta), 500_000.0, "y el dinero vuelve entero");
@@ -1923,8 +1931,8 @@ fn c68_revertir_dos_veces_falla_la_segunda_sin_duplicar_la_devolucion() {
     .unwrap();
     let abono = ultimo_abono();
 
-    revertir_abono_tarjeta(abono).unwrap();
-    assert!(revertir_abono_tarjeta(abono).is_err(), "el abono ya no existe");
+    revertir_abono_tarjeta(abono, motivo_de_prueba()).unwrap();
+    assert!(revertir_abono_tarjeta(abono, motivo_de_prueba()).is_err(), "el abono ya no existe");
 
     assert_importe(saldo_cuenta_id(cuenta), 100_000.0, "sin doble devolución");
 }
@@ -2110,7 +2118,7 @@ fn c79_borrar_una_factura_cobrada_revierte_el_abono() {
     let id = crear_ingreso(factura("A-010", 10_000.0, 15.0)).unwrap();
     marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), 8_500.0).unwrap();
 
-    eliminar_ingreso(id).unwrap();
+    eliminar_ingreso(id, motivo_de_prueba()).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "el saldo vuelve donde estaba");
 }
@@ -2130,7 +2138,7 @@ fn c80_h20_resuelto_borrar_una_factura_no_recorta_el_saldo() {
         .execute("UPDATE cuentas_ahorro SET balance_actual = 500.0 WHERE id = ?;", params![cuenta])
         .unwrap();
 
-    eliminar_ingreso(id).unwrap();
+    eliminar_ingreso(id, motivo_de_prueba()).unwrap();
 
     // 500 - 8 500 = -8 000. Lo que falta por reponer, dicho en vez de
     // tragado.
@@ -2171,7 +2179,7 @@ fn c83_borrar_un_informal_cobrado_revierte_su_abono() {
     let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), 2_000.0).unwrap();
     marcar_informal_pagado(id, cuenta, "16/09/2026".into(), 2_000.0).unwrap();
 
-    eliminar_ingreso_informal(id).unwrap();
+    eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "el saldo vuelve donde estaba");
 }
@@ -2182,7 +2190,7 @@ fn c84_un_informal_sin_cobrar_no_mueve_ningun_saldo_al_borrarse() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), 2_000.0).unwrap();
 
-    eliminar_ingreso_informal(id).unwrap();
+    eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "nunca entró, nada sale");
 }
