@@ -9,5 +9,6 @@ pub mod cuenta;
 pub mod dinero;
 pub mod errores;
 pub mod gasto;
+pub mod ingreso;
 pub mod prestamo;
 pub mod tarjeta;
