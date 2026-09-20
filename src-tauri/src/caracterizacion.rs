@@ -2017,7 +2017,7 @@ fn c74_corregir_una_factura_usa_la_misma_regla_que_al_crearla() {
     let _g = entorno_aislado();
     let id = crear_ingreso(factura("A-006", 1_000.0, 15.0)).unwrap();
 
-    actualizar_ingreso(id, "A-006".into(), 1, "16/09/2026".into(), 1_234.56, 15.0).unwrap();
+    actualizar_ingreso(id, "A-006".into(), 1, "16/09/2026".into(), 1_234.56, 15.0, None).unwrap();
 
     assert_importe(retencion_de(id), 185.18, "crear y corregir no divergen");
 }
@@ -2090,10 +2090,11 @@ fn c79_borrar_una_factura_cobrada_revierte_el_abono() {
 }
 
 #[test]
-fn c80_h20_borrar_una_factura_recorta_el_saldo_en_cero() {
-    // Conducta vigente: `MAX(0.0, ...)`. Si el dinero ya se gastó, revertir
-    // deja la cuenta en cero y la diferencia desaparece sin registro. Es el
-    // mismo recorte que H5 y H10 retiraron en tarjetas y transferencias.
+fn c80_h20_resuelto_borrar_una_factura_no_recorta_el_saldo() {
+    // **H20 resuelto, con las mismas condiciones que H5 y H10.** Antes el
+    // `MAX(0.0, ...)` dejaba la cuenta en cero y la diferencia desaparecía
+    // sin registro. Ahora el saldo queda negativo, que es el estado
+    // verdadero: el dinero se cobró y se gastó.
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
     let id = crear_ingreso(factura("A-011", 10_000.0, 15.0)).unwrap();
@@ -2105,7 +2106,9 @@ fn c80_h20_borrar_una_factura_recorta_el_saldo_en_cero() {
 
     eliminar_ingreso(id).unwrap();
 
-    assert_importe(saldo_cuenta_id(cuenta), 0.0, "recorte en cero (H20)");
+    // 500 - 8 500 = -8 000. Lo que falta por reponer, dicho en vez de
+    // tragado.
+    assert_importe(saldo_cuenta_id(cuenta), -8_000.0, "sin recorte");
 }
 
 // --- Ingresos informales ---
@@ -2184,7 +2187,7 @@ fn c85_corregir_al_alza_una_factura_cobrada_acredita_la_diferencia() {
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "entró el neto");
 
     // Eran 12 000, no 10 000. El neto sube de 8 500 a 10 200.
-    actualizar_ingreso(id, "B-001".into(), 1, "20/09/2026".into(), 12_000.0, 15.0).unwrap();
+    actualizar_ingreso(id, "B-001".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None).unwrap();
 
     assert_importe(retencion_de(id), 1_800.0, "la retención se recalcula");
     assert_importe(recibido_de(id), 10_200.0, "y lo recibido también");
@@ -2198,29 +2201,59 @@ fn c86_corregir_a_la_baja_retira_de_la_cuenta_lo_que_sobraba() {
     let id = crear_ingreso(factura("B-002", 10_000.0, 15.0)).unwrap();
     marcar_ingreso_pagado(id, "Cuenta Ahorros DOP".into(), "20/09/2026".into(), 8_500.0).unwrap();
 
-    actualizar_ingreso(id, "B-002".into(), 1, "20/09/2026".into(), 8_000.0, 15.0).unwrap();
+    actualizar_ingreso(id, "B-002".into(), 1, "20/09/2026".into(), 8_000.0, 15.0, None).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 7_800.0, "se retiran los 1 700 de más");
     assert_importe(recibido_de(id), 6_800.0, "lo recibido baja con el neto");
 }
 
 #[test]
-fn c87_la_correccion_conserva_un_cobro_parcial() {
-    // Si se cobró de menos, corregir el total mueve ambas cifras por igual y
-    // la diferencia sobrevive. Sustituir lo recibido por el neto nuevo la
-    // borraría, y con ella la constancia de que falta cobrar algo.
+fn c87_corregir_da_por_cobrado_el_neto_entero_aunque_faltara_algo() {
+    // **La regla.** Si al corregir no se dice otra cosa, la factura pasa a
+    // estar cobrada por su neto nuevo: corregir el monto es normalmente
+    // decir «este era el importe, y se cobró».
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-003", 10_000.0, 15.0)).unwrap();
     // Neto de 8 500, pero solo entraron 8 000.
     marcar_ingreso_pagado(id, "Cuenta Ahorros DOP".into(), "20/09/2026".into(), 8_000.0).unwrap();
 
-    actualizar_ingreso(id, "B-003".into(), 1, "20/09/2026".into(), 12_000.0, 15.0).unwrap();
+    actualizar_ingreso(id, "B-003".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None).unwrap();
 
-    assert_importe(recibido_de(id), 9_700.0, "8 000 más el ajuste de 1 700");
-    assert_importe(saldo_cuenta_id(cuenta), 10_700.0, "la cuenta sigue el ajuste");
-    // El neto nuevo es 10 200: siguen faltando los mismos 500 de antes.
-    assert_importe(10_200.0 - recibido_de(id), 500.0, "la diferencia sobrevive");
+    assert_importe(recibido_de(id), 10_200.0, "el neto nuevo, entero");
+    assert_importe(saldo_cuenta_id(cuenta), 11_200.0, "la cuenta sube los 2 200 que faltaban");
+}
+
+#[test]
+fn c87b_un_cobro_parcial_declarado_conserva_lo_que_falta() {
+    // **La excepción, afirmada.** El neto es 10 200 y solo entraron 9 000:
+    // quedan 1 200 por cobrar, y la factura lo dice en lugar de darlo por
+    // saldado.
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso(factura("B-006", 10_000.0, 15.0)).unwrap();
+    marcar_ingreso_pagado(id, "Cuenta Ahorros DOP".into(), "20/09/2026".into(), 8_500.0).unwrap();
+
+    actualizar_ingreso(id, "B-006".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, Some(9_000.0))
+        .unwrap();
+
+    assert_importe(recibido_de(id), 9_000.0, "lo que de verdad entró");
+    assert_importe(saldo_cuenta_id(cuenta), 10_000.0, "la cuenta sigue a lo recibido");
+    assert_importe(12_000.0 - retencion_de(id) - recibido_de(id), 1_200.0, "queda por cobrar");
+}
+
+#[test]
+fn c87c_un_cobro_parcial_mayor_que_el_neto_se_rechaza() {
+    let _g = entorno_aislado();
+    crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso(factura("B-007", 10_000.0, 15.0)).unwrap();
+    marcar_ingreso_pagado(id, "Cuenta Ahorros DOP".into(), "20/09/2026".into(), 8_500.0).unwrap();
+
+    let r = actualizar_ingreso(
+        id, "B-007".into(), 1, "20/09/2026".into(), 10_000.0, 15.0, Some(9_000.0),
+    );
+
+    assert!(r.is_err(), "cobrar más que el neto no es un cobro parcial");
 }
 
 #[test]
@@ -2231,7 +2264,7 @@ fn c88_corregir_sin_cambiar_importes_no_mueve_ningun_saldo() {
     marcar_ingreso_pagado(id, "Cuenta Ahorros DOP".into(), "20/09/2026".into(), 8_500.0).unwrap();
 
     // Solo cambia la fecha.
-    actualizar_ingreso(id, "B-004".into(), 1, "21/09/2026".into(), 10_000.0, 15.0).unwrap();
+    actualizar_ingreso(id, "B-004".into(), 1, "21/09/2026".into(), 10_000.0, 15.0, None).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "corregir la fecha no toca la cuenta");
 }
@@ -2242,7 +2275,7 @@ fn c89_corregir_una_factura_sin_cobrar_no_toca_ninguna_cuenta() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-005", 10_000.0, 15.0)).unwrap();
 
-    actualizar_ingreso(id, "B-005".into(), 1, "20/09/2026".into(), 12_000.0, 15.0).unwrap();
+    actualizar_ingreso(id, "B-005".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None).unwrap();
 
     assert_importe(retencion_de(id), 1_800.0, "las cifras sí cambian");
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "pero no hay dinero que ajustar");
@@ -2251,7 +2284,7 @@ fn c89_corregir_una_factura_sin_cobrar_no_toca_ninguna_cuenta() {
 #[test]
 fn c90_corregir_una_factura_inexistente_falla_en_vez_de_callar() {
     let _g = entorno_aislado();
-    let r = actualizar_ingreso(404, "X".into(), 1, "20/09/2026".into(), 100.0, 15.0);
+    let r = actualizar_ingreso(404, "X".into(), 1, "20/09/2026".into(), 100.0, 15.0, None);
 
     assert!(r.is_err(), "no se corrige lo que no existe");
 }
