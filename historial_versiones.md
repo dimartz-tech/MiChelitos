@@ -4,7 +4,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.14.0 (Versión Actual) - 2026-09-16
+## 🚀 Versión 1.15.0 (Versión Actual) - 2026-09-19
+**Una reversión devuelve lo que salió, no lo que hoy se calcularía.**
+
+### ↩️ Reversión de abonos
+* El abono **guarda** el importe que debitó de la cuenta y la comisión que cobró. La reversión los lee en vez de reconstruirlos.
+* **Corrige una decisión anterior de este mismo proyecto.** La primera versión recalculaba, con el argumento de que el cálculo es el mismo que al registrar. Era el argumento equivocado: deshacer una operación es reponer *lo que ocurrió*, no lo que hoy creemos que debió ocurrir. Si la regla de redondeo cambia —como acaba de cambiar— o si un importe se corrigió a mano, recalcular deja un residuo que nadie ve.
+* Un abono con cuenta pero **sin débito guardado ya no se revierte a ciegas**: se dice qué falta, porque devolver una cifra inventada a una cuenta real es peor que no devolver nada.
+
+### 🗄️ Base de Datos
+* **Migración 6 — el abono guarda lo que debitó**: `pagos_tarjeta` gana `monto_debitado` y `comision`.
+  * El relleno de los abonos anteriores usa **el importe y la tasa**, no la comisión. Derivar el débito dividiendo la comisión entre 0.002 solo es exacto mientras la comisión conserve sus decimales: una vez redondeada al céntimo la división se desvía — 42.77 / 0.002 da 21 385.00 para un débito real de 21 384.61.
+  * Para las filas anteriores a la columna el valor es una **reconstrucción, no un registro**, y queda dicho en la migración.
+
+---
+
+## 🚀 Versión 1.14.0 - 2026-09-16
 **El céntimo se decide en aritmética entera, no en coma flotante.**
 
 ### 🧮 Núcleo monetario

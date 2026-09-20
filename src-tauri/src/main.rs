@@ -25,7 +25,6 @@ use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use chrono::{NaiveDate, Local, Datelike};
 
-use dominio::cargos::TASA_RETENCION;
 use dominio::dinero::{Dinero, Divisa, TasaCambio};
 use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::gastos::AlmacenSqlite;

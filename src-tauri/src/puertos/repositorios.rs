@@ -196,7 +196,18 @@ pub struct PagoGuardado {
     pub monto: Dinero,
     pub cuenta_ahorro_id: Option<i64>,
     /// Tasa aplicada al convertir. `None` o 1.0 significan sin conversión.
+    ///
+    /// Se conserva como dato de la operación, **no para recalcular con ella**.
     pub tasa_cambio: Option<f64>,
+    /// Lo que salió de la cuenta, sin la comisión, en la divisa de la cuenta.
+    ///
+    /// `None` solo cuando el abono se registró sin cuenta. Es lo que una
+    /// reversión devuelve, y por eso se guarda en vez de deducirse: deshacer
+    /// una operación es reponer **lo que ocurrió**, no lo que hoy creemos que
+    /// debió ocurrir.
+    pub monto_debitado: Option<Dinero>,
+    /// La comisión que se cobró, tal como se cobró.
+    pub comision: Option<Dinero>,
     pub gasto_comision_id: Option<i64>,
 }
 
@@ -213,6 +224,10 @@ pub struct PagoAPersistir {
     pub monto: Dinero,
     pub cuenta_ahorro_id: Option<i64>,
     pub tasa_cambio: Option<f64>,
+    /// Lo que se debitó y lo que se cobró de comisión, para no tener que
+    /// deducirlos nunca más.
+    pub monto_debitado: Option<Dinero>,
+    pub comision: Option<Dinero>,
     pub gasto_comision_id: Option<i64>,
 }
 
