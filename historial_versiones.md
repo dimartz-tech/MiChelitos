@@ -4,7 +4,25 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.18.0 (Versión Actual) - 2026-09-20
+## 🚀 Versión 1.19.0 (Versión Actual) - 2026-09-20
+**Borrar un movimiento abre un caso de auditoría y exige explicarlo.**
+
+> **Medida temporal.** La solución definitiva son los asientos de compensación de la Fase 8: un movimiento anulado deja su contrario y el original sobrevive. Mientras eso no exista, borrar destruye el rastro, y esto deja constancia de qué se destruyó y por qué.
+
+### 🛠️ Corrección de transacciones
+* Los cinco borrados de movimiento —gasto, factura, ingreso informal, traspaso y abono— **exigen un motivo escrito** y devuelven un **número de caso** (`COR-2026-0001`).
+* **La exigencia es fricción deliberada, no un trámite.** El propósito de esta pantalla no es facilitar el borrado sino reducir cuántas veces hace falta: una corrección que cuesta una frase se piensa dos veces. Un motivo de menos de quince caracteres se rechaza, porque «error» pasa cualquier comprobación de «no vacío» y no explica nada.
+* **Una línea junto al botón dice qué se pierde**: que no queda asiento que anule el movimiento, solo el caso, y que conviene corregir antes que borrar cuando la operación lo permita.
+* El caso guarda **cómo se identificaba el movimiento** —descripción, importe y divisa— porque después de borrarlo no habría de dónde sacarlo.
+* Los casos se consultan desde la misma pantalla. **No hay comando para borrarlos**: un rastro que se puede borrar no es un rastro.
+
+### 🗄️ Base de Datos
+* **Migración 8 — casos de corrección**: tabla `correcciones`.
+* Limitación declarada y fijada por prueba: la numeración sale del mayor caso vivo del año, de modo que **borrar el último reutilizaría su número**. Por eso no existe forma de borrarlos; si algún día la hubiera, habría que rehacer la numeración primero.
+
+---
+
+## 🚀 Versión 1.18.0 - 2026-09-20
 **Fase 4.2: el dominio de ingresos cierra los tres defectos que quedaban.**
 
 ### 🧾 Ingresos — H17, H18 y H19 resueltos

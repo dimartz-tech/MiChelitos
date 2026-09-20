@@ -339,7 +339,7 @@ const AppAPI = {
         return await invoke('eliminar_ingreso_informal', { id: Number(id) });
     },
 
-    async eliminarIngreso(id) {
-        return await invoke('eliminar_ingreso', { id: Number(id) });
+    async eliminarIngreso(id, motivo) {
+        return await invoke('eliminar_ingreso', { id: Number(id), motivo });
     }
 };

@@ -820,6 +820,41 @@ pub fn migracion_7_cobro_por_referencia(tx: &Transaction) -> Result<(), ErrorMig
     Ok(())
 }
 
+const MIG8: &str = "casos de corrección";
+
+/// Registro de las correcciones que borran un movimiento.
+///
+/// **Es una medida temporal, y conviene que conste.** La solución buena son
+/// los asientos de compensación de la Fase 8: un movimiento que se anula deja
+/// su contrario, y el original sigue ahí. Mientras eso no exista, borrar
+/// destruye el rastro, y esto al menos deja constancia de qué se destruyó y
+/// por qué.
+///
+/// Tiene un segundo propósito, tan importante como el primero: **exigir un
+/// motivo escrito es fricción deliberada**. Una corrección que cuesta un
+/// párrafo se piensa dos veces, y la mayoría de estas situaciones se evitan
+/// antes de ocurrir.
+pub fn migracion_8_casos_de_correccion(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::paso(
+        tx,
+        MIG8,
+        "crear la tabla de casos",
+        "CREATE TABLE IF NOT EXISTS correcciones (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             numero_caso TEXT UNIQUE NOT NULL,
+             fecha TEXT NOT NULL,
+             tipo TEXT NOT NULL,
+             referencia_id INTEGER NOT NULL,
+             descripcion TEXT NOT NULL,
+             importe REAL,
+             divisa TEXT,
+             motivo TEXT NOT NULL
+         );",
+    )?;
+
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
