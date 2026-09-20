@@ -17,7 +17,7 @@
 //! —no por su importe entero— y un estado de cuenta puede declararlo, que es
 //! la única fuente que cuadra al centavo con la del acreedor.
 
-use super::dinero::Dinero;
+use super::dinero::{Dinero, Porcentaje};
 use super::errores::ErrorDominio;
 
 /// Naturaleza del financiamiento.
@@ -99,7 +99,10 @@ pub fn desglosar_cuota(
     let interes = if saldo.es_negativo() || saldo.es_cero() {
         Dinero::cero(saldo.divisa())
     } else {
-        saldo.porcentaje(tasa_anual / 100.0 / 12.0)?
+        // La tasa llega como porcentaje anual desde una columna REAL. Se
+        // convierte a entero una sola vez, aquí, y el interés sale de
+        // aritmética entera a partir de ese punto.
+        saldo.porcentaje(Porcentaje::desde_fraccion(tasa_anual / 100.0 / 12.0)?)?
     };
 
     let capital = cuota.restar(&interes)?;

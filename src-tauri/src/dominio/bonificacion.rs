@@ -11,7 +11,7 @@
 //! el vínculo con el gasto es de uno a muchos y además opcional: los estados
 //! no dicen a qué consumo corresponde cada crédito.
 
-use super::dinero::Dinero;
+use super::dinero::{Dinero, Porcentaje};
 use super::errores::ErrorDominio;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,7 +55,7 @@ impl Bonificacion {
     /// centavos**, no porcentajes: el emisor redondea el crédito, de modo que
     /// 1 234.56 al 5 % da 61.73 y no 61.728, y una comparación de porcentajes
     /// nunca daría exacta.
-    pub fn coincide_con_tasa(&self, consumo: Dinero, tasa: f64) -> bool {
+    pub fn coincide_con_tasa(&self, consumo: Dinero, tasa: Porcentaje) -> bool {
         match consumo.porcentaje(tasa) {
             Ok(esperado) => esperado == self.monto,
             Err(_) => false,
@@ -126,8 +126,8 @@ mod tests {
         // 61.73 sobre 1 234.56: el 5 % exacto son 61.728, que el emisor
         // redondea a 61.73. Comparar porcentajes daría 5.000162 % y fallaría.
         let b = Bonificacion::nueva(dop(61.73), "Cashback compra por internet").unwrap();
-        assert!(b.coincide_con_tasa(dop(1234.56), 0.05));
-        assert!(!b.coincide_con_tasa(dop(1234.56), 0.03), "descarta una tasa que no es");
+        assert!(b.coincide_con_tasa(dop(1234.56), Porcentaje::puntos_basicos(500)));
+        assert!(!b.coincide_con_tasa(dop(1234.56), Porcentaje::puntos_basicos(300)), "descarta una tasa que no es");
     }
 
     #[test]
@@ -138,8 +138,8 @@ mod tests {
         let base = Bonificacion::nueva(dop(50.00), "Recompensa base").unwrap();
         let extra = Bonificacion::nueva(dop(100.00), "Bonificación de categoría").unwrap();
 
-        assert!(base.coincide_con_tasa(consumo, 0.01));
-        assert!(extra.coincide_con_tasa(consumo, 0.02));
+        assert!(base.coincide_con_tasa(consumo, Porcentaje::puntos_basicos(100)));
+        assert!(extra.coincide_con_tasa(consumo, Porcentaje::puntos_basicos(200)));
         assert_eq!(base.monto().sumar(&extra.monto()).unwrap(), dop(150.00));
     }
 
@@ -149,8 +149,8 @@ mod tests {
         // compra que debió recibir el 5 % y no recibió nada se detecta por
         // ausencia, no por un crédito que no cuadre.
         let b = Bonificacion::nueva(dop(100.00), "Cashback").unwrap();
-        assert!(b.coincide_con_tasa(dop(2000.00), 0.05));
-        assert!(!b.coincide_con_tasa(dop(3000.00), 0.05));
+        assert!(b.coincide_con_tasa(dop(2000.00), Porcentaje::puntos_basicos(500)));
+        assert!(!b.coincide_con_tasa(dop(3000.00), Porcentaje::puntos_basicos(500)));
     }
 
     #[test]
