@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.16.0 (Versión Actual) - 2026-09-20
+## 🚀 Versión 1.17.0 (Versión Actual) - 2026-09-20
+**H20 resuelto, y el cobro parcial pasa a ser una afirmación explícita.**
+
+### ↩️ Ingresos — H20 resuelto
+* Borrar una factura o un ingreso informal cobrado **deja de recortar el saldo en cero**. Si lo cobrado ya se gastó, la cuenta queda en negativo: eso es el estado verdadero, y el recorte hacía desaparecer la diferencia sin registro.
+* Se resuelve **en las mismas condiciones que H5 y H10**, que retiraron el mismo recorte en tarjetas y transferencias. Con esto, el recorte a cero ya no existe en ningún vertical.
+
+### 🧾 Corregir una factura cobrada
+* **La regla pasa a ser el cobro completo.** Corregir el monto de una factura la da por cobrada por su neto nuevo, que es lo normal cuando se corrige un importe mal anotado.
+* **Se confirma con las cifras delante**, no con una advertencia genérica: el diálogo dice por cuánto pasará a constar cobrada y que la cuenta se ajustará.
+* **El cobro parcial es la excepción, y hay que declararlo.** Una casilla despliega el importe realmente cobrado; la diferencia con el neto queda como pendiente en vez de darse por saldada.
+  * Está oculto por defecto a propósito: un campo siempre visible invitaría a rellenarlo y convertiría la excepción en costumbre.
+  * Un «parcial» mayor que el neto **se rechaza**. Admitirlo dejaría la factura diciendo que se cobró más de lo facturado, sin nada que lo explicara.
+* **La cuenta sigue siempre a lo recibido**, sea completo o parcial. Una sola regla, sin dos caminos que puedan divergir.
+
+---
+
+## 🚀 Versión 1.16.0 - 2026-09-20
 **H16 resuelto, y una factura ya cobrada se puede corregir.**
 
 ### 🧾 Ingresos
