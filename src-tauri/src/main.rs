@@ -512,53 +512,60 @@ fn crear_ingreso(input: IngresoInput) -> Result<i64, String> {
 
 /// Resuelve la cuenta que recibe un cobro y comprueba que puede recibirlo.
 ///
-/// Cierra tres defectos de golpe, que eran tres formas de la misma cosa
-/// —aplicar un efecto sin comprobar que tenía dónde aplicarse—:
+/// Comprueba **tres** cosas, y conviene enumerarlas porque la primera versión
+/// de esta función solo hacía dos y parecía hacer las tres:
 ///
-/// * **H17**: la cuenta se localizaba por su nombre y el fallo se descartaba
-///   con `let _ =`. Ahora se busca por identificador y su ausencia es error.
-/// * **H19**: el importe se acreditaba sin mirar la divisa. Ahora el tipo
-///   `Deposito` no se construye si no coinciden.
+/// 1. **Que la cuenta exista** (H17). Antes se localizaba por su nombre y el
+///    fallo se descartaba con `let _ =`.
+/// 2. **Que el importe no sea negativo**, dentro de `Deposito`.
+/// 3. **Que la divisa de lo cobrado sea la de la cuenta** (H19).
+///
+/// La tercera es la que faltaba, y faltaba de una forma difícil de ver: el
+/// importe se denominaba **con la divisa de la cuenta**, de modo que
+/// `Deposito::nuevo` comparaba esa divisa consigo misma y no podía fallar
+/// nunca. La comprobación existía en el tipo y era vacua en la llamada.
+///
+/// Por eso `divisa_cobrada` llega desde fuera: una factura se emite en moneda
+/// local —`ingresos` no tiene columna de divisa— y cobrarla en una cuenta en
+/// otra divisa exigiría una conversión que nadie ha declarado. Reinterpretar
+/// 8 500 pesos como 8 500 dólares es precisamente el daño que H19 describía.
 fn resolver_deposito(
     tx: &rusqlite::Transaction,
     cuenta_id: i64,
+    divisa_cobrada: Divisa,
     importe: f64,
 ) -> Result<dominio::ingreso::Deposito, String> {
-    let divisa: String = tx
+    let divisa_cuenta: String = tx
         .query_row("SELECT divisa FROM cuentas_ahorro WHERE id = ?;", [cuenta_id], |r| r.get(0))
         .map_err(|_| format!("No se encontró la cuenta {}.", cuenta_id))?;
 
-    let divisa = Divisa::desde_codigo(&divisa)?;
     let deposito = dominio::ingreso::Deposito::nuevo(
         cuenta_id,
-        divisa,
-        Dinero::nuevo(importe, divisa)?,
+        Divisa::desde_codigo(&divisa_cuenta)?,
+        Dinero::nuevo(importe, divisa_cobrada)?,
     )?;
     Ok(deposito)
 }
 
-/// Aplica un cobro a su cuenta, o falla diciendo que no pudo.
+/// Aplica un cobro a su cuenta.
 ///
-/// La comprobación de filas es un **respaldo inalcanzable hoy**: quien llega
-/// aquí pasó antes por `resolver_deposito`, que ya verificó la cuenta dentro
-/// de la misma transacción. Se deja porque cuesta nada y protegería si algún
-/// día las dos operaciones se separan, pero queda dicho que **ninguna prueba
-/// la ejercita** —se comprobó retirándola, y la suite sigue en verde— para
-/// que nadie la lea como una garantía verificada.
+/// No vuelve a comprobar que la cuenta exista: eso lo garantiza
+/// `resolver_deposito`, que ya la leyó dentro de esta misma transacción y sin
+/// el cual no existiría el `Deposito` que se recibe aquí.
+///
+/// La versión anterior repetía la comprobación «por si acaso». Se retira
+/// porque **no podía fallar**, y una comprobación que no puede fallar no
+/// protege: aparenta una garantía que ninguna prueba sostiene, y anima a
+/// confiar en ella. La garantía vive en un solo sitio, donde sí se ejercita.
 fn acreditar(
     tx: &rusqlite::Transaction,
     deposito: &dominio::ingreso::Deposito,
 ) -> Result<(), String> {
-    let filas = tx
-        .execute(
-            "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
-            (deposito.importe().unidades(), deposito.cuenta_id()),
-        )
-        .map_err(|e| e.to_string())?;
-
-    if filas == 0 {
-        return Err(format!("No se encontró la cuenta {}.", deposito.cuenta_id()));
-    }
+    tx.execute(
+        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
+        (deposito.importe().unidades(), deposito.cuenta_id()),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -572,7 +579,8 @@ fn marcar_ingreso_pagado(
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let deposito = resolver_deposito(&tx, cuenta_ahorro_id, monto_recibido)?;
+    // Una factura se emite en moneda local, de modo que su cobro también.
+    let deposito = resolver_deposito(&tx, cuenta_ahorro_id, MONEDA_LOCAL, monto_recibido)?;
     let nombre: String = tx
         .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -649,7 +657,8 @@ fn marcar_informal_pagado(
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let deposito = resolver_deposito(&tx, cuenta_ahorro_id, monto_recibido)?;
+    // Una factura se emite en moneda local, de modo que su cobro también.
+    let deposito = resolver_deposito(&tx, cuenta_ahorro_id, MONEDA_LOCAL, monto_recibido)?;
     let nombre: String = tx
         .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;

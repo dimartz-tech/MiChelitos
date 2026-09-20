@@ -2068,21 +2068,37 @@ fn c77_h18_resuelto_cobrar_una_factura_inexistente_falla() {
 }
 
 #[test]
-fn c78_h19_resuelto_el_importe_se_acredita_en_la_divisa_de_su_cuenta() {
-    // **H19 resuelto.** `ingresos` sigue sin columna de divisa —el importe es
-    // implícitamente local—, pero el tipo `Deposito` exige que coincida con
-    // la de la cuenta. El caso de sumar pesos a un saldo en dólares ya no se
-    // puede construir. Es el camino por el que se cerró H2.
+fn c78_h19_resuelto_cobrar_en_otra_divisa_se_rechaza() {
+    // **H19, resuelto de verdad esta vez.** La versión anterior de este
+    // arreglo denominaba el importe **con la divisa de la cuenta**, de modo
+    // que la comprobación comparaba esa divisa consigo misma y no podía
+    // fallar: 8 500 pesos entraban como 8 500 dólares sin que nada lo dijera.
     //
-    // Que el importe entre en una cuenta USD es correcto **si se interpreta
-    // como dólares**: lo que no puede es entrar como pesos.
+    // Una factura se emite en moneda local —`ingresos` no tiene columna de
+    // divisa— así que cobrarla en una cuenta en dólares exigiría una
+    // conversión que nadie ha declarado. Se rechaza en vez de inventarla.
     let _g = entorno_aislado();
     let cuenta_usd = crear_cuenta("Cuenta Ahorros USD", "USD", 100.0);
     let id = crear_ingreso(factura("A-009", 10_000.0, 15.0)).unwrap();
 
-    marcar_ingreso_pagado(id, cuenta_usd, "16/09/2026".into(), 50.0).unwrap();
+    let r = marcar_ingreso_pagado(id, cuenta_usd, "16/09/2026".into(), 8_500.0);
 
-    assert_importe(saldo_cuenta_id(cuenta_usd), 150.0, "50 dólares, no 50 pesos");
+    assert!(r.is_err(), "no se reinterpretan pesos como dólares");
+    assert_eq!(estatus_de(id), "emitida", "la factura sigue pendiente");
+    assert_importe(saldo_cuenta_id(cuenta_usd), 100.0, "y la cuenta no se toca");
+}
+
+#[test]
+fn c78b_cobrar_en_una_cuenta_de_la_misma_divisa_funciona() {
+    // El contrapunto: la comprobación rechaza lo que no cuadra sin estorbar
+    // lo que sí. Sin esta prueba, negarse siempre también pasaría c78.
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso(factura("A-010b", 10_000.0, 15.0)).unwrap();
+
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), 8_500.0).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "entra el neto, sin estorbos");
 }
 
 // --- Borrado ---
