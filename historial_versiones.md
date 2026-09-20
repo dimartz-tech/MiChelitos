@@ -4,7 +4,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.15.0 (Versión Actual) - 2026-09-19
+## 🚀 Versión 1.16.0 (Versión Actual) - 2026-09-20
+**H16 resuelto, y una factura ya cobrada se puede corregir.**
+
+### 🧾 Ingresos
+* **H16 resuelto — la retención se decide al céntimo.** Antes `(monto × tasa).round()` redondeaba a unidades: el 15 % de 1 234.56 —185.184— quedaba en 185.00. Se perdían céntimos en cada factura, siempre en la misma dirección.
+  * Pasa a usar el **mismo núcleo** que el resto del sistema. No por uniformidad: una regla que existe dos veces se corrige una vez y sigue mal en la otra, que es literalmente lo que había pasado con H8.
+  * La retención y el neto **suman siempre el total exacto**, porque el neto se obtiene restando en vez de calcularse con un segundo porcentaje que volvería a redondear.
+* **Corregir una factura ya cobrada**:
+  * La interfaz solo ofrecía corregir mientras la factura estuviera emitida. Una vez cobrada, un error de importe quedaba congelado.
+  * Corregirla **no es reescribir cifras**: hay dinero en una cuenta que dependía de ellas. La corrección ajusta esa cuenta por la diferencia del neto, y avisa antes de hacerlo.
+  * El ajuste **se suma** a lo recibido en lugar de sustituirlo por el neto nuevo. Así una diferencia deliberada entre lo facturado y lo que de verdad entró —un cobro parcial— sobrevive a la corrección en vez de borrarse.
+  * Si la cuenta de depósito ya no existe, la corrección **falla diciéndolo** en lugar de dejar la factura y el saldo descuadrados.
+
+---
+
+## 🚀 Versión 1.15.0 - 2026-09-19
 **Una reversión devuelve lo que salió, no lo que hoy se calcularía.**
 
 ### ↩️ Reversión de abonos

@@ -363,8 +363,11 @@ class AppUI {
                                                     <td><span class="badge ${i.estatus}">${i.estatus}</span></td>
                                                     <td>
                                                         <div style="display:flex; gap:0.3rem;">
+                                                            <!-- Corregir se ofrece también cobrada: un error de importe no
+                                                                 debería quedar congelado porque el dinero ya entró. El ajuste
+                                                                 de la cuenta lo resuelve el comando. -->
+                                                            <button onclick="appUI.abrirEdicionFormal('${iEscaped}')" class="btn btn-secondary" style="padding: 0.3rem 0.5rem; font-size:0.75rem; border:none; background:rgba(255,255,255,0.05);" title="${i.estatus === 'pagada' ? 'Corregir factura cobrada: ajustará la cuenta por la diferencia' : 'Corregir factura'}">✏️</button>
                                                             ${i.estatus === 'emitida' ? `
-                                                                <button onclick="appUI.abrirEdicionFormal('${iEscaped}')" class="btn btn-secondary" style="padding: 0.3rem 0.5rem; font-size:0.75rem; border:none; background:rgba(255,255,255,0.05);" title="Corregir factura">✏️</button>
                                                                 <button onclick="appUI.abrirCobroFormal(${i.id}, ${i.monto_total - i.monto_retenido})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.75rem;">💵 Cobrar</button>
                                                             ` : `
                                                                 <span style="font-size:0.75rem; color:var(--text-muted); font-style:italic;">Dep: ${i.institucion_deposito}</span>
@@ -3720,9 +3723,18 @@ class AppUI {
             const overlay = document.createElement('div');
             overlay.className = 'modal-overlay';
             overlay.id = `modal-edit-for-${i.id}`;
+            // El estado viaja con el modal para que el envío sepa si mover
+            // dinero exige avisar antes.
+            overlay.dataset.cobrada = i.estatus === 'pagada' ? 'si' : 'no';
             overlay.innerHTML = `
                 <div class="card" style="width: 450px; background: var(--bg-surface-opaque);">
                     <h3 style="font-family: var(--font-heading); margin-bottom: 0.6rem;">✏️ Corregir / Editar Factura</h3>
+                    ${i.estatus === 'pagada' ? `
+                        <p style="font-size:0.75rem; color:var(--color-warning); margin-bottom:0.8rem; line-height:1.4;">
+                            Esta factura ya está cobrada en <strong>${i.institucion_deposito || 'ninguna cuenta'}</strong>.
+                            Cambiar el monto o la retención ajustará esa cuenta por la diferencia.
+                        </p>
+                    ` : ''}
                     <form onsubmit="appUI.handleEdicionFormalSubmit(event, ${i.id})">
                         <div class="form-group">
                             <label>Número de Factura *</label>
@@ -3767,9 +3779,22 @@ class AppUI {
         const mon = Number(document.getElementById(`edit_mon_tot_${id}`).value);
         const ret = Number(document.getElementById(`edit_ret_por_${id}`).value);
 
+        // Corregir una factura cobrada mueve dinero: conviene decirlo antes,
+        // no después.
+        const cobrada = document.getElementById(`modal-edit-for-${id}`)?.dataset?.cobrada === 'si';
+        if (cobrada) {
+            const sigue = confirm(
+                "Esta factura ya está cobrada.\n\n" +
+                "Si cambias el monto o la retención, se ajustará la cuenta de depósito " +
+                "por la diferencia, y el importe recibido se moverá con ella.\n\n" +
+                "¿Continuar?"
+            );
+            if (!sigue) return;
+        }
+
         try {
-            await AppAPI.actualizarIngreso(id, fac, cliId, fec, mon, ret);
-            this.showToast("Factura corregida exitosamente.");
+            const resumen = await AppAPI.actualizarIngreso(id, fac, cliId, fec, mon, ret);
+            this.showToast(resumen || "Factura corregida.");
             document.getElementById(`modal-edit-for-${id}`).remove();
             await this.render('ingresos');
         } catch (err) {
