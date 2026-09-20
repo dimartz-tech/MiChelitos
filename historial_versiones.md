@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.17.0 (Versión Actual) - 2026-09-20
+## 🚀 Versión 1.18.0 (Versión Actual) - 2026-09-20
+**Fase 4.2: el dominio de ingresos cierra los tres defectos que quedaban.**
+
+### 🧾 Ingresos — H17, H18 y H19 resueltos
+* **H17 — la cuenta deja de referenciarse por su nombre.** El cobro se aplicaba con `UPDATE ... WHERE nombre = ?` descartando el resultado: si el nombre no coincidía, el ingreso quedaba cobrado y ningún saldo se movía. Ahora se referencia por identificador y su ausencia es un error. Es el mismo arreglo que cerró H3 con la caja de efectivo.
+* **H18 — cobrar una factura inexistente ya falla.** El `UPDATE` afectaba a cero filas y devolvía éxito; el sistema no distinguía entre haber cobrado y no haber encontrado nada que cobrar. La condición exige además que la factura esté pendiente, de modo que cobrar dos veces tampoco pasa inadvertido.
+* **H19 — el importe entra en la divisa de su cuenta.** El tipo `Deposito` no se construye si el importe y la cuenta no coinciden, así que sumar pesos a un saldo en dólares deja de ser representable. Es el camino por el que se cerró H2.
+
+### 🗄️ Base de Datos
+* **Migración 7 — el cobro apunta a una cuenta, no a un nombre**: `ingresos` e `ingresos_informales` ganan `cuenta_ahorro_id`, rellenado desde el nombre guardado.
+  * El nombre se conserva: sirve para leer el histórico y para los cobros registrados contra una cuenta que ya no existe, donde no hay identificador que poner.
+
+### 🖥️ Interfaz
+* Los selectores de cuenta de los cobros mandan el **identificador** en lugar del nombre.
+
+---
+
+## 🚀 Versión 1.17.0 - 2026-09-20
 **H20 resuelto, y el cobro parcial pasa a ser una afirmación explícita.**
 
 ### ↩️ Ingresos — H20 resuelto

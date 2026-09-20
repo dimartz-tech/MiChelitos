@@ -783,6 +783,43 @@ pub fn migracion_6_abono_guarda_lo_debitado(tx: &Transaction) -> Result<(), Erro
     Ok(())
 }
 
+const MIG7: &str = "el cobro apunta a una cuenta, no a un nombre";
+
+/// Vincula el cobro de un ingreso con la cuenta que lo recibió.
+///
+/// `institucion_deposito` guardaba el **nombre** de la cuenta, y el abono se
+/// aplicaba con `UPDATE ... WHERE nombre = ?` descartando el resultado. Si el
+/// nombre no coincidía, el ingreso quedaba cobrado y ningún saldo se movía
+/// (**H17**). Es el mismo defecto que H3 tenía con la caja de efectivo, y se
+/// cierra igual: por referencia, no por texto.
+///
+/// El nombre se conserva. Sirve para leer el histórico y para los cobros que
+/// se registraron contra una cuenta que ya no existe, donde no hay id que
+/// poner.
+pub fn migracion_7_cobro_por_referencia(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    for tabla in ["ingresos", "ingresos_informales"] {
+        migraciones::anadir_columna(
+            tx, MIG7, tabla, "cuenta_ahorro_id",
+            "INTEGER REFERENCES cuentas_ahorro(id) ON DELETE SET NULL",
+        )?;
+
+        migraciones::paso(
+            tx,
+            MIG7,
+            &format!("vincular los cobros de {} con su cuenta", tabla),
+            &format!(
+                "UPDATE {t} SET cuenta_ahorro_id = (
+                     SELECT c.id FROM cuentas_ahorro c WHERE c.nombre = {t}.institucion_deposito
+                 )
+                 WHERE cuenta_ahorro_id IS NULL AND institucion_deposito IS NOT NULL;",
+                t = tabla
+            ),
+        )?;
+    }
+
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
