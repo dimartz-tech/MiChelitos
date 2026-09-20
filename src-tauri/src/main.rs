@@ -510,21 +510,91 @@ fn crear_ingreso(input: IngresoInput) -> Result<i64, String> {
     Ok(id)
 }
 
+/// Resuelve la cuenta que recibe un cobro y comprueba que puede recibirlo.
+///
+/// Cierra tres defectos de golpe, que eran tres formas de la misma cosa
+/// —aplicar un efecto sin comprobar que tenía dónde aplicarse—:
+///
+/// * **H17**: la cuenta se localizaba por su nombre y el fallo se descartaba
+///   con `let _ =`. Ahora se busca por identificador y su ausencia es error.
+/// * **H19**: el importe se acreditaba sin mirar la divisa. Ahora el tipo
+///   `Deposito` no se construye si no coinciden.
+fn resolver_deposito(
+    tx: &rusqlite::Transaction,
+    cuenta_id: i64,
+    importe: f64,
+) -> Result<dominio::ingreso::Deposito, String> {
+    let divisa: String = tx
+        .query_row("SELECT divisa FROM cuentas_ahorro WHERE id = ?;", [cuenta_id], |r| r.get(0))
+        .map_err(|_| format!("No se encontró la cuenta {}.", cuenta_id))?;
+
+    let divisa = Divisa::desde_codigo(&divisa)?;
+    let deposito = dominio::ingreso::Deposito::nuevo(
+        cuenta_id,
+        divisa,
+        Dinero::nuevo(importe, divisa)?,
+    )?;
+    Ok(deposito)
+}
+
+/// Aplica un cobro a su cuenta, o falla diciendo que no pudo.
+///
+/// La comprobación de filas es un **respaldo inalcanzable hoy**: quien llega
+/// aquí pasó antes por `resolver_deposito`, que ya verificó la cuenta dentro
+/// de la misma transacción. Se deja porque cuesta nada y protegería si algún
+/// día las dos operaciones se separan, pero queda dicho que **ninguna prueba
+/// la ejercita** —se comprobó retirándola, y la suite sigue en verde— para
+/// que nadie la lea como una garantía verificada.
+fn acreditar(
+    tx: &rusqlite::Transaction,
+    deposito: &dominio::ingreso::Deposito,
+) -> Result<(), String> {
+    let filas = tx
+        .execute(
+            "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
+            (deposito.importe().unidades(), deposito.cuenta_id()),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if filas == 0 {
+        return Err(format!("No se encontró la cuenta {}.", deposito.cuenta_id()));
+    }
+    Ok(())
+}
+
 #[tauri::command]
-fn marcar_ingreso_pagado(id: i64, institucion: String, fecha: String, monto_recibido: f64) -> Result<(), String> {
+fn marcar_ingreso_pagado(
+    id: i64,
+    cuenta_ahorro_id: i64,
+    fecha: String,
+    monto_recibido: f64,
+) -> Result<(), String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    
-    tx.execute(
-        "UPDATE ingresos SET estatus = 'pagada', institucion_deposito = ?, fecha_pago = ?, monto_recibido = ? WHERE id = ?;",
-        (&institucion, &fecha, monto_recibido, id)
-    ).map_err(|e| e.to_string())?;
 
-    // Incrementar balance de la cuenta de ahorro/efectivo si su nombre coincide
-    let _ = tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
-        (monto_recibido, &institucion)
-    );
+    let deposito = resolver_deposito(&tx, cuenta_ahorro_id, monto_recibido)?;
+    let nombre: String = tx
+        .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+
+    // H18: un cobro que no encuentra su factura deja de devolver éxito.
+    let filas = tx
+        .execute(
+            "UPDATE ingresos SET estatus = 'pagada', institucion_deposito = ?,
+                                 cuenta_ahorro_id = ?, fecha_pago = ?, monto_recibido = ?
+             WHERE id = ? AND estatus <> 'pagada';",
+            (&nombre, cuenta_ahorro_id, &fecha, monto_recibido, id),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if filas == 0 {
+        return Err(format!(
+            "No se encontró una factura {} pendiente de cobro.",
+            id
+        ));
+    }
+
+    acreditar(&tx, &deposito)?;
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -570,20 +640,34 @@ fn crear_ingreso_informal(fecha: String, descripcion: String, monto: f64) -> Res
 }
 
 #[tauri::command]
-fn marcar_informal_pagado(id: i64, institucion: String, fecha: String, monto_recibido: f64) -> Result<(), String> {
+fn marcar_informal_pagado(
+    id: i64,
+    cuenta_ahorro_id: i64,
+    fecha: String,
+    monto_recibido: f64,
+) -> Result<(), String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    
-    tx.execute(
-        "UPDATE ingresos_informales SET estatus = 'pagado', institucion_deposito = ?, fecha_pago = ?, monto_recibido = ? WHERE id = ?;",
-        (&institucion, &fecha, monto_recibido, id)
-    ).map_err(|e| e.to_string())?;
 
-    // Incrementar balance de la cuenta de ahorro/efectivo si su nombre coincide
-    let _ = tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
-        (monto_recibido, &institucion)
-    );
+    let deposito = resolver_deposito(&tx, cuenta_ahorro_id, monto_recibido)?;
+    let nombre: String = tx
+        .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+
+    let filas = tx
+        .execute(
+            "UPDATE ingresos_informales SET estatus = 'pagado', institucion_deposito = ?,
+                                            cuenta_ahorro_id = ?, fecha_pago = ?, monto_recibido = ?
+             WHERE id = ? AND estatus <> 'pagado';",
+            (&nombre, cuenta_ahorro_id, &fecha, monto_recibido, id),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if filas == 0 {
+        return Err(format!("No se encontró un ingreso {} pendiente de cobro.", id));
+    }
+
+    acreditar(&tx, &deposito)?;
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())

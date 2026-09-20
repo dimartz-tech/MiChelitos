@@ -3969,7 +3969,7 @@ class AppUI {
                             <label>Cuenta de Depósito *</label>
                             <select id="cob_ban_${id}" class="form-control" required>
                                 <option value="" disabled selected>Seleccione cuenta...</option>
-                                ${cuentas.map(c => `<option value="${c.nombre}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
+                                ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-row">
@@ -4028,7 +4028,7 @@ class AppUI {
                             <label>Cuenta de Depósito *</label>
                             <select id="cob_ban_inf_${id}" class="form-control" required>
                                 <option value="" disabled selected>Seleccione cuenta...</option>
-                                ${cuentas.map(c => `<option value="${c.nombre}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
+                                ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-row">

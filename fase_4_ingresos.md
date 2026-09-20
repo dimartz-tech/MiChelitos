@@ -89,3 +89,57 @@ consultan antes de aplicarse.
 Ambas son **las correcciones futuras**, no averías: que hagan fallar la
 caracterización es justo lo que debe pasar, y es la señal de que el día que se
 apliquen no pasarán inadvertidas.
+
+---
+
+## 4.2 Dominio y cierre de los tres defectos restantes
+
+Los cinco hallazgos quedan resueltos. Los dos que tocaban dinero se
+consultaron —H16 y H20—; estos tres son correcciones de conducta sin pérdida,
+y se hicieron dentro de la extracción como estaba acordado.
+
+### H17 — la cuenta deja de referenciarse por su nombre
+
+Era H3 otra vez. Se cierra igual: **por referencia, no por texto**. La
+migración 7 añade `cuenta_ahorro_id` a las dos tablas de ingresos y lo rellena
+desde el nombre guardado.
+
+El nombre **se conserva**. Sirve para leer el histórico, y para los cobros
+registrados contra una cuenta que ya no existe: ahí no hay identificador que
+poner, y borrar el dato dejaría el asiento sin explicación.
+
+### H18 — cobrar una factura inexistente ya falla
+
+La condición del `UPDATE` exige además que la factura esté **pendiente**, de
+modo que cobrar dos veces tampoco pasa inadvertido. Era un caso que nadie
+había mirado: el defecto original solo hablaba de facturas que no existen.
+
+### H19 — el importe entra en la divisa de su cuenta
+
+El tipo `Deposito` ata el importe a la divisa de la cuenta que lo recibe, como
+`ExtremoCuenta` hace con las transferencias. Sumar pesos a un saldo en dólares
+deja de ser representable en vez de quedar prohibido por una comprobación que
+alguien debe acordarse de escribir.
+
+## Una comprobación que ninguna prueba ejercita
+
+`acreditar` verifica que el `UPDATE` afectó a alguna fila. **Es inalcanzable
+hoy**: quien llega ahí pasó antes por `resolver_deposito`, que ya verificó la
+cuenta dentro de la misma transacción.
+
+Se comprobó retirándola, y la suite siguió en verde. Se deja porque cuesta
+nada y protegería si algún día las dos operaciones se separan, pero queda
+dicho en el código que **no está cubierta**, para que nadie la lea como una
+garantía verificada. Una comprobación que parece protegida y no lo está es
+peor que no tenerla.
+
+## Verificación
+
+399 pruebas en verde. Tres mutaciones sobre los defectos cerrados:
+
+| Mutación | Resultado |
+|---|---|
+| El cobro no comprueba que la factura exista | falla `c77` |
+| El depósito no comprueba la divisa | falla la prueba de H19 |
+| `acreditar` descarta el fallo | **no la detecta nadie** — ver arriba |
+
