@@ -115,14 +115,16 @@ const AppAPI = {
         return await invoke('crear_ingreso', { input: ingresoData });
     },
 
-    async actualizarIngreso(id, numeroFactura, clienteId, fechaEmision, montoTotal, porcentajeRetencion) {
+    async actualizarIngreso(id, numeroFactura, clienteId, fechaEmision, montoTotal, porcentajeRetencion, cobroParcial) {
         return await invoke('actualizar_ingreso', {
             id: Number(id),
             numeroFactura,
             clienteId: Number(clienteId),
             fechaEmision,
             montoTotal: Number(montoTotal),
-            porcentajeRetencion: Number(porcentajeRetencion)
+            porcentajeRetencion: Number(porcentajeRetencion),
+            // Nulo es la regla: se da por cobrado el neto entero.
+            cobroParcial: cobroParcial ?? null
         });
     },
 

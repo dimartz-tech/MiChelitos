@@ -31,6 +31,21 @@ pub fn neto(monto: Dinero, tasa: Porcentaje) -> Result<Dinero, ErrorDominio> {
     monto.restar(&retencion(monto, tasa)?)
 }
 
+/// Qué se da por cobrado tras corregir una factura.
+///
+/// La regla es **el cobro completo**: si el titular corrige el monto de una
+/// factura, lo normal es que el importe nuevo sea el que se cobró entero. Lo
+/// parcial existe para las excepciones, y por eso hay que declararlo: una
+/// diferencia entre lo facturado y lo que entró debe ser una afirmación, no
+/// un residuo que sobrevive sin que nadie lo mire.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Cobro {
+    /// Entró el neto entero.
+    Completo,
+    /// Solo entró una parte, y se dice cuál.
+    Parcial(Dinero),
+}
+
 /// Cómo cambia una factura al corregirla.
 ///
 /// Corregir una factura **ya cobrada** no puede limitarse a reescribir sus
@@ -41,28 +56,51 @@ pub fn neto(monto: Dinero, tasa: Porcentaje) -> Result<Dinero, ErrorDominio> {
 pub struct CorreccionDeFactura {
     pub retencion: Dinero,
     pub neto: Dinero,
-    /// Diferencia entre el neto nuevo y el anterior.
+    /// Lo que la factura pasa a declarar como cobrado.
+    pub recibido: Dinero,
+    /// Diferencia entre lo que pasa a estar cobrado y lo que lo estaba.
     ///
-    /// Es lo que hay que sumar a la cuenta que cobró y al importe recibido.
-    /// Positiva si la corrección aumenta lo que corresponde cobrar.
+    /// Es lo que hay que sumar a la cuenta de depósito. Positiva si la
+    /// corrección aumenta lo cobrado, negativa si lo reduce.
     pub ajuste: Dinero,
 }
 
-/// Calcula una corrección a partir del neto que la factura tenía antes.
+/// Calcula una corrección a partir de lo que la factura tenía cobrado.
 ///
-/// El ajuste se aplica **al importe recibido**, no se sustituye por el neto
-/// nuevo. Conserva así cualquier diferencia deliberada entre lo facturado y
-/// lo que de verdad entró —un cobro parcial, por ejemplo—: corregir el total
-/// mueve ambas cifras a la vez y la relación entre ellas sobrevive.
+/// **La cuenta sigue siempre a lo recibido**, sea completo o parcial: el
+/// ajuste es la diferencia entre lo que pasa a estar cobrado y lo que lo
+/// estaba. Esa es la única regla, y evita tener dos caminos que puedan
+/// divergir.
 pub fn corregir(
     monto: Dinero,
     tasa: Porcentaje,
-    neto_anterior: Dinero,
+    recibido_anterior: Dinero,
+    cobro: Cobro,
 ) -> Result<CorreccionDeFactura, ErrorDominio> {
     let retencion = retencion(monto, tasa)?;
     let neto = monto.restar(&retencion)?;
-    let ajuste = neto.restar(&neto_anterior)?;
-    Ok(CorreccionDeFactura { retencion, neto, ajuste })
+
+    let recibido = match cobro {
+        Cobro::Completo => neto,
+        Cobro::Parcial(parte) => {
+            if parte.es_negativo() {
+                return Err(ErrorDominio::MontoInvalido { valor: parte.unidades() });
+            }
+            // Un «parcial» mayor que el neto no es parcial. Admitirlo dejaría
+            // la factura diciendo que se cobró más de lo que se facturó, sin
+            // nada que lo explicara.
+            if parte.restar(&neto)?.centavos() > 0 {
+                return Err(ErrorDominio::CobroParcialExcedeElNeto {
+                    parcial: parte.unidades(),
+                    neto: neto.unidades(),
+                });
+            }
+            parte
+        }
+    };
+
+    let ajuste = recibido.restar(&recibido_anterior)?;
+    Ok(CorreccionDeFactura { retencion, neto, recibido, ajuste })
 }
 
 #[cfg(test)]
@@ -109,19 +147,22 @@ mod tests {
     // --- Corrección ---
 
     #[test]
-    fn corregir_al_alza_devuelve_lo_que_falta_por_acreditar() {
-        // La factura decía 10 000 y eran 12 000. El neto sube de 8 500 a
-        // 10 200, así que faltan 1 700 por entrar en la cuenta.
-        let c = corregir(dop(12_000.0), quince_por_ciento(), dop(8_500.0)).unwrap();
+    fn corregir_al_alza_da_por_cobrado_el_neto_nuevo() {
+        // La regla: corregir una factura la da por cobrada entera. El neto
+        // sube de 8 500 a 10 200, así que faltan 1 700 por entrar.
+        let c = corregir(dop(12_000.0), quince_por_ciento(), dop(8_500.0), Cobro::Completo)
+            .unwrap();
 
         assert_eq!(c.retencion, dop(1_800.0));
         assert_eq!(c.neto, dop(10_200.0));
+        assert_eq!(c.recibido, dop(10_200.0), "se da por cobrado entero");
         assert_eq!(c.ajuste, dop(1_700.0));
     }
 
     #[test]
     fn corregir_a_la_baja_devuelve_un_ajuste_negativo() {
-        let c = corregir(dop(8_000.0), quince_por_ciento(), dop(8_500.0)).unwrap();
+        let c = corregir(dop(8_000.0), quince_por_ciento(), dop(8_500.0), Cobro::Completo)
+            .unwrap();
 
         assert_eq!(c.neto, dop(6_800.0));
         assert_eq!(c.ajuste, dop(-1_700.0), "hay que retirar de la cuenta");
@@ -129,26 +170,72 @@ mod tests {
 
     #[test]
     fn corregir_sin_cambiar_nada_no_mueve_ningun_saldo() {
-        let c = corregir(dop(10_000.0), quince_por_ciento(), dop(8_500.0)).unwrap();
+        let c = corregir(dop(10_000.0), quince_por_ciento(), dop(8_500.0), Cobro::Completo)
+            .unwrap();
 
         assert_eq!(c.ajuste, dop(0.0), "corregir la fecha no toca la cuenta");
     }
 
     #[test]
-    fn el_ajuste_conserva_la_diferencia_entre_lo_facturado_y_lo_recibido() {
-        // Si se cobró de menos —8 000 sobre un neto de 8 500—, corregir el
-        // total mueve ambas cifras por igual y los 500 de diferencia siguen
-        // ahí. Sustituir el recibido por el neto nuevo los borraría.
-        let c = corregir(dop(12_000.0), quince_por_ciento(), dop(8_500.0)).unwrap();
-        let recibido_anterior = dop(8_000.0);
+    fn un_cobro_parcial_declara_lo_que_entro_de_verdad() {
+        // La excepción, y hay que afirmarla. El neto es 10 200 pero solo
+        // entraron 9 000: la cuenta sube 500 sobre los 8 500 que ya tenía.
+        let c = corregir(
+            dop(12_000.0), quince_por_ciento(), dop(8_500.0), Cobro::Parcial(dop(9_000.0)),
+        )
+        .unwrap();
 
-        let recibido_nuevo = recibido_anterior.sumar(&c.ajuste).unwrap();
+        assert_eq!(c.neto, dop(10_200.0), "lo facturado no cambia");
+        assert_eq!(c.recibido, dop(9_000.0), "lo cobrado sí");
+        assert_eq!(c.ajuste, dop(500.0));
+        assert_eq!(c.neto.restar(&c.recibido).unwrap(), dop(1_200.0), "queda por cobrar");
+    }
 
-        assert_eq!(recibido_nuevo, dop(9_700.0));
-        assert_eq!(
-            c.neto.restar(&recibido_nuevo).unwrap(),
-            dop(500.0),
-            "la diferencia sobrevive a la corrección"
+    #[test]
+    fn un_parcial_mayor_que_el_neto_no_es_parcial() {
+        // Admitirlo dejaría la factura diciendo que se cobró más de lo
+        // facturado, sin nada que lo explicara.
+        let r = corregir(
+            dop(10_000.0), quince_por_ciento(), dop(0.0), Cobro::Parcial(dop(9_000.0)),
         );
+
+        assert!(matches!(r, Err(ErrorDominio::CobroParcialExcedeElNeto { .. })));
+    }
+
+    #[test]
+    fn un_parcial_igual_al_neto_es_valido_y_equivale_al_completo() {
+        // El borde: cobrar exactamente el neto es un cobro completo dicho de
+        // otra forma, y rechazarlo sería un estorbo sin motivo.
+        let completo =
+            corregir(dop(10_000.0), quince_por_ciento(), dop(0.0), Cobro::Completo).unwrap();
+        let parcial = corregir(
+            dop(10_000.0), quince_por_ciento(), dop(0.0), Cobro::Parcial(dop(8_500.0)),
+        )
+        .unwrap();
+
+        assert_eq!(completo, parcial);
+    }
+
+    #[test]
+    fn un_parcial_negativo_se_rechaza() {
+        let r = corregir(
+            dop(10_000.0), quince_por_ciento(), dop(0.0), Cobro::Parcial(dop(-1.0)),
+        );
+
+        assert!(matches!(r, Err(ErrorDominio::MontoInvalido { .. })));
+    }
+
+    #[test]
+    fn la_cuenta_sigue_siempre_a_lo_recibido() {
+        // La única regla, comprobada en los dos caminos: el ajuste es la
+        // diferencia entre lo que pasa a estar cobrado y lo que lo estaba.
+        for cobro in [Cobro::Completo, Cobro::Parcial(dop(9_000.0))] {
+            let c = corregir(dop(12_000.0), quince_por_ciento(), dop(8_500.0), cobro).unwrap();
+            assert_eq!(
+                c.recibido.restar(&dop(8_500.0)).unwrap(),
+                c.ajuste,
+                "el ajuste no sigue a lo recibido con {cobro:?}"
+            );
+        }
     }
 }
