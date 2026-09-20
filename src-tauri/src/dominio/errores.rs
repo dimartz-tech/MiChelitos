@@ -17,6 +17,8 @@ pub enum ErrorDominio {
     /// Sale un importe y entra otro distinto, sin cambio de divisa que lo
     /// explique.
     ImportesNoCuadran { sale: f64, entra: f64, divisa: Divisa },
+    /// Se declaró un cobro parcial mayor que el neto de la factura.
+    CobroParcialExcedeElNeto { parcial: f64, neto: f64 },
 }
 
 impl fmt::Display for ErrorDominio {
@@ -27,6 +29,11 @@ impl fmt::Display for ErrorDominio {
                 "No se pueden combinar montos en {} y {}: indique una tasa de cambio para convertirlos.",
                 esperada.codigo(),
                 recibida.codigo()
+            ),
+            ErrorDominio::CobroParcialExcedeElNeto { parcial, neto } => write!(
+                f,
+                "Un cobro parcial de {:.2} no puede superar el neto de la factura, que es {:.2}.",
+                parcial, neto
             ),
             ErrorDominio::ImportesNoCuadran { sale, entra, divisa } => write!(
                 f,

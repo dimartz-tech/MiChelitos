@@ -1812,7 +1812,10 @@ fn actualizar_ingreso(
     cliente_id: i64,
     fecha_emision: String,
     monto_total: f64,
-    porcentaje_retencion: f64
+    porcentaje_retencion: f64,
+    // Importe cobrado cuando no entró el neto entero. `None` es la regla: se
+    // da por cobrado el neto completo.
+    cobro_parcial: Option<f64>,
 ) -> Result<String, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -1830,13 +1833,21 @@ fn actualizar_ingreso(
         )
         .map_err(|_| format!("No se encontró la factura {}.", id))?;
 
-    let neto_anterior = Dinero::nuevo(total_ant, MONEDA_LOCAL)?
-        .restar(&Dinero::nuevo(retenido_ant, MONEDA_LOCAL)?)?;
+    // Lo que estaba cobrado. Una factura sin cobrar parte de cero, de modo
+    // que corregirla y darla por cobrada sería un ajuste por el neto entero.
+    let recibido_anterior = Dinero::nuevo(recibido_ant.unwrap_or(0.0), MONEDA_LOCAL)?;
+    let _ = (total_ant, retenido_ant);
+
+    let cobro = match cobro_parcial {
+        Some(parte) => dominio::ingreso::Cobro::Parcial(Dinero::nuevo(parte, MONEDA_LOCAL)?),
+        None => dominio::ingreso::Cobro::Completo,
+    };
 
     let correccion = dominio::ingreso::corregir(
         Dinero::nuevo(monto_total, MONEDA_LOCAL)?,
         Porcentaje::desde_porcentaje(porcentaje_retencion)?,
-        neto_anterior,
+        recibido_anterior,
+        cobro,
     )?;
 
     tx.execute(
@@ -1853,15 +1864,9 @@ fn actualizar_ingreso(
     let resumen = if estatus != "pagada" || correccion.ajuste.es_cero() {
         "Factura corregida.".to_string()
     } else {
-        // El ajuste se **suma** a lo recibido en lugar de sustituirlo por el
-        // neto nuevo. Así una diferencia deliberada entre lo facturado y lo
-        // que de verdad entró —un cobro parcial— sobrevive a la corrección.
-        let recibido = Dinero::nuevo(recibido_ant.unwrap_or(0.0), MONEDA_LOCAL)?
-            .sumar(&correccion.ajuste)?;
-
         tx.execute(
             "UPDATE ingresos SET monto_recibido = ? WHERE id = ?;",
-            (recibido.unidades(), id),
+            (correccion.recibido.unidades(), id),
         )
         .map_err(|e| e.to_string())?;
 
@@ -2050,7 +2055,12 @@ fn eliminar_ingreso_informal(id: i64) -> Result<(), String> {
         if let Some(ref inst) = institucion_deposito {
             if !inst.is_empty() {
                 tx.execute(
-                    "UPDATE cuentas_ahorro SET balance_actual = MAX(0.0, balance_actual - ?) WHERE nombre = ?;",
+                    // Sin recorte a cero (resolución de H20, en las mismas
+                    // condiciones que H5 y H10). Si lo cobrado ya se gastó,
+                    // deshacer el cobro deja la cuenta en negativo, y eso es
+                    // el estado verdadero: el dinero salió. Recortarlo hacía
+                    // desaparecer la diferencia sin registro.
+                    "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE nombre = ?;",
                     (monto_recibido.unwrap_or(0.0), inst)
                 ).map_err(|e| e.to_string())?;
             }
@@ -2078,7 +2088,12 @@ fn eliminar_ingreso(id: i64) -> Result<(), String> {
         if let Some(ref inst) = institucion_deposito {
             if !inst.is_empty() {
                 tx.execute(
-                    "UPDATE cuentas_ahorro SET balance_actual = MAX(0.0, balance_actual - ?) WHERE nombre = ?;",
+                    // Sin recorte a cero (resolución de H20, en las mismas
+                    // condiciones que H5 y H10). Si lo cobrado ya se gastó,
+                    // deshacer el cobro deja la cuenta en negativo, y eso es
+                    // el estado verdadero: el dinero salió. Recortarlo hacía
+                    // desaparecer la diferencia sin registro.
+                    "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE nombre = ?;",
                     (monto_recibido.unwrap_or(0.0), inst)
                 ).map_err(|e| e.to_string())?;
             }

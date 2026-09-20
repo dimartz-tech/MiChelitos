@@ -3732,8 +3732,22 @@ class AppUI {
                     ${i.estatus === 'pagada' ? `
                         <p style="font-size:0.75rem; color:var(--color-warning); margin-bottom:0.8rem; line-height:1.4;">
                             Esta factura ya está cobrada en <strong>${i.institucion_deposito || 'ninguna cuenta'}</strong>.
-                            Cambiar el monto o la retención ajustará esa cuenta por la diferencia.
+                            Al corregirla se dará por cobrada <strong>por su neto completo</strong>,
+                            y esa cuenta se ajustará por la diferencia.
                         </p>
+                        <div style="border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:0.6rem; margin-bottom:0.8rem;">
+                            <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.8rem; cursor:pointer;">
+                                <input type="checkbox" id="edit_parcial_chk_${i.id}" onchange="appUI.alternarCobroParcial(${i.id})">
+                                Entró solo una parte del neto
+                            </label>
+                            <div id="edit_parcial_caja_${i.id}" hidden style="margin-top:0.5rem;">
+                                <label style="font-size:0.7rem; color:var(--text-muted);">Importe realmente cobrado</label>
+                                <input type="number" step="0.01" min="0" id="edit_parcial_mon_${i.id}" class="form-control" value="${i.monto_recibido ?? ''}" style="padding:0.4rem;">
+                                <p style="font-size:0.7rem; color:var(--text-muted); margin-top:0.3rem; line-height:1.3;">
+                                    La diferencia con el neto queda como pendiente de cobro en vez de darse por saldada.
+                                </p>
+                            </div>
+                        </div>
                     ` : ''}
                     <form onsubmit="appUI.handleEdicionFormalSubmit(event, ${i.id})">
                         <div class="form-group">
@@ -3771,6 +3785,19 @@ class AppUI {
         }).catch(err => this.showToast(err.toString(), 'error'));
     }
 
+    /// Despliega el importe del cobro parcial solo cuando se declara.
+    ///
+    /// Oculto por defecto porque lo normal es el cobro completo: un campo
+    /// siempre visible invitaría a rellenarlo y convertiría la excepción en
+    /// costumbre.
+    alternarCobroParcial(id) {
+        const caja = document.getElementById(`edit_parcial_caja_${id}`);
+        const marca = document.getElementById(`edit_parcial_chk_${id}`);
+        if (caja && marca) {
+            caja.hidden = !marca.checked;
+        }
+    }
+
     async handleEdicionFormalSubmit(e, id) {
         e.preventDefault();
         const fac = document.getElementById(`edit_num_fac_${id}`).value;
@@ -3779,21 +3806,40 @@ class AppUI {
         const mon = Number(document.getElementById(`edit_mon_tot_${id}`).value);
         const ret = Number(document.getElementById(`edit_ret_por_${id}`).value);
 
-        // Corregir una factura cobrada mueve dinero: conviene decirlo antes,
-        // no después.
+        // Corregir una factura cobrada mueve dinero, así que se confirma con
+        // las cifras delante en vez de con una advertencia genérica.
         const cobrada = document.getElementById(`modal-edit-for-${id}`)?.dataset?.cobrada === 'si';
+        let parcial = null;
+
         if (cobrada) {
+            const quiereParcial = document.getElementById(`edit_parcial_chk_${id}`)?.checked;
+            const neto = Math.round((mon - mon * (ret / 100)) * 100) / 100;
+
+            if (quiereParcial) {
+                const texto = document.getElementById(`edit_parcial_mon_${id}`).value;
+                parcial = texto.trim() === '' ? null : Number(texto);
+                if (parcial === null || !(parcial >= 0)) {
+                    this.showToast("Indica cuánto se cobró de verdad, o desmarca el cobro parcial.", "error");
+                    return;
+                }
+                if (parcial > neto) {
+                    this.showToast(`Un cobro parcial no puede superar el neto (${this.formatMoney(neto)}).`, "error");
+                    return;
+                }
+            }
+
+            const cobrado = parcial ?? neto;
             const sigue = confirm(
                 "Esta factura ya está cobrada.\n\n" +
-                "Si cambias el monto o la retención, se ajustará la cuenta de depósito " +
-                "por la diferencia, y el importe recibido se moverá con ella.\n\n" +
-                "¿Continuar?"
+                `Pasará a constar cobrada por DOP ${this.formatMoney(cobrado)}` +
+                (parcial !== null ? ` de un neto de ${this.formatMoney(neto)}.` : " (neto completo).") +
+                "\n\nLa cuenta de depósito se ajustará por la diferencia.\n\n¿Continuar?"
             );
             if (!sigue) return;
         }
 
         try {
-            const resumen = await AppAPI.actualizarIngreso(id, fac, cliId, fec, mon, ret);
+            const resumen = await AppAPI.actualizarIngreso(id, fac, cliId, fec, mon, ret, parcial);
             this.showToast(resumen || "Factura corregida.");
             document.getElementById(`modal-edit-for-${id}`).remove();
             await this.render('ingresos');
