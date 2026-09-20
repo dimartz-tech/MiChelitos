@@ -31,7 +31,7 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ### 📏 Tolerancia de representación: 0.01 centavos
 * Se declara y se **hace cumplir por prueba** una desviación máxima de 0.01 centavos atribuible a representar una tasa, medida sobre un importe de referencia de 10 000 unidades.
-* **Acota una de las dos fuentes de desviación, no las dos.** El redondeo final al céntimo no es un error sino una decisión: el 0.20 % de 8 967.90 son 1 793.58 centavos, y hay que cobrar 1 793 o 1 794. Ese residuo llega a medio centavo por definición y ningún límite lo reduce.
+* **Acota una de las dos fuentes de desviación, no las dos.** El redondeo final al céntimo no es un error sino una decisión: el 0.20 % de 10 002.10 son 2 000.42 centavos, y hay que cobrar 2 000 o 2 001. Ese residuo llega a medio centavo por definición y ningún límite lo reduce.
 * **La tolerancia obligó a subir la escala de los porcentajes** de millonésimas a mil-millonésimas: a la escala anterior, una tasa cuantizada desviaba hasta 0.5 centavos sobre el importe de referencia, cincuenta veces el límite.
 * Las tasas que el sistema declara en puntos básicos se representan **exactas**, sin residuo: toda la desviación que queda en ellas es la del redondeo final.
 

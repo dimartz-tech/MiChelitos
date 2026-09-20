@@ -30,8 +30,8 @@ const MAX_CENTAVOS_EXACTOS: f64 = 9_007_199_254_740_991.0;
 /// confundirlas:
 ///
 /// * **El redondeo final al céntimo** no es un error sino una decisión. El
-///   0.20 % de 89.6790 son 1 793.58 centavos: 0.58 de centavo no existe, y hay
-///   que cobrar 1 793 o 1 794. Ese residuo llega a medio centavo **por
+///   0.20 % de 10 002.10 son 2 000.42 centavos: 0.42 de centavo no existe, y
+///   hay que cobrar 2 000 o 2 001. Ese residuo llega a medio centavo **por
 ///   definición** y ningún límite puede reducirlo; lo que sí puede exigirse es
 ///   que la decisión sea explícita y siempre la misma, que es lo que hace
 ///   `dividir_redondeando`.
@@ -635,7 +635,7 @@ mod tests {
         // La otra cara del límite: no se puede exigir 0.01 ¢ al redondeo
         // final, porque su residuo es medio centavo por definición. Confundir
         // ambas cosas llevaría a rechazar comisiones corrientes.
-        let importe = dop(8_967.90);
+        let importe = dop(10_002.10);
         let comision = importe.porcentaje(Porcentaje::puntos_basicos(20)).unwrap();
 
         let exacto = importe.centavos() as f64 * 0.002;
