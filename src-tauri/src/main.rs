@@ -41,6 +41,7 @@ use aplicacion::liquidar_gasto::liquidar_gasto;
 use aplicacion::registrar_bonificacion::{registrar_bonificacion, revertir_bonificacion, DatosBonificacion};
 use dominio::bonificacion::Bonificacion;
 use dominio::prestamo::{self, TipoPrestamo};
+use dominio::suscripcion::{Frecuencia, MarcaDeCobro, Suscripcion as SuscripcionDominio};
 
 // --- ESTRUCTURAS DTO (DATA TRANSFER OBJECTS) ---
 #[derive(Serialize, Deserialize, Debug)]
@@ -1040,14 +1041,26 @@ fn eliminar_suscripcion(id: i64) -> Result<(), String> {
 
 #[tauri::command]
 fn procesar_suscripciones() -> Result<Vec<String>, String> {
+    procesar_suscripciones_con(&crate::adaptadores::reloj_sistema::RelojSistema)
+}
+
+/// El cobro automático, con el «hoy» que le den.
+///
+/// Se separa del comando para que las pruebas puedan fijar la fecha. Hasta
+/// ahora leía `Local::now()` por dentro, y eso hacía **imposible escribir la
+/// prueba que más falta hace**: que una suscripción *no* se cobre antes de su
+/// día. `s1` tiene que usar el día 1 precisamente por eso —es el único que
+/// está siempre alcanzado—, de modo que la red cubre el cobro y no cubre la
+/// abstención.
+///
+/// El puerto `Reloj` existe desde la Fase 0 para esto y no lo usaba nadie.
+pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> Result<Vec<String>, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    
-    // Obtener la fecha actual
-    let hoy = Local::now().naive_local();
-    let hoy_fecha_str = hoy.format("%d/%m/%Y").to_string(); // Formato estándar usado en el frontend
-    let dia_actual = hoy.day() as i32;
-    let mes_actual = hoy.month();
-    let anio_actual = hoy.year();
+
+    let hoy = reloj.hoy();
+    // El formato de la aplicación. Convive con el ISO de los commits y el
+    // changelog: son dos públicos distintos, no una inconsistencia.
+    let hoy_fecha_str = hoy.format("%d/%m/%Y").to_string();
 
     let mut stmt = conn.prepare(
         "SELECT id, plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, fecha_ultimo_pago, divisa FROM suscripciones;"
@@ -1106,32 +1119,20 @@ fn procesar_suscripciones() -> Result<Vec<String>, String> {
     let mut mensajes_cargo = Vec::new();
 
     for sub in suscripciones {
-        // Determinar si corresponde realizar el cargo automático
-        let mut requiere_cargo = false;
-        
-        if let Some(ref ultimo_pago) = sub.fecha_ultimo_pago {
-            // Intentar parsear el último pago
-            let partes: Vec<&str> = ultimo_pago.split('/').collect();
-            if partes.len() == 3 {
-                if let (Ok(_p_dia), Ok(p_mes), Ok(p_anio)) = (partes[0].parse::<i32>(), partes[1].parse::<u32>(), partes[2].parse::<i32>()) {
-                    if sub.frecuencia == "mensual" {
-                        if (anio_actual > p_anio || (anio_actual == p_anio && mes_actual > p_mes)) && dia_actual >= sub.dia_facturacion {
-                            requiere_cargo = true;
-                        }
-                    } else if sub.frecuencia == "anual" {
-                        if anio_actual > p_anio && dia_actual >= sub.dia_facturacion {
-                            requiere_cargo = true;
-                        }
-                    }
-                }
-            } else {
-                requiere_cargo = true;
+        // La decisión vive en `dominio::suscripcion`, no aquí. Este bucle se
+        // ocupa de mover dinero; si corresponde moverlo lo dice la regla.
+        let requiere_cargo = match Frecuencia::desde_codigo(&sub.frecuencia) {
+            Some(frecuencia) => SuscripcionDominio {
+                frecuencia,
+                dia_de_facturacion: sub.dia_facturacion.max(0) as u32,
+                ultimo_cobro: MarcaDeCobro::desde_texto(sub.fecha_ultimo_pago.as_deref()),
             }
-        } else {
-            if dia_actual >= sub.dia_facturacion {
-                requiere_cargo = true;
-            }
-        }
+            .corresponde_cobrar(hoy),
+            // Una frecuencia que el `CHECK` no admite no debería existir. Si
+            // existiera, no cobrar es lo que hacía la cadena de `if`
+            // anterior al no coincidir con ninguna rama.
+            None => false,
+        };
 
         if requiere_cargo {
             let tx = conn.transaction().map_err(|e| e.to_string())?;

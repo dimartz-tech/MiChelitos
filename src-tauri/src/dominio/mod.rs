@@ -11,4 +11,5 @@ pub mod errores;
 pub mod gasto;
 pub mod ingreso;
 pub mod prestamo;
+pub mod suscripcion;
 pub mod tarjeta;
