@@ -1912,6 +1912,12 @@ fn actualizar_ingreso(
     // Importe cobrado cuando no entró el neto entero. `None` es la regla: se
     // da por cobrado el neto completo.
     cobro_parcial: Option<f64>,
+    // Motivo de la corrección. Obligatorio **solo cuando mueve dinero**: si la
+    // factura ya se cobró y el ajuste no es cero, hay un saldo que cambia y
+    // eso abre un caso. Corregir una fecha o un número de factura no lo pide,
+    // porque exigir explicación donde no hay riesgo enseña a escribirla sin
+    // pensar.
+    motivo: Option<String>,
 ) -> Result<String, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -1932,7 +1938,7 @@ fn actualizar_ingreso(
     // Lo que estaba cobrado. Una factura sin cobrar parte de cero, de modo
     // que corregirla y darla por cobrada sería un ajuste por el neto entero.
     let recibido_anterior = Dinero::nuevo(recibido_ant.unwrap_or(0.0), MONEDA_LOCAL)?;
-    let _ = (total_ant, retenido_ant);
+    let _ = retenido_ant;
 
     let cobro = match cobro_parcial {
         Some(parte) => dominio::ingreso::Cobro::Parcial(Dinero::nuevo(parte, MONEDA_LOCAL)?),
@@ -1960,6 +1966,23 @@ fn actualizar_ingreso(
     let resumen = if estatus != "pagada" || correccion.ajuste.es_cero() {
         "Factura corregida.".to_string()
     } else {
+        // Aquí sí se mueve un saldo, de modo que queda constancia. Es la misma
+        // clase de corrección que un borrado, y merece el mismo rastro.
+        let caso = correcciones::registrar(
+            &tx,
+            correcciones::Correccion {
+                tipo: "corrección de factura",
+                referencia_id: id,
+                descripcion: format!(
+                    "Factura {}: {:.2} → {:.2}",
+                    numero_factura, total_ant, monto_total
+                ),
+                importe: Some(correccion.ajuste.unidades()),
+                divisa: Some(MONEDA_LOCAL.codigo().to_string()),
+                motivo: motivo.as_deref().unwrap_or(""),
+            },
+        )?;
+        let _ = &caso;
         tx.execute(
             "UPDATE ingresos SET monto_recibido = ? WHERE id = ?;",
             (correccion.recibido.unidades(), id),
@@ -1983,12 +2006,16 @@ fn actualizar_ingreso(
                     ));
                 }
                 format!(
-                    "Factura corregida. Se ajustó «{}» en DOP {:.2}.",
+                    "Factura corregida. Se ajustó «{}» en DOP {:.2}. Caso {}.",
                     cuenta,
-                    correccion.ajuste.unidades()
+                    correccion.ajuste.unidades(),
+                    caso
                 )
             }
-            None => "Factura corregida. No tenía cuenta de depósito que ajustar.".to_string(),
+            None => format!(
+                "Factura corregida. No tenía cuenta de depósito que ajustar. Caso {}.",
+                caso
+            ),
         }
     };
 

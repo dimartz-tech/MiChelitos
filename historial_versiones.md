@@ -16,6 +16,12 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 * El caso guarda **cómo se identificaba el movimiento** —descripción, importe y divisa— porque después de borrarlo no habría de dónde sacarlo.
 * Los casos se consultan desde la misma pantalla. **No hay comando para borrarlos**: un rastro que se puede borrar no es un rastro.
 
+### 🧾 Corregir una factura cobrada también abre caso
+* Corregir el importe de una factura ya cobrada **mueve un saldo**, igual que borrarla, y hasta ahora no dejaba rastro. El registro se había construido para los borrados y esta corrección se quedó fuera.
+* **El motivo se exige solo cuando mueve dinero.** Cambiar la fecha o el número de una factura cobrada no toca ningún saldo y no lo pide: exigir explicación donde no hay riesgo enseña a escribirla sin pensar, que es el modo en que un control de este tipo deja de servir.
+* El diálogo dice **el ajuste exacto** que va a sufrir la cuenta antes de pedir la explicación.
+* Si falta el motivo, la operación se deshace entera: ni caso, ni corrección, ni saldo movido.
+
 ### 🗄️ Base de Datos
 * **Migración 8 — casos de corrección**: tabla `correcciones`.
 * Limitación declarada y fijada por prueba: la numeración sale del mayor caso vivo del año, de modo que **borrar el último reutilizaría su número**. Por eso no existe forma de borrarlos; si algún día la hubiera, habría que rehacer la numeración primero.
