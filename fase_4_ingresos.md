@@ -89,3 +89,82 @@ consultan antes de aplicarse.
 Ambas son **las correcciones futuras**, no averías: que hagan fallar la
 caracterización es justo lo que debe pasar, y es la señal de que el día que se
 apliquen no pasarán inadvertidas.
+
+---
+
+## 4.2 Dominio y cierre de los tres defectos restantes
+
+Los cinco hallazgos quedan resueltos. Los dos que tocaban dinero se
+consultaron —H16 y H20—; estos tres son correcciones de conducta sin pérdida,
+y se hicieron dentro de la extracción como estaba acordado.
+
+### H17 — la cuenta deja de referenciarse por su nombre
+
+Era H3 otra vez. Se cierra igual: **por referencia, no por texto**. La
+migración 7 añade `cuenta_ahorro_id` a las dos tablas de ingresos y lo rellena
+desde el nombre guardado.
+
+El nombre **se conserva**. Sirve para leer el histórico, y para los cobros
+registrados contra una cuenta que ya no existe: ahí no hay identificador que
+poner, y borrar el dato dejaría el asiento sin explicación.
+
+### H18 — cobrar una factura inexistente ya falla
+
+La condición del `UPDATE` exige además que la factura esté **pendiente**, de
+modo que cobrar dos veces tampoco pasa inadvertido. Era un caso que nadie
+había mirado: el defecto original solo hablaba de facturas que no existen.
+
+### H19 — el importe entra en la divisa de su cuenta
+
+El tipo `Deposito` ata el importe a la divisa de la cuenta que lo recibe, como
+`ExtremoCuenta` hace con las transferencias.
+
+**El primer intento no lo resolvió, y merece contarse.** `resolver_deposito`
+denominaba el importe **con la divisa de la cuenta** y acto seguido pedía a
+`Deposito::nuevo` que comprobara que coincidían. Comparaba esa divisa consigo
+misma: la comprobación existía en el tipo y era **vacua en la llamada**. El
+caso real —8 500 pesos entrando como 8 500 dólares— seguía pasando.
+
+La corrección es que la divisa de lo cobrado llegue **desde fuera**. Una
+factura se emite en moneda local —`ingresos` no tiene columna de divisa—, así
+que cobrarla en una cuenta en otra divisa exigiría una conversión que nadie ha
+declarado. Se rechaza en vez de inventarla.
+
+## Qué comprueba `resolver_deposito`
+
+Tres cosas, y enumerarlas fue lo que destapó el fallo anterior:
+
+1. **Que la cuenta exista** (H17).
+2. **Que el importe no sea negativo**, dentro de `Deposito`.
+3. **Que la divisa de lo cobrado sea la de la cuenta** (H19).
+
+La tercera era la que faltaba, y faltaba de una forma difícil de ver: no por
+ausencia de código sino porque sus dos operandos eran el mismo valor.
+
+## La lección: una comprobación que no puede fallar no protege
+
+La versión anterior de `acreditar` repetía la verificación de la cuenta «por si
+acaso», y se documentó como respaldo inalcanzable. **Se retira.**
+
+Una comprobación que no puede fallar aparenta una garantía que ninguna prueba
+sostiene, y anima a confiar en ella. Fue exactamente lo que pasó con la de
+divisas: parecía cubierta por el tipo y no lo estaba. La garantía de existencia
+vive ahora en un solo sitio, donde sí se ejercita.
+
+El criterio que queda: **si una mutación que rompe una comprobación no hace
+fallar ninguna prueba, la comprobación no está validando nada** — o sobra, o
+sus operandos no son independientes. Ambas cosas hay que mirarlas, no
+documentarlas.
+
+## Verificación
+
+400 pruebas en verde. Las mutaciones sobre los defectos cerrados:
+
+| Mutación | Resultado |
+|---|---|
+| El cobro no comprueba que la factura exista | falla `c77` |
+| El depósito no compara divisas | falla `c78` y la prueba de dominio |
+| Se denomina el importe con la divisa de la cuenta | falla `c78` — reproduce el fallo entregado |
+
+La última es la importante: reproduce el error que este documento describía
+como resuelto, y ahora se detecta.

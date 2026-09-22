@@ -510,21 +510,99 @@ fn crear_ingreso(input: IngresoInput) -> Result<i64, String> {
     Ok(id)
 }
 
+/// Resuelve la cuenta que recibe un cobro y comprueba que puede recibirlo.
+///
+/// Comprueba **tres** cosas, y conviene enumerarlas porque la primera versión
+/// de esta función solo hacía dos y parecía hacer las tres:
+///
+/// 1. **Que la cuenta exista** (H17). Antes se localizaba por su nombre y el
+///    fallo se descartaba con `let _ =`.
+/// 2. **Que el importe no sea negativo**, dentro de `Deposito`.
+/// 3. **Que la divisa de lo cobrado sea la de la cuenta** (H19).
+///
+/// La tercera es la que faltaba, y faltaba de una forma difícil de ver: el
+/// importe se denominaba **con la divisa de la cuenta**, de modo que
+/// `Deposito::nuevo` comparaba esa divisa consigo misma y no podía fallar
+/// nunca. La comprobación existía en el tipo y era vacua en la llamada.
+///
+/// Por eso `divisa_cobrada` llega desde fuera: una factura se emite en moneda
+/// local —`ingresos` no tiene columna de divisa— y cobrarla en una cuenta en
+/// otra divisa exigiría una conversión que nadie ha declarado. Reinterpretar
+/// 8 500 pesos como 8 500 dólares es precisamente el daño que H19 describía.
+fn resolver_deposito(
+    tx: &rusqlite::Transaction,
+    cuenta_id: i64,
+    divisa_cobrada: Divisa,
+    importe: f64,
+) -> Result<dominio::ingreso::Deposito, String> {
+    let divisa_cuenta: String = tx
+        .query_row("SELECT divisa FROM cuentas_ahorro WHERE id = ?;", [cuenta_id], |r| r.get(0))
+        .map_err(|_| format!("No se encontró la cuenta {}.", cuenta_id))?;
+
+    let deposito = dominio::ingreso::Deposito::nuevo(
+        cuenta_id,
+        Divisa::desde_codigo(&divisa_cuenta)?,
+        Dinero::nuevo(importe, divisa_cobrada)?,
+    )?;
+    Ok(deposito)
+}
+
+/// Aplica un cobro a su cuenta.
+///
+/// No vuelve a comprobar que la cuenta exista: eso lo garantiza
+/// `resolver_deposito`, que ya la leyó dentro de esta misma transacción y sin
+/// el cual no existiría el `Deposito` que se recibe aquí.
+///
+/// La versión anterior repetía la comprobación «por si acaso». Se retira
+/// porque **no podía fallar**, y una comprobación que no puede fallar no
+/// protege: aparenta una garantía que ninguna prueba sostiene, y anima a
+/// confiar en ella. La garantía vive en un solo sitio, donde sí se ejercita.
+fn acreditar(
+    tx: &rusqlite::Transaction,
+    deposito: &dominio::ingreso::Deposito,
+) -> Result<(), String> {
+    tx.execute(
+        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
+        (deposito.importe().unidades(), deposito.cuenta_id()),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
-fn marcar_ingreso_pagado(id: i64, institucion: String, fecha: String, monto_recibido: f64) -> Result<(), String> {
+fn marcar_ingreso_pagado(
+    id: i64,
+    cuenta_ahorro_id: i64,
+    fecha: String,
+    monto_recibido: f64,
+) -> Result<(), String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    
-    tx.execute(
-        "UPDATE ingresos SET estatus = 'pagada', institucion_deposito = ?, fecha_pago = ?, monto_recibido = ? WHERE id = ?;",
-        (&institucion, &fecha, monto_recibido, id)
-    ).map_err(|e| e.to_string())?;
 
-    // Incrementar balance de la cuenta de ahorro/efectivo si su nombre coincide
-    let _ = tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
-        (monto_recibido, &institucion)
-    );
+    // Una factura se emite en moneda local, de modo que su cobro también.
+    let deposito = resolver_deposito(&tx, cuenta_ahorro_id, MONEDA_LOCAL, monto_recibido)?;
+    let nombre: String = tx
+        .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+
+    // H18: un cobro que no encuentra su factura deja de devolver éxito.
+    let filas = tx
+        .execute(
+            "UPDATE ingresos SET estatus = 'pagada', institucion_deposito = ?,
+                                 cuenta_ahorro_id = ?, fecha_pago = ?, monto_recibido = ?
+             WHERE id = ? AND estatus <> 'pagada';",
+            (&nombre, cuenta_ahorro_id, &fecha, monto_recibido, id),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if filas == 0 {
+        return Err(format!(
+            "No se encontró una factura {} pendiente de cobro.",
+            id
+        ));
+    }
+
+    acreditar(&tx, &deposito)?;
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -570,20 +648,35 @@ fn crear_ingreso_informal(fecha: String, descripcion: String, monto: f64) -> Res
 }
 
 #[tauri::command]
-fn marcar_informal_pagado(id: i64, institucion: String, fecha: String, monto_recibido: f64) -> Result<(), String> {
+fn marcar_informal_pagado(
+    id: i64,
+    cuenta_ahorro_id: i64,
+    fecha: String,
+    monto_recibido: f64,
+) -> Result<(), String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    
-    tx.execute(
-        "UPDATE ingresos_informales SET estatus = 'pagado', institucion_deposito = ?, fecha_pago = ?, monto_recibido = ? WHERE id = ?;",
-        (&institucion, &fecha, monto_recibido, id)
-    ).map_err(|e| e.to_string())?;
 
-    // Incrementar balance de la cuenta de ahorro/efectivo si su nombre coincide
-    let _ = tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
-        (monto_recibido, &institucion)
-    );
+    // Una factura se emite en moneda local, de modo que su cobro también.
+    let deposito = resolver_deposito(&tx, cuenta_ahorro_id, MONEDA_LOCAL, monto_recibido)?;
+    let nombre: String = tx
+        .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+
+    let filas = tx
+        .execute(
+            "UPDATE ingresos_informales SET estatus = 'pagado', institucion_deposito = ?,
+                                            cuenta_ahorro_id = ?, fecha_pago = ?, monto_recibido = ?
+             WHERE id = ? AND estatus <> 'pagado';",
+            (&nombre, cuenta_ahorro_id, &fecha, monto_recibido, id),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if filas == 0 {
+        return Err(format!("No se encontró un ingreso {} pendiente de cobro.", id));
+    }
+
+    acreditar(&tx, &deposito)?;
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())

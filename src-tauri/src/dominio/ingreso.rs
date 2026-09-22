@@ -9,7 +9,7 @@
 //! estética: porque una regla que existe dos veces se corrige una vez y sigue
 //! mal en la otra, que es exactamente lo que había pasado con **H8**.
 
-use super::dinero::{Dinero, Porcentaje};
+use super::dinero::{Dinero, Divisa, Porcentaje};
 use super::errores::ErrorDominio;
 
 /// Lo que se retiene de una factura.
@@ -29,6 +29,50 @@ pub fn retencion(monto: Dinero, tasa: Porcentaje) -> Result<Dinero, ErrorDominio
 /// segundo redondeo los descuadre por un céntimo.
 pub fn neto(monto: Dinero, tasa: Porcentaje) -> Result<Dinero, ErrorDominio> {
     monto.restar(&retencion(monto, tasa)?)
+}
+
+/// Dónde entra el dinero de un cobro, y cuánto.
+///
+/// La divisa de la cuenta viaja con su identificador, igual que en
+/// `ExtremoCuenta` para las transferencias, y por el mismo motivo: sin ella no
+/// se puede comprobar nada.
+///
+/// **Hace irrepresentable H19.** Un ingreso se factura en moneda local, pero
+/// la cuenta de destino se elegía por su nombre y podía ser en dólares: se
+/// sumaban unidades de peso a un saldo en divisa. Construir un depósito ahora
+/// exige que el importe y la cuenta coincidan, de modo que ese caso no llega a
+/// existir. Es el mismo camino por el que se cerró H2.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Deposito {
+    cuenta_id: i64,
+    importe: Dinero,
+}
+
+impl Deposito {
+    pub fn nuevo(
+        cuenta_id: i64,
+        divisa_cuenta: Divisa,
+        importe: Dinero,
+    ) -> Result<Deposito, ErrorDominio> {
+        if importe.divisa() != divisa_cuenta {
+            return Err(ErrorDominio::DivisasIncompatibles {
+                esperada: divisa_cuenta,
+                recibida: importe.divisa(),
+            });
+        }
+        if importe.es_negativo() {
+            return Err(ErrorDominio::MontoInvalido { valor: importe.unidades() });
+        }
+        Ok(Deposito { cuenta_id, importe })
+    }
+
+    pub fn cuenta_id(&self) -> i64 {
+        self.cuenta_id
+    }
+
+    pub fn importe(&self) -> Dinero {
+        self.importe
+    }
 }
 
 /// Qué se da por cobrado tras corregir una factura.
@@ -142,6 +186,43 @@ mod tests {
         let monto = dop(5_000.0);
         assert_eq!(retencion(monto, Porcentaje::puntos_basicos(0)).unwrap(), dop(0.0));
         assert_eq!(neto(monto, Porcentaje::puntos_basicos(0)).unwrap(), monto);
+    }
+
+    // --- Depósito ---
+
+    #[test]
+    fn h19_no_se_puede_depositar_pesos_en_una_cuenta_en_dolares() {
+        // El caso que la caracterización fijaba: un ingreso facturado en
+        // pesos acreditado a una cuenta USD. Ya no se puede construir.
+        let r = Deposito::nuevo(1, Divisa::Usd, dop(8_500.0));
+
+        assert_eq!(
+            r,
+            Err(ErrorDominio::DivisasIncompatibles {
+                esperada: Divisa::Usd,
+                recibida: Divisa::Dop,
+            })
+        );
+    }
+
+    #[test]
+    fn un_deposito_en_la_divisa_de_su_cuenta_se_construye() {
+        let d = Deposito::nuevo(7, Divisa::Dop, dop(8_500.0)).unwrap();
+
+        assert_eq!(d.cuenta_id(), 7);
+        assert_eq!(d.importe(), dop(8_500.0));
+    }
+
+    #[test]
+    fn un_deposito_negativo_no_es_un_cobro() {
+        assert!(Deposito::nuevo(1, Divisa::Dop, dop(-1.0)).is_err());
+    }
+
+    #[test]
+    fn un_deposito_de_cero_es_valido() {
+        // Una factura puede cobrarse por cero —retenida al 100 %, un ajuste—,
+        // y rechazarlo sería un estorbo sin motivo.
+        assert!(Deposito::nuevo(1, Divisa::Dop, dop(0.0)).is_ok());
     }
 
     // --- Corrección ---
