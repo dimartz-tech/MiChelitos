@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 12;
+pub const VERSION_OBJETIVO: u32 = 13;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -153,6 +153,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 12,
             nombre: "la fecha de renovación de las anuales",
             aplicar: crate::db_sql::migracion_12_renovacion_anual,
+        },
+        Migracion {
+            version: 13,
+            nombre: "las fechas de una suscripción tienen forma de fecha",
+            aplicar: crate::db_sql::migracion_13_fechas_de_suscripcion,
         },
     ]
 }
@@ -560,6 +565,8 @@ mod tests_centavos {
     /// `el_esquema_migrado_rechaza_una_fraccion_de_centimo` la afirma.
     fn base_migrada_hasta(version: u32) -> Connection {
         let mut c = Connection::open_in_memory().unwrap();
+        // Lo mismo que hace `ejecutar`: reconstruir una tabla lo exige.
+        c.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
         for migracion in catalogo() {
             if migracion.version > version {
                 break;
@@ -1020,7 +1027,9 @@ mod tests_centavos {
         // abrió la aplicación, que puede ser posterior al de facturación. El
         // proveedor renueva el suyo, así que la fecha derivada toma
         // `dia_facturacion`. Sobre datos reales esa diferencia era de un día.
-        let c = base_migrada();
+        // Hasta la 12: desde la 13 el esquema no admite una fecha sin forma
+        // de fecha, y esta prueba necesita sembrar una.
+        let c = base_migrada_hasta(12);
         c.execute_batch(
             "INSERT INTO tarjetas (entidad, nombre_tarjeta, fecha_corte, fecha_limite_pago)
              VALUES ('Emisor', 'Producto', 5, 25);",

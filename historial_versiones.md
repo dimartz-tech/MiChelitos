@@ -4,7 +4,27 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.25.0 (Versión Actual) - 2026-09-22
+## 🚀 Versión 1.26.0 (Versión Actual) - 2026-09-22
+**Una marca de cobro ilegible deja de cobrar en cada arranque. Era el defecto que invertía la idempotencia.**
+
+### ⛔ No cobrar, y decirlo
+* Si la fecha del último cobro no tenía tres partes separadas por `/`, la decisión hacía `requiere_cargo = true` sin más: **el mecanismo de idempotencia se volvía un duplicador**.
+* Ahora no cobra. No se puede saber cuándo se cobró por última vez, y entre un cargo de más y uno de menos, el de menos se corrige mirando el estado de cuenta.
+* **Pero no en silencio.** Una suscripción parada sin avisar es peor que una que cobra de más: el cargo indebido sale en el estado, la parada no sale en ninguna parte. `Impedimento` responde «¿llegará a cobrarse?», que es distinto de «¿toca hoy?», y unifica los dos estados parados.
+* En una **anual** con marca ilegible no hay impedimento: decide con su fecha de renovación y no mira la marca. Señalarla sería decir que algo está parado cuando no lo está, y un aviso que miente se aprende a ignorar.
+
+### 🔧 La salida
+* `corregir_ultimo_cobro` es la única vía para escribir la fecha a mano, y existe solo para esto: la edición normal la conserva a propósito (`s7`), y esa preservación dejaba sin salida a una suscripción con la fecha rota.
+* **Pide la fecha en lugar de limpiarla.** Borrarla la dejaría como «nunca cobrada» y volvería a cobrar este mes, que es el duplicado del que `s7` protege.
+
+### 🗄️ Base de Datos
+* **Migración 13**: un `CHECK` con `GLOB` obliga a que `fecha_ultimo_pago` y `fecha_renovacion` tengan forma `dd/mm/aaaa`. No es teórico: en la base real hay un `gastos.fecha` con valor `1009/2026`, un `10/09/2026` sin la primera barra.
+* El `CHECK` comprueba la **forma**, no que la fecha exista. Por eso el analizador pasó a validar con `from_ymd_opt`: antes parseaba tres partes y usaba dos, de modo que un `31/02/2026` pasaba como febrero y un `13/13/2026` como mes 13.
+* La migración **no toca `gastos.fecha`**: corregir un dato del titular es decisión suya.
+
+---
+
+## 🚀 Versión 1.25.0 - 2026-09-22
 **El día de facturación se recorta a los días que tiene el mes: febrero deja de perder su cargo.**
 
 ### 📅 La regla
