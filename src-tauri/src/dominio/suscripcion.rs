@@ -14,9 +14,19 @@
 //! una decisión del titular, no del código:
 //!
 //! * Una mensual del **día 31** se cobra 7 de 12 meses; la del 30, once.
-//! * Una **anual** se recobra al cambiar el año aunque no haya pasado uno.
 //! * Varios períodos vencidos generan **un solo cargo**.
-//! * Una marca de cobro **ilegible** obliga a cobrar.
+//! * Una marca de cobro **ilegible** obliga a cobrar, en las mensuales.
+//!
+//! ## Lo que sí cambió: la anual
+//!
+//! Una anual se recobraba al cambiar el año aunque no hubiera pasado uno
+//! —cobrada en julio, volvía a cobrar el 5 de enero—. La causa era que
+//! **intentaba deducir el vencimiento y le faltaba el mes**.
+//!
+//! Ahora la fecha de renovación se anota, y la decisión la lee en vez de
+//! deducirla. Eso cierra de paso los otros dos agujeros en las anuales: una
+//! fecha es una fecha, así que ni el día 31 ni una marca ilegible la
+//! desvían.
 //!
 //! Cada una lleva su comentario donde se decide.
 
@@ -95,13 +105,24 @@ pub struct Suscripcion {
     /// Día del mes en que factura el proveedor, de 1 a 31.
     pub dia_de_facturacion: u32,
     pub ultimo_cobro: MarcaDeCobro,
+    /// **Solo las anuales.** La fecha exacta en que el proveedor renueva.
+    ///
+    /// Es un dato anotado, no una deducción. La regla anterior intentaba
+    /// deducir el vencimiento de una anual a partir del año del último cobro,
+    /// y no podía: le faltaba el mes. De ahí salía el cargo seis meses antes
+    /// de tiempo.
+    ///
+    /// `None` en una anual significa que **no se sabe cuándo renueva**, y
+    /// entonces no se cobra. Entre un cargo de más y uno de menos, el de
+    /// menos es el que se puede corregir mirando el estado de cuenta.
+    pub renovacion: Option<NaiveDate>,
 }
 
 impl Suscripcion {
     /// Si hoy toca cargar.
     ///
-    /// Reproduce la decisión actual sin alterarla. Lo que cambia es que ahora
-    /// **se puede leer**, y cada rama dice qué deja fuera.
+    /// Las anuales leen su fecha de renovación. Las mensuales conservan la
+    /// conducta anterior, divergencias incluidas, y cada rama dice cuál.
     pub fn corresponde_cobrar(&self, hoy: NaiveDate) -> bool {
         // **Divergencia: el día 31 en un mes de 30.** `hoy.day()` nunca llega
         // a 31 en abril, junio, septiembre o noviembre —ni a 30 en febrero—,
@@ -114,9 +135,18 @@ impl Suscripcion {
             // propiedad que sostiene todo el mecanismo. Lo prudente sería lo
             // contrario —no cobrar y avisar—, porque un cargo de más es más
             // difícil de deshacer que uno de menos.
-            MarcaDeCobro::Ilegible => true,
+            MarcaDeCobro::Ilegible => match self.frecuencia {
+                // La anual tiene una fecha propia: una marca ilegible ya no
+                // la arrastra a cobrar. El agujero queda abierto solo donde
+                // sigue siendo el único dato, que es en las mensuales.
+                Frecuencia::Anual => self.vence_la_renovacion(hoy),
+                Frecuencia::Mensual => true,
+            },
 
-            MarcaDeCobro::Ninguna => dia_alcanzado,
+            MarcaDeCobro::Ninguna => match self.frecuencia {
+                Frecuencia::Anual => self.vence_la_renovacion(hoy),
+                Frecuencia::Mensual => dia_alcanzado,
+            },
 
             // **Divergencia: varios períodos vencidos generan un cargo.** La
             // marca es una fecha, no un contador, y al cobrar se pone «hoy»:
@@ -127,15 +157,61 @@ impl Suscripcion {
                         hoy.year() > *anio || (hoy.year() == *anio && hoy.month() > *mes);
                     mes_nuevo && dia_alcanzado
                 }
-                // **Divergencia: la anual no mira el mes.** Cobrada en julio,
-                // se recobra el 5 de enero siguiente. Bastaría comparar meses
-                // absolutos, y por eso el arreglo es tentador; sigue siendo
-                // una decisión sobre dinero real.
-                Frecuencia::Anual => hoy.year() > *anio && dia_alcanzado,
+                // La anual ya no deduce: **lee la fecha anotada**. Ver
+                // `renovacion` y `s12b`.
+                Frecuencia::Anual => self.vence_la_renovacion(hoy),
             },
         }
     }
+
+    /// Si la renovación anotada ya venció. Sin fecha, no vence nada.
+    fn vence_la_renovacion(&self, hoy: NaiveDate) -> bool {
+        match self.renovacion {
+            Some(fecha) => hoy >= fecha,
+            None => false,
+        }
+    }
+
+    /// Cuándo toca el próximo cargo, si se puede decir.
+    ///
+    /// **Solo las anuales lo saben.** Una mensual tendría que predecirlo, y
+    /// esa predicción arrastraría hoy el defecto del día 31; anunciar una
+    /// fecha que el sistema luego no respeta es peor que no anunciar nada.
+    pub fn proximo_cobro(&self) -> Option<NaiveDate> {
+        match self.frecuencia {
+            Frecuencia::Anual => self.renovacion,
+            Frecuencia::Mensual => None,
+        }
+    }
+
+    /// Si toca avisar: el cargo cae dentro de los próximos siete días.
+    ///
+    /// Incluye el mismo día del cargo y excluye lo ya vencido, que no es un
+    /// aviso sino un cobro pendiente.
+    pub fn avisa(&self, hoy: NaiveDate) -> bool {
+        match self.proximo_cobro() {
+            Some(fecha) => {
+                let faltan = (fecha - hoy).num_days();
+                (0..=DIAS_DE_AVISO).contains(&faltan)
+            }
+            None => false,
+        }
+    }
+
+    /// La renovación del año siguiente, para después de cobrar.
+    ///
+    /// El 29 de febrero se traslada al 28: `NaiveDate` no admite un 29 en año
+    /// común, y adelantar al 1 de marzo movería el cargo de mes.
+    pub fn renovacion_siguiente(&self) -> Option<NaiveDate> {
+        let fecha = self.renovacion?;
+        let anio = fecha.year() + 1;
+        NaiveDate::from_ymd_opt(anio, fecha.month(), fecha.day())
+            .or_else(|| NaiveDate::from_ymd_opt(anio, fecha.month(), 28))
+    }
 }
+
+/// Cuántos días antes se avisa de un cargo.
+pub const DIAS_DE_AVISO: i64 = 7;
 
 #[cfg(test)]
 mod tests {
@@ -146,7 +222,21 @@ mod tests {
     }
 
     fn mensual(dia: u32, ultimo: MarcaDeCobro) -> Suscripcion {
-        Suscripcion { frecuencia: Frecuencia::Mensual, dia_de_facturacion: dia, ultimo_cobro: ultimo }
+        Suscripcion {
+            frecuencia: Frecuencia::Mensual,
+            dia_de_facturacion: dia,
+            ultimo_cobro: ultimo,
+            renovacion: None,
+        }
+    }
+
+    fn anual(renovacion: Option<NaiveDate>, ultimo: MarcaDeCobro) -> Suscripcion {
+        Suscripcion {
+            frecuencia: Frecuencia::Anual,
+            dia_de_facturacion: 1,
+            ultimo_cobro: ultimo,
+            renovacion,
+        }
     }
 
     #[test]
@@ -176,15 +266,67 @@ mod tests {
     }
 
     #[test]
-    fn una_anual_se_recobra_al_cambiar_el_ano_sin_haber_pasado_uno() {
-        // Divergencia fijada: seis meses después del cobro anterior.
-        let s = Suscripcion {
-            frecuencia: Frecuencia::Anual,
-            dia_de_facturacion: 5,
-            ultimo_cobro: MarcaDeCobro::En { anio: 2025, mes: 7 },
-        };
-        assert!(!s.corresponde_cobrar(en(2025, 12, 31)), "en el mismo año no");
-        assert!(s.corresponde_cobrar(en(2026, 1, 5)), "y en enero sí, seis meses antes");
+    fn una_anual_espera_a_la_fecha_que_tiene_anotada() {
+        // **CAMBIO DE CONDUCTA.** Antes se recobraba al cambiar el año: la
+        // cobrada el 05/07/2025 volvía a cobrar el 05/01/2026, seis meses
+        // antes. Ahora espera a su fecha.
+        let s = anual(Some(en(2026, 7, 5)), MarcaDeCobro::En { anio: 2025, mes: 7 });
+
+        assert!(!s.corresponde_cobrar(en(2026, 1, 5)), "enero ya no dispara nada");
+        assert!(!s.corresponde_cobrar(en(2026, 7, 4)), "ni la víspera");
+        assert!(s.corresponde_cobrar(en(2026, 7, 5)), "el día anotado sí");
+        assert!(s.corresponde_cobrar(en(2026, 8, 1)), "y después sigue pendiente");
+    }
+
+    #[test]
+    fn una_anual_sin_fecha_anotada_no_se_cobra() {
+        // Entre un cargo de más y uno de menos, el de menos es el que se
+        // corrige mirando el estado de cuenta.
+        let s = anual(None, MarcaDeCobro::En { anio: 2020, mes: 1 });
+        assert!(!s.corresponde_cobrar(en(2026, 12, 31)));
+    }
+
+    #[test]
+    fn en_una_anual_una_marca_ilegible_ya_no_fuerza_el_cobro() {
+        // El defecto que invertía la idempotencia queda cerrado en las
+        // anuales, porque ya no dependen de la marca.
+        let s = anual(Some(en(2026, 7, 5)), MarcaDeCobro::Ilegible);
+        assert!(!s.corresponde_cobrar(en(2026, 3, 1)), "sin fecha vencida no cobra");
+        assert!(s.corresponde_cobrar(en(2026, 7, 5)), "y en su fecha sí");
+
+        // En las mensuales sigue abierto: ahí la marca es el único dato.
+        assert!(mensual(15, MarcaDeCobro::Ilegible).corresponde_cobrar(en(2026, 3, 1)));
+    }
+
+    #[test]
+    fn el_aviso_se_enciende_una_semana_antes_y_no_despues_de_cobrar() {
+        let s = anual(Some(en(2026, 7, 5)), MarcaDeCobro::Ninguna);
+
+        assert!(!s.avisa(en(2026, 6, 27)), "ocho días antes todavía no");
+        assert!(s.avisa(en(2026, 6, 28)), "siete días antes sí");
+        assert!(s.avisa(en(2026, 7, 4)), "la víspera");
+        assert!(s.avisa(en(2026, 7, 5)), "y el mismo día");
+        assert!(!s.avisa(en(2026, 7, 6)), "pasada la fecha ya no es aviso, es cobro pendiente");
+    }
+
+    #[test]
+    fn una_mensual_no_anuncia_una_fecha_que_el_sistema_no_respetaria() {
+        // Mientras el día 31 siga saltándose meses, predecir el próximo cobro
+        // de una mensual sería anunciar algo que luego no ocurre.
+        let s = mensual(30, MarcaDeCobro::En { anio: 2026, mes: 1 });
+        assert_eq!(s.proximo_cobro(), None);
+        assert!(!s.avisa(en(2026, 2, 25)));
+    }
+
+    #[test]
+    fn la_renovacion_siguiente_traslada_el_29_de_febrero_al_28() {
+        // 2028 es bisiesto; 2029 no.
+        let s = anual(Some(en(2028, 2, 29)), MarcaDeCobro::Ninguna);
+        assert_eq!(s.renovacion_siguiente(), Some(en(2029, 2, 28)),
+                   "adelantar al 1 de marzo movería el cargo de mes");
+
+        let s = anual(Some(en(2026, 7, 5)), MarcaDeCobro::Ninguna);
+        assert_eq!(s.renovacion_siguiente(), Some(en(2027, 7, 5)));
     }
 
     #[test]
@@ -236,6 +378,7 @@ mod tests {
                     frecuencia: Frecuencia::Mensual,
                     dia_de_facturacion: 31,
                     ultimo_cobro: marca.clone(),
+                    renovacion: None,
                 };
                 if s.corresponde_cobrar(en(2026, mes, dia)) {
                     cobros += 1;

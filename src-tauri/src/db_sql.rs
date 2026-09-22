@@ -1247,6 +1247,84 @@ fn verificar_restricciones_presentes(tx: &Transaction) -> Result<(), ErrorMigrac
     Ok(())
 }
 
+const MIG12: &str = "la fecha de renovación de las anuales";
+
+/// Las suscripciones anuales anotan **cuándo renuevan**, en vez de deducirlo.
+///
+/// La regla anterior intentaba deducir el vencimiento de una anual a partir
+/// del año del último cobro y no podía, porque le faltaba el mes: una
+/// cobrada en julio volvía a cobrarse el 5 de enero, seis meses antes.
+///
+/// ## De dónde sale la fecha de las que ya existen
+///
+/// Del último cobro más un año, tomando el **día de facturación** y no el día
+/// en que se ejecutó el cargo. Son dos cosas distintas: el cargo se anota el
+/// día en que se abrió la aplicación, que puede ser posterior. El proveedor
+/// renueva el suyo.
+///
+/// Si el día no existe en ese mes, se usa el último del mes. Y si no hay
+/// último cobro, la columna queda en `NULL`: **una anual sin fecha no se
+/// cobra**, y el titular la anota. Inventar una fecha para poder cobrar sería
+/// exactamente el error que esta migración corrige.
+pub fn migracion_12_renovacion_anual(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    if !columna_existe_en(tx, "suscripciones", "fecha_renovacion")? {
+        migraciones::anadir_columna(tx, MIG12, "suscripciones", "fecha_renovacion", "TEXT")?;
+    }
+
+    let pendientes: Vec<(i64, String, i64)> = {
+        let mut s = tx
+            .prepare(
+                "SELECT id, fecha_ultimo_pago, dia_facturacion FROM suscripciones
+                 WHERE frecuencia = 'anual'
+                   AND fecha_renovacion IS NULL
+                   AND fecha_ultimo_pago IS NOT NULL;",
+            )
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        let it = s
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        it.filter_map(|x| x.ok()).collect()
+    };
+
+    for (id, ultimo, dia_facturacion) in pendientes {
+        let Some(fecha) = renovacion_derivada(&ultimo, dia_facturacion) else {
+            // Una marca ilegible no permite deducir nada, y no es motivo para
+            // detener la migración: la suscripción se queda sin fecha, que es
+            // el estado que no cobra.
+            continue;
+        };
+
+        tx.execute(
+            "UPDATE suscripciones SET fecha_renovacion = ? WHERE id = ?;",
+            (&fecha, id),
+        )
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+    }
+
+    Ok(())
+}
+
+/// `dd/mm/aaaa` del último cobro, más un año, con el día de facturación.
+fn renovacion_derivada(ultimo_cobro: &str, dia_facturacion: i64) -> Option<String> {
+    let partes: Vec<&str> = ultimo_cobro.split('/').collect();
+    if partes.len() != 3 {
+        return None;
+    }
+    let mes: u32 = partes[1].parse().ok()?;
+    let anio: i32 = partes[2].parse().ok()?;
+    let dia = u32::try_from(dia_facturacion).ok()?;
+
+    let anio = anio + 1;
+    let ultimo_del_mes = match mes {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if anio % 4 == 0 && (anio % 100 != 0 || anio % 400 == 0) => 29,
+        2 => 28,
+        _ => return None,
+    };
+    Some(format!("{:02}/{:02}/{}", dia.clamp(1, ultimo_del_mes), mes, anio))
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
