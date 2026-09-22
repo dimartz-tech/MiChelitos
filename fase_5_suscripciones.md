@@ -31,16 +31,19 @@ sujeto por una prueba que muere si alguien cambia la conducta:
 
 | | Lo que hace hoy | Prueba |
 |---|---|---|
-| Mensual el **día 31** | 7 cargos en 12 meses: febrero, abril, junio, septiembre y noviembre se saltan enteros | `s10` |
-| Mensual el **día 30** | 11 cargos: se pierde febrero | `s11` |
-| **Anual** | ~~Se recobra al cambiar el año~~ — **corregido**, ver abajo | `s12b` |
+| Mensual el **día 31** | ~~7 cargos en 12 meses~~ — **corregido**: el día se recorta al último del mes | `s10b` |
+| Mensual el **día 30** | ~~11 cargos: se pierde febrero~~ — **corregido** | `s11b` |
+| **Anual** | ~~Se recobra al cambiar el año~~ — **corregido**: la fecha se anota, no se deduce | `s12b` |
 | **Períodos vencidos** | Tres meses sin abrir la aplicación generan **un** cargo, no tres | `s13` |
 | Marca de cobro **ilegible** | Cobra en cada arranque, incluso antes de su día | `s14` |
 | Sin la categoría **«Suscripciones»** ni **«Otros»** | El gasto cae en el identificador 1 literal, que hoy es «Alimentación» | `s17` |
 
-El quinto es el más grave, porque **invierte la propiedad que da nombre a la
-fase**: una fecha mal formada convierte el mecanismo de idempotencia en un
-duplicador.
+**Tres de los seis quedan cerrados**, cada uno por decisión del titular y con
+el estado de cuenta delante; los capítulos del final cuentan cómo. De los tres
+que siguen abiertos, el de la **marca ilegible** es el más grave, porque
+invierte la propiedad que da nombre a la fase: una fecha mal formada convierte
+el mecanismo de idempotencia en un duplicador. Queda solo en las mensuales —en
+las anuales lo cerró la fecha de renovación—.
 
 ### Por qué no se corrigen aquí
 
@@ -103,6 +106,62 @@ Mientras tanto el cobro sigue sin pasar por `Dinero` —se lee como `f64` y se
 carga a la tarjeta— y la divisa se decide con `if divisa == "USD"`, de modo
 que cualquier otra cosa es pesos: el mismo patrón que `c16` declaró en gastos.
 
+
+---
+
+# El día que no existe en el mes
+
+Los dos primeros defectos **se cierran**, por decisión del titular y con el
+estado de cuenta delante.
+
+## La regla, y las dos veces que se corrigió
+
+El día de facturación se **recorta a los días que tiene el mes**. Una del 30
+se cobra el 28 de febrero; una del 31, el 30 de abril.
+
+Llegar ahí costó tres versiones, y las dos correcciones vinieron del titular:
+
+1. **«El último día del mes»** — la suposición razonable de partida.
+2. **«El 1 de marzo»** — al mirar el estado de cuenta. Se implementó así, y
+   obligaba a rehacer la marca de idempotencia: si el cargo de febrero cae en
+   marzo, marzo lleva dos vencimientos y «ya cobré este mes» los funde en uno.
+3. **«El cargo se generó el 28/02 y se cobró el 1 de marzo»** — lo que
+   reconcilia las dos anteriores. Son dos fechas distintas: **generación y
+   liquidación**.
+
+Esta aplicación asienta el **consumo** contra la tarjeta, no su liquidación,
+así que el asiento lleva la fecha de generación: el 28. La liquidación entra
+por el ciclo de pago de la tarjeta, que se lleva aparte.
+
+La tercera versión resultó además la más pequeña: sin cambiar la marca de
+idempotencia, porque el recorte **mueve el día, no añade vencimientos**. Cada
+mes sigue teniendo uno.
+
+## Lo que cambia en los datos reales
+
+Dos suscripciones del titular facturan los días 29 y 30. Entre las dos, la
+aplicación dejaba de asentar **USD 30,94 al año** que el proveedor sí cobraba.
+
+Simulando 2027 sobre una copia de la base real: 98 cargos donde antes había
+96, y febrero pasa a tener los dos que le faltaban, ambos fechados el
+**28/02/2027**.
+
+## Lo que sigue abierto
+
+De los seis defectos quedan **tres**:
+
+* **Varios períodos vencidos generan un solo cargo** (`s13`). Se comprobó al
+  implementar: una formulación más general de la regla de febrero también
+  recuperaba un período atrasado de rebote —dieciocho cargos en enero donde
+  había ocho, sobre datos reales— y se descartó por eso. Recuperar períodos
+  vencidos es una decisión, y no se toma de lado.
+* **Una marca de cobro ilegible obliga a cobrar** (`s14`), que sigue
+  invirtiendo la idempotencia en las mensuales. En las anuales lo cerró la
+  fecha de renovación.
+* **Sin la categoría esperada, el gasto cae en el identificador 1** (`s17`).
+
+Y sigue pendiente que el cobro pase por `Dinero`: hoy se lee como `f64` y se
+carga a la tarjeta directamente.
 
 ---
 

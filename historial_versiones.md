@@ -4,8 +4,21 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-<<<<<<< HEAD
-## 🚀 Versión 1.24.0 (Versión Actual) - 2026-09-22
+## 🚀 Versión 1.25.0 (Versión Actual) - 2026-09-22
+**El día de facturación se recorta a los días que tiene el mes: febrero deja de perder su cargo.**
+
+### 📅 La regla
+* Una mensual del **día 30** se cobraba once veces al año y una del **31**, siete: la condición comparaba contra el día crudo, y `hoy.day()` nunca llega a 31 en un mes de 30. Ahora el día se recorta al último del mes.
+* **La fecha sale del estado de cuenta.** Un cargo del día 29 se generó el **28 de febrero** y se liquidó el 1 de marzo: son dos fechas distintas. Esta aplicación asienta el *consumo* contra la tarjeta, así que el asiento lleva la de generación; la liquidación entra por el ciclo de pago, que se lleva aparte.
+* El recorte **mueve el día, no añade vencimientos**: cada mes sigue teniendo uno, y la marca de idempotencia no cambia.
+
+### 💵 Efecto sobre datos reales
+* Dos suscripciones facturan los días 29 y 30. Entre las dos, la aplicación dejaba de asentar **USD 30,94 al año** que el proveedor sí cobraba.
+* Simulando 2027 sobre una copia de la base real: 98 cargos frente a 96, y los dos que faltaban aparecen fechados el **28/02/2027**.
+
+### 🔍 Lo que se descartó al medirlo
+* Una formulación más general —«cobra si pasó cualquier vencimiento posterior al último cobro»— también arreglaba febrero, y **de paso recuperaba un período atrasado** que antes se perdía: dieciocho cargos en enero donde había ocho, sobre datos reales. Recuperar períodos vencidos es una decisión abierta (`s13`) y no se toma de rebote.
+## 🚀 Versión 1.24.0 - 2026-09-22
 **Las suscripciones anuales anotan cuándo renuevan, en vez de deducirlo, y avisan una semana antes.**
 
 ### 📅 La fecha de renovación
@@ -43,7 +56,6 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 * La regla sale del bucle que mueve el dinero y pasa a ser un tipo con una sola pregunta: `corresponde_cobrar(hoy)`.
 * **`MarcaDeCobro::Ilegible` es distinto de `Ninguna`**: no haber cobrado nunca y no entender la marca son estados opuestos, y confundirlos era lo que escondía el defecto.
 * La marca **no guarda el día**, porque la regla no lo mira; conservarlo sugeriría una precisión que la decisión no tiene.
-=======
 ## 🚀 Versión 1.22.0 - 2026-09-22
 **El esquema rechaza una fracción de céntimo al escribir. El tramo a `INTEGER` se descarta: midiendo, la premisa era falsa.**
 
@@ -66,7 +78,6 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 * **Migración 10 — el céntimo exacto, sin tolerancia**: redondea por exactitud, con el mismo criterio que impone el `CHECK`.
 * **Migración 11 — la fracción se rechaza al escribir**: reconstruye las 12 tablas con sus restricciones. Idempotente, comprueba el recuento de filas y se detiene si encontrara un índice o disparador propio que la reconstrucción perdería.
 * **Las migraciones corren con las claves ajenas apagadas**, como SQLite prescribe para rehacer una tabla, y cada una termina con `foreign_key_check` dentro de su transacción: la comprobación pasa de ser por sentencia a ser por migración.
->>>>>>> main
 
 ---
 
