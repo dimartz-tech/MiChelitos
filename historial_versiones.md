@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.19.1 (Versión Actual) - 2026-09-22
+## 🚀 Versión 1.20.0 (Versión Actual) - 2026-09-22
+**Cuatro columnas de dinero estaban fuera de la red del redondeo, y una dejaba entrar fracciones de céntimo.**
+
+### 🧮 Núcleo monetario
+* `cuentas_ahorro.comision_pago_impuestos` se escribía **sin pasar por `Dinero`**: solo se comprobaba que el número fuera finito y no negativo. Una comisión de 75.005 entraba con su tercer decimal. Era la única vía por la que un importe llegaba a la base sin que el núcleo decidiera su céntimo.
+* Otras tres —`pagos_tarjeta.monto_debitado`, `pagos_tarjeta.comision` y `correcciones.importe`— quedaron fuera de `COLUMNAS_DE_DINERO` por haberse añadido en migraciones **posteriores** a la 3, que es la que redondea y verifica.
+
+### 📏 La regla
+* **En un esquema migrado, toda columna `REAL` tiene que estar clasificada** como dinero o como tasa. Una prueba lo exige y nombra la que falte.
+* La guardiana anterior protegía en un solo sentido: impedía meter una tasa entre el dinero, pero no impedía **olvidar** una columna de dinero. Por ahí se colaron las cuatro.
+* El coste de cumplirla es una línea en una lista. El de no tenerla ya se pagó.
+
+### 🗄️ Base de Datos
+* **Migración 9 — las columnas que nacieron fuera de la red**: redondea al céntimo las cuatro tardías, con la misma verificación que la 3.
+
+---
+
+## 🚀 Versión 1.19.1 - 2026-09-22
 **El tramo 3 de la política de redondeo se cierra declarándolo innecesario.**
 
 ### 🧮 Núcleo monetario
