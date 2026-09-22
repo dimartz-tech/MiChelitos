@@ -739,6 +739,21 @@ fn fijar_ultimo_pago(sub_id: i64, fecha: &str) {
         .expect("fijar fecha de último pago");
 }
 
+fn renovacion_de(sub_id: i64) -> Option<String> {
+    conexion()
+        .query_row("SELECT fecha_renovacion FROM suscripciones WHERE id = ?;", [sub_id], |r| r.get(0))
+        .expect("leer fecha de renovación")
+}
+
+/// Si alguna suscripción avisa en esa fecha, según lo que ve la vista.
+fn avisa_en(anio: i32, mes: u32, dia: u32) -> bool {
+    let reloj = crate::puertos::reloj::RelojFijo::en(anio, mes, dia);
+    crate::suscripciones_con_aviso(&reloj)
+        .expect("leer suscripciones")
+        .iter()
+        .any(|s| s.avisa)
+}
+
 fn ultimo_pago(sub_id: i64) -> Option<String> {
     conexion()
         .query_row("SELECT fecha_ultimo_pago FROM suscripciones WHERE id = ?;", [sub_id], |r| r.get(0))
@@ -750,7 +765,7 @@ fn s1_una_suscripcion_nunca_cobrada_se_cobra_al_llegar_su_dia() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
     // Día 1: siempre alcanzado, sea cual sea la fecha de hoy.
-    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).unwrap();
 
     let mensajes = procesar_suscripciones().unwrap();
 
@@ -764,7 +779,7 @@ fn s1_una_suscripcion_nunca_cobrada_se_cobra_al_llegar_su_dia() {
 fn s2_cobrada_este_mismo_mes_no_vuelve_a_cobrarse() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).unwrap();
     fijar_ultimo_pago(sub, &hoy_formateado());
 
     let mensajes = procesar_suscripciones().unwrap();
@@ -780,7 +795,7 @@ fn s3_procesar_dos_veces_seguidas_no_duplica_el_cargo() {
     // arranque sin cobrar de más.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).unwrap();
 
     procesar_suscripciones().unwrap();
     let segunda = procesar_suscripciones().unwrap();
@@ -794,7 +809,7 @@ fn s3_procesar_dos_veces_seguidas_no_duplica_el_cargo() {
 fn s4_una_anual_cobrada_este_ano_no_vuelve_a_cobrarse() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Anual".into(), 3600.0, tarjeta, "anual".into(), 1, "DOP".into()).unwrap();
+    let sub = crear_suscripcion("Anual".into(), 3600.0, tarjeta, "anual".into(), 1, "DOP".into(), None).unwrap();
     fijar_ultimo_pago(sub, &hoy_formateado());
 
     assert!(procesar_suscripciones().unwrap().is_empty());
@@ -805,7 +820,7 @@ fn s4_una_anual_cobrada_este_ano_no_vuelve_a_cobrarse() {
 fn s5_el_cargo_en_dolares_solo_mueve_el_balance_en_dolares() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(1000.0, 50.0);
-    crear_suscripcion("Plataforma".into(), 15.0, tarjeta, "mensual".into(), 1, "USD".into()).unwrap();
+    crear_suscripcion("Plataforma".into(), 15.0, tarjeta, "mensual".into(), 1, "USD".into(), None).unwrap();
 
     procesar_suscripciones().unwrap();
 
@@ -822,14 +837,14 @@ fn s6_borrar_y_recrear_reinicia_la_idempotencia_y_vuelve_a_cobrar() {
     // cobra otra vez el mismo mes.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).unwrap();
 
     procesar_suscripciones().unwrap();
     assert_importe(balances_tarjeta(tarjeta).0, 500.0, "primer cargo");
 
     // El usuario quiere cambiar el monto: borra y vuelve a crear.
     crate::eliminar_suscripcion(sub).unwrap();
-    crear_suscripcion("Plataforma".into(), 600.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    crear_suscripcion("Plataforma".into(), 600.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).unwrap();
 
     procesar_suscripciones().unwrap();
 
@@ -843,13 +858,13 @@ fn s7_editar_una_suscripcion_conserva_la_idempotencia_y_no_recobra() {
     // evitar el cobro duplicado que provoca borrar y recrear.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).unwrap();
 
     procesar_suscripciones().unwrap();
     assert_importe(balances_tarjeta(tarjeta).0, 500.0, "primer cargo");
     let marca = ultimo_pago(sub);
 
-    crate::actualizar_suscripcion(sub, "Plataforma".into(), 600.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    crate::actualizar_suscripcion(sub, "Plataforma".into(), 600.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).unwrap();
 
     assert_eq!(ultimo_pago(sub), marca, "la marca de idempotencia se conserva");
     procesar_suscripciones().unwrap();
@@ -861,10 +876,10 @@ fn s7_editar_una_suscripcion_conserva_la_idempotencia_y_no_recobra() {
 fn s8_editar_no_altera_los_cargos_ya_realizados() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).unwrap();
     procesar_suscripciones().unwrap();
 
-    crate::actualizar_suscripcion(sub, "Otro nombre".into(), 999.0, tarjeta, "anual".into(), 20, "USD".into()).unwrap();
+    crate::actualizar_suscripcion(sub, "Otro nombre".into(), 999.0, tarjeta, "anual".into(), 20, "USD".into(), None).unwrap();
 
     let (monto, _, _) = ultimo_gasto();
     assert_importe(monto, 500.0, "el gasto ya registrado mantiene su importe");
@@ -875,7 +890,7 @@ fn s8_editar_no_altera_los_cargos_ya_realizados() {
 fn s9_editar_una_suscripcion_inexistente_es_error() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    assert!(crate::actualizar_suscripcion(9999, "X".into(), 1.0, tarjeta, "mensual".into(), 1, "DOP".into()).is_err());
+    assert!(crate::actualizar_suscripcion(9999, "X".into(), 1.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).is_err());
 }
 
 
@@ -930,7 +945,7 @@ fn s10_una_mensual_del_dia_31_solo_se_cobra_siete_meses_al_ano() {
     // decidir.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 31, "DOP".into()).unwrap();
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 31, "DOP".into(), None).unwrap();
 
     let cargos = cargos_en_el_ano(2026);
 
@@ -943,27 +958,138 @@ fn s11_una_mensual_del_dia_30_pierde_febrero() {
     // DIVERGENCIA DECLARADA. La misma causa que S10, un mes en vez de cinco.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 30, "DOP".into()).unwrap();
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 30, "DOP".into(), None).unwrap();
 
     assert_eq!(cargos_en_el_ano(2026), 11, "hoy se cobran 11 de 12 meses");
 }
 
 #[test]
-fn s12_una_anual_se_recobra_al_cambiar_el_ano_aunque_no_haya_pasado_un_ano() {
-    // DIVERGENCIA DECLARADA — la más cara de las cinco.
+fn s12b_una_anual_espera_a_la_fecha_de_renovacion_que_tiene_anotada() {
+    // **CAMBIO DE CONDUCTA — 2026-09-22.**
     //
-    // La condición de «anual» es `anio_actual > p_anio && dia >= dia_fact`, y
-    // **no mira el mes**. Una suscripción cobrada en julio se vuelve a cobrar
-    // el 5 de enero siguiente: seis meses antes de tocarle.
+    // Antes: la condición de «anual» era `anio_actual > p_anio`, sin mirar el
+    // mes, de modo que una cobrada el 05/07/2025 volvía a cobrar el
+    // 05/01/2026. Seis meses antes de tocarle.
+    //
+    // Ahora la fecha de renovación se **anota**, y la decisión la lee. La
+    // causa del defecto era que se intentaba deducir el vencimiento con un
+    // dato que no bastaba.
+    //
+    // Sobre los datos reales no dispara ningún cobro: las dos anuales
+    // existentes derivan su renovación a 2027.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into()).unwrap();
+    let sub = crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(),
+                                Some("05/07/2026".into())).unwrap();
     fijar_ultimo_pago(sub, "05/07/2025");
 
-    let en_enero = procesar_en(2026, 1, 5);
+    assert!(procesar_en(2026, 1, 5).is_empty(), "enero ya no dispara nada");
+    assert!(procesar_en(2026, 7, 4).is_empty(), "ni la víspera");
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "ningún cargo antes de tiempo");
 
-    assert_eq!(en_enero.len(), 1, "cobra en enero habiendo cobrado en julio");
-    assert_importe(balances_tarjeta(tarjeta).0, 3_600.0, "un año de cargo, seis meses después");
+    assert_eq!(procesar_en(2026, 7, 5).len(), 1, "el día anotado sí cobra");
+    assert_importe(balances_tarjeta(tarjeta).0, 3_600.0, "un cargo, en su fecha");
+}
+
+#[test]
+fn s12c_al_cobrar_una_anual_la_renovacion_avanza_un_ano() {
+    // Sin esto el cargo se repetiría cada día a partir del vencimiento: la
+    // condición es «hoy >= fecha», no «hoy == fecha».
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(),
+                                Some("05/07/2026".into())).unwrap();
+
+    procesar_en(2026, 7, 5);
+    assert_eq!(renovacion_de(sub), Some("05/07/2027".into()), "la renovación avanza");
+
+    procesar_en(2026, 7, 6);
+    procesar_en(2026, 12, 31);
+    assert_importe(balances_tarjeta(tarjeta).0, 3_600.0, "y no vuelve a cobrar este año");
+    assert_eq!(total_gastos(), 1);
+}
+
+#[test]
+fn s12d_si_la_aplicacion_se_abre_tarde_la_renovacion_sigue_la_del_proveedor() {
+    // La fecha del año que viene se calcula desde la **anotada**, no desde
+    // hoy. Si se calculara desde hoy, cada apertura tardía correría el
+    // vencimiento y al cabo de unos años dejaría de parecerse al del
+    // proveedor.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(),
+                                Some("05/07/2026".into())).unwrap();
+
+    procesar_en(2026, 9, 22); // se abre casi tres meses tarde
+
+    assert_eq!(renovacion_de(sub), Some("05/07/2027".into()), "no se corre al 22/09");
+}
+
+#[test]
+fn s12e_una_anual_sin_fecha_anotada_no_se_cobra() {
+    // Entre un cargo de más y uno de menos, el de menos es el que se corrige
+    // mirando el estado de cuenta.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(), None).unwrap();
+
+    assert!(procesar_en(2026, 12, 31).is_empty());
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "sin fecha no hay cargo");
+}
+
+#[test]
+fn s12f_una_fecha_de_renovacion_ilegible_se_rechaza_al_guardarla() {
+    // Guardarla dejaría una anual que **aparenta estar configurada** y no
+    // cobra. El hueco visible es mejor que el falso lleno.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+
+    let r = crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(),
+                              Some("2026-07-05".into()));
+    assert!(r.is_err(), "el ISO no es el formato de la aplicación");
+
+    let r = crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(),
+                              Some("31/02/2026".into()));
+    assert!(r.is_err(), "un 31 de febrero no existe");
+}
+
+#[test]
+fn s12g_la_fecha_de_renovacion_no_se_guarda_en_una_mensual() {
+    // No la usa. Guardarla sugeriría que gobierna algo.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Mensual".into(), 500.0, tarjeta, "mensual".into(), 10, "DOP".into(),
+                                Some("05/07/2026".into())).unwrap();
+
+    assert_eq!(renovacion_de(sub), None);
+}
+
+#[test]
+fn s18_el_aviso_se_enciende_una_semana_antes_del_cobro_anual() {
+    // La alarma que pidió el titular. Se resuelve en el backend y no en la
+    // vista: es una regla, y una regla en el HTML es una regla sin pruebas.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(),
+                      Some("05/07/2026".into())).unwrap();
+
+    assert!(!avisa_en(2026, 6, 27), "ocho días antes todavía no");
+    assert!(avisa_en(2026, 6, 28), "siete días antes sí");
+    assert!(avisa_en(2026, 7, 5), "y el mismo día");
+    assert!(!avisa_en(2026, 7, 6), "pasada la fecha ya no es aviso, es cobro pendiente");
+}
+
+#[test]
+fn s19_una_mensual_no_avisa_de_una_fecha_que_el_sistema_no_respetaria() {
+    // Mientras el día 31 siga saltándose meses (`s10`, `s11`), anunciar el
+    // próximo cobro de una mensual sería prometer algo que luego no ocurre.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Mensual".into(), 500.0, tarjeta, "mensual".into(), 30, "DOP".into(), None).unwrap();
+
+    for dia in 20..=28u32 {
+        assert!(!avisa_en(2026, 2, dia), "avisó el {dia} de febrero");
+    }
 }
 
 #[test]
@@ -979,7 +1105,7 @@ fn s13_tres_meses_sin_abrir_la_aplicacion_generan_un_solo_cargo() {
     // evidente.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 10, "DOP".into()).unwrap();
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 10, "DOP".into(), None).unwrap();
     fijar_ultimo_pago(sub, "10/01/2026");
 
     // Se abre por primera vez en abril, tras saltarse febrero y marzo.
@@ -1004,7 +1130,7 @@ fn s14_una_fecha_de_ultimo_pago_ilegible_cobra_en_cada_arranque() {
     // arranque, cobra en todos.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into()).unwrap();
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
 
     for dia in [1, 2, 3] {
         fijar_ultimo_pago(sub, "2026-01-10"); // ISO: no tiene el formato esperado
@@ -1023,7 +1149,7 @@ fn s15_antes_de_su_dia_no_se_cobra() {
     // suscripciones facturaban el día 1.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into()).unwrap();
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
 
     for dia in 1..15u32 {
         assert!(
@@ -1042,7 +1168,7 @@ fn s16_el_dia_del_cargo_es_el_del_reloj_y_no_el_del_sistema() {
     // las pruebas de arriba estarían midiendo el día real y no lo que dicen.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).unwrap();
 
     procesar_en(2026, 6, 9);
 
@@ -1065,7 +1191,7 @@ fn s17_sin_la_categoria_de_suscripciones_el_cargo_va_a_parar_a_la_categoria_1() 
     // usuario puede renombrarlas o borrarlas desde la propia aplicación.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into(), None).unwrap();
 
     // El usuario renombra las dos categorías que el código busca por nombre.
     conexion()

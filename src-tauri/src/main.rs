@@ -42,6 +42,7 @@ use aplicacion::registrar_bonificacion::{registrar_bonificacion, revertir_bonifi
 use dominio::bonificacion::Bonificacion;
 use dominio::prestamo::{self, TipoPrestamo};
 use dominio::suscripcion::{Frecuencia, MarcaDeCobro, Suscripcion as SuscripcionDominio};
+use puertos::reloj::Reloj;
 
 // --- ESTRUCTURAS DTO (DATA TRANSFER OBJECTS) ---
 #[derive(Serialize, Deserialize, Debug)]
@@ -159,6 +160,11 @@ pub struct Suscripcion {
     divisa: String,
     entidad: String,
     nombre_tarjeta: String,
+    /// Solo las anuales. `None` significa que no se sabe cuándo renueva, y
+    /// entonces no se cobra.
+    fecha_renovacion: Option<String>,
+    /// Si el cargo cae dentro de los próximos siete días.
+    avisa: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -962,9 +968,14 @@ fn revertir_abono_tarjeta(id: i64, motivo: String) -> Result<String, String> {
 // --- COMANDOS: SUSCRIPCIONES ---
 #[tauri::command]
 fn obtener_suscripciones() -> Result<Vec<Suscripcion>, String> {
+    suscripciones_con_aviso(&crate::adaptadores::reloj_sistema::RelojSistema)
+}
+
+/// Las suscripciones, con el aviso ya resuelto para ese «hoy».
+pub fn suscripciones_con_aviso(reloj: &dyn Reloj) -> Result<Vec<Suscripcion>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT s.id, s.plataforma, s.monto, s.tarjeta_id, s.frecuencia, s.dia_facturacion, s.fecha_ultimo_pago, s.divisa, t.entidad, t.nombre_tarjeta
+        "SELECT s.id, s.plataforma, s.monto, s.tarjeta_id, s.frecuencia, s.dia_facturacion, s.fecha_ultimo_pago, s.divisa, t.entidad, t.nombre_tarjeta, s.fecha_renovacion
          FROM suscripciones s
          JOIN tarjetas t ON s.tarjeta_id = t.id
          ORDER BY s.plataforma ASC;"
@@ -982,6 +993,8 @@ fn obtener_suscripciones() -> Result<Vec<Suscripcion>, String> {
             divisa: row.get(7)?,
             entidad: row.get(8)?,
             nombre_tarjeta: row.get(9)?,
+            fecha_renovacion: row.get(10)?,
+            avisa: false, // se calcula abajo, con el reloj
         })
     }).map_err(|e| e.to_string())?;
 
@@ -989,17 +1002,69 @@ fn obtener_suscripciones() -> Result<Vec<Suscripcion>, String> {
     for r in rows {
         list.push(r.map_err(|e| e.to_string())?);
     }
+    drop(stmt);
+
+    // El aviso se resuelve aquí y no en la vista: es una regla, y las reglas
+    // no viven en el HTML. La vista solo pinta el `bool`.
+    let hoy = reloj.hoy();
+    for s in &mut list {
+        s.avisa = dominio_de(s).map(|d| d.avisa(hoy)).unwrap_or(false);
+    }
+
     Ok(list)
 }
 
+/// La vista de dominio de una fila de `suscripciones`.
+///
+/// Un solo sitio donde se traduce lo almacenado a la regla, para que el
+/// cobro y el aviso no puedan discrepar sobre qué día vence una suscripción.
+fn dominio_de(s: &Suscripcion) -> Option<SuscripcionDominio> {
+    Some(SuscripcionDominio {
+        frecuencia: Frecuencia::desde_codigo(&s.frecuencia)?,
+        dia_de_facturacion: s.dia_facturacion.max(0) as u32,
+        ultimo_cobro: MarcaDeCobro::desde_texto(s.fecha_ultimo_pago.as_deref()),
+        renovacion: s.fecha_renovacion.as_deref().and_then(fecha_desde_texto),
+    })
+}
+
+/// `dd/mm/aaaa` — el formato de la aplicación.
+fn fecha_desde_texto(texto: &str) -> Option<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(texto, "%d/%m/%Y").ok()
+}
+
 #[tauri::command]
-fn crear_suscripcion(plataforma: String, monto: f64, tarjeta_id: i64, frecuencia: String, dia_facturacion: i32, divisa: String) -> Result<i64, String> {
+fn crear_suscripcion(plataforma: String, monto: f64, tarjeta_id: i64, frecuencia: String, dia_facturacion: i32, divisa: String, fecha_renovacion: Option<String>) -> Result<i64, String> {
+    let renovacion = validar_renovacion(&frecuencia, fecha_renovacion)?;
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO suscripciones (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa) VALUES (?, ?, ?, ?, ?, ?);",
-        (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa)
+        "INSERT INTO suscripciones (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, fecha_renovacion) VALUES (?, ?, ?, ?, ?, ?, ?);",
+        (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, renovacion)
     ).map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
+}
+
+/// La fecha de renovación pertenece a las anuales, y tiene que entenderse.
+///
+/// Se rechaza una fecha ilegible en vez de guardarla: una anual con fecha que
+/// no se puede leer se comporta como una sin fecha —no cobra— pero **aparenta
+/// estar configurada**, y eso es peor que el hueco visible.
+///
+/// En una mensual se descarta, porque no la usa: guardarla sugeriría que
+/// gobierna algo.
+fn validar_renovacion(frecuencia: &str, fecha: Option<String>) -> Result<Option<String>, String> {
+    if frecuencia != "anual" {
+        return Ok(None);
+    }
+    match fecha.as_deref().map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(texto) => match fecha_desde_texto(texto) {
+            Some(_) => Ok(Some(texto.to_string())),
+            None => Err(format!(
+                "La fecha de renovación «{}» no se entiende. Se espera dd/mm/aaaa.",
+                texto
+            )),
+        },
+    }
 }
 
 /// Edita una suscripción **conservando `fecha_ultimo_pago`**.
@@ -1018,12 +1083,14 @@ fn actualizar_suscripcion(
     frecuencia: String,
     dia_facturacion: i32,
     divisa: String,
+    fecha_renovacion: Option<String>,
 ) -> Result<(), String> {
+    let renovacion = validar_renovacion(&frecuencia, fecha_renovacion)?;
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let filas = conn
         .execute(
-            "UPDATE suscripciones SET plataforma = ?, monto = ?, tarjeta_id = ?, frecuencia = ?, dia_facturacion = ?, divisa = ? WHERE id = ?;",
-            (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, id),
+            "UPDATE suscripciones SET plataforma = ?, monto = ?, tarjeta_id = ?, frecuencia = ?, dia_facturacion = ?, divisa = ?, fecha_renovacion = ? WHERE id = ?;",
+            (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, renovacion, id),
         )
         .map_err(|e| e.to_string())?;
     if filas == 0 {
@@ -1063,7 +1130,7 @@ pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> R
     let hoy_fecha_str = hoy.format("%d/%m/%Y").to_string();
 
     let mut stmt = conn.prepare(
-        "SELECT id, plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, fecha_ultimo_pago, divisa FROM suscripciones;"
+        "SELECT id, plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, fecha_ultimo_pago, divisa, fecha_renovacion FROM suscripciones;"
     ).map_err(|e| e.to_string())?;
 
     struct SubRecord {
@@ -1075,6 +1142,7 @@ pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> R
         dia_facturacion: i32,
         fecha_ultimo_pago: Option<String>,
         divisa: String,
+        fecha_renovacion: Option<String>,
     }
 
     let rows = stmt.query_map([], |row| {
@@ -1087,6 +1155,7 @@ pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> R
             dia_facturacion: row.get(5)?,
             fecha_ultimo_pago: row.get(6)?,
             divisa: row.get(7)?,
+            fecha_renovacion: row.get(8)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -1121,18 +1190,16 @@ pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> R
     for sub in suscripciones {
         // La decisión vive en `dominio::suscripcion`, no aquí. Este bucle se
         // ocupa de mover dinero; si corresponde moverlo lo dice la regla.
-        let requiere_cargo = match Frecuencia::desde_codigo(&sub.frecuencia) {
-            Some(frecuencia) => SuscripcionDominio {
-                frecuencia,
-                dia_de_facturacion: sub.dia_facturacion.max(0) as u32,
-                ultimo_cobro: MarcaDeCobro::desde_texto(sub.fecha_ultimo_pago.as_deref()),
-            }
-            .corresponde_cobrar(hoy),
-            // Una frecuencia que el `CHECK` no admite no debería existir. Si
-            // existiera, no cobrar es lo que hacía la cadena de `if`
-            // anterior al no coincidir con ninguna rama.
-            None => false,
-        };
+        let regla = Frecuencia::desde_codigo(&sub.frecuencia).map(|frecuencia| SuscripcionDominio {
+            frecuencia,
+            dia_de_facturacion: sub.dia_facturacion.max(0) as u32,
+            ultimo_cobro: MarcaDeCobro::desde_texto(sub.fecha_ultimo_pago.as_deref()),
+            renovacion: sub.fecha_renovacion.as_deref().and_then(fecha_desde_texto),
+        });
+        // Una frecuencia que el `CHECK` no admite no debería existir. Si
+        // existiera, no cobrar es lo que hacía la cadena de `if` anterior al
+        // no coincidir con ninguna rama.
+        let requiere_cargo = regla.as_ref().is_some_and(|r| r.corresponde_cobrar(hoy));
 
         if requiere_cargo {
             let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -1162,6 +1229,18 @@ pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> R
                 "UPDATE suscripciones SET fecha_ultimo_pago = ? WHERE id = ?;",
                 (&hoy_fecha_str, sub.id)
             ).map_err(|e| e.to_string())?;
+
+            // 4. Y en una anual, adelantar la renovación un año.
+            //
+            // Se calcula desde la fecha **anotada**, no desde hoy: si la
+            // aplicación se abre tarde, el vencimiento del año que viene
+            // sigue siendo el del proveedor y no el del descuido.
+            if let Some(siguiente) = regla.as_ref().and_then(|r| r.renovacion_siguiente()) {
+                tx.execute(
+                    "UPDATE suscripciones SET fecha_renovacion = ? WHERE id = ?;",
+                    (siguiente.format("%d/%m/%Y").to_string(), sub.id),
+                ).map_err(|e| e.to_string())?;
+            }
 
             tx.commit().map_err(|e| e.to_string())?;
 
