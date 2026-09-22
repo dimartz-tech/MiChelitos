@@ -124,11 +124,7 @@ impl Suscripcion {
     /// Las anuales leen su fecha de renovación. Las mensuales conservan la
     /// conducta anterior, divergencias incluidas, y cada rama dice cuál.
     pub fn corresponde_cobrar(&self, hoy: NaiveDate) -> bool {
-        // **Divergencia: el día 31 en un mes de 30.** `hoy.day()` nunca llega
-        // a 31 en abril, junio, septiembre o noviembre —ni a 30 en febrero—,
-        // de modo que esos meses se saltan enteros. Lo natural sería tomar el
-        // último día del mes, pero eso cambia el importe anual.
-        let dia_alcanzado = hoy.day() >= self.dia_de_facturacion;
+        let dia_alcanzado = hoy.day() >= self.dia_de_facturacion_en(hoy);
 
         match &self.ultimo_cobro {
             // **Divergencia: la marca ilegible obliga a cobrar.** Invierte la
@@ -164,6 +160,22 @@ impl Suscripcion {
         }
     }
 
+    /// El día en que factura, **recortado a los días que tiene ese mes**.
+    ///
+    /// Antes se comparaba contra el día crudo, y `hoy.day()` nunca llega a 31
+    /// en un mes de 30 ni a 30 en febrero: esos meses pasaban sin cargo. Una
+    /// mensual del día 31 se cobraba 7 de 12 veces al año.
+    ///
+    /// **La fecha sale del estado de cuenta, no de lo que parezca lógico.**
+    /// Un cargo del día 29 se generó el 28 de febrero, el último día del mes.
+    /// Que se liquidara el 1 de marzo es otra cosa: esta aplicación asienta
+    /// el consumo contra la tarjeta, y el consumo lleva la fecha en que el
+    /// emisor lo generó. La liquidación entra por el ciclo de pago de la
+    /// tarjeta, que se lleva aparte.
+    fn dia_de_facturacion_en(&self, hoy: NaiveDate) -> u32 {
+        self.dia_de_facturacion.min(dias_del_mes(hoy.year(), hoy.month()))
+    }
+
     /// Si la renovación anotada ya venció. Sin fecha, no vence nada.
     fn vence_la_renovacion(&self, hoy: NaiveDate) -> bool {
         match self.renovacion {
@@ -174,9 +186,15 @@ impl Suscripcion {
 
     /// Cuándo toca el próximo cargo, si se puede decir.
     ///
-    /// **Solo las anuales lo saben.** Una mensual tendría que predecirlo, y
-    /// esa predicción arrastraría hoy el defecto del día 31; anunciar una
-    /// fecha que el sistema luego no respeta es peor que no anunciar nada.
+    /// **Solo las anuales lo dicen**, y ahora por una razón distinta de la
+    /// original. Cuando esto se escribió, una mensual no podía anunciar su
+    /// próximo cobro porque el día 31 se saltaba meses y la fecha anunciada
+    /// no se habría cumplido. Ese defecto está cerrado: el día se recorta al
+    /// último del mes, así que la fecha **ya sería predecible**.
+    ///
+    /// Se mantiene anual porque es lo que el titular pidió del aviso, no
+    /// porque siga siendo imposible. Extenderlo a las mensuales es ahora un
+    /// cambio pequeño y deliberado, y conviene que se note la diferencia.
     pub fn proximo_cobro(&self) -> Option<NaiveDate> {
         match self.frecuencia {
             Frecuencia::Anual => self.renovacion,
@@ -201,12 +219,22 @@ impl Suscripcion {
     /// La renovación del año siguiente, para después de cobrar.
     ///
     /// El 29 de febrero se traslada al 28: `NaiveDate` no admite un 29 en año
-    /// común, y adelantar al 1 de marzo movería el cargo de mes.
+    /// común, y adelantar al 1 de marzo movería el cargo de mes. Es la misma
+    /// decisión que toma `dia_de_facturacion_en` para las mensuales.
     pub fn renovacion_siguiente(&self) -> Option<NaiveDate> {
         let fecha = self.renovacion?;
         let anio = fecha.year() + 1;
         NaiveDate::from_ymd_opt(anio, fecha.month(), fecha.day())
             .or_else(|| NaiveDate::from_ymd_opt(anio, fecha.month(), 28))
+    }
+}
+
+fn dias_del_mes(anio: i32, mes: u32) -> u32 {
+    match mes {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if anio % 4 == 0 && (anio % 100 != 0 || anio % 400 == 0) => 29,
+        _ => 28,
     }
 }
 
@@ -255,14 +283,40 @@ mod tests {
     }
 
     #[test]
-    fn el_dia_31_no_llega_en_los_meses_de_treinta() {
-        // Divergencia fijada: en abril no hay día 31, de modo que el mes pasa
-        // sin cargo. Se afirma para que corregirla sea un cambio deliberado.
+    fn el_dia_de_facturacion_se_recorta_a_los_dias_que_tiene_el_mes() {
+        // **CAMBIO DE CONDUCTA.** Antes abril pasaba sin cargo por no tener
+        // un día 31. Ahora el cargo se genera el 30, que es lo que hace el
+        // emisor: un cargo del día 29 se generó el 28 de febrero.
         let s = mensual(31, MarcaDeCobro::En { anio: 2026, mes: 3 });
-        for dia in 1..=30u32 {
-            assert!(!s.corresponde_cobrar(en(2026, 4, dia)), "cobró el {dia} de abril");
+        for dia in 1..=29u32 {
+            assert!(!s.corresponde_cobrar(en(2026, 4, dia)), "aún no es el último día");
         }
-        assert!(s.corresponde_cobrar(en(2026, 5, 31)), "hasta mayo no vuelve a cobrar");
+        assert!(s.corresponde_cobrar(en(2026, 4, 30)), "el 30 de abril, que es el último");
+    }
+
+    #[test]
+    fn en_febrero_el_cargo_del_dia_29_se_genera_el_28() {
+        // El caso real, con su fecha: 2026 no es bisiesto.
+        let s = mensual(29, MarcaDeCobro::En { anio: 2026, mes: 1 });
+        assert!(!s.corresponde_cobrar(en(2026, 2, 27)));
+        assert!(s.corresponde_cobrar(en(2026, 2, 28)), "el último día de febrero");
+    }
+
+    #[test]
+    fn en_un_febrero_bisiesto_el_ultimo_dia_es_el_29() {
+        // 2028 sí es bisiesto. El recorte sigue al mes, no a una cifra fija.
+        let s = mensual(30, MarcaDeCobro::En { anio: 2028, mes: 1 });
+        assert!(!s.corresponde_cobrar(en(2028, 2, 28)));
+        assert!(s.corresponde_cobrar(en(2028, 2, 29)));
+    }
+
+    #[test]
+    fn recortar_el_dia_no_adelanta_el_cargo_de_un_mes_largo() {
+        // El recorte solo actúa donde el día no existe. En marzo, una del 30
+        // sigue esperando al 30.
+        let s = mensual(30, MarcaDeCobro::En { anio: 2026, mes: 2 });
+        assert!(!s.corresponde_cobrar(en(2026, 3, 29)));
+        assert!(s.corresponde_cobrar(en(2026, 3, 30)));
     }
 
     #[test]
@@ -363,8 +417,9 @@ mod tests {
     }
 
     #[test]
-    fn un_ano_completo_del_dia_31_deja_cinco_meses_sin_cargo() {
+    fn un_ano_completo_del_dia_31_ya_no_deja_ningun_mes_sin_cargo() {
         // La misma medición que `s10` hace contra la base, aquí sin ella.
+        // Antes daba siete.
         let mut cobros = 0;
         let mut marca = MarcaDeCobro::Ninguna;
         for mes in 1..=12u32 {
@@ -386,6 +441,6 @@ mod tests {
                 }
             }
         }
-        assert_eq!(cobros, 7, "siete cargos donde el proveedor hace doce");
+        assert_eq!(cobros, 12, "doce, los mismos que hace el proveedor");
     }
 }
