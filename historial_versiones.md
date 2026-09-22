@@ -4,7 +4,6 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-<<<<<<< HEAD
 ## 🚀 Versión 1.25.0 (Versión Actual) - 2026-09-22
 **El día de facturación se recorta a los días que tiene el mes: febrero deja de perder su cargo.**
 
@@ -19,6 +18,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ### 🔍 Lo que se descartó al medirlo
 * Una formulación más general —«cobra si pasó cualquier vencimiento posterior al último cobro»— también arreglaba febrero, y **de paso recuperaba un período atrasado** que antes se perdía: dieciocho cargos en enero donde había ocho, sobre datos reales. Recuperar períodos vencidos es una decisión abierta (`s13`) y no se toma de rebote.
+## 🚀 Versión 1.24.0 - 2026-09-22
+**Las suscripciones anuales anotan cuándo renuevan, en vez de deducirlo, y avisan una semana antes.**
+
+### 📅 La fecha de renovación
+* La condición anterior era `anio_actual > p_anio` y **no miraba el mes**: una anual cobrada en julio volvía a cobrar el 5 de enero, seis meses antes. No era una condición mal escrita, era que **intentaba deducir un vencimiento con un dato que no bastaba**.
+* Ahora la fecha se anota y la decisión la lee. **Una anual sin fecha no se cobra**: entre un cargo de más y uno de menos, el de menos es el que se corrige mirando el estado de cuenta.
+* Cierra de paso los otros dos agujeros **en las anuales**: ni el día 31 ni una marca de cobro ilegible las desvían ya. En las mensuales siguen abiertos, porque allí la marca es el único dato.
+* Una fecha de renovación ilegible **se rechaza al guardarla**, en vez de dejar una anual que aparenta estar configurada y no cobra.
+
+### 🔔 El aviso
+* Siete días antes del cargo y hasta el propio día; pasada la fecha se apaga, porque ya no es un aviso sino un cobro pendiente.
+* **Solo las anuales.** Una mensual tendría que predecir su próximo cobro, y esa predicción arrastraría el defecto del día 31: anunciar una fecha que el sistema luego no respeta es peor que no anunciar nada.
+* La regla vive en el núcleo y llega a la vista como un `bool`. Una regla en el HTML es una regla sin pruebas.
+
+### 🗄️ Base de Datos
+* **Migración 12**: añade `suscripciones.fecha_renovacion` y la deriva para las anuales existentes, tomando el **día de facturación y no el día en que se ejecutó el cargo** — sobre datos reales esa diferencia era de un día. Sin marca previa, o con una ilegible, la deja vacía.
 
 ---
 
@@ -41,7 +56,6 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 * La regla sale del bucle que mueve el dinero y pasa a ser un tipo con una sola pregunta: `corresponde_cobrar(hoy)`.
 * **`MarcaDeCobro::Ilegible` es distinto de `Ninguna`**: no haber cobrado nunca y no entender la marca son estados opuestos, y confundirlos era lo que escondía el defecto.
 * La marca **no guarda el día**, porque la regla no lo mira; conservarlo sugeriría una precisión que la decisión no tiene.
-=======
 ## 🚀 Versión 1.22.0 - 2026-09-22
 **El esquema rechaza una fracción de céntimo al escribir. El tramo a `INTEGER` se descarta: midiendo, la premisa era falsa.**
 
@@ -64,7 +78,6 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 * **Migración 10 — el céntimo exacto, sin tolerancia**: redondea por exactitud, con el mismo criterio que impone el `CHECK`.
 * **Migración 11 — la fracción se rechaza al escribir**: reconstruye las 12 tablas con sus restricciones. Idempotente, comprueba el recuento de filas y se detiene si encontrara un índice o disparador propio que la reconstrucción perdería.
 * **Las migraciones corren con las claves ajenas apagadas**, como SQLite prescribe para rehacer una tabla, y cada una termina con `foreign_key_check` dentro de su transacción: la comprobación pasa de ser por sentencia a ser por migración.
->>>>>>> main
 
 ---
 
