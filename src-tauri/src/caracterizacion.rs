@@ -77,6 +77,11 @@ fn conexion() -> Connection {
 ///
 /// Las correcciones exigen una explicación de cierta longitud, así que las
 /// pruebas la proporcionan igual que lo haría el titular.
+/// Un importe tal como llegaría del IPC: por sus dígitos.
+fn importe(texto: &str) -> crate::ipc::ImporteDecimal {
+    crate::ipc::ImporteDecimal::desde_texto(texto).expect("importe de prueba")
+}
+
 fn motivo_de_prueba() -> String {
     "Corrección de prueba automatizada del sistema".to_string()
 }
@@ -1243,7 +1248,7 @@ fn c37_declarar_el_saldo_del_estado_lo_fija_y_deja_constancia_de_la_diferencia()
     crate::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
     assert_importe(saldo_prestamo(id), 96_000.0, "estimación");
 
-    crate::declarar_saldo_prestamo(id, 96_250.75, Some("30/09/2026".into())).unwrap();
+    crate::declarar_saldo_prestamo(id, importe("96250.75"), Some("30/09/2026".into())).unwrap();
 
     assert_importe(saldo_prestamo(id), 96_250.75, "manda el estado de cuenta");
     let movimientos = crate::obtener_movimientos_prestamo(id).unwrap();
@@ -2269,20 +2274,20 @@ fn c87_corregir_da_por_cobrado_el_neto_entero_aunque_faltara_algo() {
 
 #[test]
 fn c87b_un_cobro_parcial_declarado_conserva_lo_que_falta() {
-    // **La excepción, afirmada.** El neto es 10 200 y solo entraron 9 000:
-    // quedan 1 200 por cobrar, y la factura lo dice en lugar de darlo por
-    // saldado.
+    // **La excepción, afirmada.** El neto es 10 200 y solo entraron
+    // 9 137,25: queda un resto por cobrar, y la factura lo dice en lugar de
+    // darlo por saldado.
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-006", 10_000.0, 15.0)).unwrap();
     marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
 
-    actualizar_ingreso(id, "B-006".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, Some(9_000.0), Some(motivo_de_prueba()))
+    actualizar_ingreso(id, "B-006".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, Some(importe("9137.25")), Some(motivo_de_prueba()))
         .unwrap();
 
-    assert_importe(recibido_de(id), 9_000.0, "lo que de verdad entró");
-    assert_importe(saldo_cuenta_id(cuenta), 10_000.0, "la cuenta sigue a lo recibido");
-    assert_importe(12_000.0 - retencion_de(id) - recibido_de(id), 1_200.0, "queda por cobrar");
+    assert_importe(recibido_de(id), 9_137.25, "lo que de verdad entró");
+    assert_importe(saldo_cuenta_id(cuenta), 10_137.25, "la cuenta sigue a lo recibido");
+    assert_importe(12_000.0 - retencion_de(id) - recibido_de(id), 1_062.75, "queda por cobrar");
 }
 
 #[test]
@@ -2293,7 +2298,7 @@ fn c87c_un_cobro_parcial_mayor_que_el_neto_se_rechaza() {
     marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
 
     let r = actualizar_ingreso(
-        id, "B-007".into(), 1, "20/09/2026".into(), 10_000.0, 15.0, Some(9_000.0),
+        id, "B-007".into(), 1, "20/09/2026".into(), 10_000.0, 15.0, Some(importe("9137.25")),
         Some(motivo_de_prueba()),
     );
 
@@ -2455,7 +2460,7 @@ fn c95_una_comision_con_fraccion_de_centimo_se_decide_al_crear() {
     let _g = entorno_aislado();
     let id = crate::crear_cuenta(
         "Cuenta Corriente DOP".into(), "DOP".into(), 0.0,
-        Some("Banco Ejemplo".into()), Some(75.005),
+        Some("Banco Ejemplo".into()), Some(importe("75.005")),
     )
     .unwrap();
 
@@ -2473,7 +2478,7 @@ fn c96_lo_mismo_al_corregir_una_cuenta_existente() {
     let id = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
 
     crate::actualizar_cuenta(
-        id, "Cuenta Corriente DOP".into(), Some("Banco Ejemplo".into()), Some(120.507),
+        id, "Cuenta Corriente DOP".into(), Some("Banco Ejemplo".into()), Some(importe("120.507")),
     )
     .unwrap();
 
@@ -2497,7 +2502,7 @@ fn c97_una_comision_sin_declarar_sigue_siendo_nula_y_no_cero() {
 fn c98_una_comision_negativa_se_sigue_rechazando() {
     let _g = entorno_aislado();
     let r = crate::crear_cuenta(
-        "Cuenta Ahorros DOP".into(), "DOP".into(), 0.0, None, Some(-1.0),
+        "Cuenta Ahorros DOP".into(), "DOP".into(), 0.0, None, Some(importe("-1.00")),
     );
 
     assert!(r.is_err());

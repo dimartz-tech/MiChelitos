@@ -19,6 +19,8 @@ pub enum ErrorDominio {
     ImportesNoCuadran { sale: f64, entra: f64, divisa: Divisa },
     /// Se declaró un cobro parcial mayor que el neto de la factura.
     CobroParcialExcedeElNeto { parcial: f64, neto: f64 },
+    /// El texto recibido no es un importe.
+    ImporteIlegible { texto: String },
 }
 
 impl fmt::Display for ErrorDominio {
@@ -30,6 +32,9 @@ impl fmt::Display for ErrorDominio {
                 esperada.codigo(),
                 recibida.codigo()
             ),
+            ErrorDominio::ImporteIlegible { texto } => {
+                write!(f, "«{}» no es un importe válido.", texto)
+            }
             ErrorDominio::CobroParcialExcedeElNeto { parcial, neto } => write!(
                 f,
                 "Un cobro parcial de {:.2} no puede superar el neto de la factura, que es {:.2}.",
