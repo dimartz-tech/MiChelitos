@@ -695,6 +695,55 @@ mod tests {
     }
 
     #[test]
+    fn una_tasa_sobrevive_al_viaje_por_una_columna_real() {
+        // **Esta prueba es la que hace innecesario persistir la tasa como
+        // entero.** SQLite guarda las tasas en columnas `REAL`, y la duda
+        // razonable era si ese viaje pierde micro-unidades.
+        //
+        // No las pierde: a escala de mil-millonésimas, una tasa del rango
+        // plausible necesita unos doce dígitos significativos y `f64` ofrece
+        // quince. Hay holgura de sobra.
+        //
+        // Lo que esta prueba protege es justamente esa holgura: si algún día
+        // se subiera `ESCALA_TASA_CAMBIO` hasta agotarla, el viaje empezaría a
+        // perder y aquí se sabría antes de que un importe se desviara.
+        let mut comprobadas = 0;
+        for milesimas in (1..200_000).step_by(37) {
+            let valor = milesimas as f64 / 1_000.0;
+            let original = TasaCambio::nueva(valor).unwrap();
+
+            // Ida y vuelta por la columna: el `f64` que se guarda y se relee.
+            let guardado = original.valor();
+            let recuperada = TasaCambio::nueva(guardado).unwrap();
+
+            assert_eq!(
+                recuperada.micro_unidades(),
+                original.micro_unidades(),
+                "la tasa {valor} no sobrevive a la columna REAL"
+            );
+            comprobadas += 1;
+        }
+        assert!(comprobadas > 5_000, "el barrido se quedó corto: {comprobadas}");
+    }
+
+    #[test]
+    fn un_porcentaje_tambien_sobrevive_al_viaje_por_una_columna_real() {
+        // Mismo argumento para las tasas de interés, que sí se guardan como
+        // `REAL` y llegan desde la base en cada cálculo de cuota.
+        for centesimas in (1..10_000).step_by(7) {
+            let fraccion = centesimas as f64 / 10_000.0;
+            let original = Porcentaje::desde_fraccion(fraccion).unwrap();
+            let recuperado = Porcentaje::desde_fraccion(original.fraccion()).unwrap();
+
+            assert_eq!(
+                recuperado.millonesimas(),
+                original.millonesimas(),
+                "el porcentaje {fraccion} no sobrevive"
+            );
+        }
+    }
+
+    #[test]
     fn una_tasa_positiva_pero_despreciable_se_rechaza() {
         // Redondearía a cero micro-unidades y no convertiría nada: es tan
         // inservible como una tasa de cero, y decirlo evita un importe nulo
