@@ -4,7 +4,28 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.22.0 (Versión Actual) - 2026-09-22
+<<<<<<< HEAD
+## 🚀 Versión 1.23.0 (Versión Actual) - 2026-09-22
+**Fase 5 — Suscripciones. El puerto `Reloj` entra en servicio, y con él aparecen seis defectos que la red anterior no podía ver.**
+
+### ⏰ El reloj, que existía sin usarse
+* `procesar_suscripciones` leía la fecha del sistema por dentro. Eso **hacía imposible escribir la prueba que más falta hacía**: que una suscripción *no* se cobre antes de su día. Todas las pruebas anteriores usan el día 1 de facturación porque es el único siempre alcanzado, de modo que la red cubría el cobro y no la abstención.
+* El puerto `Reloj` y su adaptador estaban construidos desde la Fase 0 y no los usaba nadie. El comando delega ahora en `procesar_suscripciones_con(reloj)`.
+
+### 🔍 Seis defectos, reproducidos y **sin corregir**
+* Una mensual del **día 31** se cobra **7 de 12 meses**: febrero, abril, junio, septiembre y noviembre se saltan enteros. La del día 30 pierde febrero.
+* Una **anual** se recobra al cambiar el año aunque no haya pasado uno: cobrada en julio, vuelve a cobrar el 5 de enero.
+* **Tres meses sin abrir la aplicación generan un solo cargo**, no tres.
+* Una marca de cobro **ilegible** cobra en cada arranque, incluso antes de su día. Es el más grave: **invierte la propiedad que da nombre a la fase**.
+* Sin las categorías «Suscripciones» ni «Otros», el cargo cae en el identificador **1 literal**, que hoy es «Alimentación».
+* Los seis cambian importes que un proveedor ya cobró de verdad, y tres no tienen respuesta obvia. Quedan documentados y fijados por pruebas, a la espera de decisión.
+
+### 🧩 `dominio::suscripcion`
+* La regla sale del bucle que mueve el dinero y pasa a ser un tipo con una sola pregunta: `corresponde_cobrar(hoy)`.
+* **`MarcaDeCobro::Ilegible` es distinto de `Ninguna`**: no haber cobrado nunca y no entender la marca son estados opuestos, y confundirlos era lo que escondía el defecto.
+* La marca **no guarda el día**, porque la regla no lo mira; conservarlo sugeriría una precisión que la decisión no tiene.
+=======
+## 🚀 Versión 1.22.0 - 2026-09-22
 **El esquema rechaza una fracción de céntimo al escribir. El tramo a `INTEGER` se descarta: midiendo, la premisa era falsa.**
 
 ### 📌 Por qué no se convirtió a `INTEGER`
@@ -26,6 +47,7 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 * **Migración 10 — el céntimo exacto, sin tolerancia**: redondea por exactitud, con el mismo criterio que impone el `CHECK`.
 * **Migración 11 — la fracción se rechaza al escribir**: reconstruye las 12 tablas con sus restricciones. Idempotente, comprueba el recuento de filas y se detiene si encontrara un índice o disparador propio que la reconstrucción perdería.
 * **Las migraciones corren con las claves ajenas apagadas**, como SQLite prescribe para rehacer una tabla, y cada una termina con `foreign_key_check` dentro de su transacción: la comprobación pasa de ser por sentencia a ser por migración.
+>>>>>>> main
 
 ---
 
