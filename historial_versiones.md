@@ -5,7 +5,26 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 ---
 
 <<<<<<< HEAD
-## 🚀 Versión 1.23.0 (Versión Actual) - 2026-09-22
+## 🚀 Versión 1.24.0 (Versión Actual) - 2026-09-22
+**Las suscripciones anuales anotan cuándo renuevan, en vez de deducirlo, y avisan una semana antes.**
+
+### 📅 La fecha de renovación
+* La condición anterior era `anio_actual > p_anio` y **no miraba el mes**: una anual cobrada en julio volvía a cobrar el 5 de enero, seis meses antes. No era una condición mal escrita, era que **intentaba deducir un vencimiento con un dato que no bastaba**.
+* Ahora la fecha se anota y la decisión la lee. **Una anual sin fecha no se cobra**: entre un cargo de más y uno de menos, el de menos es el que se corrige mirando el estado de cuenta.
+* Cierra de paso los otros dos agujeros **en las anuales**: ni el día 31 ni una marca de cobro ilegible las desvían ya. En las mensuales siguen abiertos, porque allí la marca es el único dato.
+* Una fecha de renovación ilegible **se rechaza al guardarla**, en vez de dejar una anual que aparenta estar configurada y no cobra.
+
+### 🔔 El aviso
+* Siete días antes del cargo y hasta el propio día; pasada la fecha se apaga, porque ya no es un aviso sino un cobro pendiente.
+* **Solo las anuales.** Una mensual tendría que predecir su próximo cobro, y esa predicción arrastraría el defecto del día 31: anunciar una fecha que el sistema luego no respeta es peor que no anunciar nada.
+* La regla vive en el núcleo y llega a la vista como un `bool`. Una regla en el HTML es una regla sin pruebas.
+
+### 🗄️ Base de Datos
+* **Migración 12**: añade `suscripciones.fecha_renovacion` y la deriva para las anuales existentes, tomando el **día de facturación y no el día en que se ejecutó el cargo** — sobre datos reales esa diferencia era de un día. Sin marca previa, o con una ilegible, la deja vacía.
+
+---
+
+## 🚀 Versión 1.23.0 - 2026-09-22
 **Fase 5 — Suscripciones. El puerto `Reloj` entra en servicio, y con él aparecen seis defectos que la red anterior no podía ver.**
 
 ### ⏰ El reloj, que existía sin usarse

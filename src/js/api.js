@@ -239,20 +239,23 @@ const AppAPI = {
         return await invoke('obtener_suscripciones');
     },
 
-    async crearSuscripcion(plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa) {
+    // `fechaRenovacion` va en dd/mm/aaaa y solo la usan las anuales; el
+    // backend la descarta en una mensual en vez de guardarla sin efecto.
+    async crearSuscripcion(plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaRenovacion = null) {
         return await invoke('crear_suscripcion', {
             plataforma,
             monto: Number(monto),
             tarjetaId: Number(tarjetaId),
             frecuencia,
             diaFacturacion: Number(diaFacturacion),
-            divisa
+            divisa,
+            fechaRenovacion
         });
     },
 
     // Edita una suscripción conservando fecha_ultimo_pago. Borrar y recrear
     // reiniciaría esa marca y provocaría un cobro duplicado en el mismo mes.
-    async actualizarSuscripcion(id, plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa) {
+    async actualizarSuscripcion(id, plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaRenovacion = null) {
         return await invoke('actualizar_suscripcion', {
             id: Number(id),
             plataforma,
@@ -260,7 +263,8 @@ const AppAPI = {
             tarjetaId: Number(tarjetaId),
             frecuencia,
             diaFacturacion: Number(diaFacturacion),
-            divisa
+            divisa,
+            fechaRenovacion
         });
     },
 
