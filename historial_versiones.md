@@ -4,7 +4,32 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.21.0 (Versión Actual) - 2026-09-22
+## 🚀 Versión 1.22.0 (Versión Actual) - 2026-09-22
+**El esquema rechaza una fracción de céntimo al escribir. El tramo a `INTEGER` se descarta: midiendo, la premisa era falsa.**
+
+### 📌 Por qué no se convirtió a `INTEGER`
+* Estaba previsto guardar centavos enteros. **En SQLite la afinidad `INTEGER` no restringe nada**: una columna declarada `INTEGER` acepta `75.005` y lo guarda como `real`, porque solo convierte cuando no pierde. El cambio de tipo no impedía lo que se quería impedir.
+* Tampoco compraba nada por otro lado: `REAL` representa centavos exactos hasta 2,5·10¹⁶, y sumar un millón de filas mezclando magnitudes se desvió **0,000000 ¢**.
+* Lo único que cambiaba era el modo de fallo, y a peor: leer un `INTEGER` como `f64` devuelve el entero crudo **sin error** —cien veces el importe, en silencio— y escribir un `i64` en una columna `REAL` hace lo mismo. Solo la dirección contraria falla en voz alta.
+* Se cierra como se cerró el tramo 3: **declarándolo innecesario**, con las mediciones convertidas en pruebas.
+
+### 🧮 La restricción de céntimo
+* Cada columna de dinero vive bajo `CHECK (ROUND(v, 2) = v)`. La garantía que faltaba —rechazar la fracción **al escribir**, no solo al migrar— sin tocar la unidad de almacenamiento.
+* **La expresión no es intercambiable.** Las variantes con `* 100` rechazan céntimos legítimos —once en un barrido, empezando por 4,77— porque multiplicar introduce el error que se pretendía detectar. La elegida no rechazó ninguno en 200 000 valores densos ni por magnitudes hasta 10¹⁴.
+
+### 🐛 Lo que la prueba contra datos reales destapó
+* **La aplicación habría dejado de funcionar.** `SET v = v + ?` suma en coma flotante y el 13 % de esas escrituras produce un valor que el `CHECK` rechaza; la quinta ya fallaba. Las nueve acumulaciones en SQL pasaron a `ROUND(v ± ?, 2)`, que corrige como mucho 1,5·10⁻⁵ unidades y **nunca decide un céntimo**. Una prueba recorre las fuentes para que no reaparezca ninguna sin redondear.
+* **Doce importes reales no pasaban**: no eran fracciones sino ruido de representación de ~10⁻¹², que las migraciones 3 y 9 saltaban por usar una tolerancia de `1e-6`.
+* **`legacy_alter_table` no surte efecto con las claves ajenas encendidas.** El `PRAGMA` se lee como activo y `RENAME` reescribe igualmente las cláusulas `REFERENCES` de las otras tablas. Renombrar `cuentas_ahorro` dejaba a `gastos` apuntando a una tabla temporal.
+
+### 🗄️ Base de Datos
+* **Migración 10 — el céntimo exacto, sin tolerancia**: redondea por exactitud, con el mismo criterio que impone el `CHECK`.
+* **Migración 11 — la fracción se rechaza al escribir**: reconstruye las 12 tablas con sus restricciones. Idempotente, comprueba el recuento de filas y se detiene si encontrara un índice o disparador propio que la reconstrucción perdería.
+* **Las migraciones corren con las claves ajenas apagadas**, como SQLite prescribe para rehacer una tabla, y cada una termina con `foreign_key_check` dentro de su transacción: la comprobación pasa de ser por sentencia a ser por migración.
+
+---
+
+## 🚀 Versión 1.21.0 - 2026-09-22
 **Los importes que el usuario teclea llegan al núcleo como dígitos, no como coma flotante.**
 
 ### 🧮 Núcleo monetario
