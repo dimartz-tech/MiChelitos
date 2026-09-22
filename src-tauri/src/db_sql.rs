@@ -1470,6 +1470,165 @@ fn reconstruir_suscripciones(
     Ok(())
 }
 
+const MIG14: &str = "la fecha manda: próximo cobro en vez de ventana mensual";
+
+/// Cada suscripción guarda **cuándo vence su próximo cobro**.
+///
+/// ## El defecto que cierra
+///
+/// La decisión anterior preguntaba «¿estamos en un mes posterior al del
+/// último cobro y ya llegó el día de facturación?», y la marca guardaba
+/// *cuándo se ejecutó* el cargo, no *qué período saldó*. Eso daba a cada
+/// período una **ventana** —de su día de facturación al fin de mes— y, si la
+/// aplicación no se abría dentro de ella, el período desaparecía al llegar el
+/// mes siguiente. Para una suscripción del día 30 la ventana era de un día.
+///
+/// Le costó a esta base un cargo real: Netflix, agosto de 2026.
+///
+/// ## De dónde sale la fecha de las que ya existen
+///
+/// * **Anual** — la que ya tenía en `fecha_renovacion`, que es el mismo
+///   concepto con otro nombre. Las dos columnas se funden en una: tener dos
+///   nombres para el mismo hecho es la duplicación que este proyecto lleva
+///   retirando.
+/// * **Mensual con último cobro** — el día de facturación del mes siguiente
+///   al de ese cobro. Para Netflix da el 30/08/2026, que **queda vencido**: el
+///   período perdido reaparece como pendiente en vez de desaparecer.
+/// * **Mensual sin último cobro** — su día de facturación en el mes en curso,
+///   o en el siguiente si ya pasó. No se inventa un pasado.
+///
+/// `dia_facturacion` **se conserva**, y no por compatibilidad: es el ancla.
+/// Sin ella, una del día 30 cobrada el 28 de febrero quedaría anclada al 28
+/// para siempre, porque el recorte a fin de mes no puede persistirse.
+pub fn migracion_14_fecha_del_proximo_cobro(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    if !tabla_existe(tx, "suscripciones")? {
+        return Ok(());
+    }
+    if columna_existe_en(tx, "suscripciones", "fecha_proximo_cobro")? {
+        return Ok(()); // idempotente
+    }
+
+    // La tabla se rehace: `fecha_renovacion` aparece en un `CHECK`, y SQLite
+    // no deja soltar una columna que una restricción menciona.
+    tx.execute_batch("PRAGMA legacy_alter_table = ON; PRAGMA defer_foreign_keys = ON;")
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+    let resultado = rehacer_suscripciones_con_proximo_cobro(tx);
+    let _ = tx.execute_batch("PRAGMA legacy_alter_table = OFF;");
+    resultado?;
+
+    rellenar_proximo_cobro(tx)
+}
+
+fn rehacer_suscripciones_con_proximo_cobro(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    let antes: i64 = tx
+        .query_row("SELECT COUNT(*) FROM suscripciones;", [], |r| r.get(0))
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+
+    migraciones::paso(
+        tx,
+        MIG14,
+        "rehacer suscripciones con fecha_proximo_cobro",
+        "ALTER TABLE suscripciones RENAME TO suscripciones_previa;
+         CREATE TABLE suscripciones (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             plataforma TEXT NOT NULL,
+             monto REAL NOT NULL,
+             tarjeta_id INTEGER NOT NULL,
+             frecuencia TEXT CHECK(frecuencia IN ('mensual', 'anual')) NOT NULL DEFAULT 'mensual',
+             dia_facturacion INTEGER NOT NULL DEFAULT 1,
+             fecha_ultimo_pago TEXT,
+             divisa TEXT CHECK(divisa IN ('DOP', 'USD')) NOT NULL DEFAULT 'DOP',
+             fecha_proximo_cobro TEXT,
+             FOREIGN KEY (tarjeta_id) REFERENCES tarjetas(id) ON DELETE CASCADE,
+             CHECK (ROUND(monto, 2) = monto),
+             CHECK (fecha_ultimo_pago IS NULL OR fecha_ultimo_pago GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]'),
+             CHECK (fecha_proximo_cobro IS NULL OR fecha_proximo_cobro GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]')
+         );
+         INSERT INTO suscripciones
+             (id, plataforma, monto, tarjeta_id, frecuencia, dia_facturacion,
+              fecha_ultimo_pago, divisa, fecha_proximo_cobro)
+         SELECT id, plataforma, monto, tarjeta_id, frecuencia, dia_facturacion,
+                fecha_ultimo_pago, divisa, fecha_renovacion
+         FROM suscripciones_previa;
+         DROP TABLE suscripciones_previa;",
+    )?;
+
+    let despues: i64 = tx
+        .query_row("SELECT COUNT(*) FROM suscripciones;", [], |r| r.get(0))
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+    if antes != despues {
+        return Err(ErrorMigracion::Fallo {
+            version: 14,
+            migracion: MIG14,
+            etapa: "verificar suscripciones".into(),
+            causa: format!("entraron {} filas y salieron {}", antes, despues),
+        });
+    }
+    Ok(())
+}
+
+/// Las mensuales, que no tenían fecha, la reciben.
+fn rellenar_proximo_cobro(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    use chrono::{Datelike, Local};
+
+    let hoy = Local::now().date_naive();
+
+    let pendientes: Vec<(i64, Option<String>, i64)> = {
+        let mut s = tx
+            .prepare(
+                "SELECT id, fecha_ultimo_pago, dia_facturacion FROM suscripciones
+                 WHERE frecuencia = 'mensual' AND fecha_proximo_cobro IS NULL;",
+            )
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        let it = s
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        it.filter_map(|x| x.ok()).collect()
+    };
+
+    for (id, ultimo, dia) in pendientes {
+        let ancla = u32::try_from(dia).unwrap_or(1).clamp(1, 31);
+
+        let fecha = match ultimo.as_deref().and_then(fecha_dmy) {
+            // El período siguiente al último cobrado. Si ya venció, el
+            // período perdido reaparece como pendiente.
+            Some(cobrado) => siguiente_mes_en(cobrado.year(), cobrado.month(), ancla),
+            // Sin historial no se inventa un pasado: el primero es el de este
+            // mes, o el del siguiente si su día ya pasó.
+            None => {
+                let de_este_mes = en_el_mes(hoy.year(), hoy.month(), ancla);
+                match de_este_mes {
+                    Some(f) if f >= hoy => Some(f),
+                    _ => siguiente_mes_en(hoy.year(), hoy.month(), ancla),
+                }
+            }
+        };
+
+        if let Some(fecha) = fecha {
+            tx.execute(
+                "UPDATE suscripciones SET fecha_proximo_cobro = ? WHERE id = ?;",
+                (fecha.format("%d/%m/%Y").to_string(), id),
+            )
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+fn fecha_dmy(texto: &str) -> Option<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(texto, "%d/%m/%Y").ok()
+}
+
+fn en_el_mes(anio: i32, mes: u32, ancla: u32) -> Option<chrono::NaiveDate> {
+    let dia = ancla.min(crate::dominio::suscripcion::dias_del_mes(anio, mes));
+    chrono::NaiveDate::from_ymd_opt(anio, mes, dia)
+}
+
+fn siguiente_mes_en(anio: i32, mes: u32, ancla: u32) -> Option<chrono::NaiveDate> {
+    let (anio, mes) = if mes == 12 { (anio + 1, 1) } else { (anio, mes + 1) };
+    en_el_mes(anio, mes, ancla)
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
