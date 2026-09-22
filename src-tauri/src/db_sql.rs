@@ -1130,7 +1130,9 @@ fn reconstruir_con_restricciones(tx: &Transaction) -> Result<(), ErrorMigracion>
             continue;
         }
 
-        let sql_nuevo = con_restricciones(&sql_actual, &presentes).ok_or_else(|| {
+        let de_centimo: Vec<String> =
+            presentes.iter().map(|c| restriccion_de_centimo(c)).collect();
+        let sql_nuevo = con_restricciones(&sql_actual, &de_centimo).ok_or_else(|| {
             ErrorMigracion::Fallo {
                 version: 11,
                 migracion: MIG11,
@@ -1191,7 +1193,7 @@ fn reconstruir_con_restricciones(tx: &Transaction) -> Result<(), ErrorMigracion>
 /// Trabaja sobre el texto que SQLite guarda, y por eso busca el paréntesis
 /// **por equilibrio** en vez de tomar el último carácter: una definición puede
 /// terminar con cláusulas después del paréntesis.
-fn con_restricciones(sql: &str, columnas: &[&str]) -> Option<String> {
+fn con_restricciones(sql: &str, restricciones: &[String]) -> Option<String> {
     let bytes = sql.as_bytes();
     let apertura = sql.find('(')?;
     let mut profundidad = 0usize;
@@ -1210,10 +1212,9 @@ fn con_restricciones(sql: &str, columnas: &[&str]) -> Option<String> {
         }
     }
     let cierre = cierre?;
-    let anadido: String = columnas
+    let anadido: String = restricciones
         .iter()
-        .map(|c| format!(",
-            {}", restriccion_de_centimo(c)))
+        .map(|r| format!(",\n            {}", r))
         .collect();
     Some(format!("{}{}{}", &sql[..cierre], anadido, &sql[cierre..]))
 }
@@ -1323,6 +1324,150 @@ fn renovacion_derivada(ultimo_cobro: &str, dia_facturacion: i64) -> Option<Strin
         _ => return None,
     };
     Some(format!("{:02}/{:02}/{}", dia.clamp(1, ultimo_del_mes), mes, anio))
+}
+
+const MIG13: &str = "las fechas de una suscripción tienen forma de fecha";
+
+/// La forma `dd/mm/aaaa`, impuesta por el esquema.
+fn restriccion_de_fecha(columna: &str) -> String {
+    format!(
+        "CHECK ({c} IS NULL OR {c} GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]')",
+        c = columna
+    )
+}
+
+/// Impide escribir en una suscripción una fecha que luego no se pueda leer.
+///
+/// ## Por qué hace falta además del dominio
+///
+/// El dominio ya no cobra con una marca ilegible, y lo dice en la lista. Eso
+/// resuelve el daño; esto cierra la puerta por la que entra.
+///
+/// Y entra: en la base real **no hay ninguna marca rota en `suscripciones`,
+/// pero sí una en `gastos.fecha`** —un `10/09/2026` tecleado sin la primera
+/// barra—. El estado no es teórico, solo no ha tocado aún esta tabla.
+///
+/// ## Lo que el `CHECK` no cubre
+///
+/// `GLOB` comprueba la **forma**, no que la fecha exista: un `31/02/2026`
+/// pasa. Por eso las dos capas se quedan, y ninguna sobra. El dominio sigue
+/// siendo el que decide si una fecha es legible de verdad.
+///
+/// No se extiende a `gastos.fecha` ni a las demás columnas de fecha: ahí hay
+/// un valor real que no cumple, y corregir un dato del titular es decisión
+/// suya, no de una migración.
+pub fn migracion_13_fechas_de_suscripcion(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    const COLUMNAS: &[&str] = &["fecha_ultimo_pago", "fecha_renovacion"];
+
+    if !tabla_existe(tx, "suscripciones")? {
+        return Ok(());
+    }
+
+    let sql_actual: String = tx
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'suscripciones';",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+
+    let restricciones: Vec<String> = COLUMNAS.iter().map(|c| restriccion_de_fecha(c)).collect();
+    if restricciones.iter().all(|r| sql_actual.contains(r.as_str())) {
+        return Ok(()); // idempotente
+    }
+
+    // Lo que ya no cumpliría se pone en claro antes de tocar nada: una
+    // migración que falla a mitad por un dato inesperado es peor que una que
+    // dice qué dato es.
+    for columna in COLUMNAS {
+        let fuera: i64 = tx
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM suscripciones
+                     WHERE {c} IS NOT NULL
+                       AND {c} NOT GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]';",
+                    c = columna
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        if fuera > 0 {
+            return Err(ErrorMigracion::Fallo {
+                version: 13,
+                migracion: MIG13,
+                etapa: format!("comprobar suscripciones.{}", columna),
+                causa: format!(
+                    "{} fila(s) guardan una fecha que no tiene forma dd/mm/aaaa. \
+                     Corrígelas desde la aplicación antes de migrar: la \
+                     migración no reescribe datos del titular.",
+                    fuera
+                ),
+            });
+        }
+    }
+
+    // Los mismos dos `PRAGMA` que la migración 11, y por lo mismo.
+    tx.execute_batch("PRAGMA legacy_alter_table = ON; PRAGMA defer_foreign_keys = ON;")
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+    let resultado = reconstruir_suscripciones(tx, &sql_actual, &restricciones);
+    let _ = tx.execute_batch("PRAGMA legacy_alter_table = OFF;");
+    resultado
+}
+
+fn reconstruir_suscripciones(
+    tx: &Transaction,
+    sql_actual: &str,
+    restricciones: &[String],
+) -> Result<(), ErrorMigracion> {
+    let sql_nuevo = con_restricciones(sql_actual, restricciones).ok_or_else(|| ErrorMigracion::Fallo {
+        version: 13,
+        migracion: MIG13,
+        etapa: "reescribir la definición de suscripciones".into(),
+        causa: "no se encontró el paréntesis que cierra la lista de columnas".into(),
+    })?;
+
+    let antes: i64 = tx
+        .query_row("SELECT COUNT(*) FROM suscripciones;", [], |r| r.get(0))
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+
+    let nombres: Vec<String> = {
+        let mut s = tx
+            .prepare("SELECT name FROM pragma_table_info('suscripciones');")
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        let it = s
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        it.filter_map(|x| x.ok()).collect()
+    };
+    let lista = nombres.join(", ");
+
+    migraciones::paso(
+        tx,
+        MIG13,
+        "reconstruir suscripciones con sus restricciones de fecha",
+        &format!(
+            "ALTER TABLE suscripciones RENAME TO suscripciones_previa;
+             {creacion};
+             INSERT INTO suscripciones ({lista}) SELECT {lista} FROM suscripciones_previa;
+             DROP TABLE suscripciones_previa;",
+            creacion = sql_nuevo,
+            lista = lista
+        ),
+    )?;
+
+    let despues: i64 = tx
+        .query_row("SELECT COUNT(*) FROM suscripciones;", [], |r| r.get(0))
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+    if antes != despues {
+        return Err(ErrorMigracion::Fallo {
+            version: 13,
+            migracion: MIG13,
+            etapa: "verificar suscripciones".into(),
+            causa: format!("entraron {} filas y salieron {}", antes, despues),
+        });
+    }
+    Ok(())
 }
 
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {

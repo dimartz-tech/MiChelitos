@@ -268,6 +268,13 @@ const AppAPI = {
         });
     },
 
+    // La única vía para escribir a mano la fecha del último cobro. Existe
+    // solo para sacar de la parada a una suscripción cuya fecha no se
+    // entiende; la edición normal la conserva a propósito.
+    async corregirUltimoCobro(id, fecha) {
+        return await invoke('corregir_ultimo_cobro', { id: Number(id), fecha });
+    },
+
     async eliminarSuscripcion(id) {
         return await invoke('eliminar_suscripcion', { id: Number(id) });
     },

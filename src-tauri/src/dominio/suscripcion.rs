@@ -13,9 +13,7 @@
 //! Corregirlas cambia importes que el proveedor ya cobró de verdad, y eso es
 //! una decisión del titular, no del código:
 //!
-//! * Una mensual del **día 31** se cobra 7 de 12 meses; la del 30, once.
 //! * Varios períodos vencidos generan **un solo cargo**.
-//! * Una marca de cobro **ilegible** obliga a cobrar, en las mensuales.
 //!
 //! ## Lo que sí cambió: la anual
 //!
@@ -60,11 +58,13 @@ impl Frecuencia {
 pub enum MarcaDeCobro {
     /// Nunca se ha cobrado.
     Ninguna,
-    /// Se cobró en ese mes de ese año.
+    /// Se cobró ese día.
     ///
-    /// **El día no se guarda a propósito**: la regla actual no lo mira, y
-    /// conservarlo aquí sugeriría una precisión que la decisión no tiene.
-    En { anio: i32, mes: u32 },
+    /// Guarda la fecha entera aunque la decisión mensual solo mire el mes.
+    /// **No es precisión de adorno: es la única forma de saber que la fecha
+    /// existe.** Antes se parseaban las tres partes y se usaban dos, y así
+    /// un `31/02/2026` pasaba como febrero y un `13/13/2026` como mes 13.
+    En(NaiveDate),
     /// Hay una marca, y no se entiende.
     ///
     /// No es lo mismo que no haberla: la regla actual las trata de forma
@@ -84,15 +84,19 @@ impl MarcaDeCobro {
             return MarcaDeCobro::Ilegible;
         }
 
-        // El día se descarta, igual que hacía el código original con su
-        // `_p_dia`. Que las tres partes se parseen y solo se usen dos es la
-        // forma en que el defecto de los períodos vencidos se hace visible.
+        // **La fecha tiene que existir**, no solo estar compuesta de
+        // dígitos. `from_ymd_opt` es quien lo decide: un `31/02/2026` tiene
+        // la forma correcta y no es un día, y el `CHECK` del esquema —que
+        // comprueba forma— lo deja pasar. Aquí es donde se detiene.
         match (
-            partes[0].parse::<i32>(),
+            partes[0].parse::<u32>(),
             partes[1].parse::<u32>(),
             partes[2].parse::<i32>(),
         ) {
-            (Ok(_), Ok(mes), Ok(anio)) => MarcaDeCobro::En { anio, mes },
+            (Ok(dia), Ok(mes), Ok(anio)) => match NaiveDate::from_ymd_opt(anio, mes, dia) {
+                Some(fecha) => MarcaDeCobro::En(fecha),
+                None => MarcaDeCobro::Ilegible,
+            },
             _ => MarcaDeCobro::Ilegible,
         }
     }
@@ -127,16 +131,21 @@ impl Suscripcion {
         let dia_alcanzado = hoy.day() >= self.dia_de_facturacion_en(hoy);
 
         match &self.ultimo_cobro {
-            // **Divergencia: la marca ilegible obliga a cobrar.** Invierte la
-            // propiedad que sostiene todo el mecanismo. Lo prudente sería lo
-            // contrario —no cobrar y avisar—, porque un cargo de más es más
-            // difícil de deshacer que uno de menos.
+            // Una marca ilegible **no autoriza a cobrar**. Antes sí: era la
+            // rama que invertía la propiedad que sostiene el mecanismo.
+            //
+            // No se puede saber cuándo se cobró por última vez, de modo que
+            // la elección es entre arriesgar un cargo de más y uno de menos.
+            // El de menos se corrige mirando el estado de cuenta; el de más
+            // hay que deshacerlo. Es el mismo criterio que la anual sin fecha
+            // de renovación.
+            //
+            // **A cambio, no puede quedarse callado.** Una suscripción que
+            // deja de cobrarse en silencio es peor que una que cobra de más,
+            // y por eso existe `impedimento`.
             MarcaDeCobro::Ilegible => match self.frecuencia {
-                // La anual tiene una fecha propia: una marca ilegible ya no
-                // la arrastra a cobrar. El agujero queda abierto solo donde
-                // sigue siendo el único dato, que es en las mensuales.
                 Frecuencia::Anual => self.vence_la_renovacion(hoy),
-                Frecuencia::Mensual => true,
+                Frecuencia::Mensual => false,
             },
 
             MarcaDeCobro::Ninguna => match self.frecuencia {
@@ -147,15 +156,44 @@ impl Suscripcion {
             // **Divergencia: varios períodos vencidos generan un cargo.** La
             // marca es una fecha, no un contador, y al cobrar se pone «hoy»:
             // los meses intermedios desaparecen.
-            MarcaDeCobro::En { anio, mes } => match self.frecuencia {
+            MarcaDeCobro::En(cobrado) => match self.frecuencia {
                 Frecuencia::Mensual => {
-                    let mes_nuevo =
-                        hoy.year() > *anio || (hoy.year() == *anio && hoy.month() > *mes);
+                    let mes_nuevo = hoy.year() > cobrado.year()
+                        || (hoy.year() == cobrado.year() && hoy.month() > cobrado.month());
                     mes_nuevo && dia_alcanzado
                 }
                 // La anual ya no deduce: **lee la fecha anotada**. Ver
                 // `renovacion` y `s12b`.
                 Frecuencia::Anual => self.vence_la_renovacion(hoy),
+            },
+        }
+    }
+
+    /// Por qué esta suscripción no va a cobrarse nunca, si es el caso.
+    ///
+    /// Existe porque las dos decisiones prudentes del módulo —no cobrar sin
+    /// fecha de renovación, no cobrar con marca ilegible— **dejan a la
+    /// suscripción parada**, y una suscripción parada en silencio es peor que
+    /// una que cobra de más: la de más se ve en el estado de cuenta, la
+    /// parada no se ve en ninguna parte.
+    ///
+    /// Devuelve `None` cuando no hay impedimento, lo que **no** significa que
+    /// hoy toque cobrar: eso lo dice `corresponde_cobrar`.
+    pub fn impedimento(&self) -> Option<Impedimento> {
+        match self.frecuencia {
+            // La mensual decide con la marca: si no se entiende, no hay con
+            // qué decidir.
+            Frecuencia::Mensual => match self.ultimo_cobro {
+                MarcaDeCobro::Ilegible => Some(Impedimento::MarcaDeCobroIlegible),
+                _ => None,
+            },
+            // La anual decide con su fecha de renovación y **no mira la
+            // marca**, de modo que una marca ilegible no la impide cobrar.
+            // Señalarla aquí sería decirle al titular que algo está parado
+            // cuando no lo está, y un aviso que miente se aprende a ignorar.
+            Frecuencia::Anual => match self.renovacion {
+                None => Some(Impedimento::AnualSinRenovacion),
+                Some(_) => None,
             },
         }
     }
@@ -238,6 +276,37 @@ fn dias_del_mes(anio: i32, mes: u32) -> u32 {
     }
 }
 
+/// Lo que impide que una suscripción llegue a cobrarse.
+///
+/// Es un estado que hay que **resolver**, no un error de programa: en los dos
+/// casos falta un dato que solo el titular puede aportar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Impedimento {
+    /// La fecha del último cobro no se entiende, así que no se sabe si toca.
+    MarcaDeCobroIlegible,
+    /// Una anual sin fecha de renovación anotada.
+    AnualSinRenovacion,
+}
+
+impl Impedimento {
+    /// Qué decirle a quien tiene que arreglarlo.
+    ///
+    /// El mensaje vive aquí y no en la vista por la misma razón que el aviso:
+    /// si cambia la regla, el texto que la explica tiene que cambiar con
+    /// ella, y para eso han de estar juntos.
+    pub fn explicacion(&self) -> &'static str {
+        match self {
+            Impedimento::MarcaDeCobroIlegible => {
+                "La fecha del último cobro no se entiende, así que no se sabe \
+                 si toca cobrar. No se cobrará hasta corregirla."
+            }
+            Impedimento::AnualSinRenovacion => {
+                "Falta la fecha de renovación. Una anual no se cobra sin ella."
+            }
+        }
+    }
+}
+
 /// Cuántos días antes se avisa de un cargo.
 pub const DIAS_DE_AVISO: i64 = 7;
 
@@ -277,7 +346,7 @@ mod tests {
 
     #[test]
     fn cobrada_este_mes_no_vuelve_a_cobrarse() {
-        let s = mensual(15, MarcaDeCobro::En { anio: 2026, mes: 3 });
+        let s = mensual(15, MarcaDeCobro::En(en(2026, 3, 15)));
         assert!(!s.corresponde_cobrar(en(2026, 3, 20)));
         assert!(s.corresponde_cobrar(en(2026, 4, 15)), "al mes siguiente sí");
     }
@@ -287,7 +356,7 @@ mod tests {
         // **CAMBIO DE CONDUCTA.** Antes abril pasaba sin cargo por no tener
         // un día 31. Ahora el cargo se genera el 30, que es lo que hace el
         // emisor: un cargo del día 29 se generó el 28 de febrero.
-        let s = mensual(31, MarcaDeCobro::En { anio: 2026, mes: 3 });
+        let s = mensual(31, MarcaDeCobro::En(en(2026, 3, 15)));
         for dia in 1..=29u32 {
             assert!(!s.corresponde_cobrar(en(2026, 4, dia)), "aún no es el último día");
         }
@@ -297,7 +366,7 @@ mod tests {
     #[test]
     fn en_febrero_el_cargo_del_dia_29_se_genera_el_28() {
         // El caso real, con su fecha: 2026 no es bisiesto.
-        let s = mensual(29, MarcaDeCobro::En { anio: 2026, mes: 1 });
+        let s = mensual(29, MarcaDeCobro::En(en(2026, 1, 15)));
         assert!(!s.corresponde_cobrar(en(2026, 2, 27)));
         assert!(s.corresponde_cobrar(en(2026, 2, 28)), "el último día de febrero");
     }
@@ -305,7 +374,7 @@ mod tests {
     #[test]
     fn en_un_febrero_bisiesto_el_ultimo_dia_es_el_29() {
         // 2028 sí es bisiesto. El recorte sigue al mes, no a una cifra fija.
-        let s = mensual(30, MarcaDeCobro::En { anio: 2028, mes: 1 });
+        let s = mensual(30, MarcaDeCobro::En(en(2028, 1, 15)));
         assert!(!s.corresponde_cobrar(en(2028, 2, 28)));
         assert!(s.corresponde_cobrar(en(2028, 2, 29)));
     }
@@ -314,7 +383,7 @@ mod tests {
     fn recortar_el_dia_no_adelanta_el_cargo_de_un_mes_largo() {
         // El recorte solo actúa donde el día no existe. En marzo, una del 30
         // sigue esperando al 30.
-        let s = mensual(30, MarcaDeCobro::En { anio: 2026, mes: 2 });
+        let s = mensual(30, MarcaDeCobro::En(en(2026, 2, 15)));
         assert!(!s.corresponde_cobrar(en(2026, 3, 29)));
         assert!(s.corresponde_cobrar(en(2026, 3, 30)));
     }
@@ -324,7 +393,7 @@ mod tests {
         // **CAMBIO DE CONDUCTA.** Antes se recobraba al cambiar el año: la
         // cobrada el 05/07/2025 volvía a cobrar el 05/01/2026, seis meses
         // antes. Ahora espera a su fecha.
-        let s = anual(Some(en(2026, 7, 5)), MarcaDeCobro::En { anio: 2025, mes: 7 });
+        let s = anual(Some(en(2026, 7, 5)), MarcaDeCobro::En(en(2025, 7, 5)));
 
         assert!(!s.corresponde_cobrar(en(2026, 1, 5)), "enero ya no dispara nada");
         assert!(!s.corresponde_cobrar(en(2026, 7, 4)), "ni la víspera");
@@ -336,20 +405,22 @@ mod tests {
     fn una_anual_sin_fecha_anotada_no_se_cobra() {
         // Entre un cargo de más y uno de menos, el de menos es el que se
         // corrige mirando el estado de cuenta.
-        let s = anual(None, MarcaDeCobro::En { anio: 2020, mes: 1 });
+        let s = anual(None, MarcaDeCobro::En(en(2020, 1, 5)));
         assert!(!s.corresponde_cobrar(en(2026, 12, 31)));
     }
 
     #[test]
-    fn en_una_anual_una_marca_ilegible_ya_no_fuerza_el_cobro() {
-        // El defecto que invertía la idempotencia queda cerrado en las
-        // anuales, porque ya no dependen de la marca.
+    fn una_anual_con_marca_ilegible_sigue_su_fecha_de_renovacion() {
+        // La anual no depende de la marca, así que una ilegible no la
+        // desvía. Aun así **queda señalada**: la marca sigue siendo un dato
+        // roto que el titular debería corregir.
         let s = anual(Some(en(2026, 7, 5)), MarcaDeCobro::Ilegible);
         assert!(!s.corresponde_cobrar(en(2026, 3, 1)), "sin fecha vencida no cobra");
         assert!(s.corresponde_cobrar(en(2026, 7, 5)), "y en su fecha sí");
-
-        // En las mensuales sigue abierto: ahí la marca es el único dato.
-        assert!(mensual(15, MarcaDeCobro::Ilegible).corresponde_cobrar(en(2026, 3, 1)));
+        // Y **no** se señala como impedida: cobra. Señalarla sería decir que
+        // algo está parado cuando no lo está, y un aviso que miente se
+        // aprende a ignorar. La marca se reescribe sola al cobrar.
+        assert_eq!(s.impedimento(), None);
     }
 
     #[test]
@@ -367,7 +438,7 @@ mod tests {
     fn una_mensual_no_anuncia_una_fecha_que_el_sistema_no_respetaria() {
         // Mientras el día 31 siga saltándose meses, predecir el próximo cobro
         // de una mensual sería anunciar algo que luego no ocurre.
-        let s = mensual(30, MarcaDeCobro::En { anio: 2026, mes: 1 });
+        let s = mensual(30, MarcaDeCobro::En(en(2026, 1, 15)));
         assert_eq!(s.proximo_cobro(), None);
         assert!(!s.avisa(en(2026, 2, 25)));
     }
@@ -384,18 +455,57 @@ mod tests {
     }
 
     #[test]
-    fn una_marca_ilegible_obliga_a_cobrar_aunque_no_toque() {
-        // Divergencia fijada, y la que invierte la idempotencia: cobra
-        // incluso antes del día de facturación.
+    fn una_marca_ilegible_no_autoriza_a_cobrar() {
+        // **CAMBIO DE CONDUCTA.** Antes cobraba, y en cada arranque: era la
+        // rama que invertía la propiedad que da nombre a la fase.
+        //
+        // No se puede saber cuándo se cobró por última vez. Entre arriesgar
+        // un cargo de más y uno de menos, el de menos se corrige mirando el
+        // estado de cuenta.
         let s = mensual(15, MarcaDeCobro::Ilegible);
-        assert!(s.corresponde_cobrar(en(2026, 3, 1)), "cobra el día 1 teniendo el 15");
+        for dia in 1..=28u32 {
+            assert!(!s.corresponde_cobrar(en(2026, 2, dia)), "cobró el día {dia}");
+        }
+    }
+
+    #[test]
+    fn una_suscripcion_parada_dice_por_que() {
+        // La contrapartida de no cobrar: quedarse parada **en silencio**
+        // sería peor que cobrar de más. Un cargo indebido se ve en el estado
+        // de cuenta; una suscripción que dejó de registrarse no se ve en
+        // ninguna parte.
+        let s = mensual(15, MarcaDeCobro::Ilegible);
+        assert_eq!(s.impedimento(), Some(Impedimento::MarcaDeCobroIlegible));
+
+        // Una anual sin fecha está parada aunque su marca se entienda.
+        let s = anual(None, MarcaDeCobro::En(en(2026, 1, 15)));
+        assert_eq!(s.impedimento(), Some(Impedimento::AnualSinRenovacion));
+
+        let s = anual(None, MarcaDeCobro::Ninguna);
+        assert_eq!(s.impedimento(), Some(Impedimento::AnualSinRenovacion));
+
+        // Y una sana no inventa un impedimento.
+        assert_eq!(mensual(15, MarcaDeCobro::Ninguna).impedimento(), None);
+        assert_eq!(anual(Some(en(2027, 1, 1)), MarcaDeCobro::Ninguna).impedimento(), None);
+    }
+
+    #[test]
+    fn no_tener_impedimento_no_significa_que_hoy_toque_cobrar() {
+        // Son dos preguntas distintas, y confundirlas haría que la vista
+        // anunciara un cargo inminente cada vez que la suscripción está sana.
+        let s = mensual(15, MarcaDeCobro::En(en(2026, 3, 15)));
+        assert_eq!(s.impedimento(), None);
+        assert!(!s.corresponde_cobrar(en(2026, 3, 20)), "ya se cobró este mes");
     }
 
     #[test]
     fn una_marca_en_otro_formato_es_ilegible_y_no_ausente() {
         // La distinción importa: ausente espera a su día, ilegible no espera.
         assert_eq!(MarcaDeCobro::desde_texto(None), MarcaDeCobro::Ninguna);
-        for texto in ["2026-01-10", "", "ayer", "10-01-2026", "x/y/z", "1/2"] {
+        // Los dos últimos tienen la forma que el esquema exige y aun así no
+        // son fechas: es el hueco que el `CHECK` no cubre.
+        for texto in ["2026-01-10", "", "ayer", "10-01-2026", "x/y/z", "1/2",
+                      "31/02/2026", "13/13/2026"] {
             assert_eq!(
                 MarcaDeCobro::desde_texto(Some(texto)),
                 MarcaDeCobro::Ilegible,
@@ -404,7 +514,7 @@ mod tests {
         }
         assert_eq!(
             MarcaDeCobro::desde_texto(Some("10/01/2026")),
-            MarcaDeCobro::En { anio: 2026, mes: 1 }
+            MarcaDeCobro::En(en(2026, 1, 10))
         );
     }
 
@@ -437,7 +547,7 @@ mod tests {
                 };
                 if s.corresponde_cobrar(en(2026, mes, dia)) {
                     cobros += 1;
-                    marca = MarcaDeCobro::En { anio: 2026, mes };
+                    marca = MarcaDeCobro::En(en(2026, mes, dia));
                 }
             }
         }
