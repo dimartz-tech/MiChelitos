@@ -927,6 +927,326 @@ pub fn migracion_9_columnas_tardias(tx: &Transaction) -> Result<(), ErrorMigraci
     verificar_centavos_exactos(tx)
 }
 
+const MIG10: &str = "el céntimo exacto, sin tolerancia";
+
+/// Lleva los importes al céntimo **exacto**, no al céntimo dentro de una
+/// tolerancia.
+///
+/// Las migraciones 3 y 9 redondean solo lo que se desvía más de `1e-6`
+/// centavos. Es coherente con la tolerancia de representación del sistema, y
+/// aun así deja un resto: sobre una base real quedaban **doce valores** que
+/// difieren de su propio redondeo en torno a `1e-12` unidades. No son
+/// fracciones de céntimo —su fracción medida es cero— sino **ruido de
+/// representación**, casi seguro de balances acumulados en coma flotante.
+///
+/// Inofensivos hoy, y aun así hay que quitarlos: son la diferencia entre «no
+/// se desvía lo bastante para importar» y «es exacto». La migración 11 exige
+/// lo segundo, y sin este paso rechazaría doce importes buenos.
+pub fn migracion_10_centimo_exacto(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    for (tabla, columna) in COLUMNAS_DE_DINERO {
+        if !tabla_existe(tx, tabla)? || !columna_existe_en(tx, tabla, columna)? {
+            continue;
+        }
+
+        migraciones::paso(
+            tx,
+            MIG10,
+            &format!("exactitud de {}.{}", tabla, columna),
+            &format!(
+                "UPDATE {t} SET {c} = ROUND({c}, 2)
+                 WHERE {c} IS NOT NULL AND ROUND({c}, 2) <> {c};",
+                t = tabla,
+                c = columna
+            ),
+        )?;
+    }
+
+    verificar_centimo_exacto(tx)
+}
+
+/// Como `verificar_centavos_exactos`, pero **sin tolerancia**.
+///
+/// La comparación es la misma que impondrá el `CHECK`, de modo que lo que
+/// aquí pasa es exactamente lo que allí pasará. Usar un criterio en la
+/// migración y otro en la restricción es la vía a una migración que se acepta
+/// y un esquema que luego no admite sus propios datos.
+fn verificar_centimo_exacto(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    for (tabla, columna) in COLUMNAS_DE_DINERO {
+        if !tabla_existe(tx, tabla)? || !columna_existe_en(tx, tabla, columna)? {
+            continue;
+        }
+
+        let fuera: i64 = tx
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM {t} WHERE {c} IS NOT NULL AND ROUND({c}, 2) <> {c};",
+                    t = tabla,
+                    c = columna
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+
+        if fuera > 0 {
+            return Err(ErrorMigracion::Fallo {
+                version: 10,
+                migracion: MIG10,
+                etapa: format!("verificar {}.{}", tabla, columna),
+                causa: format!("quedan {} importes que no son exactos al céntimo", fuera),
+            });
+        }
+    }
+    Ok(())
+}
+
+const MIG11: &str = "la fracción de céntimo se rechaza al escribir";
+
+/// La restricción que condiciona cada columna de dinero.
+///
+/// `ROUND(v, 2) = v` y no una comparación sobre `v * 100`. La diferencia no
+/// es de estilo: se midió, y las variantes con `* 100` **rechazan céntimos
+/// legítimos** —once en un barrido, empezando por 4,77— porque multiplicar
+/// por cien introduce el error que se pretendía detectar. `ROUND(v, 2) = v`
+/// no rechazó ninguno en doscientos mil valores densos ni por magnitudes
+/// hasta 10^14.
+fn restriccion_de_centimo(columna: &str) -> String {
+    format!("CHECK (ROUND({c}, 2) = {c})", c = columna)
+}
+
+/// Impide guardar una fracción de céntimo, en el propio esquema.
+///
+/// ## Por qué aquí y no en el tipo de la columna
+///
+/// Estaba previsto convertir las columnas a `INTEGER` y guardar centavos. **Se
+/// midió antes de hacerlo, y la premisa era falsa**: en SQLite la afinidad
+/// `INTEGER` no restringe nada. Una columna declarada `INTEGER` acepta 75.005
+/// y lo guarda como `real`, porque la afinidad solo convierte cuando la
+/// conversión no pierde. El cambio de tipo no habría impedido lo que se
+/// quería impedir.
+///
+/// Y no compraba nada por otro lado: `REAL` representa centavos exactos hasta
+/// 2,5·10^16, y sumar un millón de filas mezclando magnitudes se desvió cero
+/// centavos. Lo único que cambiaba era el modo de fallo, y a peor: leer un
+/// `INTEGER` como `f64` devuelve el entero crudo sin error —inflación de 100
+/// veces en silencio— y escribir un `i64` en una columna `REAL` hace lo mismo.
+/// Solo la dirección contraria, leer un `REAL` como `i64`, falla en voz alta.
+///
+/// De modo que el tramo se cierra como se cerró el tercero: **declarando
+/// innecesaria la conversión** y quedándose con lo que sí hacía falta, que era
+/// rechazar la fracción **al escribir** y no solo al migrar.
+///
+/// ## Por qué reconstruir
+///
+/// SQLite no tiene `ALTER TABLE ADD CONSTRAINT`. La única vía es rehacer la
+/// tabla, y se hace insertando restricciones **de tabla** al final de la lista
+/// de columnas en lugar de tocar la definición de cada columna: es una sola
+/// inserción antes del paréntesis final, en vez de analizar sintaxis que ya
+/// incluye claves ajenas, valores por defecto y otros `CHECK`.
+///
+/// Las filas se copian por nombre de columna y se comprueba el recuento antes
+/// y después. Esta base no tiene índices ni disparadores de usuario —solo los
+/// automáticos de `UNIQUE`, que renacen con la definición—, y eso también se
+/// comprueba en vez de suponerse: si aparecieran, la migración se detiene.
+pub fn migracion_11_rechazar_fraccion_de_centimo(
+    tx: &Transaction,
+) -> Result<(), ErrorMigracion> {
+    // **Los dos `PRAGMA` del procedimiento de SQLite, y por qué cada uno.**
+    //
+    // `legacy_alter_table`: sin él, `RENAME TO` reescribe las cláusulas
+    // `REFERENCES` de las **otras** tablas para que sigan apuntando al nombre
+    // nuevo. Es lo correcto para un renombrado de verdad y lo contrario de lo
+    // que hace falta aquí: al renombrar `cuentas_ahorro` a `..._previa`,
+    // `gastos` pasaba a referenciar una tabla que esta misma migración borra
+    // después. Se descubrió porque la suite entera se cayó de golpe.
+    //
+    // `defer_foreign_keys`: entre el renombrado y la creación hay un instante
+    // sin la tabla referenciada. Difiere la comprobación al `COMMIT`, que es
+    // cuando el esquema vuelve a ser coherente. `foreign_keys` no vale: dentro
+    // de una transacción no hace nada, y esto corre dentro de una.
+    tx.execute_batch("PRAGMA legacy_alter_table = ON; PRAGMA defer_foreign_keys = ON;")
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+    let resultado = reconstruir_con_restricciones(tx);
+    let _ = tx.execute_batch("PRAGMA legacy_alter_table = OFF;");
+    resultado?;
+
+    verificar_restricciones_presentes(tx)
+}
+
+fn reconstruir_con_restricciones(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    let mut por_tabla: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
+    for (tabla, columna) in COLUMNAS_DE_DINERO {
+        por_tabla.entry(tabla).or_default().push(columna);
+    }
+
+    for (tabla, columnas) in por_tabla {
+        if !tabla_existe(tx, tabla)? {
+            continue;
+        }
+
+        // Un índice o un disparador de usuario no sobreviviría a la
+        // reconstrucción. Hoy no los hay; si algún día los hubiera, esto para
+        // la migración en vez de perderlos sin decirlo.
+        let propios: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE tbl_name = ? AND type IN ('index', 'trigger')
+                   AND name NOT LIKE 'sqlite_autoindex_%';",
+                [tabla],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        if propios > 0 {
+            return Err(ErrorMigracion::Fallo {
+                version: 11,
+                migracion: MIG11,
+                etapa: format!("reconstruir {}", tabla),
+                causa: format!(
+                    "{} tiene {} índice(s) o disparador(es) propios;                      la reconstrucción los perdería. Recréalos aquí primero.",
+                    tabla, propios
+                ),
+            });
+        }
+
+        let sql_actual: String = tx
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?;",
+                [tabla],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+
+        let presentes: Vec<&str> = columnas
+            .iter()
+            .copied()
+            .filter(|c| columna_existe_en(tx, tabla, c).unwrap_or(false))
+            .collect();
+        if presentes.is_empty() {
+            continue;
+        }
+
+        // Idempotente: si ya lleva sus restricciones, no se toca.
+        if presentes.iter().all(|c| sql_actual.contains(&restriccion_de_centimo(c))) {
+            continue;
+        }
+
+        let sql_nuevo = con_restricciones(&sql_actual, &presentes).ok_or_else(|| {
+            ErrorMigracion::Fallo {
+                version: 11,
+                migracion: MIG11,
+                etapa: format!("reescribir la definición de {}", tabla),
+                causa: "no se encontró el paréntesis que cierra la lista de columnas".into(),
+            }
+        })?;
+
+        let antes: i64 = tx
+            .query_row(&format!("SELECT COUNT(*) FROM {};", tabla), [], |r| r.get(0))
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+
+        let nombres: Vec<String> = {
+            let mut s = tx
+                .prepare(&format!("SELECT name FROM pragma_table_info('{}');", tabla))
+                .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+            let it = s
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+            it.filter_map(|x| x.ok()).collect()
+        };
+        let lista = nombres.join(", ");
+
+        migraciones::paso(
+            tx,
+            MIG11,
+            &format!("reconstruir {} con sus restricciones", tabla),
+            &format!(
+                "ALTER TABLE {t} RENAME TO {t}_previa;
+                 {creacion};
+                 INSERT INTO {t} ({lista}) SELECT {lista} FROM {t}_previa;
+                 DROP TABLE {t}_previa;",
+                t = tabla,
+                creacion = sql_nuevo,
+                lista = lista
+            ),
+        )?;
+
+        let despues: i64 = tx
+            .query_row(&format!("SELECT COUNT(*) FROM {};", tabla), [], |r| r.get(0))
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        if antes != despues {
+            return Err(ErrorMigracion::Fallo {
+                version: 11,
+                migracion: MIG11,
+                etapa: format!("verificar {}", tabla),
+                causa: format!("entraron {} filas y salieron {}", antes, despues),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Inserta las restricciones de tabla antes del paréntesis que cierra la
+/// lista de columnas.
+///
+/// Trabaja sobre el texto que SQLite guarda, y por eso busca el paréntesis
+/// **por equilibrio** en vez de tomar el último carácter: una definición puede
+/// terminar con cláusulas después del paréntesis.
+fn con_restricciones(sql: &str, columnas: &[&str]) -> Option<String> {
+    let bytes = sql.as_bytes();
+    let apertura = sql.find('(')?;
+    let mut profundidad = 0usize;
+    let mut cierre = None;
+    for (i, b) in bytes.iter().enumerate().skip(apertura) {
+        match b {
+            b'(' => profundidad += 1,
+            b')' => {
+                profundidad -= 1;
+                if profundidad == 0 {
+                    cierre = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let cierre = cierre?;
+    let anadido: String = columnas
+        .iter()
+        .map(|c| format!(",
+            {}", restriccion_de_centimo(c)))
+        .collect();
+    Some(format!("{}{}{}", &sql[..cierre], anadido, &sql[cierre..]))
+}
+
+/// Que cada columna de dinero viva bajo su restricción, dicho por el esquema.
+///
+/// Se comprueba leyendo `sqlite_master` y no confiando en que la
+/// reconstrucción hiciera lo que decía: es la misma razón por la que la
+/// migración 3 verifica en vez de darse por buena porque no falló.
+fn verificar_restricciones_presentes(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    for (tabla, columna) in COLUMNAS_DE_DINERO {
+        if !tabla_existe(tx, tabla)? || !columna_existe_en(tx, tabla, columna)? {
+            continue;
+        }
+        let sql: String = tx
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?;",
+                [tabla],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        if !sql.contains(&restriccion_de_centimo(columna)) {
+            return Err(ErrorMigracion::Fallo {
+                version: 11,
+                migracion: MIG11,
+                etapa: format!("verificar {}.{}", tabla, columna),
+                causa: "la columna quedó sin su restricción de céntimo".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;

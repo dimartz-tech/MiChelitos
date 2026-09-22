@@ -232,8 +232,8 @@ impl RepositorioBonificaciones for AlmacenSqlite<'_> {
 impl RepositorioTarjetas for AlmacenSqlite<'_> {
     fn ajustar_deuda(&mut self, tarjeta_id: i64, delta: Dinero) -> Result<(), ErrorAlmacen> {
         let sql = match delta.divisa() {
-            Divisa::Usd => "UPDATE tarjetas SET balance_dolares = balance_dolares + ? WHERE id = ?;",
-            Divisa::Dop => "UPDATE tarjetas SET balance_pesos = balance_pesos + ? WHERE id = ?;",
+            Divisa::Usd => "UPDATE tarjetas SET balance_dolares = ROUND(balance_dolares + ?, 2) WHERE id = ?;",
+            Divisa::Dop => "UPDATE tarjetas SET balance_pesos = ROUND(balance_pesos + ?, 2) WHERE id = ?;",
         };
         let filas =
             self.tx.execute(sql, params![delta.unidades(), tarjeta_id]).map_err(fallo)?;
