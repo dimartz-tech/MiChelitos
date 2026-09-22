@@ -128,10 +128,10 @@ const AppAPI = {
         });
     },
 
-    async marcarIngresoPagado(id, institucion, fecha, montoRecibido) {
+    async marcarIngresoPagado(id, cuentaAhorroId, fecha, montoRecibido) {
         return await invoke('marcar_ingreso_pagado', {
             id: Number(id),
-            institucion,
+            cuentaAhorroId: Number(cuentaAhorroId),
             fecha,
             montoRecibido: Number(montoRecibido)
         });
@@ -150,10 +150,10 @@ const AppAPI = {
         });
     },
 
-    async marcarInformalPagado(id, institucion, fecha, montoRecibido) {
+    async marcarInformalPagado(id, cuentaAhorroId, fecha, montoRecibido) {
         return await invoke('marcar_informal_pagado', {
             id: Number(id),
-            institucion,
+            cuentaAhorroId: Number(cuentaAhorroId),
             fecha,
             montoRecibido: Number(montoRecibido)
         });
