@@ -1770,11 +1770,23 @@ fn depurar_datos_de_cuenta(
         .map(|e| e.trim().to_string())
         .filter(|e| !e.is_empty());
 
-    if let Some(c) = comision {
-        if !c.is_finite() || c < 0.0 {
-            return Err("La comisión por pago de impuestos no puede ser negativa.".to_string());
+    // **La comisión pasa por `Dinero`.** Antes se comprobaba que fuera finita
+    // y no negativa, y se escribía tal cual: una comisión de 75.005 entraba
+    // con su tercer decimal. Era la única vía por la que un importe llegaba a
+    // la base sin que el núcleo decidiera su céntimo.
+    //
+    // La divisa es la local porque la comisión la cobra el banco sobre una
+    // operación en moneda local; si algún día una cuenta en divisa declarara
+    // la suya, habría que leerla de la fila como se hace en los depósitos.
+    let comision = match comision {
+        None => None,
+        Some(c) => {
+            if c < 0.0 {
+                return Err("La comisión por pago de impuestos no puede ser negativa.".to_string());
+            }
+            Some(Dinero::nuevo(c, MONEDA_LOCAL)?.unidades())
         }
-    }
+    };
 
     Ok((entidad, comision))
 }

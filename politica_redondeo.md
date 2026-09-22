@@ -65,6 +65,24 @@ ahí, antes de que un importe se desviara.
 Una migración de tres columnas, su relleno y su verificación, sustituidos por
 dos pruebas. **El tramo se cierra declarándolo innecesario, no haciéndolo.**
 
+## La regla: toda columna `REAL` está clasificada
+
+En un esquema migrado, **cada columna `REAL` tiene que estar declarada** en
+`COLUMNAS_DE_DINERO` —y entrar en el redondeo al céntimo— o en
+`COLUMNAS_DE_TASA`. Ninguna puede quedarse sin clasificar, y una prueba lo
+exige.
+
+Existe porque la guardiana anterior protegía en un solo sentido: impedía meter
+una tasa entre el dinero, pero **no impedía olvidar una columna de dinero**.
+Cuatro se olvidaron por ahí —todas añadidas en migraciones posteriores a la 3,
+que es la que redondea y verifica— y una de ellas,
+`cuentas_ahorro.comision_pago_impuestos`, se escribía además sin pasar por
+`Dinero`: era la única vía por la que un importe llegaba a la base sin que el
+núcleo decidiera su céntimo.
+
+El coste de cumplir la regla es una línea en una lista. El de no tenerla ya se
+pagó.
+
 ## Tramo 4 — columnas `INTEGER` e IPC en texto ⏳
 
 Pendiente. Es el grande: 53 columnas de dinero, 53 comandos que reciben `f64`,
