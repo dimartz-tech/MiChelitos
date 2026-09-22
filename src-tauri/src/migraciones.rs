@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 8;
+pub const VERSION_OBJETIVO: u32 = 9;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -133,6 +133,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 8,
             nombre: "casos de corrección",
             aplicar: crate::db_sql::migracion_8_casos_de_correccion,
+        },
+        Migracion {
+            version: 9,
+            nombre: "las columnas que nacieron fuera de la red",
+            aplicar: crate::db_sql::migracion_9_columnas_tardias,
         },
     ]
 }
@@ -460,7 +465,7 @@ mod tests {
 #[cfg(test)]
 mod tests_centavos {
     use super::*;
-    use crate::db_sql::COLUMNAS_DE_DINERO;
+    use crate::db_sql::{COLUMNAS_DE_DINERO, COLUMNAS_DE_TASA};
 
     fn base_migrada() -> Connection {
         let mut c = Connection::open_in_memory().unwrap();
@@ -562,6 +567,77 @@ mod tests_centavos {
                 "{}.{} parece una tasa y no debería redondearse al centavo",
                 tabla,
                 columna
+            );
+        }
+    }
+
+    #[test]
+    fn toda_columna_real_esta_clasificada_como_dinero_o_como_tasa() {
+        // **La regla.** En un esquema migrado, cada columna `REAL` tiene que
+        // estar declarada en una de las dos listas. Ninguna puede quedarse sin
+        // clasificar.
+        //
+        // Existe porque la guardiana anterior protegía en un solo sentido:
+        // impedía meter una tasa entre el dinero, pero no impedía **olvidar**
+        // una columna de dinero. Cuatro se olvidaron por ahí —todas añadidas
+        // en migraciones posteriores a la 3, que es la que redondea—, y una de
+        // ellas dejó abierta una vía por la que entraban fracciones de centavo
+        // a la base.
+        //
+        // El coste de cumplirla es una línea en una lista. El de no tenerla ya
+        // se pagó.
+        let mut c = base_migrada();
+        let tx = c.transaction().unwrap();
+
+        let tablas: Vec<String> = {
+            let mut s = tx
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';")
+                .unwrap();
+            let f = s.query_map([], |r| r.get(0)).unwrap();
+            f.map(|x| x.unwrap()).collect()
+        };
+
+        let mut sin_clasificar = Vec::new();
+        for tabla in &tablas {
+            let mut s = tx.prepare(&format!("PRAGMA table_info({});", tabla)).unwrap();
+            let columnas: Vec<(String, String)> = s
+                .query_map([], |r| Ok((r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .map(|x| x.unwrap())
+                .collect();
+
+            for (columna, tipo) in columnas {
+                if !tipo.eq_ignore_ascii_case("REAL") {
+                    continue;
+                }
+                let par = (tabla.as_str(), columna.as_str());
+                let es_dinero = COLUMNAS_DE_DINERO.iter().any(|(t, c)| *t == par.0 && *c == par.1);
+                let es_tasa = COLUMNAS_DE_TASA.iter().any(|(t, c)| *t == par.0 && *c == par.1);
+                if !es_dinero && !es_tasa {
+                    sin_clasificar.push(format!("{}.{}", tabla, columna));
+                }
+            }
+        }
+
+        assert!(
+            sin_clasificar.is_empty(),
+            "columnas REAL sin clasificar: {:?}.\n\
+             Declárala en COLUMNAS_DE_DINERO si es un importe —entrará en el \
+             redondeo al céntimo— o en COLUMNAS_DE_TASA si no lo es.",
+            sin_clasificar
+        );
+    }
+
+    #[test]
+    fn ninguna_columna_esta_en_las_dos_listas() {
+        // Clasificarla dos veces sería una contradicción declarada, y la
+        // redondearía al céntimo por estar en la primera.
+        for (t, c) in COLUMNAS_DE_DINERO {
+            assert!(
+                !COLUMNAS_DE_TASA.iter().any(|(t2, c2)| t2 == t && c2 == c),
+                "{}.{} está declarada como dinero y como tasa a la vez",
+                t,
+                c
             );
         }
     }

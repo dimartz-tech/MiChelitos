@@ -481,6 +481,29 @@ pub const COLUMNAS_DE_DINERO: &[(&str, &str)] = &[
     ("movimientos_prestamo", "capital"),
     ("movimientos_prestamo", "saldo_resultante"),
     ("bonificaciones", "monto"),
+    // Añadidas después de la migración 3, de modo que nacieron fuera de su
+    // red. Es el hueco que documenta `politica_redondeo.md`: la migración 9
+    // las alcanza, y `toda_columna_real_esta_clasificada` impide que vuelva a
+    // pasar.
+    ("cuentas_ahorro", "comision_pago_impuestos"),
+    ("pagos_tarjeta", "monto_debitado"),
+    ("pagos_tarjeta", "comision"),
+    ("correcciones", "importe"),
+];
+
+/// Columnas `REAL` que **no** son dinero: tasas y porcentajes.
+///
+/// Existe por simetría con `COLUMNAS_DE_DINERO`, y juntas forman la regla: en
+/// un esquema migrado, **toda** columna `REAL` tiene que estar en una de las
+/// dos listas. Antes solo había una guardiana —la que impide meter una tasa
+/// entre el dinero— y protegía de meter de más, no de olvidar de menos. Cuatro
+/// columnas de dinero se olvidaron por ahí.
+pub const COLUMNAS_DE_TASA: &[(&str, &str)] = &[
+    ("gastos", "tasa_conversion"),
+    ("ingresos", "porcentaje_retencion"),
+    ("pagos_tarjeta", "tasa_cambio"),
+    ("prestamos", "tasa_actual"),
+    ("transacciones_cuentas", "tasa_cambio"),
 ];
 
 const MIG3: &str = "importes en centavos exactos";
@@ -853,6 +876,55 @@ pub fn migracion_8_casos_de_correccion(tx: &Transaction) -> Result<(), ErrorMigr
     )?;
 
     Ok(())
+}
+
+const MIG9: &str = "las columnas que nacieron fuera de la red";
+
+/// Redondea al céntimo las columnas de dinero añadidas **después** de la
+/// migración 3.
+///
+/// La migración 3 lleva todos los importes al céntimo exacto y lo verifica,
+/// pero solo alcanza a lo que estaba en `COLUMNAS_DE_DINERO` cuando corrió.
+/// Las migraciones 4, 6 y 8 añadieron cuatro columnas de dinero después, y
+/// ninguna entró en esa red: nacieron sin redondear y sin verificar.
+///
+/// Una de ellas, `cuentas_ahorro.comision_pago_impuestos`, además se escribía
+/// sin pasar por `Dinero` —esa vía ya está cerrada—, de modo que podía traer
+/// un tercer decimal desde la interfaz.
+///
+/// Reutiliza la misma mecánica y la misma verificación que la 3. Que haga
+/// falta una migración aparte para esto es, en sí, el argumento de la regla
+/// `toda_columna_real_esta_clasificada_como_dinero_o_como_tasa`: sin ella, la
+/// próxima columna de dinero volvería a nacer fuera.
+pub fn migracion_9_columnas_tardias(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    const TARDIAS: &[(&str, &str)] = &[
+        ("cuentas_ahorro", "comision_pago_impuestos"),
+        ("pagos_tarjeta", "monto_debitado"),
+        ("pagos_tarjeta", "comision"),
+        ("correcciones", "importe"),
+    ];
+
+    for (tabla, columna) in TARDIAS {
+        if !tabla_existe(tx, tabla)? || !columna_existe_en(tx, tabla, columna)? {
+            continue;
+        }
+
+        migraciones::paso(
+            tx,
+            MIG9,
+            &format!("redondear {}.{} al centavo", tabla, columna),
+            &format!(
+                "UPDATE {t} SET {c} = ROUND({c}, 2)
+                 WHERE {c} IS NOT NULL AND ABS({c} * 100 - ROUND({c} * 100)) > 1e-6;",
+                t = tabla,
+                c = columna
+            ),
+        )?;
+    }
+
+    // La misma verificación que la 3, ahora sobre la lista completa: la
+    // conversión se acepta solo cuando es comprobable.
+    verificar_centavos_exactos(tx)
 }
 
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
