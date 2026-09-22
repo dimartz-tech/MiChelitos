@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 7;
+pub const VERSION_OBJETIVO: u32 = 8;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -128,6 +128,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 7,
             nombre: "el cobro apunta a una cuenta, no a un nombre",
             aplicar: crate::db_sql::migracion_7_cobro_por_referencia,
+        },
+        Migracion {
+            version: 8,
+            nombre: "casos de corrección",
+            aplicar: crate::db_sql::migracion_8_casos_de_correccion,
         },
     ]
 }
