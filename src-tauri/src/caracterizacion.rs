@@ -2432,3 +2432,74 @@ fn c94_mover_dinero_sin_motivo_se_rechaza_y_no_corrige_nada() {
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "y la cuenta tampoco");
 }
 
+// ---------------------------------------------------------------------------
+//  La comisión por pago de impuestos pasa por el núcleo
+//
+//  Era la única vía por la que un importe llegaba a la base sin que `Dinero`
+//  decidiera su céntimo: `depurar_datos_de_cuenta` comprobaba que el número
+//  fuera finito y no negativo, y lo escribía tal cual.
+// ---------------------------------------------------------------------------
+
+fn comision_de(cuenta_id: i64) -> Option<f64> {
+    conexion()
+        .query_row(
+            "SELECT comision_pago_impuestos FROM cuentas_ahorro WHERE id = ?;",
+            params![cuenta_id],
+            |r| r.get(0),
+        )
+        .expect("leer comisión")
+}
+
+#[test]
+fn c95_una_comision_con_fraccion_de_centimo_se_decide_al_crear() {
+    let _g = entorno_aislado();
+    let id = crate::crear_cuenta(
+        "Cuenta Corriente DOP".into(), "DOP".into(), 0.0,
+        Some("Banco Ejemplo".into()), Some(75.005),
+    )
+    .unwrap();
+
+    // 75.005 se guarda en f64 como 75.00499…, pero al multiplicar por 100 el
+    // error se cancela y da 7500.5 exacto: mitad alejándose de cero, sube.
+    // Es el mismo fenómeno que documenta `dividir_redondeando`, y por eso la
+    // expectativa se calcula, no se intuye.
+    assert_importe(comision_de(id).unwrap(), 75.01, "el tercer decimal se decide");
+}
+
+#[test]
+fn c96_lo_mismo_al_corregir_una_cuenta_existente() {
+    // Crear y corregir no pueden divergir: son la misma regla.
+    let _g = entorno_aislado();
+    let id = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
+
+    crate::actualizar_cuenta(
+        id, "Cuenta Corriente DOP".into(), Some("Banco Ejemplo".into()), Some(120.507),
+    )
+    .unwrap();
+
+    assert_importe(comision_de(id).unwrap(), 120.51, "sube, como manda la regla");
+}
+
+#[test]
+fn c97_una_comision_sin_declarar_sigue_siendo_nula_y_no_cero() {
+    // Nulo significa «no hay tarifa pactada» y cero significa «el banco no
+    // cobra». Pasar por `Dinero` no puede borrar esa distinción.
+    let _g = entorno_aislado();
+    let id = crate::crear_cuenta(
+        "Cuenta Ahorros DOP".into(), "DOP".into(), 0.0, None, None,
+    )
+    .unwrap();
+
+    assert!(comision_de(id).is_none(), "sigue sin declarar");
+}
+
+#[test]
+fn c98_una_comision_negativa_se_sigue_rechazando() {
+    let _g = entorno_aislado();
+    let r = crate::crear_cuenta(
+        "Cuenta Ahorros DOP".into(), "DOP".into(), 0.0, None, Some(-1.0),
+    );
+
+    assert!(r.is_err());
+}
+
