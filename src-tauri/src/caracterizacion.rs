@@ -1160,29 +1160,105 @@ fn s13_tres_meses_sin_abrir_la_aplicacion_generan_un_solo_cargo() {
 }
 
 #[test]
-fn s14_una_fecha_de_ultimo_pago_ilegible_cobra_en_cada_arranque() {
-    // DIVERGENCIA DECLARADA — **invierte la propiedad que da nombre a la
-    // fase**.
+fn s14b_una_marca_de_cobro_ilegible_no_autoriza_a_cobrar() {
+    // **CAMBIO DE CONDUCTA — 2026-09-22.**
     //
-    // Si la fecha no tiene tres partes separadas por `/`, la rama que decide
-    // hace `requiere_cargo = true` sin más. Y como el cobro vuelve a escribir
-    // una fecha bien formada, en la práctica cobra una vez de más... salvo
-    // que algo siga escribiendo el formato malo, en cuyo caso no hay tope.
+    // Antes: si la fecha no tenía tres partes separadas por `/`, la rama que
+    // decidía hacía `requiere_cargo = true` sin más, y cobraba en cada
+    // arranque. Era la divergencia que **invertía la propiedad que da nombre
+    // a la fase**: el mecanismo de idempotencia se volvía un duplicador.
     //
-    // Aquí se fija lo comprobable: con la fecha corrupta puesta antes de cada
-    // arranque, cobra en todos.
+    // Ahora no cobra. No se puede saber cuándo se cobró por última vez, y
+    // entre arriesgar un cargo de más y uno de menos, el de menos se corrige
+    // mirando el estado de cuenta.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
     let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
 
-    for dia in [1, 2, 3] {
-        fijar_ultimo_pago(sub, "2026-01-10"); // ISO: no tiene el formato esperado
-        let cargos = procesar_en(2026, 3, dia);
-        assert_eq!(cargos.len(), 1, "cobra el día {dia} pese a no tocarle hasta el 15");
+    for dia in [1, 2, 3, 16, 17] {
+        // **Un 31 de febrero.** Tiene la forma que el esquema exige y aun
+        // así no es una fecha: es exactamente el hueco que el `CHECK` no
+        // cubre y por el que el dominio se gana el sitio.
+        fijar_ultimo_pago(sub, "31/02/2026");
+        assert!(procesar_en(2026, 3, dia).is_empty(), "cobró el día {dia}");
     }
 
-    assert_importe(balances_tarjeta(tarjeta).0, 1_500.0, "tres cargos en tres días");
-    assert_eq!(total_gastos(), 3);
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "ningún cargo");
+    assert_eq!(total_gastos(), 0);
+}
+
+#[test]
+fn s14f_el_esquema_rechaza_una_fecha_sin_forma_de_fecha() {
+    // La otra capa. El dominio impide el daño; esto cierra la puerta.
+    // En la base real no había ninguna marca rota en `suscripciones`, pero sí
+    // una en `gastos.fecha`: un `10/09/2026` tecleado sin la primera barra.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
+
+    for mala in ["1009/2026", "2026-01-10", "ayer", "1/1/2026"] {
+        let r = conexion().execute(
+            "UPDATE suscripciones SET fecha_ultimo_pago = ? WHERE id = ?;",
+            params![mala, sub],
+        );
+        assert!(r.is_err(), "el esquema aceptó «{mala}»");
+    }
+
+    // Y la que sí tiene forma entra, aunque no exista: eso lo ve el dominio.
+    let r = conexion().execute(
+        "UPDATE suscripciones SET fecha_ultimo_pago = ? WHERE id = ?;",
+        params!["31/02/2026", sub],
+    );
+    assert!(r.is_ok(), "el CHECK comprueba la forma, no que la fecha exista");
+}
+
+#[test]
+fn s14c_una_suscripcion_parada_lo_dice_en_la_lista() {
+    // La contrapartida de no cobrar. Quedarse parada **en silencio** sería
+    // peor que cobrar de más: el cargo indebido aparece en el estado de
+    // cuenta, la suscripción parada no aparece en ninguna parte.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
+    fijar_ultimo_pago(sub, "31/02/2026");
+
+    let lista = crate::obtener_suscripciones().unwrap();
+    let impedimento = lista[0].impedimento_para_pruebas();
+
+    assert!(impedimento.is_some(), "la lista no dice que esté parada");
+    assert!(
+        impedimento.unwrap().contains("no se entiende"),
+        "el mensaje no explica qué arreglar"
+    );
+}
+
+#[test]
+fn s14d_corregir_la_fecha_devuelve_la_suscripcion_al_ciclo() {
+    // Y la salida: `s7` conserva la fecha a propósito, lo que sin esta vía
+    // dejaría la suscripción parada para siempre.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
+    fijar_ultimo_pago(sub, "31/02/2026");
+    assert!(procesar_en(2026, 3, 20).is_empty(), "parada");
+
+    crate::corregir_ultimo_cobro(sub, "15/02/2026".into()).unwrap();
+
+    assert_eq!(procesar_en(2026, 3, 20).len(), 1, "vuelve a cobrar");
+    assert!(crate::obtener_suscripciones().unwrap()[0].impedimento_para_pruebas().is_none());
+}
+
+#[test]
+fn s14e_corregir_con_una_fecha_que_tampoco_se_entiende_se_rechaza() {
+    // Si no, la reparación reintroduciría el estado que repara.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
+
+    for mala in ["2026-02-15", "15-02-2026", "ayer", "", "31/02/2026", "1009/2026"] {
+        assert!(crate::corregir_ultimo_cobro(sub, mala.into()).is_err(), "aceptó «{mala}»");
+    }
+    assert!(crate::corregir_ultimo_cobro(9999, "15/02/2026".into()).is_err(), "suscripción inexistente");
 }
 
 #[test]

@@ -35,15 +35,13 @@ sujeto por una prueba que muere si alguien cambia la conducta:
 | Mensual el **día 30** | ~~11 cargos: se pierde febrero~~ — **corregido** | `s11b` |
 | **Anual** | ~~Se recobra al cambiar el año~~ — **corregido**: la fecha se anota, no se deduce | `s12b` |
 | **Períodos vencidos** | Tres meses sin abrir la aplicación generan **un** cargo, no tres | `s13` |
-| Marca de cobro **ilegible** | Cobra en cada arranque, incluso antes de su día | `s14` |
+| Marca de cobro **ilegible** | ~~Cobra en cada arranque~~ — **corregido**, ver abajo | `s14b` |
 | Sin la categoría **«Suscripciones»** ni **«Otros»** | El gasto cae en el identificador 1 literal, que hoy es «Alimentación» | `s17` |
 
 **Tres de los seis quedan cerrados**, cada uno por decisión del titular y con
-el estado de cuenta delante; los capítulos del final cuentan cómo. De los tres
-que siguen abiertos, el de la **marca ilegible** es el más grave, porque
-invierte la propiedad que da nombre a la fase: una fecha mal formada convierte
-el mecanismo de idempotencia en un duplicador. Queda solo en las mensuales —en
-las anuales lo cerró la fecha de renovación—.
+el estado de cuenta delante; los capítulos del final cuentan cómo. Siguen
+abiertos los **períodos vencidos** (`s13`) y la **categoría de respaldo**
+(`s17`).
 
 ### Por qué no se corrigen aquí
 
@@ -148,16 +146,13 @@ Simulando 2027 sobre una copia de la base real: 98 cargos donde antes había
 
 ## Lo que sigue abierto
 
-De los seis defectos quedan **tres**:
+De los seis defectos quedan **dos**:
 
 * **Varios períodos vencidos generan un solo cargo** (`s13`). Se comprobó al
   implementar: una formulación más general de la regla de febrero también
   recuperaba un período atrasado de rebote —dieciocho cargos en enero donde
   había ocho, sobre datos reales— y se descartó por eso. Recuperar períodos
   vencidos es una decisión, y no se toma de lado.
-* **Una marca de cobro ilegible obliga a cobrar** (`s14`), que sigue
-  invirtiendo la idempotencia en las mensuales. En las anuales lo cerró la
-  fecha de renovación.
 * **Sin la categoría esperada, el gasto cae en el identificador 1** (`s17`).
 
 Y sigue pendiente que el cobro pase por `Dinero`: hoy se lee como `f64` y se
@@ -214,3 +209,66 @@ Cobro» muestra un guion en las mensuales por esa razón, no por olvido.
 
 El aviso se resuelve en el núcleo y llega a la vista como un `bool`. Una regla
 en el HTML es una regla sin pruebas.
+
+
+---
+
+# La marca de cobro ilegible
+
+El defecto que **invertía la propiedad que da nombre a la fase**: si la fecha
+del último cobro no tenía tres partes separadas por `/`, la rama que decidía
+hacía `requiere_cargo = true` sin más. El mecanismo de idempotencia se volvía
+un duplicador, y cobraba en cada arranque.
+
+## No cobrar, y decirlo
+
+No se puede saber cuándo se cobró por última vez. Entre arriesgar un cargo de
+más y uno de menos, **el de menos se corrige mirando el estado de cuenta**; el
+de más hay que deshacerlo. Es el mismo criterio que la anual sin fecha de
+renovación.
+
+Pero no cobrar, a secas, cambia un defecto por otro: **una suscripción parada
+en silencio es peor que una que cobra de más**, porque el cargo indebido
+aparece en el estado de cuenta y la parada no aparece en ninguna parte.
+
+De ahí `Impedimento`, que responde a una pregunta distinta de
+`corresponde_cobrar`: no «¿toca hoy?» sino «¿llegará a cobrarse alguna vez?».
+Unifica los dos estados parados —marca ilegible y anual sin renovación— y
+lleva su propio texto, porque si cambia la regla el texto que la explica tiene
+que cambiar con ella.
+
+Un detalle que costó una corrección a media implementación: en una **anual**
+con marca ilegible no hay impedimento. La anual decide con su fecha de
+renovación y no mira la marca, así que señalarla sería decir que algo está
+parado cuando no lo está. **Un aviso que miente se aprende a ignorar.**
+
+## La salida
+
+`s7` conserva `fecha_ultimo_pago` a propósito, porque reiniciarla provoca un
+cobro duplicado. Esa misma preservación dejaba al titular sin salida cuando la
+fecha guardada no se entiende.
+
+`corregir_ultimo_cobro` es la única vía para escribirla a mano, y existe solo
+por esto. **Pide la fecha en lugar de limpiarla**: borrarla la dejaría como
+«nunca cobrada» y volvería a cobrar este mes, que es justo el duplicado del
+que `s7` protege. Quien tiene el estado de cuenta delante sabe cuál es la
+buena.
+
+## Dos capas, y ninguna sobra
+
+El dominio impide el daño. La **migración 13** cierra la puerta: un `CHECK`
+con `GLOB` obliga a que las dos fechas de una suscripción tengan forma
+`dd/mm/aaaa`.
+
+Que hacía falta no es teórico. En la base real no había ninguna marca rota en
+`suscripciones`, **pero sí una en `gastos.fecha`**: un `10/09/2026` tecleado
+sin la primera barra. El estado es alcanzable; simplemente no había tocado aún
+esta tabla.
+
+Y el `CHECK` no basta solo: comprueba la **forma**, no que la fecha exista. Un
+`31/02/2026` la tiene y no es un día. Por eso el analizador pasó a validar con
+`from_ymd_opt` en vez de parsear tres partes y usar dos — así un `13/13/2026`
+deja de leerse como «mes 13».
+
+La migración **no toca `gastos.fecha`**: ahí hay un valor real que no cumple,
+y corregir un dato del titular es decisión suya, no de una migración.

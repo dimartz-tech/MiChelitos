@@ -165,6 +165,19 @@ pub struct Suscripcion {
     fecha_renovacion: Option<String>,
     /// Si el cargo cae dentro de los próximos siete días.
     avisa: bool,
+    /// Por qué esta suscripción no llegará a cobrarse, si es el caso.
+    ///
+    /// Va en el mismo viaje que los datos y no en una consulta aparte: una
+    /// suscripción parada tiene que verse justo donde se la mira.
+    impedimento: Option<String>,
+}
+
+impl Suscripcion {
+    /// El impedimento, para que las pruebas lean el mismo campo que la vista.
+    #[cfg(test)]
+    pub fn impedimento_para_pruebas(&self) -> Option<&str> {
+        self.impedimento.as_deref()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -994,7 +1007,8 @@ pub fn suscripciones_con_aviso(reloj: &dyn Reloj) -> Result<Vec<Suscripcion>, St
             entidad: row.get(8)?,
             nombre_tarjeta: row.get(9)?,
             fecha_renovacion: row.get(10)?,
-            avisa: false, // se calcula abajo, con el reloj
+            avisa: false,          // se calculan abajo: uno necesita el
+            impedimento: None,     // reloj, y el otro la regla de dominio
         })
     }).map_err(|e| e.to_string())?;
 
@@ -1008,7 +1022,12 @@ pub fn suscripciones_con_aviso(reloj: &dyn Reloj) -> Result<Vec<Suscripcion>, St
     // no viven en el HTML. La vista solo pinta el `bool`.
     let hoy = reloj.hoy();
     for s in &mut list {
-        s.avisa = dominio_de(s).map(|d| d.avisa(hoy)).unwrap_or(false);
+        let regla = dominio_de(s);
+        s.avisa = regla.as_ref().is_some_and(|d| d.avisa(hoy));
+        s.impedimento = regla
+            .as_ref()
+            .and_then(|d| d.impedimento())
+            .map(|i| i.explicacion().to_string());
     }
 
     Ok(list)
@@ -1095,6 +1114,39 @@ fn actualizar_suscripcion(
         .map_err(|e| e.to_string())?;
     if filas == 0 {
         return Err("No se encontró la suscripción que se intenta editar.".to_string());
+    }
+    Ok(())
+}
+
+/// Corrige la fecha del último cobro de una suscripción.
+///
+/// **Es la única vía para escribirla a mano, y existe solo por esto.** La
+/// edición normal la conserva a propósito —`s7`—, porque reiniciarla provoca
+/// un cobro duplicado. Pero cuando la fecha almacenada no se entiende, la
+/// suscripción queda parada y esa preservación deja al titular sin salida.
+///
+/// Pide la fecha en vez de limpiarla: borrarla la dejaría como «nunca
+/// cobrada» y volvería a cobrar este mes, que es justo el duplicado del que
+/// `s7` protege. Quien tiene el estado de cuenta delante sabe la fecha buena.
+#[tauri::command]
+fn corregir_ultimo_cobro(id: i64, fecha: String) -> Result<(), String> {
+    let fecha = fecha.trim();
+    if fecha_desde_texto(fecha).is_none() {
+        return Err(format!(
+            "«{}» no se entiende como fecha. Se espera dd/mm/aaaa.",
+            fecha
+        ));
+    }
+
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let filas = conn
+        .execute(
+            "UPDATE suscripciones SET fecha_ultimo_pago = ? WHERE id = ?;",
+            (fecha, id),
+        )
+        .map_err(|e| e.to_string())?;
+    if filas == 0 {
+        return Err("No se encontró la suscripción que se intenta corregir.".to_string());
     }
     Ok(())
 }
@@ -2430,6 +2482,7 @@ fn main() {
             crear_suscripcion,
             actualizar_suscripcion,
             eliminar_suscripcion,
+            corregir_ultimo_cobro,
             procesar_suscripciones,
             obtener_capital,
             guardar_capital,
