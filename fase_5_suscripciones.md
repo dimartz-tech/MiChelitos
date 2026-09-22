@@ -31,16 +31,19 @@ sujeto por una prueba que muere si alguien cambia la conducta:
 
 | | Lo que hace hoy | Prueba |
 |---|---|---|
-| Mensual el **día 31** | ~~7 cargos en 12 meses~~ — **corregido**, ver abajo | `s10b` |
+| Mensual el **día 31** | ~~7 cargos en 12 meses~~ — **corregido**: el día se recorta al último del mes | `s10b` |
 | Mensual el **día 30** | ~~11 cargos: se pierde febrero~~ — **corregido** | `s11b` |
-| **Anual** | Se recobra al cambiar el año aunque no haya pasado uno: cobrada en julio, vuelve a cobrar el 5 de enero | `s12` |
+| **Anual** | ~~Se recobra al cambiar el año~~ — **corregido**: la fecha se anota, no se deduce | `s12b` |
 | **Períodos vencidos** | Tres meses sin abrir la aplicación generan **un** cargo, no tres | `s13` |
 | Marca de cobro **ilegible** | Cobra en cada arranque, incluso antes de su día | `s14` |
 | Sin la categoría **«Suscripciones»** ni **«Otros»** | El gasto cae en el identificador 1 literal, que hoy es «Alimentación» | `s17` |
 
-El quinto es el más grave, porque **invierte la propiedad que da nombre a la
-fase**: una fecha mal formada convierte el mecanismo de idempotencia en un
-duplicador.
+**Tres de los seis quedan cerrados**, cada uno por decisión del titular y con
+el estado de cuenta delante; los capítulos del final cuentan cómo. De los tres
+que siguen abiertos, el de la **marca ilegible** es el más grave, porque
+invierte la propiedad que da nombre a la fase: una fecha mal formada convierte
+el mecanismo de idempotencia en un duplicador. Queda solo en las mensuales —en
+las anuales lo cerró la fecha de renovación—.
 
 ### Por qué no se corrigen aquí
 
@@ -145,7 +148,7 @@ Simulando 2027 sobre una copia de la base real: 98 cargos donde antes había
 
 ## Lo que sigue abierto
 
-De los seis defectos quedan dos, los dos de las mensuales:
+De los seis defectos quedan **tres**:
 
 * **Varios períodos vencidos generan un solo cargo** (`s13`). Se comprobó al
   implementar: una formulación más general de la regla de febrero también
@@ -153,4 +156,61 @@ De los seis defectos quedan dos, los dos de las mensuales:
   había ocho, sobre datos reales— y se descartó por eso. Recuperar períodos
   vencidos es una decisión, y no se toma de lado.
 * **Una marca de cobro ilegible obliga a cobrar** (`s14`), que sigue
-  invirtiendo la idempotencia en las mensuales.
+  invirtiendo la idempotencia en las mensuales. En las anuales lo cerró la
+  fecha de renovación.
+* **Sin la categoría esperada, el gasto cae en el identificador 1** (`s17`).
+
+Y sigue pendiente que el cobro pase por `Dinero`: hoy se lee como `f64` y se
+carga a la tarjeta directamente.
+
+---
+
+# La renovación anual, anotada
+
+El defecto de la anual **se cierra**, por decisión del titular: en lugar de
+deducir el vencimiento, se anota.
+
+## Por qué el defecto existía
+
+La condición era `anio_actual > p_anio && dia >= dia_facturacion`. No miraba
+el mes, y no podía: del último cobro solo se guardaba una fecha que la regla
+usaba a medias. **Intentaba deducir un vencimiento anual con un dato que no
+bastaba**, y de ahí salía el cargo seis meses antes.
+
+La corrección no es afinar la condición: es dejar de deducir. Una anual sabe
+cuándo renueva porque el proveedor lo dice, y eso es un dato que se anota.
+
+## Lo que cierra de paso
+
+Una fecha es una fecha, así que en las anuales desaparecen también los otros
+dos agujeros:
+
+* El día 31 ya no las desvía.
+* Una **marca de cobro ilegible** ya no las arrastra a cobrar. El agujero
+  queda abierto solo en las mensuales, donde la marca sigue siendo el único
+  dato.
+
+## Las que ya existían
+
+La migración 12 deriva la fecha del último cobro más un año, tomando el **día
+de facturación y no el día en que se ejecutó el cargo**. Son dos cosas
+distintas: el cargo se anota el día en que se abrió la aplicación, que puede
+ser posterior. Sobre datos reales esa diferencia era de un día.
+
+Sin último cobro, o con una marca ilegible, la columna queda vacía. **Una
+anual sin fecha no se cobra.** Inventar una para poder cobrar sería el mismo
+error que la migración corrige, y entre un cargo de más y uno de menos, el de
+menos se corrige mirando el estado de cuenta.
+
+## El aviso
+
+Siete días antes, y hasta el propio día del cargo. Pasada la fecha deja de ser
+un aviso y pasa a ser un cobro pendiente, de modo que se apaga.
+
+**Solo las anuales avisan.** Una mensual tendría que predecir su próximo cobro,
+y esa predicción arrastraría hoy el defecto del día 31: anunciar una fecha que
+el sistema luego no respeta es peor que no anunciar nada. La columna «Próximo
+Cobro» muestra un guion en las mensuales por esa razón, no por olvido.
+
+El aviso se resuelve en el núcleo y llega a la vista como un `bool`. Una regla
+en el HTML es una regla sin pruebas.
