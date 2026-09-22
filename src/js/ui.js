@@ -1065,6 +1065,16 @@ class AppUI {
             <div class="section-title">
                 <h1>Suscripciones Recurrentes</h1>
                 ${(() => {
+                    const paradas = suscripciones.filter(s => s.impedimento);
+                    if (paradas.length === 0) return '';
+                    return `<div class="card" style="border-left:3px solid var(--danger, #e05260); margin-bottom:1rem;">
+                        <strong>⛔ No se cobrarán</strong>
+                        <ul style="margin:0.5rem 0 0 1rem; font-size:0.85rem;">
+                            ${paradas.map(s => `<li><strong>${s.plataforma}</strong> — ${s.impedimento}</li>`).join('')}
+                        </ul>
+                    </div>`;
+                })()}
+                ${(() => {
                     const avisan = suscripciones.filter(s => s.avisa);
                     if (avisan.length === 0) return '';
                     return `<div class="card" style="border-left:3px solid var(--warning, #e0a020); margin-bottom:1rem;">
@@ -1165,10 +1175,15 @@ class AppUI {
                                                         ? `${s.avisa ? '🔔 ' : ''}${s.fecha_renovacion}`
                                                         : '<span style="color:var(--danger, #e05260);">Sin fecha: no se cobrará</span>'
                                             }</td>
-                                            <td>${s.fecha_ultimo_pago || '<span style="font-style:italic;color:var(--text-muted);">Pendiente</span>'}</td>
+                                            <td>${
+                                                s.impedimento
+                                                    ? `<span style="color:var(--danger, #e05260);" title="${s.impedimento}">⛔ ${s.fecha_ultimo_pago || 'sin fecha'}</span>`
+                                                    : (s.fecha_ultimo_pago || '<span style="font-style:italic;color:var(--text-muted);">Pendiente</span>')
+                                            }</td>
                                             <td>${s.entidad} (${s.nombre_tarjeta})</td>
                                             <td class="amount expense">${s.divisa} ${this.formatMoney(s.monto)}</td>
                                             <td>
+                                                ${s.impedimento && s.fecha_ultimo_pago ? `<button onclick="appUI.handleCorregirUltimoCobro(${s.id}, '${s.fecha_ultimo_pago}')" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(224,82,96,0.15); border:1px solid var(--danger, #e05260);" title="Corregir la fecha del último cobro">🔧</button>` : ''}
                                                 <button onclick='appUI.abrirEdicionSuscripcion(${JSON.stringify(s).replace(/'/g, "&apos;")})' class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Editar">✏️</button>
                                                 <button onclick="appUI.handleEliminarSuscripcion(${s.id})" class="btn btn-danger" style="padding: 0.3rem 0.5rem; font-size:0.8rem;">🗑️</button>
                                             </td>
@@ -3197,6 +3212,39 @@ class AppUI {
         if (!ddmmaaaa) return '';
         const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(ddmmaaaa);
         return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
+    }
+
+    /// Corrige la fecha del último cobro de una suscripción parada.
+    ///
+    /// Pide la fecha en lugar de limpiarla. Dejarla vacía la haría pasar por
+    /// «nunca cobrada» y volvería a cobrar este mes, que es el cobro
+    /// duplicado del que la edición protege. Quien tiene el estado de cuenta
+    /// delante sabe cuál es la buena.
+    async handleCorregirUltimoCobro(id, actual) {
+        const fecha = prompt(
+            `La fecha del último cobro no se entiende: «${actual}».\n\n` +
+            `Escribe la buena en formato dd/mm/aaaa. Mientras no se corrija, ` +
+            `esta suscripción no se cobrará.`,
+            ''
+        );
+        if (fecha === null) return;
+
+        // Se valida la forma aquí y también en el núcleo. Aquí para no hacer
+        // ir y volver un texto que ya se ve mal; allí porque es donde la
+        // garantía tiene que vivir.
+        const limpia = fecha.trim();
+        if (!/^\d{2}\/\d{2}\/\d{4}$/.test(limpia)) {
+            this.showToast("La fecha debe escribirse como dd/mm/aaaa.", "error");
+            return;
+        }
+
+        try {
+            await AppAPI.corregirUltimoCobro(id, limpia);
+            this.showToast("Fecha corregida. La suscripción vuelve a su ciclo.");
+            await this.render('suscripciones');
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
     }
 
     async handleAgregarSuscripcion(e) {
