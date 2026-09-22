@@ -41,7 +41,7 @@ use aplicacion::liquidar_gasto::liquidar_gasto;
 use aplicacion::registrar_bonificacion::{registrar_bonificacion, revertir_bonificacion, DatosBonificacion};
 use dominio::bonificacion::Bonificacion;
 use dominio::prestamo::{self, TipoPrestamo};
-use dominio::suscripcion::{Frecuencia, MarcaDeCobro, Suscripcion as SuscripcionDominio};
+use dominio::suscripcion::{Frecuencia, Suscripcion as SuscripcionDominio};
 use puertos::reloj::Reloj;
 
 // --- ESTRUCTURAS DTO (DATA TRANSFER OBJECTS) ---
@@ -160,9 +160,14 @@ pub struct Suscripcion {
     divisa: String,
     entidad: String,
     nombre_tarjeta: String,
-    /// Solo las anuales. `None` significa que no se sabe cuándo renueva, y
+    /// Cuándo vence el próximo cobro. `None` significa que no se sabe, y
     /// entonces no se cobra.
-    fecha_renovacion: Option<String>,
+    fecha_proximo_cobro: Option<String>,
+    /// Los vencimientos que hay que confirmar a mano, si son dos o más.
+    ///
+    /// Viajan con la suscripción y no en una consulta aparte: un período que
+    /// se perdió tiene que verse justo donde se mira la suscripción.
+    pendientes: Vec<String>,
     /// Si el cargo cae dentro de los próximos siete días.
     avisa: bool,
     /// Por qué esta suscripción no llegará a cobrarse, si es el caso.
@@ -173,10 +178,27 @@ pub struct Suscripcion {
 }
 
 impl Suscripcion {
-    /// El impedimento, para que las pruebas lean el mismo campo que la vista.
+    /// Lo que la vista recibe, expuesto para que las pruebas lean **el mismo
+    /// campo** en vez de recalcularlo por su cuenta.
     #[cfg(test)]
     pub fn impedimento_para_pruebas(&self) -> Option<&str> {
         self.impedimento.as_deref()
+    }
+    #[cfg(test)]
+    pub fn pendientes_para_pruebas(&self) -> Vec<String> {
+        self.pendientes.clone()
+    }
+    #[cfg(test)]
+    pub fn avisa_para_pruebas(&self) -> bool {
+        self.avisa
+    }
+    #[cfg(test)]
+    pub fn id_para_pruebas(&self) -> i64 {
+        self.id
+    }
+    #[cfg(test)]
+    pub fn plataforma_para_pruebas(&self) -> &str {
+        &self.plataforma
     }
 }
 
@@ -988,7 +1010,7 @@ fn obtener_suscripciones() -> Result<Vec<Suscripcion>, String> {
 pub fn suscripciones_con_aviso(reloj: &dyn Reloj) -> Result<Vec<Suscripcion>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT s.id, s.plataforma, s.monto, s.tarjeta_id, s.frecuencia, s.dia_facturacion, s.fecha_ultimo_pago, s.divisa, t.entidad, t.nombre_tarjeta, s.fecha_renovacion
+        "SELECT s.id, s.plataforma, s.monto, s.tarjeta_id, s.frecuencia, s.dia_facturacion, s.fecha_ultimo_pago, s.divisa, t.entidad, t.nombre_tarjeta, s.fecha_proximo_cobro
          FROM suscripciones s
          JOIN tarjetas t ON s.tarjeta_id = t.id
          ORDER BY s.plataforma ASC;"
@@ -1006,9 +1028,10 @@ pub fn suscripciones_con_aviso(reloj: &dyn Reloj) -> Result<Vec<Suscripcion>, St
             divisa: row.get(7)?,
             entidad: row.get(8)?,
             nombre_tarjeta: row.get(9)?,
-            fecha_renovacion: row.get(10)?,
-            avisa: false,          // se calculan abajo: uno necesita el
-            impedimento: None,     // reloj, y el otro la regla de dominio
+            fecha_proximo_cobro: row.get(10)?,
+            pendientes: Vec::new(), // se calculan abajo, con el reloj y la
+            avisa: false,           // regla de dominio
+            impedimento: None,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -1028,6 +1051,15 @@ pub fn suscripciones_con_aviso(reloj: &dyn Reloj) -> Result<Vec<Suscripcion>, St
             .as_ref()
             .and_then(|d| d.impedimento())
             .map(|i| i.explicacion().to_string());
+        s.pendientes = regla
+            .as_ref()
+            .map(|d| {
+                d.pendientes_de_confirmar(hoy)
+                    .iter()
+                    .map(|f| f.format("%d/%m/%Y").to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
     }
 
     Ok(list)
@@ -1040,9 +1072,8 @@ pub fn suscripciones_con_aviso(reloj: &dyn Reloj) -> Result<Vec<Suscripcion>, St
 fn dominio_de(s: &Suscripcion) -> Option<SuscripcionDominio> {
     Some(SuscripcionDominio {
         frecuencia: Frecuencia::desde_codigo(&s.frecuencia)?,
-        dia_de_facturacion: s.dia_facturacion.max(0) as u32,
-        ultimo_cobro: MarcaDeCobro::desde_texto(s.fecha_ultimo_pago.as_deref()),
-        renovacion: s.fecha_renovacion.as_deref().and_then(fecha_desde_texto),
+        proximo_cobro: s.fecha_proximo_cobro.as_deref().and_then(fecha_desde_texto),
+        dia_ancla: s.dia_facturacion.max(1) as u32,
     })
 }
 
@@ -1052,34 +1083,31 @@ fn fecha_desde_texto(texto: &str) -> Option<chrono::NaiveDate> {
 }
 
 #[tauri::command]
-fn crear_suscripcion(plataforma: String, monto: f64, tarjeta_id: i64, frecuencia: String, dia_facturacion: i32, divisa: String, fecha_renovacion: Option<String>) -> Result<i64, String> {
-    let renovacion = validar_renovacion(&frecuencia, fecha_renovacion)?;
+fn crear_suscripcion(plataforma: String, monto: f64, tarjeta_id: i64, frecuencia: String, dia_facturacion: i32, divisa: String, fecha_proximo_cobro: Option<String>) -> Result<i64, String> {
+    let proximo = validar_proximo_cobro(fecha_proximo_cobro)?;
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO suscripciones (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, fecha_renovacion) VALUES (?, ?, ?, ?, ?, ?, ?);",
-        (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, renovacion)
+        "INSERT INTO suscripciones (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, fecha_proximo_cobro) VALUES (?, ?, ?, ?, ?, ?, ?);",
+        (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, proximo)
     ).map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
 }
 
-/// La fecha de renovación pertenece a las anuales, y tiene que entenderse.
+/// La fecha del próximo cobro tiene que entenderse.
 ///
-/// Se rechaza una fecha ilegible en vez de guardarla: una anual con fecha que
-/// no se puede leer se comporta como una sin fecha —no cobra— pero **aparenta
-/// estar configurada**, y eso es peor que el hueco visible.
+/// Se rechaza una fecha ilegible en vez de guardarla: una suscripción con una
+/// fecha que no se puede leer no cobra, pero **aparenta estar configurada**, y
+/// eso es peor que el hueco visible.
 ///
-/// En una mensual se descarta, porque no la usa: guardarla sugeriría que
-/// gobierna algo.
-fn validar_renovacion(frecuencia: &str, fecha: Option<String>) -> Result<Option<String>, String> {
-    if frecuencia != "anual" {
-        return Ok(None);
-    }
+/// Ya no distingue por frecuencia: desde que la fecha manda, la mensual la
+/// usa igual que la anual.
+fn validar_proximo_cobro(fecha: Option<String>) -> Result<Option<String>, String> {
     match fecha.as_deref().map(str::trim) {
         None | Some("") => Ok(None),
         Some(texto) => match fecha_desde_texto(texto) {
             Some(_) => Ok(Some(texto.to_string())),
             None => Err(format!(
-                "La fecha de renovación «{}» no se entiende. Se espera dd/mm/aaaa.",
+                "La fecha del próximo cobro «{}» no se entiende. Se espera dd/mm/aaaa.",
                 texto
             )),
         },
@@ -1102,14 +1130,14 @@ fn actualizar_suscripcion(
     frecuencia: String,
     dia_facturacion: i32,
     divisa: String,
-    fecha_renovacion: Option<String>,
+    fecha_proximo_cobro: Option<String>,
 ) -> Result<(), String> {
-    let renovacion = validar_renovacion(&frecuencia, fecha_renovacion)?;
+    let proximo = validar_proximo_cobro(fecha_proximo_cobro)?;
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let filas = conn
         .execute(
-            "UPDATE suscripciones SET plataforma = ?, monto = ?, tarjeta_id = ?, frecuencia = ?, dia_facturacion = ?, divisa = ?, fecha_renovacion = ? WHERE id = ?;",
-            (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, renovacion, id),
+            "UPDATE suscripciones SET plataforma = ?, monto = ?, tarjeta_id = ?, frecuencia = ?, dia_facturacion = ?, divisa = ?, fecha_proximo_cobro = ? WHERE id = ?;",
+            (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, proximo, id),
         )
         .map_err(|e| e.to_string())?;
     if filas == 0 {
@@ -1118,18 +1146,14 @@ fn actualizar_suscripcion(
     Ok(())
 }
 
-/// Corrige la fecha del último cobro de una suscripción.
+/// Pone a mano la fecha del próximo cobro.
 ///
-/// **Es la única vía para escribirla a mano, y existe solo por esto.** La
-/// edición normal la conserva a propósito —`s7`—, porque reiniciarla provoca
-/// un cobro duplicado. Pero cuando la fecha almacenada no se entiende, la
-/// suscripción queda parada y esa preservación deja al titular sin salida.
-///
-/// Pide la fecha en vez de limpiarla: borrarla la dejaría como «nunca
-/// cobrada» y volvería a cobrar este mes, que es justo el duplicado del que
-/// `s7` protege. Quien tiene el estado de cuenta delante sabe la fecha buena.
+/// Es la salida cuando una suscripción se queda sin fecha y por tanto parada.
+/// Pide la fecha en lugar de deducirla, por lo mismo que la anual: deducir un
+/// vencimiento con datos que no bastan es lo que produjo los defectos de esta
+/// fase.
 #[tauri::command]
-fn corregir_ultimo_cobro(id: i64, fecha: String) -> Result<(), String> {
+fn corregir_proximo_cobro(id: i64, fecha: String) -> Result<(), String> {
     let fecha = fecha.trim();
     if fecha_desde_texto(fecha).is_none() {
         return Err(format!(
@@ -1141,7 +1165,7 @@ fn corregir_ultimo_cobro(id: i64, fecha: String) -> Result<(), String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let filas = conn
         .execute(
-            "UPDATE suscripciones SET fecha_ultimo_pago = ? WHERE id = ?;",
+            "UPDATE suscripciones SET fecha_proximo_cobro = ? WHERE id = ?;",
             (fecha, id),
         )
         .map_err(|e| e.to_string())?;
@@ -1175,132 +1199,244 @@ fn procesar_suscripciones() -> Result<Vec<String>, String> {
 /// El puerto `Reloj` existe desde la Fase 0 para esto y no lo usaba nadie.
 pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> Result<Vec<String>, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-
     let hoy = reloj.hoy();
-    // El formato de la aplicación. Convive con el ISO de los commits y el
-    // changelog: son dos públicos distintos, no una inconsistencia.
-    let hoy_fecha_str = hoy.format("%d/%m/%Y").to_string();
+    let categoria = categoria_de_suscripciones(&conn);
 
-    let mut stmt = conn.prepare(
-        "SELECT id, plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, fecha_ultimo_pago, divisa, fecha_renovacion FROM suscripciones;"
-    ).map_err(|e| e.to_string())?;
+    let mut mensajes = Vec::new();
+    for sub in leer_suscripciones(&conn)? {
+        let Some(regla) = regla_de(&sub) else { continue };
+        // **Solo si hay exactamente un período vencido.** Con varios, la
+        // aplicación no sabe si el proveedor los cobró ni si la suscripción
+        // siguió activa: se ofrecen para confirmar en vez de fabricarse.
+        let Some(vencimiento) = regla.cobro_automatico(hoy) else { continue };
 
-    struct SubRecord {
-        id: i64,
-        plataforma: String,
-        monto: f64,
-        tarjeta_id: i64,
-        frecuencia: String,
-        dia_facturacion: i32,
-        fecha_ultimo_pago: Option<String>,
-        divisa: String,
-        fecha_renovacion: Option<String>,
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        asentar_cargo(&tx, &sub, &regla, vencimiento, categoria)?;
+        tx.commit().map_err(|e| e.to_string())?;
+
+        mensajes.push(format!(
+            "Cargo automático realizado para {} ({} {}) con fecha {}",
+            sub.plataforma,
+            sub.divisa,
+            sub.monto,
+            vencimiento.format("%d/%m/%Y")
+        ));
     }
+    Ok(mensajes)
+}
 
-    let rows = stmt.query_map([], |row| {
-        Ok(SubRecord {
-            id: row.get(0)?,
-            plataforma: row.get(1)?,
-            monto: row.get(2)?,
-            tarjeta_id: row.get(3)?,
-            frecuencia: row.get(4)?,
-            dia_facturacion: row.get(5)?,
-            fecha_ultimo_pago: row.get(6)?,
-            divisa: row.get(7)?,
-            fecha_renovacion: row.get(8)?,
+struct SubRecord {
+    id: i64,
+    plataforma: String,
+    monto: f64,
+    tarjeta_id: i64,
+    frecuencia: String,
+    dia_facturacion: i32,
+    divisa: String,
+    fecha_proximo_cobro: Option<String>,
+}
+
+fn leer_suscripciones(conn: &rusqlite::Connection) -> Result<Vec<SubRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, plataforma, monto, tarjeta_id, frecuencia, dia_facturacion,
+                    divisa, fecha_proximo_cobro
+             FROM suscripciones ORDER BY id;",
+        )
+        .map_err(|e| e.to_string())?;
+    let filas = stmt
+        .query_map([], |row| {
+            Ok(SubRecord {
+                id: row.get(0)?,
+                plataforma: row.get(1)?,
+                monto: row.get(2)?,
+                tarjeta_id: row.get(3)?,
+                frecuencia: row.get(4)?,
+                dia_facturacion: row.get(5)?,
+                divisa: row.get(6)?,
+                fecha_proximo_cobro: row.get(7)?,
+            })
         })
-    }).map_err(|e| e.to_string())?;
-
-    let mut suscripciones = Vec::new();
-    for r in rows {
-        suscripciones.push(r.map_err(|e| e.to_string())?);
+        .map_err(|e| e.to_string())?;
+    let mut v = Vec::new();
+    for f in filas {
+        v.push(f.map_err(|e| e.to_string())?);
     }
-    drop(stmt);
+    Ok(v)
+}
 
-    // Buscar o crear la categoría de Suscripciones en el sistema
-    let categoria_suscripciones_id: i64 = match conn.query_row(
-        "SELECT id FROM categorias WHERE LOWER(nombre) = 'suscripciones';",
-        [],
-        |r| r.get(0)
-    ) {
-        Ok(id) => id,
-        Err(_) => {
-            // Si no existe, usar la categoría "Otros" o crear "Suscripciones"
-            match conn.query_row(
-                "SELECT id FROM categorias WHERE LOWER(nombre) = 'otros';",
-                [],
-                |r| r.get(0)
-            ) {
-                Ok(id) => id,
-                Err(_) => 1 // Fallback al ID 1
-            }
+/// Una frecuencia que el `CHECK` no admite no debería existir. Si existiera,
+/// no cobrar es lo que hacía la cadena de `if` anterior al no coincidir con
+/// ninguna rama.
+fn regla_de(sub: &SubRecord) -> Option<SuscripcionDominio> {
+    Some(SuscripcionDominio {
+        frecuencia: Frecuencia::desde_codigo(&sub.frecuencia)?,
+        proximo_cobro: sub.fecha_proximo_cobro.as_deref().and_then(fecha_desde_texto),
+        dia_ancla: sub.dia_facturacion.max(1) as u32,
+    })
+}
+
+/// Dónde va el gasto de una suscripción.
+///
+/// **Divergencia conocida (`s17`), sin resolver.** Si no existen ni
+/// «Suscripciones» ni «Otros», cae en el identificador 1 literal, sea cual
+/// sea la categoría que lo tenga.
+fn categoria_de_suscripciones(conn: &rusqlite::Connection) -> i64 {
+    for nombre in ["suscripciones", "otros"] {
+        if let Ok(id) = conn.query_row(
+            "SELECT id FROM categorias WHERE LOWER(nombre) = ?;",
+            [nombre],
+            |r| r.get(0),
+        ) {
+            return id;
+        }
+    }
+    1
+}
+
+/// Asienta un cargo de suscripción **con la fecha de su vencimiento**.
+///
+/// La fecha es la del período, no la del día en que se ejecuta. Antes se
+/// usaba «hoy», y por eso en la base real un cargo de Google One —que factura
+/// el día 9— figura asentado el 11: cuadrarlo contra el estado de cuenta era
+/// más difícil de lo necesario.
+///
+/// Es la misma función para el cobro automático y para confirmar un período
+/// pendiente, de modo que los dos caminos no puedan divergir.
+fn asentar_cargo(
+    tx: &rusqlite::Transaction,
+    sub: &SubRecord,
+    regla: &SuscripcionDominio,
+    vencimiento: chrono::NaiveDate,
+    categoria: i64,
+) -> Result<(), String> {
+    let fecha = vencimiento.format("%d/%m/%Y").to_string();
+
+    let columna = if sub.divisa == "USD" { "balance_dolares" } else { "balance_pesos" };
+    tx.execute(
+        &format!("UPDATE tarjetas SET {c} = ROUND({c} + ?, 2) WHERE id = ?;", c = columna),
+        (sub.monto, sub.tarjeta_id),
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id)
+         VALUES (?, ?, ?, ?, ?, 'tarjeta', 0.0, ?);",
+        (&fecha, sub.monto, &sub.divisa, format!("Cargo recurrente: {}", sub.plataforma), categoria, sub.tarjeta_id),
+    )
+    .map_err(|e| e.to_string())?;
+
+    avanzar_el_puntero(tx, sub.id, regla, vencimiento, Some(&fecha))
+}
+
+/// Mueve `fecha_proximo_cobro` al período siguiente.
+///
+/// Se calcula **desde el vencimiento saldado**, no desde hoy: si la
+/// aplicación se abre tarde, el vencimiento siguiente sigue siendo el del
+/// proveedor y no el del descuido.
+fn avanzar_el_puntero(
+    tx: &rusqlite::Transaction,
+    id: i64,
+    regla: &SuscripcionDominio,
+    saldado: chrono::NaiveDate,
+    marca_de_cobro: Option<&str>,
+) -> Result<(), String> {
+    let siguiente = regla
+        .siguiente_vencimiento(saldado)
+        .map(|f| f.format("%d/%m/%Y").to_string());
+
+    tx.execute(
+        "UPDATE suscripciones SET fecha_proximo_cobro = ? WHERE id = ?;",
+        (&siguiente, id),
+    )
+    .map_err(|e| e.to_string())?;
+
+    if let Some(marca) = marca_de_cobro {
+        tx.execute(
+            "UPDATE suscripciones SET fecha_ultimo_pago = ? WHERE id = ?;",
+            (marca, id),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Asienta el período pendiente más antiguo, tras confirmarlo el titular.
+#[tauri::command]
+fn asentar_periodo_pendiente(id: i64) -> Result<String, String> {
+    confirmar_pendiente(id, &crate::adaptadores::reloj_sistema::RelojSistema, None)
+}
+
+/// Da por no cobrado el período pendiente más antiguo y pasa al siguiente.
+///
+/// **Exige un motivo escrito**, por lo mismo que las correcciones: descartar
+/// un período es afirmar que el proveedor no lo cobró, y esa afirmación la
+/// hace alguien mirando un estado de cuenta. Si dentro de seis meses la cifra
+/// anual no cuadra, esto es lo que dirá por qué.
+#[tauri::command]
+fn descartar_periodo_pendiente(id: i64, motivo: String) -> Result<String, String> {
+    confirmar_pendiente(id, &crate::adaptadores::reloj_sistema::RelojSistema, Some(motivo))
+}
+
+pub fn confirmar_pendiente(
+    id: i64,
+    reloj: &dyn crate::puertos::reloj::Reloj,
+    motivo_de_descarte: Option<String>,
+) -> Result<String, String> {
+    let hoy = reloj.hoy();
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let categoria = categoria_de_suscripciones(&conn);
+
+    let sub = leer_suscripciones(&conn)?
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or("No se encontró la suscripción.")?;
+    let regla = regla_de(&sub).ok_or("La suscripción tiene una frecuencia que no se reconoce.")?;
+
+    // Se actúa sobre el **más antiguo**, y solo si de verdad hay varios: con
+    // uno, el cobro automático es quien debe encargarse, y dejar que esta vía
+    // lo tocara abriría un segundo camino para el mismo hecho.
+    let pendientes = regla.pendientes_de_confirmar(hoy);
+    let vencimiento = *pendientes
+        .first()
+        .ok_or("Esta suscripción no tiene períodos pendientes de confirmar.")?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let resumen = match motivo_de_descarte {
+        None => {
+            asentar_cargo(&tx, &sub, &regla, vencimiento, categoria)?;
+            format!(
+                "Asentado el cargo de {} con fecha {}.",
+                sub.plataforma,
+                vencimiento.format("%d/%m/%Y")
+            )
+        }
+        Some(motivo) => {
+            let caso = correcciones::registrar(
+                &tx,
+                correcciones::Correccion {
+                    tipo: "período de suscripción",
+                    referencia_id: sub.id,
+                    descripcion: format!(
+                        "{} — período del {}",
+                        sub.plataforma,
+                        vencimiento.format("%d/%m/%Y")
+                    ),
+                    importe: Some(sub.monto),
+                    divisa: Some(sub.divisa.clone()),
+                    motivo: &motivo,
+                },
+            )?;
+            avanzar_el_puntero(&tx, sub.id, &regla, vencimiento, None)?;
+            format!(
+                "Período del {} descartado. Caso {}.",
+                vencimiento.format("%d/%m/%Y"),
+                caso
+            )
         }
     };
-
-    let mut mensajes_cargo = Vec::new();
-
-    for sub in suscripciones {
-        // La decisión vive en `dominio::suscripcion`, no aquí. Este bucle se
-        // ocupa de mover dinero; si corresponde moverlo lo dice la regla.
-        let regla = Frecuencia::desde_codigo(&sub.frecuencia).map(|frecuencia| SuscripcionDominio {
-            frecuencia,
-            dia_de_facturacion: sub.dia_facturacion.max(0) as u32,
-            ultimo_cobro: MarcaDeCobro::desde_texto(sub.fecha_ultimo_pago.as_deref()),
-            renovacion: sub.fecha_renovacion.as_deref().and_then(fecha_desde_texto),
-        });
-        // Una frecuencia que el `CHECK` no admite no debería existir. Si
-        // existiera, no cobrar es lo que hacía la cadena de `if` anterior al
-        // no coincidir con ninguna rama.
-        let requiere_cargo = regla.as_ref().is_some_and(|r| r.corresponde_cobrar(hoy));
-
-        if requiere_cargo {
-            let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-            // 1. Cargar a la tarjeta correspondiente
-            if sub.divisa == "USD" {
-                tx.execute(
-                    "UPDATE tarjetas SET balance_dolares = ROUND(balance_dolares + ?, 2) WHERE id = ?;",
-                    (sub.monto, sub.tarjeta_id)
-                ).map_err(|e| e.to_string())?;
-            } else {
-                tx.execute(
-                    "UPDATE tarjetas SET balance_pesos = ROUND(balance_pesos + ?, 2) WHERE id = ?;",
-                    (sub.monto, sub.tarjeta_id)
-                ).map_err(|e| e.to_string())?;
-            }
-
-            // 2. Registrar en gastos
-            tx.execute(
-                "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id)
-                 VALUES (?, ?, ?, ?, ?, 'tarjeta', 0.0, ?);",
-                (&hoy_fecha_str, sub.monto, &sub.divisa, format!("Cargo recurrente: {}", sub.plataforma), categoria_suscripciones_id, sub.tarjeta_id)
-            ).map_err(|e| e.to_string())?;
-
-            // 3. Actualizar fecha de último pago
-            tx.execute(
-                "UPDATE suscripciones SET fecha_ultimo_pago = ? WHERE id = ?;",
-                (&hoy_fecha_str, sub.id)
-            ).map_err(|e| e.to_string())?;
-
-            // 4. Y en una anual, adelantar la renovación un año.
-            //
-            // Se calcula desde la fecha **anotada**, no desde hoy: si la
-            // aplicación se abre tarde, el vencimiento del año que viene
-            // sigue siendo el del proveedor y no el del descuido.
-            if let Some(siguiente) = regla.as_ref().and_then(|r| r.renovacion_siguiente()) {
-                tx.execute(
-                    "UPDATE suscripciones SET fecha_renovacion = ? WHERE id = ?;",
-                    (siguiente.format("%d/%m/%Y").to_string(), sub.id),
-                ).map_err(|e| e.to_string())?;
-            }
-
-            tx.commit().map_err(|e| e.to_string())?;
-
-            mensajes_cargo.push(format!("Cargo automático realizado para {} ({} {})", sub.plataforma, sub.divisa, sub.monto));
-        }
-    }
-
-    Ok(mensajes_cargo)
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(resumen)
 }
 
 // --- COMANDOS: CAPITAL (NoSQL) ---
@@ -2482,7 +2618,9 @@ fn main() {
             crear_suscripcion,
             actualizar_suscripcion,
             eliminar_suscripcion,
-            corregir_ultimo_cobro,
+            corregir_proximo_cobro,
+            asentar_periodo_pendiente,
+            descartar_periodo_pendiente,
             procesar_suscripciones,
             obtener_capital,
             guardar_capital,
