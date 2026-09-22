@@ -1,6 +1,6 @@
 {
   "name": "michelitos-tauri",
-  "version": "1.19.0",
+  "version": "1.19.1",
   "description": "Aplicación de escritorio nativa macOS con Tauri y Rust para MiChelitos",
   "main": "src/index.html",
   "type": "module",

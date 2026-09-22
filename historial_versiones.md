@@ -4,7 +4,25 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.19.0 (Versión Actual) - 2026-09-20
+## 🚀 Versión 1.19.1 (Versión Actual) - 2026-09-22
+**El tramo 3 de la política de redondeo se cierra declarándolo innecesario.**
+
+### 🧮 Núcleo monetario
+* Estaba previsto sacar la coma flotante también de las **columnas de tasa**, que SQLite guarda como `REAL`. Se comprobó antes de implementarlo y **no compra nada**: una tasa sobrevive intacta al viaje `entero → REAL → entero`.
+* A escala de mil-millonésimas, una tasa del rango plausible necesita unos doce dígitos significativos y `f64` ofrece quince. La holgura es amplia, y lo mismo vale para los porcentajes de interés.
+* Lo que sí hacía falta era **proteger esa holgura**, porque es la razón de que el tramo sobre. Dos pruebas de barrido lo fijan: si algún día se subiera la escala hasta agotarla, el viaje empezaría a perder y se sabría ahí.
+* Una migración de tres columnas, su relleno y su verificación, **sustituidos por dos pruebas**.
+
+### 🧪 Pruebas
+* Las pruebas de caracterización usaban una **ruta temporal fija**, de modo que dos ejecuciones simultáneas de `cargo test` se pisaban la misma base y fallaban con «attempt to write a readonly database» — un mensaje que no dice en absoluto lo que pasa. Ahora la raíz lleva el identificador del proceso.
+* Aparece en cuanto una herramienta lanza las pruebas mientras hay otra corriendo, que es justo lo que hace `herramientas/revisar.py`.
+
+### 📄 Documentación
+* `politica_redondeo.md` recoge los cuatro tramos, su estado, y las decisiones que cambiaron sobre la marcha.
+
+---
+
+## 🚀 Versión 1.19.0 - 2026-09-20
 **Borrar un movimiento abre un caso de auditoría y exige explicarlo.**
 
 > **Medida temporal.** La solución definitiva son los asientos de compensación de la Fase 8: un movimiento anulado deja su contrario y el original sobrevive. Mientras eso no exista, borrar destruye el rastro, y esto deja constancia de qué se destruyó y por qué.
