@@ -64,6 +64,7 @@ const AppAPI = {
             divisa,
             balance: Number(balance),
             entidad: entidad || null,
+            // Texto, por el mismo motivo que el saldo del préstamo.
             comisionPagoImpuestos: comisionPagoImpuestos ?? null
         });
     },
@@ -298,7 +299,9 @@ const AppAPI = {
     },
 
     async declararSaldoPrestamo(id, saldo) {
-        return await invoke('declarar_saldo_prestamo', { id: Number(id), saldo: Number(saldo) });
+        // `saldo` viaja como **texto**: el céntimo lo decide el backend con la
+        // regla del sistema, no `Number()` sobre binario.
+        return await invoke('declarar_saldo_prestamo', { id: Number(id), saldo: String(saldo) });
     },
 
     async obtenerMovimientosPrestamo(id) {

@@ -98,6 +98,73 @@ pub fn dividir_redondeando(numerador: i128, denominador: i128) -> i128 {
     }
 }
 
+/// Convierte los dígitos de un importe decimal en centavos exactos.
+///
+/// **No usa coma flotante en ningún punto.** Separa la cadena por el punto
+/// decimal, lee cada mitad como entero y las compone. Ese es todo el truco, y
+/// es lo que hace que el número guardado sea el número escrito.
+///
+/// Admite lo que un formulario produce: signo opcional, espacios alrededor,
+/// separadores de millar, y con o sin parte decimal. Rechaza lo que no es un
+/// importe, nombrando el motivo en vez de devolver cero.
+pub fn centavos_desde_texto(texto: &str) -> Result<i64, ErrorDominio> {
+    let limpio: String = texto.chars().filter(|c| !c.is_whitespace() && *c != ',').collect();
+    if limpio.is_empty() {
+        return Err(ErrorDominio::ImporteIlegible { texto: texto.to_string() });
+    }
+
+    let (negativo, cuerpo) = match limpio.strip_prefix('-') {
+        Some(resto) => (true, resto),
+        None => (false, limpio.strip_prefix('+').unwrap_or(&limpio)),
+    };
+
+    let (entera, decimal) = match cuerpo.split_once('.') {
+        Some((e, d)) => (e, d),
+        None => (cuerpo, ""),
+    };
+
+    // Una parte entera vacía es legítima en «.50»; ambas vacías, no.
+    if entera.is_empty() && decimal.is_empty() {
+        return Err(ErrorDominio::ImporteIlegible { texto: texto.to_string() });
+    }
+    if !entera.chars().all(|c| c.is_ascii_digit()) || !decimal.chars().all(|c| c.is_ascii_digit()) {
+        return Err(ErrorDominio::ImporteIlegible { texto: texto.to_string() });
+    }
+
+    let unidades: i128 = if entera.is_empty() {
+        0
+    } else {
+        entera.parse().map_err(|_| ErrorDominio::ImporteIlegible { texto: texto.to_string() })?
+    };
+
+    // Los decimales se completan o se recortan a centavos. Al recortar se
+    // decide con la misma regla que el resto del sistema, usando el primer
+    // dígito sobrante para saber hacia dónde.
+    let centavos_decimales: i128 = match decimal.len() {
+        0 => 0,
+        1 => decimal.parse::<i128>().unwrap() * 10,
+        2 => decimal.parse::<i128>().unwrap(),
+        _ => {
+            let dos: i128 = decimal[..2].parse().unwrap();
+            let resto = &decimal[2..];
+            let sube = resto.as_bytes()[0] >= b'5';
+            dos + i128::from(sube)
+        }
+    };
+
+    let total = unidades
+        .checked_mul(CENTAVOS_POR_UNIDAD as i128)
+        .and_then(|u| u.checked_add(centavos_decimales))
+        .ok_or(ErrorDominio::ImporteIlegible { texto: texto.to_string() })?;
+
+    let total = if negativo { -total } else { total };
+
+    if total.abs() > MAX_CENTAVOS_EXACTOS as i128 {
+        return Err(ErrorDominio::MontoInvalido { valor: total as f64 });
+    }
+    Ok(total as i64)
+}
+
 /// Una proporción — una retención, un cashback, un interés— como entero.
 ///
 /// Guarda **millonésimas de la fracción**, no del porcentaje: 0.20 % es la
@@ -232,6 +299,26 @@ impl Dinero {
     ///
     /// Es el constructor de la frontera: los importes que llegan de la interfaz
     /// y de las columnas `REAL` de SQLite entran por aquí.
+    /// Construye un importe a partir de los **dígitos que se escribieron**.
+    ///
+    /// Es la entrada que evita el viaje por coma flotante. `Dinero::nuevo`
+    /// recibe un `f64` que **ya no vale** lo que el usuario tecleó: `1234.56`
+    /// no existe en binario, y al multiplicarlo por 100 y redondear se decide
+    /// un céntimo sobre un número que nunca fue el escrito.
+    ///
+    /// Los tramos 1 y 2 no eliminaron esa conversión: la **centralizaron**
+    /// aquí. Esta función la retira, leyendo la parte entera y la decimal como
+    /// enteros y componiéndolas. `"1234.56"` da 123 456 centavos exactos, sin
+    /// que ningún `f64` intervenga.
+    ///
+    /// Acepta más de dos decimales y los decide con la regla del sistema
+    /// —mitad alejándose de cero—, porque un importe tecleado con tres
+    /// decimales es un error del usuario, no del programa, y rechazarlo sería
+    /// un estorbo donde basta decidir.
+    pub fn desde_texto(texto: &str, divisa: Divisa) -> Result<Dinero, ErrorDominio> {
+        Ok(Dinero { centavos: centavos_desde_texto(texto)?, divisa })
+    }
+
     pub fn nuevo(unidades: f64, divisa: Divisa) -> Result<Dinero, ErrorDominio> {
         if !unidades.is_finite() {
             return Err(ErrorDominio::MontoInvalido { valor: unidades });
@@ -560,6 +647,94 @@ mod tests {
         assert_eq!(dop(54_321.09).porcentaje(Porcentaje::puntos_basicos(20)).unwrap(), dop(108.64));
         assert_eq!(dop(10_000.50).porcentaje(Porcentaje::puntos_basicos(20)).unwrap(), dop(20.00));
         assert_eq!(usd(150.00).porcentaje(Porcentaje::puntos_basicos(20)).unwrap(), usd(0.30));
+    }
+
+    // --- Los dígitos escritos, sin pasar por binario ---
+
+    #[test]
+    fn el_texto_se_lee_como_centavos_exactos() {
+        assert_eq!(centavos_desde_texto("1234.56").unwrap(), 123_456);
+        assert_eq!(centavos_desde_texto("0.01").unwrap(), 1);
+        assert_eq!(centavos_desde_texto("100").unwrap(), 10_000);
+        assert_eq!(centavos_desde_texto("100.5").unwrap(), 10_050, "un decimal se completa");
+        assert_eq!(centavos_desde_texto(".50").unwrap(), 50, "sin parte entera");
+        assert_eq!(centavos_desde_texto("-42.75").unwrap(), -4_275);
+    }
+
+    #[test]
+    fn el_texto_evita_el_error_que_la_coma_flotante_introducia() {
+        // **La razón de que esto exista.** Por `f64`, 1.005 se guarda como
+        // 1.00499… y al multiplicar por 100 da 100.4999…, que baja a 1.00. Por
+        // texto no hay nada que aproximar: los dígitos son los dígitos.
+        assert_eq!(centavos_desde_texto("1.005").unwrap(), 101, "el 5 sube, sin binario");
+        assert_eq!(Dinero::nuevo(1.005, Divisa::Dop).unwrap().centavos(), 100, "por f64 baja");
+
+        // Y el caso simétrico, donde la coma flotante acertaba por accidente.
+        assert_eq!(centavos_desde_texto("2.675").unwrap(), 268);
+        assert_eq!(Dinero::nuevo(2.675, Divisa::Dop).unwrap().centavos(), 268);
+    }
+
+    #[test]
+    fn un_tercer_decimal_se_decide_con_la_regla_del_sistema() {
+        // Mitad alejándose de cero, igual que `dividir_redondeando`.
+        assert_eq!(centavos_desde_texto("10.004").unwrap(), 1_000);
+        assert_eq!(centavos_desde_texto("10.005").unwrap(), 1_001);
+        assert_eq!(centavos_desde_texto("10.009").unwrap(), 1_001);
+        assert_eq!(centavos_desde_texto("-10.005").unwrap(), -1_001, "también en negativo");
+    }
+
+    #[test]
+    fn se_admite_lo_que_un_formulario_produce() {
+        assert_eq!(centavos_desde_texto("  1234.56  ").unwrap(), 123_456, "espacios");
+        assert_eq!(centavos_desde_texto("1,234.56").unwrap(), 123_456, "separador de millar");
+        assert_eq!(centavos_desde_texto("+50.00").unwrap(), 5_000, "signo explícito");
+    }
+
+    #[test]
+    fn lo_que_no_es_un_importe_se_rechaza_nombrando_el_motivo() {
+        // Devolver cero ante un texto ilegible es la forma habitual de que un
+        // importe desaparezca sin que nadie se entere.
+        for basura in ["", "  ", "abc", "1.2.3", "12a", "-", ".", "1e5"] {
+            let r = centavos_desde_texto(basura);
+            assert!(r.is_err(), "aceptó «{basura}»");
+            assert!(
+                format!("{}", r.unwrap_err()).contains("no es un importe"),
+                "el error no explica qué pasó con «{basura}»"
+            );
+        }
+    }
+
+    #[test]
+    fn el_texto_y_la_coma_flotante_coinciden_salvo_donde_esta_pierde() {
+        // Barrido: para importes con dos decimales —lo que un formulario
+        // produce normalmente— ambos caminos dan lo mismo. La diferencia
+        // aparece solo con un tercer decimal, que es donde `f64` decide sobre
+        // un número que no es el escrito.
+        let mut divergencias = 0;
+        for centavos in (1..200_000).step_by(13) {
+            let texto = format!("{}.{:02}", centavos / 100, centavos % 100);
+            let por_texto = centavos_desde_texto(&texto).unwrap();
+            let por_f64 = Dinero::nuevo(texto.parse::<f64>().unwrap(), Divisa::Dop)
+                .unwrap()
+                .centavos();
+            if por_texto != por_f64 {
+                divergencias += 1;
+            }
+            assert_eq!(por_texto, centavos as i64, "el texto no es exacto en {texto}");
+        }
+        assert_eq!(divergencias, 0, "con dos decimales ambos caminos coinciden");
+    }
+
+    #[test]
+    fn desde_texto_construye_un_dinero_con_su_divisa() {
+        let d = Dinero::desde_texto("1234.56", Divisa::Usd).unwrap();
+        assert_eq!(d.centavos(), 123_456);
+        assert_eq!(d.divisa(), Divisa::Usd);
+    }
+
+    #[test]
+    fn un_importe_desmesurado_se_rechaza_en_vez_de_desbordar() {
+        assert!(centavos_desde_texto("999999999999999999999.99").is_err());
     }
 
     // --- La tolerancia de representación, exigida ---

@@ -3322,9 +3322,17 @@ class AppUI {
         );
         if (comision === null) return;
 
-        const valor = comision.trim() === '' ? null : Number(comision);
-        if (valor !== null && !(valor >= 0)) {
-            this.showToast("La comisión debe ser un número mayor o igual que cero.", "error");
+        // Se manda **el texto**, no un número. Este campo llega por `prompt`,
+        // que no pasa por la validación de `step="0.01"` del navegador, así
+        // que aquí sí puede aparecer un tercer decimal — y el céntimo debe
+        // decidirlo el núcleo con su regla, no `Number()` sobre binario.
+        const valor = comision.trim() === '' ? null : comision.trim();
+        if (valor !== null && !/^-?\d*\.?\d+$/.test(valor.replace(/,/g, ''))) {
+            this.showToast("La comisión debe ser un importe válido.", "error");
+            return;
+        }
+        if (valor !== null && valor.startsWith('-')) {
+            this.showToast("La comisión no puede ser negativa.", "error");
             return;
         }
 
@@ -3735,9 +3743,12 @@ class AppUI {
         );
         if (respuesta === null) return;
 
-        const saldo = Number(respuesta);
-        if (!Number.isFinite(saldo)) {
-            this.showToast("El saldo debe ser un número.", 'error');
+        // Mismo motivo: entra por `prompt`, así que va como texto.
+        const saldo = respuesta.trim();
+        // Se valida la **forma** del texto, no el número: convertirlo aquí
+        // para comprobarlo devolvería al punto de partida.
+        if (!/^-?\d*\.?\d+$/.test(saldo.replace(/,/g, ''))) {
+            this.showToast("El saldo debe ser un importe válido.", 'error');
             return;
         }
 
@@ -3921,19 +3932,26 @@ class AppUI {
             const neto = Math.round((mon - mon * (ret / 100)) * 100) / 100;
 
             if (quiereParcial) {
+                // Va como texto, igual que los otros importes que no pasan
+                // por la validación del formulario: este campo se lee con
+                // `.value` directamente, así que el `step="0.01"` nunca llega
+                // a comprobarse. Se valida la **forma**, y el céntimo lo
+                // decide el núcleo.
                 const texto = document.getElementById(`edit_parcial_mon_${id}`).value;
-                parcial = texto.trim() === '' ? null : Number(texto);
-                if (parcial === null || !(parcial >= 0)) {
+                parcial = texto.trim() === '' ? null : texto.trim();
+                if (parcial === null || !/^\d*\.?\d+$/.test(parcial.replace(/,/g, ''))) {
                     this.showToast("Indica cuánto se cobró de verdad, o desmarca el cobro parcial.", "error");
                     return;
                 }
-                if (parcial > neto) {
+                // La cota sí es una comparación, no una decisión de céntimo:
+                // convertir aquí no compromete el importe que se envía.
+                if (Number(parcial.replace(/,/g, '')) > neto) {
                     this.showToast(`Un cobro parcial no puede superar el neto (${this.formatMoney(neto)}).`, "error");
                     return;
                 }
             }
 
-            const cobrado = parcial ?? neto;
+            const cobrado = parcial === null ? neto : Number(parcial.replace(/,/g, ''));
             const recibidoAntes = Number(
                 document.getElementById(`modal-edit-for-${id}`)?.dataset?.recibido ?? 0
             );

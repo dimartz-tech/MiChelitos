@@ -4,7 +4,29 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.20.0 (Versión Actual) - 2026-09-22
+## 🚀 Versión 1.21.0 (Versión Actual) - 2026-09-22
+**Los importes que el usuario teclea llegan al núcleo como dígitos, no como coma flotante.**
+
+### 🧮 Núcleo monetario
+* `Dinero::desde_texto` decide el céntimo **sobre los dígitos escritos**. `Dinero::nuevo` recibía un `f64` que ya no valía lo tecleado: `1.005` se almacena como 1.00499… y bajaba a 1.00. Por texto sube a 1.01, que es la regla del sistema.
+* `ImporteDecimal`, en la frontera IPC, acepta **texto o número**. El número se admite durante la transición para migrar pantalla a pantalla; cuando no quede ninguna llamada que lo mande, esa rama se retira.
+
+### 📌 De dónde viene esta decisión
+* Salió de investigar el tramo 4 de la política de redondeo, y el argumento no estaba en el planteamiento original: **los tramos 1 y 2 no eliminaron la conversión desde coma flotante, la centralizaron**. El defecto que `dividir_redondeando` documenta vivía también en la puerta de entrada.
+* Antes de aplicarlo **se midió, y la medida acotó el trabajo**: 52 de 53 campos de importe llevan `step="0.01"`, que el navegador valida al enviar el formulario; y el viaje `texto → Number → texto` no pierde nada con dos decimales —cero divergencias en 28 571 muestras—.
+* Quedan **tres importes fuera de esa validación**: la comisión por pago de impuestos, el saldo declarado de un préstamo y el cobro parcial de una factura. Los tres entran sin pasar por el formulario. Son los tres que se migran ahora.
+* Se anota así, y no como «se hizo todo», porque **la diferencia entre una corrección que cambia importes y una que ordena el código debería poder leerse**. Migrar los cuarenta y un parámetros restantes es mecánico y no urge: el `step` ya los cubre.
+
+### 🖥️ Interfaz
+* Los tres campos mandan **el texto tal cual**, y se validan por **forma** —una expresión regular— en vez de por conversión. Convertir para comprobar devolvería al punto de partida.
+* La cota del cobro parcial sigue comparando números, que es lo que es: una comparación, no una decisión de céntimo.
+
+### 🐛 Correcciones
+* `revertir_abono_tarjeta` calculaba el número de caso de auditoría y **no lo devolvía**. La reversión quedaba registrada, pero el usuario no veía con qué número.
+
+---
+
+## 🚀 Versión 1.20.0 - 2026-09-22
 **Cuatro columnas de dinero estaban fuera de la red del redondeo, y una dejaba entrar fracciones de céntimo.**
 
 ### 🧮 Núcleo monetario
