@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 11;
+pub const VERSION_OBJETIVO: u32 = 12;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -148,6 +148,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 11,
             nombre: "la fracción de céntimo se rechaza al escribir",
             aplicar: crate::db_sql::migracion_11_rechazar_fraccion_de_centimo,
+        },
+        Migracion {
+            version: 12,
+            nombre: "la fecha de renovación de las anuales",
+            aplicar: crate::db_sql::migracion_12_renovacion_anual,
         },
     ]
 }
@@ -1006,6 +1011,78 @@ mod tests_centavos {
             "el redondeo de la acumulación movió {peor_correccion:.3e} unidades: \
              eso ya no es limpiar ruido, es decidir un céntimo"
         );
+    }
+
+
+    #[test]
+    fn la_migracion_12_deriva_la_renovacion_del_dia_de_facturacion_y_no_del_cargo() {
+        // **La distinción que importa.** El cargo se anota el día en que se
+        // abrió la aplicación, que puede ser posterior al de facturación. El
+        // proveedor renueva el suyo, así que la fecha derivada toma
+        // `dia_facturacion`. Sobre datos reales esa diferencia era de un día.
+        let c = base_migrada();
+        c.execute_batch(
+            "INSERT INTO tarjetas (entidad, nombre_tarjeta, fecha_corte, fecha_limite_pago)
+             VALUES ('Emisor', 'Producto', 5, 25);",
+        )
+        .unwrap();
+        // Se siembra saltándose el comando, para fijar una marca ya existente.
+        c.execute_batch(
+            "INSERT INTO suscripciones (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, fecha_ultimo_pago)
+                 VALUES ('Anual tardía', 100.0, 1, 'anual', 10, 'DOP', '11/08/2026'),
+                        ('Anual sin marca', 100.0, 1, 'anual', 10, 'DOP', NULL),
+                        ('Anual ilegible', 100.0, 1, 'anual', 10, 'DOP', '2026-08-11'),
+                        ('Anual en enero 31', 100.0, 1, 'anual', 31, 'DOP', '15/02/2026'),
+                        ('Mensual', 100.0, 1, 'mensual', 10, 'DOP', '11/08/2026');
+             UPDATE suscripciones SET fecha_renovacion = NULL;",
+        )
+        .unwrap();
+
+        let mut c = c;
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_12_renovacion_anual(&tx).unwrap();
+        tx.commit().unwrap();
+
+        let leer = |plataforma: &str| -> Option<String> {
+            c.query_row(
+                "SELECT fecha_renovacion FROM suscripciones WHERE plataforma = ?;",
+                [plataforma],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+
+        assert_eq!(leer("Anual tardía").as_deref(), Some("10/08/2027"),
+                   "toma el día 10 de facturación, no el 11 en que se ejecutó");
+        assert_eq!(leer("Anual sin marca"), None,
+                   "sin marca no hay nada que derivar, y sin fecha no se cobra");
+        assert_eq!(leer("Anual ilegible"), None,
+                   "una marca ilegible tampoco permite deducir: se queda sin fecha");
+        assert_eq!(leer("Anual en enero 31").as_deref(), Some("28/02/2027"),
+                   "un día que no existe en el mes se recorta al último");
+        assert_eq!(leer("Mensual"), None, "una mensual no usa la fecha");
+    }
+
+    #[test]
+    fn la_migracion_12_no_reescribe_una_fecha_ya_anotada() {
+        let c = base_migrada();
+        c.execute_batch(
+            "INSERT INTO tarjetas (entidad, nombre_tarjeta, fecha_corte, fecha_limite_pago)
+                 VALUES ('Emisor', 'Producto', 5, 25);
+             INSERT INTO suscripciones (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, fecha_ultimo_pago, fecha_renovacion)
+                 VALUES ('Anual', 100.0, 1, 'anual', 10, 'DOP', '11/08/2026', '01/01/2030');",
+        )
+        .unwrap();
+
+        let mut c = c;
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_12_renovacion_anual(&tx).unwrap();
+        tx.commit().unwrap();
+
+        let f: String = c
+            .query_row("SELECT fecha_renovacion FROM suscripciones;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(f, "01/01/2030", "lo anotado por el titular manda sobre lo derivado");
     }
 
     #[test]

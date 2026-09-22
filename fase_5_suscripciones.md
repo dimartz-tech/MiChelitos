@@ -33,7 +33,7 @@ sujeto por una prueba que muere si alguien cambia la conducta:
 |---|---|---|
 | Mensual el **día 31** | 7 cargos en 12 meses: febrero, abril, junio, septiembre y noviembre se saltan enteros | `s10` |
 | Mensual el **día 30** | 11 cargos: se pierde febrero | `s11` |
-| **Anual** | Se recobra al cambiar el año aunque no haya pasado uno: cobrada en julio, vuelve a cobrar el 5 de enero | `s12` |
+| **Anual** | ~~Se recobra al cambiar el año~~ — **corregido**, ver abajo | `s12b` |
 | **Períodos vencidos** | Tres meses sin abrir la aplicación generan **un** cargo, no tres | `s13` |
 | Marca de cobro **ilegible** | Cobra en cada arranque, incluso antes de su día | `s14` |
 | Sin la categoría **«Suscripciones»** ni **«Otros»** | El gasto cae en el identificador 1 literal, que hoy es «Alimentación» | `s17` |
@@ -102,3 +102,56 @@ Las tres decisiones de arriba, y con ellas la corrección de los seis defectos.
 Mientras tanto el cobro sigue sin pasar por `Dinero` —se lee como `f64` y se
 carga a la tarjeta— y la divisa se decide con `if divisa == "USD"`, de modo
 que cualquier otra cosa es pesos: el mismo patrón que `c16` declaró en gastos.
+
+
+---
+
+# La renovación anual, anotada
+
+El defecto de la anual **se cierra**, por decisión del titular: en lugar de
+deducir el vencimiento, se anota.
+
+## Por qué el defecto existía
+
+La condición era `anio_actual > p_anio && dia >= dia_facturacion`. No miraba
+el mes, y no podía: del último cobro solo se guardaba una fecha que la regla
+usaba a medias. **Intentaba deducir un vencimiento anual con un dato que no
+bastaba**, y de ahí salía el cargo seis meses antes.
+
+La corrección no es afinar la condición: es dejar de deducir. Una anual sabe
+cuándo renueva porque el proveedor lo dice, y eso es un dato que se anota.
+
+## Lo que cierra de paso
+
+Una fecha es una fecha, así que en las anuales desaparecen también los otros
+dos agujeros:
+
+* El día 31 ya no las desvía.
+* Una **marca de cobro ilegible** ya no las arrastra a cobrar. El agujero
+  queda abierto solo en las mensuales, donde la marca sigue siendo el único
+  dato.
+
+## Las que ya existían
+
+La migración 12 deriva la fecha del último cobro más un año, tomando el **día
+de facturación y no el día en que se ejecutó el cargo**. Son dos cosas
+distintas: el cargo se anota el día en que se abrió la aplicación, que puede
+ser posterior. Sobre datos reales esa diferencia era de un día.
+
+Sin último cobro, o con una marca ilegible, la columna queda vacía. **Una
+anual sin fecha no se cobra.** Inventar una para poder cobrar sería el mismo
+error que la migración corrige, y entre un cargo de más y uno de menos, el de
+menos se corrige mirando el estado de cuenta.
+
+## El aviso
+
+Siete días antes, y hasta el propio día del cargo. Pasada la fecha deja de ser
+un aviso y pasa a ser un cobro pendiente, de modo que se apaga.
+
+**Solo las anuales avisan.** Una mensual tendría que predecir su próximo cobro,
+y esa predicción arrastraría hoy el defecto del día 31: anunciar una fecha que
+el sistema luego no respeta es peor que no anunciar nada. La columna «Próximo
+Cobro» muestra un guion en las mensuales por esa razón, no por olvido.
+
+El aviso se resuelve en el núcleo y llega a la vista como un `bool`. Una regla
+en el HTML es una regla sin pruebas.

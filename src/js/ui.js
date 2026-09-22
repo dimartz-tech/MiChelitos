@@ -1064,6 +1064,16 @@ class AppUI {
         this.contentContainer.innerHTML = `
             <div class="section-title">
                 <h1>Suscripciones Recurrentes</h1>
+                ${(() => {
+                    const avisan = suscripciones.filter(s => s.avisa);
+                    if (avisan.length === 0) return '';
+                    return `<div class="card" style="border-left:3px solid var(--warning, #e0a020); margin-bottom:1rem;">
+                        <strong>🔔 Cobro próximo</strong>
+                        <ul style="margin:0.5rem 0 0 1rem; font-size:0.85rem;">
+                            ${avisan.map(s => `<li><strong>${s.plataforma}</strong> — ${s.divisa} ${this.formatMoney(s.monto)} el ${s.fecha_renovacion}</li>`).join('')}
+                        </ul>
+                    </div>`;
+                })()}
                 <span class="subtitle">Monitoreo de membresías mensuales y anuales debidamente cargadas</span>
             </div>
 
@@ -1096,11 +1106,18 @@ class AppUI {
                                 </div>
                                 <div class="form-group">
                                     <label for="sus_fre">Frecuencia</label>
-                                    <select id="sus_fre" class="form-control">
+                                    <select id="sus_fre" class="form-control" onchange="appUI.alternarRenovacion()">
                                         <option value="mensual" selected>Mensual</option>
                                         <option value="anual">Anual</option>
                                     </select>
                                 </div>
+                            </div>
+                            <div class="form-group" id="sus_ren_caja" hidden>
+                                <label for="sus_ren">Fecha exacta de renovación *</label>
+                                <input type="date" id="sus_ren" class="form-control">
+                                <small style="color:var(--text-muted); font-size:0.7rem;">
+                                    Sin ella la suscripción no se cobra: el sistema no deduce cuándo renueva una anual.
+                                </small>
                             </div>
                             <div class="form-group">
                                 <label for="sus_tar">Tarjeta de Cargo *</label>
@@ -1128,6 +1145,7 @@ class AppUI {
                                         <th>Servicio</th>
                                         <th>Frecuencia</th>
                                         <th>Día Pago</th>
+                                        <th>Próximo Cobro</th>
                                         <th>Último Pago</th>
                                         <th>Tarjeta Cargo</th>
                                         <th>Monto</th>
@@ -1140,6 +1158,13 @@ class AppUI {
                                             <td><strong>${s.plataforma}</strong></td>
                                             <td style="text-transform:capitalize;">${s.frecuencia}</td>
                                             <td>Día ${s.dia_facturacion}</td>
+                                            <td>${
+                                                s.frecuencia !== 'anual'
+                                                    ? '<span style="color:var(--text-muted);">—</span>'
+                                                    : s.fecha_renovacion
+                                                        ? `${s.avisa ? '🔔 ' : ''}${s.fecha_renovacion}`
+                                                        : '<span style="color:var(--danger, #e05260);">Sin fecha: no se cobrará</span>'
+                                            }</td>
                                             <td>${s.fecha_ultimo_pago || '<span style="font-style:italic;color:var(--text-muted);">Pendiente</span>'}</td>
                                             <td>${s.entidad} (${s.nombre_tarjeta})</td>
                                             <td class="amount expense">${s.divisa} ${this.formatMoney(s.monto)}</td>
@@ -3146,6 +3171,34 @@ class AppUI {
         }
     }
 
+    /// Despliega la fecha de renovación solo cuando la frecuencia la usa.
+    alternarRenovacion(id) {
+        const sufijo = id === undefined ? '' : `_${id}`;
+        const caja = document.getElementById(id === undefined ? 'sus_ren_caja' : `es_ren_caja_${id}`);
+        const sel = document.getElementById(id === undefined ? 'sus_fre' : `es_fre_${id}`);
+        if (caja && sel) caja.hidden = sel.value !== 'anual';
+        void sufijo;
+    }
+
+    /// Un `<input type="date">` entrega ISO; la aplicación guarda dd/mm/aaaa.
+    ///
+    /// La conversión se hace aquí, en el borde, y no en el núcleo: son dos
+    /// formatos con dos públicos, y mezclarlos es lo que produce fechas que
+    /// nadie sabe leer.
+    fechaDeEntrada(elementoId) {
+        const iso = document.getElementById(elementoId)?.value;
+        if (!iso) return null;
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+        return m ? `${m[3]}/${m[2]}/${m[1]}` : null;
+    }
+
+    /// El camino inverso, para rellenar el formulario de edición.
+    fechaAIso(ddmmaaaa) {
+        if (!ddmmaaaa) return '';
+        const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(ddmmaaaa);
+        return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
+    }
+
     async handleAgregarSuscripcion(e) {
         e.preventDefault();
         const pla = document.getElementById('sus_pla').value;
@@ -3154,9 +3207,14 @@ class AppUI {
         const dia = Number(document.getElementById('sus_dia').value);
         const fre = document.getElementById('sus_fre').value;
         const tar = Number(document.getElementById('sus_tar').value);
+        const ren = fre === 'anual' ? this.fechaDeEntrada('sus_ren') : null;
+        if (fre === 'anual' && ren === null) {
+            this.showToast("Una suscripción anual necesita su fecha de renovación.", "error");
+            return;
+        }
 
         try {
-            await AppAPI.crearSuscripcion(pla, mon, tar, fre, dia, div);
+            await AppAPI.crearSuscripcion(pla, mon, tar, fre, dia, div, ren);
             this.showToast("Suscripción recurrente guardada.");
             await this.render('suscripciones');
         } catch (err) {
@@ -3200,7 +3258,7 @@ class AppUI {
                         </div>
                         <div class="form-group">
                             <label>Frecuencia</label>
-                            <select id="es_fre_${s.id}" class="form-control">
+                            <select id="es_fre_${s.id}" class="form-control" onchange="appUI.alternarRenovacion(${s.id})">
                                 <option value="mensual" ${s.frecuencia === 'mensual' ? 'selected' : ''}>Mensual</option>
                                 <option value="anual" ${s.frecuencia === 'anual' ? 'selected' : ''}>Anual</option>
                             </select>
@@ -3208,6 +3266,10 @@ class AppUI {
                     </div>
                     <div class="form-group">
                         <label>Tarjeta de cargo</label>
+                        <div class="form-group" id="es_ren_caja_${s.id}" ${s.frecuencia === 'anual' ? '' : 'hidden'}>
+                            <label for="es_ren_${s.id}">Fecha exacta de renovación *</label>
+                            <input type="date" id="es_ren_${s.id}" class="form-control" value="${appUI.fechaAIso(s.fecha_renovacion)}">
+                        </div>
                         <select id="es_tar_${s.id}" class="form-control" required>
                             ${tarjetas.map(t => `<option value="${t.id}" ${t.id === s.tarjeta_id ? 'selected' : ''}>${t.entidad} - ${t.nombre_tarjeta}</option>`).join('')}
                         </select>
@@ -3236,7 +3298,12 @@ class AppUI {
         if (!(dia >= 1 && dia <= 31)) { this.showToast("El día de facturación debe estar entre 1 y 31.", "error"); return; }
 
         try {
-            await AppAPI.actualizarSuscripcion(id, pla, mon, tar, fre, dia, div);
+            const ren = fre === 'anual' ? this.fechaDeEntrada(`es_ren_${id}`) : null;
+            if (fre === 'anual' && ren === null) {
+                this.showToast("Una suscripción anual necesita su fecha de renovación.", "error");
+                return;
+            }
+            await AppAPI.actualizarSuscripcion(id, pla, mon, tar, fre, dia, div, ren);
             this.showToast("Suscripción actualizada. Los cargos ya realizados no se alteran.");
             document.getElementById(`modal-edit-sus-${id}`).remove();
             await this.render('suscripciones');
