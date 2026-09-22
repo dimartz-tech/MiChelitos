@@ -878,6 +878,216 @@ fn s9_editar_una_suscripcion_inexistente_es_error() {
     assert!(crate::actualizar_suscripcion(9999, "X".into(), 1.0, tarjeta, "mensual".into(), 1, "DOP".into()).is_err());
 }
 
+
+// ---------------------------------------------------------------------
+//  Suscripciones — lo que la red anterior no alcanzaba
+// ---------------------------------------------------------------------
+//
+// Las pruebas S1–S9 se escribieron cuando `procesar_suscripciones` leía la
+// fecha del sistema por dentro, y eso les impedía comprobar nada que
+// dependiera de *qué día es*. Por eso todas usan el día 1 de facturación: es
+// el único que está siempre alcanzado.
+//
+// Con el puerto `Reloj` inyectado, las de aquí abajo fijan la fecha. Las
+// cinco primeras **reproducen defectos y los dejan como están**: describen lo
+// que el sistema hace hoy, no lo que debería hacer. Corregirlas cambia
+// importes que el proveedor ya cobró de verdad, y esa decisión no es del
+// código.
+
+fn procesar_en(anio: i32, mes: u32, dia: u32) -> Vec<String> {
+    let reloj = crate::puertos::reloj::RelojFijo::en(anio, mes, dia);
+    crate::procesar_suscripciones_con(&reloj).expect("procesar suscripciones")
+}
+
+/// Abre la aplicación todos los días del año y cuenta los cargos.
+fn cargos_en_el_ano(anio: i32) -> usize {
+    let mut n = 0;
+    for mes in 1..=12u32 {
+        let dias = match mes {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            _ if anio % 4 == 0 && (anio % 100 != 0 || anio % 400 == 0) => 29,
+            _ => 28,
+        };
+        for dia in 1..=dias {
+            n += procesar_en(anio, mes, dia).len();
+        }
+    }
+    n
+}
+
+#[test]
+fn s10_una_mensual_del_dia_31_solo_se_cobra_siete_meses_al_ano() {
+    // DIVERGENCIA DECLARADA — no se corrige aquí.
+    //
+    // La condición pide `dia_actual >= dia_facturacion`, y en un mes de 30
+    // días nunca hay un 31. Febrero, abril, junio, septiembre y noviembre se
+    // saltan enteros: **cinco meses sin cargo** de una suscripción que el
+    // proveedor cobra los doce.
+    //
+    // Lo natural sería cobrar el último día del mes, pero eso es una regla
+    // nueva y no un arreglo: cambia el importe anual. Queda pendiente de
+    // decidir.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 31, "DOP".into()).unwrap();
+
+    let cargos = cargos_en_el_ano(2026);
+
+    assert_eq!(cargos, 7, "hoy se cobran 7 de 12 meses");
+    assert_importe(balances_tarjeta(tarjeta).0, 3_500.0, "5 meses sin cargar");
+}
+
+#[test]
+fn s11_una_mensual_del_dia_30_pierde_febrero() {
+    // DIVERGENCIA DECLARADA. La misma causa que S10, un mes en vez de cinco.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 30, "DOP".into()).unwrap();
+
+    assert_eq!(cargos_en_el_ano(2026), 11, "hoy se cobran 11 de 12 meses");
+}
+
+#[test]
+fn s12_una_anual_se_recobra_al_cambiar_el_ano_aunque_no_haya_pasado_un_ano() {
+    // DIVERGENCIA DECLARADA — la más cara de las cinco.
+    //
+    // La condición de «anual» es `anio_actual > p_anio && dia >= dia_fact`, y
+    // **no mira el mes**. Una suscripción cobrada en julio se vuelve a cobrar
+    // el 5 de enero siguiente: seis meses antes de tocarle.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into()).unwrap();
+    fijar_ultimo_pago(sub, "05/07/2025");
+
+    let en_enero = procesar_en(2026, 1, 5);
+
+    assert_eq!(en_enero.len(), 1, "cobra en enero habiendo cobrado en julio");
+    assert_importe(balances_tarjeta(tarjeta).0, 3_600.0, "un año de cargo, seis meses después");
+}
+
+#[test]
+fn s13_tres_meses_sin_abrir_la_aplicacion_generan_un_solo_cargo() {
+    // DIVERGENCIA DECLARADA.
+    //
+    // La marca de idempotencia es la fecha del último cobro, no un contador
+    // de períodos vencidos: al procesar se pone «hoy» y los meses
+    // intermedios desaparecen. El proveedor cobró los tres.
+    //
+    // Tiene contrapartida: recuperarlos automáticamente cargaría de golpe
+    // varios meses sin que nadie lo pida. Por eso es decisión y no defecto
+    // evidente.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 10, "DOP".into()).unwrap();
+    fijar_ultimo_pago(sub, "10/01/2026");
+
+    // Se abre por primera vez en abril, tras saltarse febrero y marzo.
+    procesar_en(2026, 4, 20);
+    procesar_en(2026, 4, 21);
+
+    assert_importe(balances_tarjeta(tarjeta).0, 500.0, "un cargo por tres meses vencidos");
+    assert_eq!(total_gastos(), 1);
+}
+
+#[test]
+fn s14_una_fecha_de_ultimo_pago_ilegible_cobra_en_cada_arranque() {
+    // DIVERGENCIA DECLARADA — **invierte la propiedad que da nombre a la
+    // fase**.
+    //
+    // Si la fecha no tiene tres partes separadas por `/`, la rama que decide
+    // hace `requiere_cargo = true` sin más. Y como el cobro vuelve a escribir
+    // una fecha bien formada, en la práctica cobra una vez de más... salvo
+    // que algo siga escribiendo el formato malo, en cuyo caso no hay tope.
+    //
+    // Aquí se fija lo comprobable: con la fecha corrupta puesta antes de cada
+    // arranque, cobra en todos.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into()).unwrap();
+
+    for dia in [1, 2, 3] {
+        fijar_ultimo_pago(sub, "2026-01-10"); // ISO: no tiene el formato esperado
+        let cargos = procesar_en(2026, 3, dia);
+        assert_eq!(cargos.len(), 1, "cobra el día {dia} pese a no tocarle hasta el 15");
+    }
+
+    assert_importe(balances_tarjeta(tarjeta).0, 1_500.0, "tres cargos en tres días");
+    assert_eq!(total_gastos(), 3);
+}
+
+#[test]
+fn s15_antes_de_su_dia_no_se_cobra() {
+    // **La prueba que no se podía escribir.** No es una divergencia: es la
+    // garantía que la red anterior dejaba fuera porque todas sus
+    // suscripciones facturaban el día 1.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into()).unwrap();
+
+    for dia in 1..15u32 {
+        assert!(
+            procesar_en(2026, 3, dia).is_empty(),
+            "cobró el día {dia}, antes de su día de facturación"
+        );
+    }
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "ningún cargo antes de tiempo");
+
+    assert_eq!(procesar_en(2026, 3, 15).len(), 1, "y el día 15 sí cobra");
+}
+
+#[test]
+fn s16_el_dia_del_cargo_es_el_del_reloj_y_no_el_del_sistema() {
+    // Sostiene a las demás: si el reloj no llegara hasta la fecha escrita,
+    // las pruebas de arriba estarían midiendo el día real y no lo que dicen.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+
+    procesar_en(2026, 6, 9);
+
+    let fecha: String = conexion()
+        .query_row("SELECT fecha FROM gastos ORDER BY id DESC LIMIT 1;", [], |r| r.get(0))
+        .expect("leer la fecha del último gasto");
+    assert_eq!(fecha, "09/06/2026", "el gasto se fecha con el reloj inyectado");
+}
+
+
+#[test]
+fn s17_sin_la_categoria_de_suscripciones_el_cargo_va_a_parar_a_la_categoria_1() {
+    // DIVERGENCIA DECLARADA — el sexto defecto, y el más silencioso.
+    //
+    // La búsqueda de categoría cae en cascada: «Suscripciones», luego
+    // «Otros», y si tampoco está, **el identificador 1 literal**, sea cual
+    // sea la categoría que lo tenga. El gasto se archiva mal y nada lo dice.
+    //
+    // Que hoy la siembra cree ambas categorías no cierra el agujero: el
+    // usuario puede renombrarlas o borrarlas desde la propia aplicación.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 1, "DOP".into()).unwrap();
+
+    // El usuario renombra las dos categorías que el código busca por nombre.
+    conexion()
+        .execute_batch(
+            "UPDATE categorias SET nombre = 'Servicios en línea' WHERE LOWER(nombre) = 'suscripciones';
+             UPDATE categorias SET nombre = 'Varios' WHERE LOWER(nombre) = 'otros';",
+        )
+        .expect("renombrar categorías");
+
+    procesar_en(2026, 3, 10);
+
+    let categoria: i64 = conexion()
+        .query_row("SELECT categoria_id FROM gastos ORDER BY id DESC LIMIT 1;", [], |r| r.get(0))
+        .expect("leer la categoría del cargo");
+    assert_eq!(categoria, 1, "el cargo cae en la categoría 1, que es «Alimentación»");
+
+    let nombre: String = conexion()
+        .query_row("SELECT nombre FROM categorias WHERE id = 1;", [], |r| r.get(0))
+        .expect("leer el nombre de la categoría 1");
+    assert_eq!(nombre, "Alimentación", "una suscripción archivada como alimentación");
+}
+
 #[test]
 fn c22_una_divisa_no_admitida_se_normaliza_al_persistir() {
     // CAMBIO DE CONDUCTA — Fase 1.7, 2026-09-09.
