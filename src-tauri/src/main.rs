@@ -564,7 +564,7 @@ fn acreditar(
     deposito: &dominio::ingreso::Deposito,
 ) -> Result<(), String> {
     tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE id = ?;",
+        "UPDATE cuentas_ahorro SET balance_actual = ROUND(balance_actual + ?, 2) WHERE id = ?;",
         (deposito.importe().unidades(), deposito.cuenta_id()),
     )
     .map_err(|e| e.to_string())?;
@@ -1139,12 +1139,12 @@ fn procesar_suscripciones() -> Result<Vec<String>, String> {
             // 1. Cargar a la tarjeta correspondiente
             if sub.divisa == "USD" {
                 tx.execute(
-                    "UPDATE tarjetas SET balance_dolares = balance_dolares + ? WHERE id = ?;",
+                    "UPDATE tarjetas SET balance_dolares = ROUND(balance_dolares + ?, 2) WHERE id = ?;",
                     (sub.monto, sub.tarjeta_id)
                 ).map_err(|e| e.to_string())?;
             } else {
                 tx.execute(
-                    "UPDATE tarjetas SET balance_pesos = balance_pesos + ? WHERE id = ?;",
+                    "UPDATE tarjetas SET balance_pesos = ROUND(balance_pesos + ?, 2) WHERE id = ?;",
                     (sub.monto, sub.tarjeta_id)
                 ).map_err(|e| e.to_string())?;
             }
@@ -2008,7 +2008,7 @@ fn actualizar_ingreso(
             Some(cuenta) => {
                 let filas = tx
                     .execute(
-                        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ?
+                        "UPDATE cuentas_ahorro SET balance_actual = ROUND(balance_actual + ?, 2)
                          WHERE nombre = ?;",
                         (correccion.ajuste.unidades(), cuenta),
                     )
@@ -2054,7 +2054,7 @@ fn crear_cobro_efectivo_informal(fecha: String, descripcion: String, monto: f64,
     let id = tx.last_insert_rowid();
     
     tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = balance_actual + ? WHERE nombre = ?;",
+        "UPDATE cuentas_ahorro SET balance_actual = ROUND(balance_actual + ?, 2) WHERE nombre = ?;",
         (monto, cuenta_efectivo)
     ).map_err(|e| e.to_string())?;
     
@@ -2274,7 +2274,7 @@ fn eliminar_ingreso_informal(id: i64, motivo: String) -> Result<String, String> 
                     // deshacer el cobro deja la cuenta en negativo, y eso es
                     // el estado verdadero: el dinero salió. Recortarlo hacía
                     // desaparecer la diferencia sin registro.
-                    "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE nombre = ?;",
+                    "UPDATE cuentas_ahorro SET balance_actual = ROUND(balance_actual - ?, 2) WHERE nombre = ?;",
                     (monto_recibido.unwrap_or(0.0), inst)
                 ).map_err(|e| e.to_string())?;
             }
@@ -2309,7 +2309,7 @@ fn eliminar_ingreso(id: i64, motivo: String) -> Result<String, String> {
                     // deshacer el cobro deja la cuenta en negativo, y eso es
                     // el estado verdadero: el dinero salió. Recortarlo hacía
                     // desaparecer la diferencia sin registro.
-                    "UPDATE cuentas_ahorro SET balance_actual = balance_actual - ? WHERE nombre = ?;",
+                    "UPDATE cuentas_ahorro SET balance_actual = ROUND(balance_actual - ?, 2) WHERE nombre = ?;",
                     (monto_recibido.unwrap_or(0.0), inst)
                 ).map_err(|e| e.to_string())?;
             }

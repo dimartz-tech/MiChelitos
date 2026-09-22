@@ -1,6 +1,6 @@
 [package]
 name = "michelitos-tauri"
-version = "1.21.0"
+version = "1.22.0"
 description = "Aplicación de escritorio nativa macOS de gestión financiera personal y corporativa MiChelitos"
 authors = ["dimartz-tech"]
 edition = "2021"
