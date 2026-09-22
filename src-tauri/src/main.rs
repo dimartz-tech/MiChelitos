@@ -7,6 +7,7 @@
 mod db_sql;
 mod migraciones;
 mod respaldo;
+mod correcciones;
 mod db_nosql;
 
 mod adaptadores;
@@ -927,9 +928,11 @@ fn obtener_abonos_tarjeta(tarjeta_id: i64) -> Result<Vec<AbonoTarjeta>, String> 
 /// gastos. Devuelve lo que se deshizo para que la interfaz pueda decirlo en
 /// vez de limitarse a confirmar que algo pasó.
 #[tauri::command]
-fn revertir_abono_tarjeta(id: i64) -> Result<String, String> {
+fn revertir_abono_tarjeta(id: i64, motivo: String) -> Result<String, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let caso = abrir_caso(&tx, "abono", id, "SELECT 'Abono del ' || fecha_pago, monto_pagado, divisa FROM pagos_tarjeta WHERE id = ?;", &motivo)?;
 
     let resumen = {
         let mut almacen = AlmacenSqlite::nuevo(&tx);
@@ -1909,6 +1912,12 @@ fn actualizar_ingreso(
     // Importe cobrado cuando no entró el neto entero. `None` es la regla: se
     // da por cobrado el neto completo.
     cobro_parcial: Option<f64>,
+    // Motivo de la corrección. Obligatorio **solo cuando mueve dinero**: si la
+    // factura ya se cobró y el ajuste no es cero, hay un saldo que cambia y
+    // eso abre un caso. Corregir una fecha o un número de factura no lo pide,
+    // porque exigir explicación donde no hay riesgo enseña a escribirla sin
+    // pensar.
+    motivo: Option<String>,
 ) -> Result<String, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -1929,7 +1938,7 @@ fn actualizar_ingreso(
     // Lo que estaba cobrado. Una factura sin cobrar parte de cero, de modo
     // que corregirla y darla por cobrada sería un ajuste por el neto entero.
     let recibido_anterior = Dinero::nuevo(recibido_ant.unwrap_or(0.0), MONEDA_LOCAL)?;
-    let _ = (total_ant, retenido_ant);
+    let _ = retenido_ant;
 
     let cobro = match cobro_parcial {
         Some(parte) => dominio::ingreso::Cobro::Parcial(Dinero::nuevo(parte, MONEDA_LOCAL)?),
@@ -1957,6 +1966,23 @@ fn actualizar_ingreso(
     let resumen = if estatus != "pagada" || correccion.ajuste.es_cero() {
         "Factura corregida.".to_string()
     } else {
+        // Aquí sí se mueve un saldo, de modo que queda constancia. Es la misma
+        // clase de corrección que un borrado, y merece el mismo rastro.
+        let caso = correcciones::registrar(
+            &tx,
+            correcciones::Correccion {
+                tipo: "corrección de factura",
+                referencia_id: id,
+                descripcion: format!(
+                    "Factura {}: {:.2} → {:.2}",
+                    numero_factura, total_ant, monto_total
+                ),
+                importe: Some(correccion.ajuste.unidades()),
+                divisa: Some(MONEDA_LOCAL.codigo().to_string()),
+                motivo: motivo.as_deref().unwrap_or(""),
+            },
+        )?;
+        let _ = &caso;
         tx.execute(
             "UPDATE ingresos SET monto_recibido = ? WHERE id = ?;",
             (correccion.recibido.unidades(), id),
@@ -1980,12 +2006,16 @@ fn actualizar_ingreso(
                     ));
                 }
                 format!(
-                    "Factura corregida. Se ajustó «{}» en DOP {:.2}.",
+                    "Factura corregida. Se ajustó «{}» en DOP {:.2}. Caso {}.",
                     cuenta,
-                    correccion.ajuste.unidades()
+                    correccion.ajuste.unidades(),
+                    caso
                 )
             }
-            None => "Factura corregida. No tenía cuenta de depósito que ajustar.".to_string(),
+            None => format!(
+                "Factura corregida. No tenía cuenta de depósito que ajustar. Caso {}.",
+                caso
+            ),
         }
     };
 
@@ -2103,26 +2133,100 @@ fn liquidar_consumo_pendiente(id: i64, monto_liquidado: f64) -> Result<f64, Stri
     Ok(tasa)
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CasoCorreccion {
+    numero_caso: String,
+    fecha: String,
+    tipo: String,
+    referencia_id: i64,
+    descripcion: String,
+    importe: Option<f64>,
+    divisa: Option<String>,
+    motivo: String,
+}
+
+/// Los casos de corrección, del más reciente al más antiguo.
+///
+/// **No hay comando para borrarlos.** Es deliberado: son el rastro de lo que
+/// se destruyó, y un rastro que se puede borrar no es un rastro.
 #[tauri::command]
-fn eliminar_gasto(id: i64) -> Result<(), String> {
+fn obtener_correcciones() -> Result<Vec<CasoCorreccion>, String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo
+             FROM correcciones ORDER BY id DESC;",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let filas = stmt
+        .query_map([], |r| {
+            Ok(CasoCorreccion {
+                numero_caso: r.get(0)?,
+                fecha: r.get(1)?,
+                tipo: r.get(2)?,
+                referencia_id: r.get(3)?,
+                descripcion: r.get(4)?,
+                importe: r.get(5)?,
+                divisa: r.get(6)?,
+                motivo: r.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut lista = Vec::new();
+    for f in filas {
+        lista.push(f.map_err(|e| e.to_string())?);
+    }
+    Ok(lista)
+}
+
+/// Anota el caso de corrección de un movimiento antes de borrarlo.
+///
+/// Lee la descripción **antes** del borrado: después no habría de dónde
+/// sacarla, y un caso que dice «se borró el gasto 315» sin decir cuál era no
+/// sirve para auditar nada.
+fn abrir_caso(
+    tx: &rusqlite::Transaction,
+    tipo: &str,
+    id: i64,
+    consulta: &str,
+    motivo: &str,
+) -> Result<String, String> {
+    let (descripcion, importe, divisa): (String, Option<f64>, Option<String>) = tx
+        .query_row(consulta, [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|_| format!("No se encontró {} con identificador {}.", tipo, id))?;
+
+    correcciones::registrar(
+        tx,
+        correcciones::Correccion { tipo, referencia_id: id, descripcion, importe, divisa, motivo },
+    )
+}
+
+#[tauri::command]
+fn eliminar_gasto(id: i64, motivo: String) -> Result<String, String> {
     // Traducción pura, igual que crear_gasto. La reversión vive en el caso de
     // uso y en el puerto, no en esta consulta.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let caso = abrir_caso(&tx, "gasto", id, "SELECT descripcion, monto, divisa FROM gastos WHERE id = ?;", &motivo)?;
     {
         let mut almacen = AlmacenSqlite::nuevo(&tx);
         revertir_gasto(id, &mut almacen)?;
     }
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(caso)
 }
 
 #[tauri::command]
-fn eliminar_transaccion_cuenta(id: i64) -> Result<(), String> {
+fn eliminar_transaccion_cuenta(id: i64, motivo: String) -> Result<String, String> {
     // Traducción pura. El recorte en cero del destino (H10) vive ahora en el
     // caso de uso y en el puerto, no en esta consulta.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let caso = abrir_caso(&tx, "traspaso", id, "SELECT COALESCE(descripcion, 'Traspaso entre cuentas'), monto_origen, 'DOP' FROM transacciones_cuentas WHERE id = ?;", &motivo)?;
 
     {
         let mut almacen = AlmacenSqlite::nuevo(&tx);
@@ -2130,13 +2234,15 @@ fn eliminar_transaccion_cuenta(id: i64) -> Result<(), String> {
     }
 
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(caso)
 }
 
 #[tauri::command]
-fn eliminar_ingreso_informal(id: i64) -> Result<(), String> {
+fn eliminar_ingreso_informal(id: i64, motivo: String) -> Result<String, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let caso = abrir_caso(&tx, "ingreso informal", id, "SELECT descripcion, monto, 'DOP' FROM ingresos_informales WHERE id = ?;", &motivo)?;
     
     let (estatus, institucion_deposito, monto_recibido): (String, Option<String>, Option<f64>) = tx.query_row(
         "SELECT estatus, institucion_deposito, monto_recibido FROM ingresos_informales WHERE id = ?;",
@@ -2163,13 +2269,15 @@ fn eliminar_ingreso_informal(id: i64) -> Result<(), String> {
     tx.execute("DELETE FROM ingresos_informales WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
     
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(caso)
 }
 
 #[tauri::command]
-fn eliminar_ingreso(id: i64) -> Result<(), String> {
+fn eliminar_ingreso(id: i64, motivo: String) -> Result<String, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let caso = abrir_caso(&tx, "factura", id, "SELECT 'Factura ' || numero_factura, monto_total, 'DOP' FROM ingresos WHERE id = ?;", &motivo)?;
     
     let (estatus, institucion_deposito, monto_recibido): (String, Option<String>, Option<f64>) = tx.query_row(
         "SELECT estatus, institucion_deposito, monto_recibido FROM ingresos WHERE id = ?;",
@@ -2196,7 +2304,7 @@ fn eliminar_ingreso(id: i64) -> Result<(), String> {
     tx.execute("DELETE FROM ingresos WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
     
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(caso)
 }
 
 // --- PUNTO DE ENTRADA PRINCIPAL ---
@@ -2244,6 +2352,7 @@ fn main() {
             obtener_cuentas,
             revertir_abono_tarjeta,
             obtener_abonos_tarjeta,
+            obtener_correcciones,
             crear_cuenta,
             actualizar_cuenta,
             eliminar_cuenta,

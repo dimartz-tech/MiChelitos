@@ -2460,9 +2460,20 @@ class AppUI {
             <!-- Corrección de Transacciones -->
             <div class="card" style="width: 100%; margin-bottom: 1.5rem;">
                 <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">🛠️ Corrección de Transacciones (Ajustes de Balance)</h3>
-                <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1.2rem;">
+                <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.6rem;">
                     Revertir y eliminar transacciones mal registradas. El sistema ajustará automáticamente los saldos de cuentas, tarjetas y efectivo asociados.
                 </p>
+                <!-- La línea que acompaña al botón: dice qué se pierde y qué queda. -->
+                <p style="font-size:0.75rem; color:var(--color-warning); margin-bottom:1.2rem; line-height:1.5; border-left:2px solid var(--color-warning); padding-left:0.6rem;">
+                    <strong>Borrar destruye el movimiento.</strong> No queda un asiento que lo anule: solo el
+                    <strong>caso de auditoría</strong> que se abre al hacerlo, con el motivo que escribas y un número
+                    de referencia. Por eso se pide una explicación — y por eso conviene corregir antes que borrar
+                    cuando la operación lo permita.
+                </p>
+                <div style="display:flex; justify-content:flex-end; margin-bottom:0.8rem;">
+                    <button type="button" onclick="appUI.alternarCasosDeCorreccion()" class="btn btn-secondary" style="padding:0.25rem 0.6rem; font-size:0.75rem;">📋 Ver casos abiertos</button>
+                </div>
+                <div id="casos-correccion" hidden style="margin-bottom:1.2rem;"></div>
                 
                 <div style="display:flex; gap:0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
                     <button type="button" onclick="document.getElementById('corr-gastos').style.display='block'; document.getElementById('corr-ingresos').style.display='none'; document.getElementById('corr-trans').style.display='none'; this.className='btn'; document.getElementById('btn-corr-ing').className='btn btn-secondary'; document.getElementById('btn-corr-tra').className='btn btn-secondary';" id="btn-corr-gas" class="btn" style="padding: 0.35rem 0.75rem; font-size:0.8rem;">💸 Gastos</button>
@@ -3072,7 +3083,12 @@ class AppUI {
         if (!confirmado) return;
 
         try {
-            const resumen = await AppAPI.revertirAbonoTarjeta(abonoId);
+            const motivo = this.pedirMotivoDeCorreccion(
+                    `Vas a borrar este abono a tarjeta`,
+                    'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
+                );
+            if (motivo === null) return;
+            const resumen = await AppAPI.revertirAbonoTarjeta(abonoId, motivo);
             this.showToast(resumen);
             await this.render('tarjetas');
             // Se vuelve a abrir el desplegable para que se vea el resultado
@@ -3425,11 +3441,83 @@ class AppUI {
         }
     }
 
+    /**
+     * Despliega los casos de corrección abiertos.
+     *
+     * Existe para que el rastro se pueda leer: un registro de auditoría que
+     * nadie puede consultar no audita nada. Se carga al abrir porque es un
+     * histórico que se mira de vez en cuando.
+     */
+    async alternarCasosDeCorreccion() {
+        const caja = document.getElementById('casos-correccion');
+        if (!caja) return;
+        if (!caja.hidden) { caja.hidden = true; return; }
+
+        caja.hidden = false;
+        caja.innerHTML = `<p style="color:var(--text-muted); font-size:0.75rem; padding:0.5rem;">Cargando…</p>`;
+
+        try {
+            const casos = await AppAPI.obtenerCorrecciones();
+            if (casos.length === 0) {
+                caja.innerHTML = `<p style="color:var(--text-muted); font-size:0.75rem; padding:0.5rem;">Ningún caso abierto. Es la mejor cifra posible.</p>`;
+                return;
+            }
+            caja.innerHTML = `
+                <div style="max-height:220px; overflow-y:auto; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+                    ${casos.map(c => `
+                        <div style="padding:0.5rem 0.7rem; border-bottom:1px solid var(--border-color); font-size:0.75rem;">
+                            <div style="display:flex; justify-content:space-between; gap:0.5rem;">
+                                <strong style="color:var(--accent-primary);">${c.numero_caso}</strong>
+                                <span style="color:var(--text-muted);">${c.fecha} · ${c.tipo}</span>
+                            </div>
+                            <div style="margin-top:0.2rem;">
+                                ${c.descripcion}${c.importe != null ? ` — ${c.divisa || ''} ${this.formatMoney(c.importe)}` : ''}
+                            </div>
+                            <div style="margin-top:0.2rem; color:var(--text-secondary); font-style:italic;">${c.motivo}</div>
+                        </div>
+                    `).join('')}
+                </div>`;
+        } catch (err) {
+            caja.innerHTML = `<p style="color:var(--color-danger); font-size:0.75rem; padding:0.5rem;">${err.toString()}</p>`;
+        }
+    }
+
+    /**
+     * Pide el motivo de una corrección que mueve dinero.
+     *
+     * Es fricción deliberada, no un trámite: el punto no es facilitar la
+     * operación sino **reducir cuántas veces hace falta**. Por eso el diálogo
+     * dice qué se pierde y exige una frase, no una palabra.
+     *
+     * `consecuencia` la pone quien llama, porque borrar y corregir no hacen lo
+     * mismo: uno destruye el movimiento y el otro mueve un saldo. Un texto
+     * único para ambos mentiría en uno de los dos casos.
+     *
+     * Devuelve `null` si el titular se echa atrás.
+     */
+    pedirMotivoDeCorreccion(queOcurre, consecuencia) {
+        const motivo = prompt(
+            `${queOcurre}.\n\n${consecuencia}\n\n` +
+            "Explica qué pasó, con una frase que siga teniendo sentido dentro de seis meses:"
+        );
+        if (motivo === null) return null;
+        if (motivo.trim().length < 15) {
+            this.showToast("El motivo es demasiado corto: explica qué pasó, no solo que pasó.", "error");
+            return null;
+        }
+        return motivo;
+    }
+
     async handleEliminarGastoCorr(id) {
         if (confirm("¿Estás seguro de que deseas revertir y eliminar este gasto? Los balances asociados serán restaurados.")) {
             try {
-                await AppAPI.eliminarGasto(id);
-                this.showToast("Gasto revertido y eliminado.");
+                const motivo = this.pedirMotivoDeCorreccion(
+                    `Vas a borrar este gasto`,
+                    'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
+                );
+                if (motivo === null) return;
+                const caso = await AppAPI.eliminarGasto(id, motivo);
+                this.showToast(`Gasto revertido y eliminado. Caso ${caso}.`);
                 await this.render('ajustes');
             } catch (err) {
                 this.showToast(err.toString(), 'error');
@@ -3440,7 +3528,12 @@ class AppUI {
     async handleEliminarIngresoInformalCorr(id) {
         if (confirm("¿Estás seguro de que deseas revertir y eliminar este ingreso informal? El balance asociado (si ya fue cobrado en efectivo) será descontado.")) {
             try {
-                await AppAPI.eliminarIngresoInformal(id);
+                const motivo = this.pedirMotivoDeCorreccion(
+                    `Vas a borrar este ingreso informal`,
+                    'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
+                );
+                if (motivo === null) return;
+                const caso = await AppAPI.eliminarIngresoInformal(id, motivo);
                 this.showToast("Ingreso informal revertido y eliminado.");
                 await this.render('ajustes');
             } catch (err) {
@@ -3452,7 +3545,12 @@ class AppUI {
     async handleEliminarIngresoCorr(id) {
         if (confirm("¿Estás seguro de que deseas revertir y eliminar esta factura/ingreso formal?")) {
             try {
-                await AppAPI.eliminarIngreso(id);
+                const motivo = this.pedirMotivoDeCorreccion(
+                    `Vas a borrar esta factura`,
+                    'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
+                );
+                if (motivo === null) return;
+                const caso = await AppAPI.eliminarIngreso(id, motivo);
                 this.showToast("Ingreso formal eliminado.");
                 await this.render('ajustes');
             } catch (err) {
@@ -3464,7 +3562,12 @@ class AppUI {
     async handleEliminarTransaccionCuentaCorr(id) {
         if (confirm("¿Estás seguro de que deseas revertir y eliminar esta transferencia? Los saldos de las cuentas origen y destino serán restaurados.")) {
             try {
-                await AppAPI.eliminarTransaccionCuenta(id);
+                const motivo = this.pedirMotivoDeCorreccion(
+                    `Vas a borrar este traspaso entre cuentas`,
+                    'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
+                );
+                if (motivo === null) return;
+                const caso = await AppAPI.eliminarTransaccionCuenta(id, motivo);
                 this.showToast("Transferencia revertida y eliminada.");
                 await this.render('ajustes');
             } catch (err) {
@@ -3726,6 +3829,7 @@ class AppUI {
             // El estado viaja con el modal para que el envío sepa si mover
             // dinero exige avisar antes.
             overlay.dataset.cobrada = i.estatus === 'pagada' ? 'si' : 'no';
+            overlay.dataset.recibido = i.monto_recibido ?? 0;
             overlay.innerHTML = `
                 <div class="card" style="width: 450px; background: var(--bg-surface-opaque);">
                     <h3 style="font-family: var(--font-heading); margin-bottom: 0.6rem;">✏️ Corregir / Editar Factura</h3>
@@ -3810,6 +3914,7 @@ class AppUI {
         // las cifras delante en vez de con una advertencia genérica.
         const cobrada = document.getElementById(`modal-edit-for-${id}`)?.dataset?.cobrada === 'si';
         let parcial = null;
+        let motivo = null;
 
         if (cobrada) {
             const quiereParcial = document.getElementById(`edit_parcial_chk_${id}`)?.checked;
@@ -3829,17 +3934,34 @@ class AppUI {
             }
 
             const cobrado = parcial ?? neto;
-            const sigue = confirm(
-                "Esta factura ya está cobrada.\n\n" +
-                `Pasará a constar cobrada por DOP ${this.formatMoney(cobrado)}` +
-                (parcial !== null ? ` de un neto de ${this.formatMoney(neto)}.` : " (neto completo).") +
-                "\n\nLa cuenta de depósito se ajustará por la diferencia.\n\n¿Continuar?"
+            const recibidoAntes = Number(
+                document.getElementById(`modal-edit-for-${id}`)?.dataset?.recibido ?? 0
             );
-            if (!sigue) return;
+            const ajuste = Math.round((cobrado - recibidoAntes) * 100) / 100;
+
+            // El motivo se pide **solo si se mueve un saldo**. Exigirlo para
+            // corregir una fecha sería fricción sin riesgo, y la fricción que
+            // no protege enseña a escribir motivos de trámite.
+            if (ajuste !== 0) {
+                motivo = this.pedirMotivoDeCorreccion(
+                    `Vas a corregir una factura ya cobrada`,
+                    `Esto **mueve un saldo real**: la cuenta de depósito se ajustará en ` +
+                    `DOP ${this.formatMoney(ajuste)}, y solo quedará el caso de auditoría que abras.`
+                );
+                if (motivo === null) return;
+            } else {
+                const sigue = confirm(
+                    "Esta factura ya está cobrada.\n\n" +
+                    `Pasará a constar cobrada por DOP ${this.formatMoney(cobrado)}` +
+                    (parcial !== null ? ` de un neto de ${this.formatMoney(neto)}.` : " (neto completo).") +
+                    "\n\nNingún saldo cambia.\n\n¿Continuar?"
+                );
+                if (!sigue) return;
+            }
         }
 
         try {
-            const resumen = await AppAPI.actualizarIngreso(id, fac, cliId, fec, mon, ret, parcial);
+            const resumen = await AppAPI.actualizarIngreso(id, fac, cliId, fec, mon, ret, parcial, motivo);
             this.showToast(resumen || "Factura corregida.");
             document.getElementById(`modal-edit-for-${id}`).remove();
             await this.render('ingresos');
