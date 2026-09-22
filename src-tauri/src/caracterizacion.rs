@@ -22,8 +22,17 @@ pub(crate) fn bloquear_entorno() -> MutexGuard<'static, ()> {
     ENTORNO.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Raíz temporal **propia de este proceso**.
+///
+/// El identificador de proceso va en la ruta porque el mutex que serializa
+/// estas pruebas solo alcanza al proceso que lo ejecuta: `HOME` es estado
+/// global del proceso, no de la máquina. Con una ruta fija, dos ejecuciones
+/// simultáneas de `cargo test` —cosa que ocurre en cuanto una herramienta lo
+/// lanza mientras hay otra corriendo— se pisaban la misma base y fallaban con
+/// «attempt to write a readonly database», que no dice en absoluto lo que
+/// pasa.
 fn raiz_temporal() -> std::path::PathBuf {
-    std::env::temp_dir().join("michelitos-caracterizacion")
+    std::env::temp_dir().join(format!("michelitos-caracterizacion-{}", std::process::id()))
 }
 
 /// Aísla el proceso de la base de datos real y entrega una base vacía recién
