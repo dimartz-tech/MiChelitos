@@ -8,6 +8,7 @@ mod db_sql;
 mod migraciones;
 mod respaldo;
 mod correcciones;
+mod ipc;
 mod db_nosql;
 
 mod adaptadores;
@@ -954,7 +955,7 @@ fn revertir_abono_tarjeta(id: i64, motivo: String) -> Result<String, String> {
     };
 
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(resumen)
+    Ok(format!("{} Caso {}.", resumen, caso))
 }
 
 // --- COMANDOS: SUSCRIPCIONES ---
@@ -1556,12 +1557,12 @@ fn pagar_cuota_prestamo(id: i64, fecha: Option<String>) -> Result<(), String> {
 /// declaración no corrige la estimación en silencio: queda asentada como un
 /// movimiento propio, con la diferencia que introdujo.
 #[tauri::command]
-fn declarar_saldo_prestamo(id: i64, saldo: f64, fecha: Option<String>) -> Result<(), String> {
+fn declarar_saldo_prestamo(id: i64, saldo: ipc::ImporteDecimal, fecha: Option<String>) -> Result<(), String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let (saldo_previo, _, _) = estado_prestamo(&tx, id)?;
-    let declarado = Dinero::nuevo(saldo, MONEDA_LOCAL)?;
+    let declarado = saldo.con_divisa(MONEDA_LOCAL);
     let diferencia = declarado.restar(&saldo_previo)?;
 
     let fecha = fecha.unwrap_or_else(|| Local::now().format("%d/%m/%Y").to_string());
@@ -1739,7 +1740,7 @@ fn crear_cuenta(
     divisa: String,
     balance: f64,
     entidad: Option<String>,
-    comision_pago_impuestos: Option<f64>,
+    comision_pago_impuestos: Option<ipc::ImporteDecimal>,
 ) -> Result<i64, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let nombre_clean = nombre.trim();
@@ -1764,7 +1765,7 @@ fn crear_cuenta(
 /// paga por cobrar.
 fn depurar_datos_de_cuenta(
     entidad: Option<String>,
-    comision: Option<f64>,
+    comision: Option<ipc::ImporteDecimal>,
 ) -> Result<(Option<String>, Option<f64>), String> {
     let entidad = entidad
         .map(|e| e.trim().to_string())
@@ -1781,10 +1782,12 @@ fn depurar_datos_de_cuenta(
     let comision = match comision {
         None => None,
         Some(c) => {
-            if c < 0.0 {
+            // Llega ya en centavos: el céntimo lo decidió el analizador de
+            // texto, no una conversión desde binario.
+            if c.centavos() < 0 {
                 return Err("La comisión por pago de impuestos no puede ser negativa.".to_string());
             }
-            Some(Dinero::nuevo(c, MONEDA_LOCAL)?.unidades())
+            Some(c.con_divisa(MONEDA_LOCAL).unidades())
         }
     };
 
@@ -1801,7 +1804,7 @@ fn actualizar_cuenta(
     id: i64,
     nombre: String,
     entidad: Option<String>,
-    comision_pago_impuestos: Option<f64>,
+    comision_pago_impuestos: Option<ipc::ImporteDecimal>,
 ) -> Result<(), String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let nombre_clean = nombre.trim();
@@ -1923,7 +1926,7 @@ fn actualizar_ingreso(
     porcentaje_retencion: f64,
     // Importe cobrado cuando no entró el neto entero. `None` es la regla: se
     // da por cobrado el neto completo.
-    cobro_parcial: Option<f64>,
+    cobro_parcial: Option<ipc::ImporteDecimal>,
     // Motivo de la corrección. Obligatorio **solo cuando mueve dinero**: si la
     // factura ya se cobró y el ajuste no es cero, hay un saldo que cambia y
     // eso abre un caso. Corregir una fecha o un número de factura no lo pide,
@@ -1953,7 +1956,7 @@ fn actualizar_ingreso(
     let _ = retenido_ant;
 
     let cobro = match cobro_parcial {
-        Some(parte) => dominio::ingreso::Cobro::Parcial(Dinero::nuevo(parte, MONEDA_LOCAL)?),
+        Some(parte) => dominio::ingreso::Cobro::Parcial(parte.con_divisa(MONEDA_LOCAL)),
         None => dominio::ingreso::Cobro::Completo,
     };
 
