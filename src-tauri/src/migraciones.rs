@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 9;
+pub const VERSION_OBJETIVO: u32 = 11;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -139,6 +139,16 @@ fn catalogo() -> Vec<Migracion> {
             nombre: "las columnas que nacieron fuera de la red",
             aplicar: crate::db_sql::migracion_9_columnas_tardias,
         },
+        Migracion {
+            version: 10,
+            nombre: "el céntimo exacto, sin tolerancia",
+            aplicar: crate::db_sql::migracion_10_centimo_exacto,
+        },
+        Migracion {
+            version: 11,
+            nombre: "la fracción de céntimo se rechaza al escribir",
+            aplicar: crate::db_sql::migracion_11_rechazar_fraccion_de_centimo,
+        },
     ]
 }
 
@@ -163,6 +173,39 @@ pub fn ejecutar(conn: &mut Connection) -> Result<Informe, ErrorMigracion> {
         });
     }
 
+    // **Las migraciones corren con las claves ajenas apagadas, y se comprueban
+    // al final de cada una.** No es una licencia: es lo que SQLite exige para
+    // reconstruir una tabla, y se descubrió midiendo.
+    //
+    // Con `foreign_keys` encendido, `ALTER TABLE ... RENAME` reescribe las
+    // cláusulas `REFERENCES` de las demás tablas —y lo hace **aunque
+    // `legacy_alter_table` esté activo**, que es el detalle que no estaba en
+    // ninguna suposición previa: el `PRAGMA` se lee como encendido y no surte
+    // efecto—. Renombrar `cuentas_ahorro` dejaba a `gastos` apuntando a una
+    // tabla temporal que la migración borra después.
+    //
+    // A cambio de apagarlas, cada migración termina con `foreign_key_check`
+    // **dentro de su transacción**: si dejó una referencia rota, no se
+    // confirma. La comprobación pasa de ser por sentencia a ser por
+    // migración, que para un cambio de esquema es el grano correcto.
+    let apagar = |c: &Connection| {
+        let _ = c.execute_batch("PRAGMA foreign_keys = OFF;");
+    };
+    let encender = |c: &Connection| {
+        let _ = c.execute_batch("PRAGMA foreign_keys = ON;");
+    };
+    apagar(conn);
+    let resultado = aplicar_pendientes(conn, version_inicial);
+    encender(conn);
+    let aplicadas = resultado?;
+
+    Ok(Informe { version_inicial, version_final: version_de(conn)?, aplicadas })
+}
+
+fn aplicar_pendientes(
+    conn: &mut Connection,
+    version_inicial: u32,
+) -> Result<Vec<&'static str>, ErrorMigracion> {
     let mut aplicadas = Vec::new();
 
     for migracion in catalogo() {
@@ -186,6 +229,8 @@ pub fn ejecutar(conn: &mut Connection) -> Result<Informe, ErrorMigracion> {
             },
         })?;
 
+        verificar_referencias(&tx, &migracion)?;
+
         // El sello va dentro de la misma transacción que los cambios. Fuera de
         // ella existiría un instante en que la base está migrada y no lo dice,
         // o lo dice sin estarlo.
@@ -207,7 +252,34 @@ pub fn ejecutar(conn: &mut Connection) -> Result<Informe, ErrorMigracion> {
         aplicadas.push(migracion.nombre);
     }
 
-    Ok(Informe { version_inicial, version_final: version_de(conn)?, aplicadas })
+    Ok(aplicadas)
+}
+
+/// Que la migración no haya dejado ninguna referencia rota.
+///
+/// Sustituye a la comprobación por sentencia que `foreign_keys` daba, y lo
+/// hace **antes de confirmar**: una migración que rompe la integridad no se
+/// aplica a medias, se deshace entera.
+fn verificar_referencias(
+    tx: &Transaction,
+    migracion: &Migracion,
+) -> Result<(), ErrorMigracion> {
+    let rotas: i64 = tx
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check;", [], |r| r.get(0))
+        .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+
+    if rotas > 0 {
+        return Err(ErrorMigracion::Fallo {
+            version: migracion.version,
+            migracion: migracion.nombre,
+            etapa: "integridad referencial".into(),
+            causa: format!(
+                "quedan {} fila(s) apuntando a algo que no existe. No se confirma nada.",
+                rotas
+            ),
+        });
+    }
+    Ok(())
 }
 
 // --- Utilidades para escribir migraciones ---
@@ -473,6 +545,28 @@ mod tests_centavos {
         c
     }
 
+    /// Una base migrada **hasta antes** de que exista la restricción de
+    /// céntimo.
+    ///
+    /// Hace falta porque desde la migración 11 el esquema **rechaza** una
+    /// fracción de céntimo, y las pruebas del redondeo necesitan poder
+    /// sembrar una. Que ya no se pueda sembrar en una base al día no es un
+    /// estorbo de las pruebas: es la garantía nueva, y
+    /// `el_esquema_migrado_rechaza_una_fraccion_de_centimo` la afirma.
+    fn base_migrada_hasta(version: u32) -> Connection {
+        let mut c = Connection::open_in_memory().unwrap();
+        for migracion in catalogo() {
+            if migracion.version > version {
+                break;
+            }
+            let tx = c.transaction().unwrap();
+            (migracion.aplicar)(&tx).unwrap();
+            tx.execute_batch(&format!("PRAGMA user_version = {};", migracion.version)).unwrap();
+            tx.commit().unwrap();
+        }
+        c
+    }
+
     fn fuera_de_centavo(c: &Connection, tabla: &str, columna: &str) -> i64 {
         c.query_row(
             &format!(
@@ -491,9 +585,10 @@ mod tests_centavos {
     fn un_importe_con_fraccion_de_centavo_queda_en_el_centavo_mas_cercano() {
         // Reproduce la forma del caso real: un gasto por transferencia cuyo
         // importe arrastra un tercer decimal.
-        // Se migra entero y después se siembra el valor torcido, para poder
-        // aplicar la migración 3 a mano y observar su efecto.
-        let mut c = base_migrada();
+        // Se migra **hasta la 10** y después se siembra el valor torcido:
+        // desde la 11 el esquema no admitiría una fracción de céntimo, que es
+        // justo lo que esta prueba necesita poder escribir.
+        let mut c = base_migrada_hasta(10);
         c.execute_batch(
             "INSERT INTO categorias (nombre) VALUES ('Prueba');
              INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago)
@@ -628,6 +723,291 @@ mod tests_centavos {
         );
     }
 
+
+    // --- El tramo 4, fijado por las mediciones que lo decidieron ---
+    //
+    // El tramo preveía convertir las columnas de dinero a `INTEGER`. Se midió
+    // antes de hacerlo y la premisa resultó falsa, de modo que se cerró como
+    // el tramo 3: declarándolo innecesario. Estas pruebas conservan las
+    // mediciones, porque un argumento que solo vive en un documento deja de
+    // comprobarse el día que alguien propone rehacerlo.
+
+    #[test]
+    fn el_esquema_migrado_rechaza_una_fraccion_de_centimo() {
+        // La garantía nueva, y la razón de todo el tramo: la fracción se
+        // rechaza **al escribir**, no solo al migrar.
+        let c = base_migrada();
+        c.execute_batch("INSERT INTO categorias (nombre) VALUES ('Prueba');").unwrap();
+        let con_fraccion = c.execute(
+            "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago)
+             VALUES ('13/09/2026', ?, 'DOP', 'Con fracción', 1, 'transferencia');",
+            [1_234.567f64],
+        );
+        assert!(con_fraccion.is_err(), "el esquema aceptó una fracción de céntimo");
+
+        let al_centimo = c.execute(
+            "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago)
+             VALUES ('13/09/2026', ?, 'DOP', 'Al céntimo', 1, 'transferencia');",
+            [1_234.57f64],
+        );
+        assert!(al_centimo.is_ok(), "el esquema rechazó un importe bueno: {al_centimo:?}");
+    }
+
+    #[test]
+    fn la_afinidad_integer_no_habria_restringido_nada() {
+        // **La premisa que mató al tramo.** Una columna declarada `INTEGER`
+        // acepta 75.005 y lo guarda como `real`: la afinidad solo convierte
+        // cuando no pierde. Cambiar el tipo no impedía lo que se quería
+        // impedir, y por eso la garantía vive en un `CHECK`.
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("CREATE TABLE t (v INTEGER);").unwrap();
+        c.execute("INSERT INTO t VALUES (?);", [75.005f64]).unwrap();
+
+        let tipo: String = c.query_row("SELECT typeof(v) FROM t;", [], |r| r.get(0)).unwrap();
+        assert_eq!(tipo, "real", "la afinidad INTEGER habría restringido, y no lo hace");
+    }
+
+    #[test]
+    fn leer_centavos_enteros_como_coma_flotante_no_falla_y_multiplica_por_cien() {
+        // El coste que habría tenido convertir a `INTEGER`: cualquier lectura
+        // `f64` que quedara sin migrar devolvería el entero crudo **sin
+        // error**. Cien veces el importe, en silencio.
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("CREATE TABLE t (v INTEGER); INSERT INTO t VALUES (7500);").unwrap();
+
+        let leido: f64 = c.query_row("SELECT v FROM t;", [], |r| r.get(0)).unwrap();
+        assert_eq!(leido, 7_500.0, "75.00 leído como 7500.00, y sin avisar");
+
+        // La dirección contraria sí avisa, y es la única que lo hace.
+        let c2 = Connection::open_in_memory().unwrap();
+        c2.execute_batch("CREATE TABLE t (v REAL); INSERT INTO t VALUES (75.0);").unwrap();
+        let entero: Result<i64, _> = c2.query_row("SELECT v FROM t;", [], |r| r.get(0));
+        assert!(entero.is_err(), "leer un REAL como entero tiene que fallar en voz alta");
+    }
+
+    #[test]
+    fn la_restriccion_no_rechaza_ningun_centimo_legitimo() {
+        // `ROUND(v,2) = v` frente a las variantes con `* 100`. **No es una
+        // elección de estilo**: multiplicar por cien introduce el error que se
+        // pretendía detectar, y las variantes rechazan importes buenos.
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE buena (v REAL CHECK (ROUND(v, 2) = v));
+             CREATE TABLE por_cien (v REAL CHECK (v * 100 = ROUND(v * 100)));",
+        )
+        .unwrap();
+
+        let (mut rechaza_buena, mut rechaza_por_cien) = (0u32, 0u32);
+        for centavos in 0..50_000i64 {
+            let unidades = centavos as f64 / 100.0;
+            if c.execute("INSERT INTO buena VALUES (?);", [unidades]).is_err() {
+                rechaza_buena += 1;
+            }
+            if c.execute("INSERT INTO por_cien VALUES (?);", [unidades]).is_err() {
+                rechaza_por_cien += 1;
+            }
+        }
+
+        assert_eq!(rechaza_buena, 0, "la restricción elegida rechazó céntimos legítimos");
+        assert!(
+            rechaza_por_cien > 0,
+            "la variante con * 100 dejó de fallar: si eso cambia, revisa por qué \
+             se descartó antes de adoptarla"
+        );
+    }
+
+    #[test]
+    fn la_restriccion_aguanta_las_magnitudes_que_el_sistema_admite() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("CREATE TABLE t (v REAL CHECK (ROUND(v, 2) = v));").unwrap();
+
+        let mut centavos = 50_000i64;
+        while centavos < 100_000_000_000_000 {
+            let unidades = centavos as f64 / 100.0;
+            assert!(
+                c.execute("INSERT INTO t VALUES (?);", [unidades]).is_ok(),
+                "rechazó {} centavos, una magnitud legítima",
+                centavos
+            );
+            centavos = centavos * 3 / 2 + 13;
+        }
+    }
+
+    #[test]
+    fn la_reconstruccion_conserva_las_filas_y_las_referencias() {
+        // Reconstruir doce tablas es el coste del tramo. Que no se pierda una
+        // fila ni se rompa una referencia es lo que lo hace aceptable, y se
+        // comprueba en vez de suponerse.
+        let c = base_migrada();
+        c.execute_batch(
+            "INSERT INTO clientes (rnc, nombre) VALUES ('000000000', 'Cliente de prueba');
+             INSERT INTO ingresos (numero_factura, cliente_id, fecha_emision, monto_total,
+                                   porcentaje_retencion, monto_retenido)
+             VALUES ('A-001', 1, '13/09/2026', 1000.0, 15.0, 150.0);",
+        )
+        .unwrap();
+
+        let rotas: i64 = c
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rotas, 0, "la reconstrucción dejó referencias rotas");
+
+        let hijas: i64 = c
+            .query_row("SELECT COUNT(*) FROM ingresos WHERE cliente_id = 1;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(hijas, 1, "la fila hija no sobrevivió");
+
+        // Y la clave ajena sigue apuntando a `clientes`, no a una temporal.
+        let sql: String = c
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='ingresos';",
+                [], |r| r.get(0))
+            .unwrap();
+        assert!(sql.contains("REFERENCES clientes"), "la referencia quedó reescrita: {sql}");
+        assert!(!sql.contains("_previa"), "quedó apuntando a una tabla temporal: {sql}");
+    }
+
+    #[test]
+    fn migrar_una_base_ya_migrada_no_vuelve_a_reconstruir() {
+        // Idempotencia: la migración 11 mira si la restricción ya está antes
+        // de rehacer la tabla. Sin eso, cada arranque reconstruiría doce
+        // tablas.
+        let mut c = base_migrada();
+        let antes: String = c
+            .query_row("SELECT sql FROM sqlite_master WHERE name='gastos';", [], |r| r.get(0))
+            .unwrap();
+
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_11_rechazar_fraccion_de_centimo(&tx).unwrap();
+        tx.commit().unwrap();
+
+        let despues: String = c
+            .query_row("SELECT sql FROM sqlite_master WHERE name='gastos';", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(antes, despues, "reconstruyó una tabla que ya tenía su restricción");
+        assert_eq!(antes.matches("CHECK (ROUND(monto, 2) = monto)").count(), 1,
+                   "duplicó la restricción");
+    }
+
+    #[test]
+    fn toda_columna_de_dinero_vive_bajo_su_restriccion() {
+        // La contrapartida de `toda_columna_real_esta_clasificada...`: estar
+        // en la lista tiene que significar algo en el esquema.
+        let c = base_migrada();
+        for (tabla, columna) in COLUMNAS_DE_DINERO {
+            let sql: String = c
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name=?;",
+                    [tabla], |r| r.get(0))
+                .unwrap_or_default();
+            assert!(
+                sql.contains(&format!("CHECK (ROUND({c}, 2) = {c})", c = columna)),
+                "{}.{} está declarada como dinero y el esquema no la restringe",
+                tabla, columna
+            );
+        }
+    }
+
+    #[test]
+    fn una_migracion_que_rompe_una_referencia_no_se_confirma() {
+        // Las migraciones corren con las claves ajenas apagadas para poder
+        // reconstruir tablas. Esto afirma que apagarlas no es una licencia:
+        // `foreign_key_check` cierra la puerta antes del COMMIT.
+        let c = base_migrada();
+        c.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        c.execute_batch(
+            "INSERT INTO clientes (rnc, nombre) VALUES ('000000000', 'Cliente de prueba');
+             INSERT INTO ingresos (numero_factura, cliente_id, fecha_emision, monto_total,
+                                   porcentaje_retencion, monto_retenido)
+             VALUES ('A-001', 99, '13/09/2026', 1000.0, 15.0, 150.0);",
+        )
+        .unwrap();
+
+        let rotas: i64 = c
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check;", [], |r| r.get(0))
+            .unwrap();
+        assert!(rotas > 0, "la comprobación no ve una referencia rota evidente");
+    }
+
+
+    #[test]
+    fn ninguna_acumulacion_en_sql_escribe_sin_redondear() {
+        // **La regla que el `CHECK` obliga a tener.** Un `SET v = v + ?`
+        // suma en coma flotante y el resultado arrastra ruido: medido, el 13%
+        // de esas escrituras produce un valor que el esquema rechaza, y la
+        // quinta ya falla. Los doce valores inexactos que la migración 10
+        // limpia venían de aquí.
+        //
+        // La corrección es `ROUND(v ± ?, 2)`, y no decide ningún céntimo: con
+        // los dos operandos exactos, lo que corrige está acotado en 1,5·10⁻⁵
+        // unidades —por debajo incluso de la tolerancia de representación—.
+        let fuentes = [
+            ("main.rs", include_str!("main.rs")),
+            ("adaptadores/sqlite/gastos.rs", include_str!("adaptadores/sqlite/gastos.rs")),
+        ];
+        let mut sin_redondear = Vec::new();
+        for (nombre, texto) in fuentes {
+            for (n, linea) in texto.lines().enumerate() {
+                let l = linea.trim();
+                if !l.contains("SET ") || !l.contains(" = ") {
+                    continue;
+                }
+                // `SET col = col + ?` sin ROUND alrededor.
+                for columna in COLUMNAS_DE_DINERO.iter().map(|(_, c)| *c) {
+                    let crudo = format!("SET {c} = {c} ", c = columna);
+                    if l.contains(&crudo) {
+                        sin_redondear.push(format!("{}:{}: {}", nombre, n + 1, l));
+                    }
+                }
+            }
+        }
+        assert!(
+            sin_redondear.is_empty(),
+            "acumulan en SQL sin redondear al céntimo; el esquema las rechazará:\n{}",
+            sin_redondear.join("\n")
+        );
+    }
+
+    #[test]
+    fn acumular_redondeando_no_produce_un_valor_que_el_esquema_rechace() {
+        // La medición que dictó la regla anterior, en las dos formas.
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE crudo (v REAL CHECK (ROUND(v,2) = v));
+             CREATE TABLE redondeado (v REAL CHECK (ROUND(v,2) = v));
+             INSERT INTO crudo VALUES (0.0);
+             INSERT INTO redondeado VALUES (0.0);",
+        )
+        .unwrap();
+
+        let (mut fallan_crudo, mut fallan_redondeado) = (0u32, 0u32);
+        let mut peor_correccion = 0.0f64;
+        for i in 1..5_000i64 {
+            let sumando = ((i * 7_919) % 1_000_000) as f64 / 100.0;
+
+            if c.execute("UPDATE crudo SET v = v + ?;", [sumando]).is_err() {
+                fallan_crudo += 1;
+                c.execute("UPDATE crudo SET v = ROUND(v, 2);", []).unwrap();
+            }
+
+            let previo: f64 = c.query_row("SELECT v FROM redondeado;", [], |r| r.get(0)).unwrap();
+            if c.execute("UPDATE redondeado SET v = ROUND(v + ?, 2);", [sumando]).is_err() {
+                fallan_redondeado += 1;
+            }
+            let ahora: f64 = c.query_row("SELECT v FROM redondeado;", [], |r| r.get(0)).unwrap();
+            peor_correccion = peor_correccion.max((ahora - (previo + sumando)).abs());
+        }
+
+        assert!(fallan_crudo > 0, "sumar sin redondear dejó de romper el esquema: \
+                si eso cambia, esta regla merece revisarse en vez de mantenerse por inercia");
+        assert_eq!(fallan_redondeado, 0, "redondear no bastó para satisfacer el esquema");
+        assert!(
+            peor_correccion < 0.005,
+            "el redondeo de la acumulación movió {peor_correccion:.3e} unidades: \
+             eso ya no es limpiar ruido, es decidir un céntimo"
+        );
+    }
+
     #[test]
     fn ninguna_columna_esta_en_las_dos_listas() {
         // Clasificarla dos veces sería una contradicción declarada, y la
@@ -645,8 +1025,9 @@ mod tests_centavos {
     #[test]
     fn la_verificacion_falla_si_queda_un_importe_fuera_de_centavo() {
         // Se comprueba que la red existe: si el redondeo no hubiera alcanzado
-        // a una columna, la migración no se daría por buena.
-        let mut c = base_migrada();
+        // a una columna, la migración no se daría por buena. Se siembra antes
+        // de la 11 por el mismo motivo que la prueba anterior.
+        let mut c = base_migrada_hasta(10);
         c.execute_batch(
             "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual)
              VALUES ('Cuenta Ejemplo', 'DOP', 100.005);",
