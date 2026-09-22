@@ -5,7 +5,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 ---
 
 <<<<<<< HEAD
-## 🚀 Versión 1.23.0 (Versión Actual) - 2026-09-22
+## 🚀 Versión 1.25.0 (Versión Actual) - 2026-09-22
+**El día de facturación se recorta a los días que tiene el mes: febrero deja de perder su cargo.**
+
+### 📅 La regla
+* Una mensual del **día 30** se cobraba once veces al año y una del **31**, siete: la condición comparaba contra el día crudo, y `hoy.day()` nunca llega a 31 en un mes de 30. Ahora el día se recorta al último del mes.
+* **La fecha sale del estado de cuenta.** Un cargo del día 29 se generó el **28 de febrero** y se liquidó el 1 de marzo: son dos fechas distintas. Esta aplicación asienta el *consumo* contra la tarjeta, así que el asiento lleva la de generación; la liquidación entra por el ciclo de pago, que se lleva aparte.
+* El recorte **mueve el día, no añade vencimientos**: cada mes sigue teniendo uno, y la marca de idempotencia no cambia.
+
+### 💵 Efecto sobre datos reales
+* Dos suscripciones facturan los días 29 y 30. Entre las dos, la aplicación dejaba de asentar **USD 30,94 al año** que el proveedor sí cobraba.
+* Simulando 2027 sobre una copia de la base real: 98 cargos frente a 96, y los dos que faltaban aparecen fechados el **28/02/2027**.
+
+### 🔍 Lo que se descartó al medirlo
+* Una formulación más general —«cobra si pasó cualquier vencimiento posterior al último cobro»— también arreglaba febrero, y **de paso recuperaba un período atrasado** que antes se perdía: dieciocho cargos en enero donde había ocho, sobre datos reales. Recuperar períodos vencidos es una decisión abierta (`s13`) y no se toma de rebote.
+
+---
+
+## 🚀 Versión 1.23.0 - 2026-09-22
 **Fase 5 — Suscripciones. El puerto `Reloj` entra en servicio, y con él aparecen seis defectos que la red anterior no podía ver.**
 
 ### ⏰ El reloj, que existía sin usarse

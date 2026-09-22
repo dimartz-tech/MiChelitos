@@ -917,35 +917,78 @@ fn cargos_en_el_ano(anio: i32) -> usize {
 }
 
 #[test]
-fn s10_una_mensual_del_dia_31_solo_se_cobra_siete_meses_al_ano() {
-    // DIVERGENCIA DECLARADA — no se corrige aquí.
+fn s10b_una_mensual_del_dia_31_se_cobra_los_doce_meses() {
+    // **CAMBIO DE CONDUCTA — 2026-09-22.**
     //
-    // La condición pide `dia_actual >= dia_facturacion`, y en un mes de 30
-    // días nunca hay un 31. Febrero, abril, junio, septiembre y noviembre se
-    // saltan enteros: **cinco meses sin cargo** de una suscripción que el
-    // proveedor cobra los doce.
+    // Antes se cobraban 7 de 12 meses: la condición comparaba contra el día
+    // crudo, y `hoy.day()` nunca llega a 31 en un mes de 30. Febrero, abril,
+    // junio, septiembre y noviembre pasaban sin cargo.
     //
-    // Lo natural sería cobrar el último día del mes, pero eso es una regla
-    // nueva y no un arreglo: cambia el importe anual. Queda pendiente de
-    // decidir.
+    // Ahora el día se recorta a los que tiene el mes. **La fecha sale del
+    // estado de cuenta**: un cargo del día 29 se generó el 28 de febrero, el
+    // último día del mes.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
     crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 31, "DOP".into()).unwrap();
 
     let cargos = cargos_en_el_ano(2026);
 
-    assert_eq!(cargos, 7, "hoy se cobran 7 de 12 meses");
-    assert_importe(balances_tarjeta(tarjeta).0, 3_500.0, "5 meses sin cargar");
+    assert_eq!(cargos, 12, "doce cargos, los mismos que hace el proveedor");
+    assert_importe(balances_tarjeta(tarjeta).0, 6_000.0, "ningún mes sin cargar");
 }
 
 #[test]
-fn s11_una_mensual_del_dia_30_pierde_febrero() {
-    // DIVERGENCIA DECLARADA. La misma causa que S10, un mes en vez de cinco.
+fn s11b_una_mensual_del_dia_30_ya_no_pierde_febrero() {
+    // **CAMBIO DE CONDUCTA.** Antes once cargos al año. Afecta a datos
+    // reales: dos suscripciones del titular facturan los días 29 y 30, y
+    // entre las dos la aplicación dejaba de asentar un año de cargos de
+    // febrero que el proveedor sí cobraba.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
     crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 30, "DOP".into()).unwrap();
 
-    assert_eq!(cargos_en_el_ano(2026), 11, "hoy se cobran 11 de 12 meses");
+    assert_eq!(cargos_en_el_ano(2026), 12, "doce cargos donde antes había once");
+}
+
+#[test]
+fn s11c_el_cargo_de_febrero_se_asienta_el_ultimo_dia_del_mes() {
+    // La fecha importa tanto como el número: el asiento tiene que poder
+    // cuadrarse contra el estado de cuenta, y ahí figura el 28.
+    //
+    // Que el emisor lo **liquide** el 1 de marzo es otra cosa. Esta
+    // aplicación asienta el consumo contra la tarjeta; la liquidación entra
+    // por el ciclo de pago, que se lleva aparte.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 30, "DOP".into()).unwrap();
+    fijar_ultimo_pago(sub, "30/01/2026");
+
+    for dia in 1..=27u32 {
+        assert!(procesar_en(2026, 2, dia).is_empty(), "aún no es el último día (día {dia})");
+    }
+    assert_eq!(procesar_en(2026, 2, 28).len(), 1, "el 28, último día de febrero de 2026");
+
+    let fecha: String = conexion()
+        .query_row("SELECT fecha FROM gastos ORDER BY id DESC LIMIT 1;", [], |r| r.get(0))
+        .expect("leer la fecha del cargo");
+    assert_eq!(fecha, "28/02/2026");
+}
+
+#[test]
+fn s11d_el_recorte_no_rompe_la_idempotencia_del_mes() {
+    // El cargo sigue siendo uno por mes: el recorte mueve el día, no añade
+    // vencimientos. Por eso la marca «ya cobré este mes» sigue sirviendo.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 30, "DOP".into()).unwrap();
+    fijar_ultimo_pago(sub, "30/01/2026");
+
+    procesar_en(2026, 2, 28);
+    assert!(procesar_en(2026, 2, 28).is_empty(), "no cobra dos veces el mismo día");
+    assert_eq!(procesar_en(2026, 3, 30).len(), 1, "y en marzo vuelve a su día 30");
+
+    assert_eq!(total_gastos(), 2, "un cargo por mes");
+    assert_importe(balances_tarjeta(tarjeta).0, 1_000.0, "dos mensualidades");
 }
 
 #[test]
