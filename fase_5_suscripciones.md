@@ -34,14 +34,12 @@ sujeto por una prueba que muere si alguien cambia la conducta:
 | Mensual el **día 31** | ~~7 cargos en 12 meses~~ — **corregido**: el día se recorta al último del mes | `s10b` |
 | Mensual el **día 30** | ~~11 cargos: se pierde febrero~~ — **corregido** | `s11b` |
 | **Anual** | ~~Se recobra al cambiar el año~~ — **corregido**: la fecha se anota, no se deduce | `s12b` |
-| **Períodos vencidos** | Tres meses sin abrir la aplicación generan **un** cargo, no tres | `s13` |
+| **Períodos vencidos** | ~~Tres meses sin abrir generan un cargo~~ — **corregido**, ver abajo | `s13b`–`s13h` |
 | Marca de cobro **ilegible** | ~~Cobra en cada arranque~~ — **corregido**, ver abajo | `s14b` |
 | Sin la categoría **«Suscripciones»** ni **«Otros»** | El gasto cae en el identificador 1 literal, que hoy es «Alimentación» | `s17` |
 
 **Tres de los seis quedan cerrados**, cada uno por decisión del titular y con
-el estado de cuenta delante; los capítulos del final cuentan cómo. Siguen
-abiertos los **períodos vencidos** (`s13`) y la **categoría de respaldo**
-(`s17`).
+el estado de cuenta delante; los capítulos del final cuentan cómo. Sigue abierta la **categoría de respaldo** (`s17`).
 
 ### Por qué no se corrigen aquí
 
@@ -272,3 +270,82 @@ deja de leerse como «mes 13».
 
 La migración **no toca `gastos.fecha`**: ahí hay un valor real que no cumple,
 y corregir un dato del titular es decisión suya, no de una migración.
+
+
+---
+
+# La ventana que se cerró
+
+El defecto más caro de los seis, y el único que dejó un importe sin asentar en
+la base real.
+
+## Qué pasaba
+
+La marca de idempotencia guardaba **cuándo se ejecutó** el cargo, no **qué
+período saldó**. La decisión preguntaba «¿es un mes posterior al del último
+cobro y ya llegó el día de facturación?», de modo que cada período tenía una
+**ventana** para ser cobrado: de su día de facturación al fin de mes. Fuera de
+ella, la misma marca pasaba a leerse como «ya atendido».
+
+La ventana dependía del día, y era muy desigual:
+
+| Día de facturación | Ventana en el peor mes |
+|---|---|
+| 29 y 30 | **1 día** |
+| 14 | 15 días |
+| 11 | 18 días |
+| 9 | 20 días |
+
+Costó un cargo real: **Netflix, agosto de 2026, USD 13,99**. El 30 y el 31 de
+agosto pasaron sin que se abriera la aplicación, y al llegar septiembre el
+período quedó fuera de alcance.
+
+## La fecha manda
+
+Ahora la suscripción guarda **la fecha de su próximo cobro**. Una fecha que ya
+pasó sigue pasada: no hay ventana que perder. Y `fecha_renovacion`, que las
+anuales ya tenían, se funde con ella — eran el mismo hecho con dos nombres.
+
+Sobreviven **dos datos, porque son dos hechos**:
+
+* `fecha_proximo_cobro` — qué período toca. Es un puntero que avanza al
+  saldar, y es lo que el titular ve y puede corregir.
+* `dia_facturacion` — en qué día del mes factura el proveedor. Hace falta
+  como **ancla**: el recorte a fin de mes no puede persistirse, porque si una
+  del día 30 cobrada el 28 de febrero calculara el siguiente desde ese 28,
+  quedaría anclada al 28 para siempre.
+
+## Uno se cobra solo, varios se preguntan
+
+**El umbral no es arbitrario.** Con un período vencido no hay ambigüedad: la
+suscripción existe, acabas de abrir la aplicación y le toca. Con varios, la
+aplicación no sabe si el proveedor los cobró ni si la suscripción siguió
+activa durante la ausencia, y **fabricar cargos que quizá no ocurrieron es
+peor que señalarlos**.
+
+Los pendientes se ofrecen uno a uno:
+
+* **«Sí se cobró»** asienta el cargo con la fecha del vencimiento y avanza.
+* **«No se cobró»** avanza sin cobrar y **exige un motivo escrito**, que queda
+  como caso de auditoría. Descartar es afirmar que el proveedor no cobró, y
+  esa afirmación se hace mirando un estado de cuenta; si dentro de seis meses
+  la cifra anual no cuadra, esto dirá por qué.
+
+La lista tiene tope de doce: una suscripción abandonada años produciría algo
+que nadie va a conciliar uno a uno.
+
+## Lo que arregla de paso
+
+El asiento lleva **la fecha del vencimiento, no la de ejecución**. En la base
+real, un cargo de Google One —que factura el día 9— figuraba asentado el 11,
+porque se usaba «hoy». Cuadrarlo contra el estado de cuenta era más difícil de
+lo necesario.
+
+## Lo que deja sin efecto
+
+`s14` cerraba la marca de cobro ilegible impidiendo el cargo y señalando la
+suscripción como parada. **Desde que la decisión lee una fecha, la marca no
+decide nada**, así que ya no impide y señalarla sería un aviso que miente —el
+mismo error que `s14` corrigió en las anuales—. Se retira el impedimento y se
+conserva la restricción de esquema, que sigue impidiendo escribir una fecha
+sin forma de fecha.

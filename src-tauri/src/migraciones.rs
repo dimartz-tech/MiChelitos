@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 13;
+pub const VERSION_OBJETIVO: u32 = 14;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -158,6 +158,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 13,
             nombre: "las fechas de una suscripción tienen forma de fecha",
             aplicar: crate::db_sql::migracion_13_fechas_de_suscripcion,
+        },
+        Migracion {
+            version: 14,
+            nombre: "la fecha manda: próximo cobro en vez de ventana mensual",
+            aplicar: crate::db_sql::migracion_14_fecha_del_proximo_cobro,
         },
     ]
 }
@@ -1074,7 +1079,8 @@ mod tests_centavos {
 
     #[test]
     fn la_migracion_12_no_reescribe_una_fecha_ya_anotada() {
-        let c = base_migrada();
+        // Hasta la 12: la 14 funde `fecha_renovacion` en `fecha_proximo_cobro`.
+        let c = base_migrada_hasta(12);
         c.execute_batch(
             "INSERT INTO tarjetas (entidad, nombre_tarjeta, fecha_corte, fecha_limite_pago)
                  VALUES ('Emisor', 'Producto', 5, 25);
