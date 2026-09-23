@@ -1200,7 +1200,7 @@ fn procesar_suscripciones() -> Result<Vec<String>, String> {
 pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> Result<Vec<String>, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let hoy = reloj.hoy();
-    let categoria = categoria_de_suscripciones(&conn);
+    let categoria = categoria_de_suscripciones(&conn)?;
 
     let mut mensajes = Vec::new();
     for sub in leer_suscripciones(&conn)? {
@@ -1278,20 +1278,34 @@ fn regla_de(sub: &SubRecord) -> Option<SuscripcionDominio> {
 
 /// Dónde va el gasto de una suscripción.
 ///
-/// **Divergencia conocida (`s17`), sin resolver.** Si no existen ni
-/// «Suscripciones» ni «Otros», cae en el identificador 1 literal, sea cual
-/// sea la categoría que lo tenga.
-fn categoria_de_suscripciones(conn: &rusqlite::Connection) -> i64 {
+/// Busca «Suscripciones» y, si no está, «Otros» — ambas nacen en la siembra
+/// inicial, pero el titular puede renombrarlas o borrarlas desde la propia
+/// aplicación. Antes, si las dos faltaban, el gasto caía en **el
+/// identificador 1 literal**, sea cual sea la categoría que lo tenga hoy: un
+/// cargo de suscripción podía terminar archivado como alquiler o gasolina sin
+/// que nada lo dijera.
+///
+/// Ahora, si ninguna existe, se **crea** «Suscripciones» en el momento. No es
+/// una tercera búsqueda más: es dejar de improvisar con lo que haya en la
+/// posición 1 y garantizar en su lugar una categoría que sí describe lo que
+/// contiene.
+fn categoria_de_suscripciones(conn: &rusqlite::Connection) -> Result<i64, String> {
     for nombre in ["suscripciones", "otros"] {
         if let Ok(id) = conn.query_row(
             "SELECT id FROM categorias WHERE LOWER(nombre) = ?;",
             [nombre],
             |r| r.get(0),
         ) {
-            return id;
+            return Ok(id);
         }
     }
-    1
+
+    conn.execute(
+        "INSERT INTO categorias (nombre) VALUES ('Suscripciones');",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
 }
 
 /// Asienta un cargo de suscripción **con la fecha de su vencimiento**.
@@ -1385,7 +1399,7 @@ pub fn confirmar_pendiente(
 ) -> Result<String, String> {
     let hoy = reloj.hoy();
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let categoria = categoria_de_suscripciones(&conn);
+    let categoria = categoria_de_suscripciones(&conn)?;
 
     let sub = leer_suscripciones(&conn)?
         .into_iter()
