@@ -4,7 +4,18 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.27.0 (Versión Actual) - 2026-09-22
+## 🚀 Versión 1.28.0 (Versión Actual) - 2026-09-23
+**Cierra la Fase 5: sin «Suscripciones» ni «Otros», la categoría se crea en vez de improvisar con la posición 1.**
+
+### 🐛 El último de los seis defectos
+* `categoria_de_suscripciones` buscaba por nombre, y si el titular renombraba o borraba las dos categorías que reconoce, el cargo caía en el **identificador 1 literal**. Un gasto de suscripción podía archivarse como alquiler o gasolina sin ningún error que lo dijera.
+* Agotadas las dos búsquedas, ahora se **crea** `Suscripciones` en el momento. Es idempotente y no toca nada cuando la categoría ya existe.
+
+Con esto se cierran los seis defectos que abrió la caracterización de la Fase 5.
+
+---
+
+## 🚀 Versión 1.27.0 - 2026-09-22
 **La fecha manda: una suscripción guarda cuándo vence su próximo cobro, y ningún período se pierde en silencio.**
 
 ### 🕳️ La ventana que se cerró

@@ -1255,10 +1255,14 @@ fn s16_el_cargo_se_fecha_en_su_vencimiento_y_no_en_el_dia_del_reloj() {
 }
 
 #[test]
-fn s17_sin_la_categoria_de_suscripciones_el_cargo_va_a_parar_a_la_categoria_1() {
-    // DIVERGENCIA DECLARADA, sin resolver. La búsqueda cae en cascada:
-    // «Suscripciones», «Otros» y, si tampoco está, el identificador 1
-    // literal, sea cual sea la categoría que lo tenga.
+fn s17_sin_categoria_de_suscripciones_se_crea_una_en_vez_de_improvisar() {
+    // **CAMBIO DE CONDUCTA.** Antes, si el titular renombraba o borraba las
+    // dos categorías que la búsqueda reconoce, el cargo caía en el
+    // identificador 1 literal: podía terminar archivado como alquiler o
+    // gasolina sin que nada lo dijera.
+    //
+    // Ahora, agotadas las dos búsquedas, se crea «Suscripciones» en vez de
+    // usar lo que haya en la posición 1.
     let _g = entorno_aislado();
     let (_, _) = suscripcion_mensual(1, "01/03/2026");
     conexion()
@@ -1270,10 +1274,68 @@ fn s17_sin_la_categoria_de_suscripciones_el_cargo_va_a_parar_a_la_categoria_1() 
 
     procesar_en(2026, 3, 10);
 
-    let categoria: i64 = conexion()
-        .query_row("SELECT categoria_id FROM gastos ORDER BY id DESC LIMIT 1;", [], |r| r.get(0))
-        .expect("leer la categoría");
-    assert_eq!(categoria, 1, "el cargo cae en la categoría 1");
+    let (categoria, nombre): (i64, String) = conexion()
+        .query_row(
+            "SELECT g.categoria_id, c.nombre FROM gastos g
+             JOIN categorias c ON c.id = g.categoria_id
+             ORDER BY g.id DESC LIMIT 1;",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("leer la categoría del cargo");
+    assert_ne!(categoria, 1, "no debe caer en la posición 1, que ahora es «Servicios en línea»");
+    assert_eq!(nombre, "Suscripciones", "se crea la categoría en vez de improvisar");
+}
+
+#[test]
+fn s17b_crear_la_categoria_es_idempotente() {
+    // Un segundo cargo, con la categoría ya creada por el primero, no debe
+    // duplicarla: el nombre es UNIQUE, y un segundo INSERT fallaría el
+    // procesamiento entero si esto no se comprobara primero.
+    let _g = entorno_aislado();
+    let (_, _) = suscripcion_mensual(1, "01/03/2026");
+    let (_, _) = suscripcion_mensual(1, "01/03/2026");
+    conexion()
+        .execute_batch(
+            "UPDATE categorias SET nombre = 'X' WHERE LOWER(nombre) = 'suscripciones';
+             UPDATE categorias SET nombre = 'Y' WHERE LOWER(nombre) = 'otros';",
+        )
+        .expect("renombrar categorías");
+
+    let mensajes = procesar_en(2026, 3, 10);
+
+    assert_eq!(mensajes.len(), 2, "las dos suscripciones se procesan sin error");
+    let creadas: i64 = conexion()
+        .query_row("SELECT COUNT(*) FROM categorias WHERE nombre = 'Suscripciones';", [], |r| r.get(0))
+        .expect("contar categorías");
+    assert_eq!(creadas, 1, "una sola categoría, no una por cargo");
+}
+
+#[test]
+fn s17c_con_otros_disponible_no_se_crea_una_categoria_nueva() {
+    // La búsqueda en cascada sigue viva: «Otros» basta y no hace falta crear
+    // nada.
+    let _g = entorno_aislado();
+    let (_, _) = suscripcion_mensual(1, "01/03/2026");
+    conexion()
+        .execute("UPDATE categorias SET nombre = 'X' WHERE LOWER(nombre) = 'suscripciones';", [])
+        .expect("renombrar «Suscripciones»");
+
+    procesar_en(2026, 3, 10);
+
+    let nombre: String = conexion()
+        .query_row(
+            "SELECT c.nombre FROM gastos g JOIN categorias c ON c.id = g.categoria_id
+             ORDER BY g.id DESC LIMIT 1;",
+            [],
+            |r| r.get(0),
+        )
+        .expect("leer la categoría del cargo");
+    assert_eq!(nombre, "Otros");
+    let total: i64 = conexion()
+        .query_row("SELECT COUNT(*) FROM categorias WHERE nombre = 'Suscripciones';", [], |r| r.get(0))
+        .expect("contar categorías");
+    assert_eq!(total, 0, "no se creó nada, porque «Otros» ya bastaba");
 }
 
 #[test]
