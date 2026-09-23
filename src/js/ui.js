@@ -1065,6 +1065,25 @@ class AppUI {
             <div class="section-title">
                 <h1>Suscripciones Recurrentes</h1>
                 ${(() => {
+                    const conHuecos = suscripciones.filter(s => s.pendientes.length > 0);
+                    if (conHuecos.length === 0) return '';
+                    return `<div class="card" style="border-left:3px solid var(--warning, #e0a020); margin-bottom:1rem;">
+                        <strong>📋 Períodos por confirmar</strong>
+                        <p style="font-size:0.78rem; color:var(--text-secondary); margin:0.4rem 0 0.6rem;">
+                            Vencieron varios sin que la aplicación estuviera abierta. No se cobran solos:
+                            confirma contra el estado de cuenta cuáles ocurrieron.
+                        </p>
+                        ${conHuecos.map(s => `
+                            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem; font-size:0.85rem;">
+                                <span style="flex:1;"><strong>${s.plataforma}</strong> — ${s.divisa} ${this.formatMoney(s.monto)},
+                                    el más antiguo: <strong>${s.pendientes[0]}</strong>
+                                    ${s.pendientes.length > 1 ? `<span style="color:var(--text-muted);">(y ${s.pendientes.length - 1} más)</span>` : ''}</span>
+                                <button onclick="appUI.handleAsentarPendiente(${s.id}, '${s.pendientes[0]}')" class="btn" style="padding:0.25rem 0.5rem; font-size:0.78rem;">Sí se cobró</button>
+                                <button onclick="appUI.handleDescartarPendiente(${s.id}, '${s.pendientes[0]}')" class="btn" style="padding:0.25rem 0.5rem; font-size:0.78rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);">No se cobró</button>
+                            </div>`).join('')}
+                    </div>`;
+                })()}
+                ${(() => {
                     const paradas = suscripciones.filter(s => s.impedimento);
                     if (paradas.length === 0) return '';
                     return `<div class="card" style="border-left:3px solid var(--danger, #e05260); margin-bottom:1rem;">
@@ -1116,17 +1135,18 @@ class AppUI {
                                 </div>
                                 <div class="form-group">
                                     <label for="sus_fre">Frecuencia</label>
-                                    <select id="sus_fre" class="form-control" onchange="appUI.alternarRenovacion()">
+                                    <select id="sus_fre" class="form-control">
                                         <option value="mensual" selected>Mensual</option>
                                         <option value="anual">Anual</option>
                                     </select>
                                 </div>
                             </div>
-                            <div class="form-group" id="sus_ren_caja" hidden>
-                                <label for="sus_ren">Fecha exacta de renovación *</label>
-                                <input type="date" id="sus_ren" class="form-control">
+                            <div class="form-group">
+                                <label for="sus_ren">Fecha del próximo cobro *</label>
+                                <input type="date" id="sus_ren" class="form-control" required>
                                 <small style="color:var(--text-muted); font-size:0.7rem;">
-                                    Sin ella la suscripción no se cobra: el sistema no deduce cuándo renueva una anual.
+                                    Sin ella la suscripción no se cobra. El día de facturación solo sirve de ancla
+                                    para calcular los siguientes.
                                 </small>
                             </div>
                             <div class="form-group">
@@ -1169,11 +1189,10 @@ class AppUI {
                                             <td style="text-transform:capitalize;">${s.frecuencia}</td>
                                             <td>Día ${s.dia_facturacion}</td>
                                             <td>${
-                                                s.frecuencia !== 'anual'
-                                                    ? '<span style="color:var(--text-muted);">—</span>'
-                                                    : s.fecha_renovacion
-                                                        ? `${s.avisa ? '🔔 ' : ''}${s.fecha_renovacion}`
-                                                        : '<span style="color:var(--danger, #e05260);">Sin fecha: no se cobrará</span>'
+                                                s.fecha_proximo_cobro
+                                                    ? `${s.avisa ? '🔔 ' : ''}${s.fecha_proximo_cobro}` +
+                                                      (s.pendientes.length > 1 ? ` <span style="color:var(--danger, #e05260);">+${s.pendientes.length - 1}</span>` : '')
+                                                    : '<span style="color:var(--danger, #e05260);">Sin fecha: no se cobrará</span>'
                                             }</td>
                                             <td>${
                                                 s.impedimento
@@ -1183,7 +1202,7 @@ class AppUI {
                                             <td>${s.entidad} (${s.nombre_tarjeta})</td>
                                             <td class="amount expense">${s.divisa} ${this.formatMoney(s.monto)}</td>
                                             <td>
-                                                ${s.impedimento && s.fecha_ultimo_pago ? `<button onclick="appUI.handleCorregirUltimoCobro(${s.id}, '${s.fecha_ultimo_pago}')" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(224,82,96,0.15); border:1px solid var(--danger, #e05260);" title="Corregir la fecha del último cobro">🔧</button>` : ''}
+                                                ${s.impedimento ? `<button onclick="appUI.handleCorregirProximoCobro(${s.id})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(224,82,96,0.15); border:1px solid var(--danger, #e05260);" title="Corregir la fecha del último cobro">🔧</button>` : ''}
                                                 <button onclick='appUI.abrirEdicionSuscripcion(${JSON.stringify(s).replace(/'/g, "&apos;")})' class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Editar">✏️</button>
                                                 <button onclick="appUI.handleEliminarSuscripcion(${s.id})" class="btn btn-danger" style="padding: 0.3rem 0.5rem; font-size:0.8rem;">🗑️</button>
                                             </td>
@@ -3186,15 +3205,6 @@ class AppUI {
         }
     }
 
-    /// Despliega la fecha de renovación solo cuando la frecuencia la usa.
-    alternarRenovacion(id) {
-        const sufijo = id === undefined ? '' : `_${id}`;
-        const caja = document.getElementById(id === undefined ? 'sus_ren_caja' : `es_ren_caja_${id}`);
-        const sel = document.getElementById(id === undefined ? 'sus_fre' : `es_fre_${id}`);
-        if (caja && sel) caja.hidden = sel.value !== 'anual';
-        void sufijo;
-    }
-
     /// Un `<input type="date">` entrega ISO; la aplicación guarda dd/mm/aaaa.
     ///
     /// La conversión se hace aquí, en el borde, y no en el núcleo: son dos
@@ -3214,17 +3224,15 @@ class AppUI {
         return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
     }
 
-    /// Corrige la fecha del último cobro de una suscripción parada.
+    /// Pone a mano la fecha del próximo cobro de una suscripción parada.
     ///
-    /// Pide la fecha en lugar de limpiarla. Dejarla vacía la haría pasar por
-    /// «nunca cobrada» y volvería a cobrar este mes, que es el cobro
-    /// duplicado del que la edición protege. Quien tiene el estado de cuenta
-    /// delante sabe cuál es la buena.
-    async handleCorregirUltimoCobro(id, actual) {
+    /// Pide la fecha en lugar de deducirla, por lo mismo que la anual:
+    /// deducir un vencimiento con datos que no bastan es lo que produjo los
+    /// defectos de esta fase.
+    async handleCorregirProximoCobro(id) {
         const fecha = prompt(
-            `La fecha del último cobro no se entiende: «${actual}».\n\n` +
-            `Escribe la buena en formato dd/mm/aaaa. Mientras no se corrija, ` +
-            `esta suscripción no se cobrará.`,
+            `Esta suscripción no tiene fecha de próximo cobro, así que no se cobrará.\n\n` +
+            `Escríbela en formato dd/mm/aaaa.`,
             ''
         );
         if (fecha === null) return;
@@ -3239,8 +3247,40 @@ class AppUI {
         }
 
         try {
-            await AppAPI.corregirUltimoCobro(id, limpia);
-            this.showToast("Fecha corregida. La suscripción vuelve a su ciclo.");
+            await AppAPI.corregirProximoCobro(id, limpia);
+            this.showToast("Fecha puesta. La suscripción vuelve a su ciclo.");
+            await this.render('suscripciones');
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
+    }
+
+    /// Confirma que el período más antiguo sí lo cobró el proveedor.
+    async handleAsentarPendiente(id, fecha) {
+        if (!confirm(`Se asentará el cargo con fecha ${fecha}, y la deuda de la tarjeta subirá.\n\n¿El proveedor cobró ese período?`)) return;
+        try {
+            this.showToast(await AppAPI.asentarPeriodoPendiente(id));
+            await this.render('suscripciones');
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
+    }
+
+    /// Da por no cobrado el período más antiguo.
+    ///
+    /// Pide un motivo por lo mismo que las correcciones: descartar es
+    /// afirmar que el proveedor no cobró, y esa afirmación se hace mirando un
+    /// estado de cuenta. Si la cifra anual no cuadra dentro de seis meses,
+    /// esto dirá por qué.
+    async handleDescartarPendiente(id, fecha) {
+        const motivo = this.pedirMotivoDeCorreccion(
+            `Dar por no cobrado el período del ${fecha}`,
+            `No se asentará ningún cargo y la suscripción pasará al período siguiente. ` +
+            `Quedará un caso de auditoría con lo que escribas.`
+        );
+        if (motivo === null) return;
+        try {
+            this.showToast(await AppAPI.descartarPeriodoPendiente(id, motivo));
             await this.render('suscripciones');
         } catch (err) {
             this.showToast(err.toString(), 'error');
@@ -3255,9 +3295,9 @@ class AppUI {
         const dia = Number(document.getElementById('sus_dia').value);
         const fre = document.getElementById('sus_fre').value;
         const tar = Number(document.getElementById('sus_tar').value);
-        const ren = fre === 'anual' ? this.fechaDeEntrada('sus_ren') : null;
-        if (fre === 'anual' && ren === null) {
-            this.showToast("Una suscripción anual necesita su fecha de renovación.", "error");
+        const ren = this.fechaDeEntrada('sus_ren');
+        if (ren === null) {
+            this.showToast("Indica la fecha del próximo cobro.", "error");
             return;
         }
 
@@ -3306,7 +3346,7 @@ class AppUI {
                         </div>
                         <div class="form-group">
                             <label>Frecuencia</label>
-                            <select id="es_fre_${s.id}" class="form-control" onchange="appUI.alternarRenovacion(${s.id})">
+                            <select id="es_fre_${s.id}" class="form-control">
                                 <option value="mensual" ${s.frecuencia === 'mensual' ? 'selected' : ''}>Mensual</option>
                                 <option value="anual" ${s.frecuencia === 'anual' ? 'selected' : ''}>Anual</option>
                             </select>
@@ -3314,9 +3354,9 @@ class AppUI {
                     </div>
                     <div class="form-group">
                         <label>Tarjeta de cargo</label>
-                        <div class="form-group" id="es_ren_caja_${s.id}" ${s.frecuencia === 'anual' ? '' : 'hidden'}>
-                            <label for="es_ren_${s.id}">Fecha exacta de renovación *</label>
-                            <input type="date" id="es_ren_${s.id}" class="form-control" value="${appUI.fechaAIso(s.fecha_renovacion)}">
+                        <div class="form-group">
+                            <label for="es_ren_${s.id}">Fecha del próximo cobro *</label>
+                            <input type="date" id="es_ren_${s.id}" class="form-control" value="${appUI.fechaAIso(s.fecha_proximo_cobro)}">
                         </div>
                         <select id="es_tar_${s.id}" class="form-control" required>
                             ${tarjetas.map(t => `<option value="${t.id}" ${t.id === s.tarjeta_id ? 'selected' : ''}>${t.entidad} - ${t.nombre_tarjeta}</option>`).join('')}
@@ -3346,9 +3386,9 @@ class AppUI {
         if (!(dia >= 1 && dia <= 31)) { this.showToast("El día de facturación debe estar entre 1 y 31.", "error"); return; }
 
         try {
-            const ren = fre === 'anual' ? this.fechaDeEntrada(`es_ren_${id}`) : null;
-            if (fre === 'anual' && ren === null) {
-                this.showToast("Una suscripción anual necesita su fecha de renovación.", "error");
+            const ren = this.fechaDeEntrada(`es_ren_${id}`);
+            if (ren === null) {
+                this.showToast("Indica la fecha del próximo cobro.", "error");
                 return;
             }
             await AppAPI.actualizarSuscripcion(id, pla, mon, tar, fre, dia, div, ren);

@@ -4,7 +4,32 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.26.0 (Versión Actual) - 2026-09-22
+## 🚀 Versión 1.27.0 (Versión Actual) - 2026-09-22
+**La fecha manda: una suscripción guarda cuándo vence su próximo cobro, y ningún período se pierde en silencio.**
+
+### 🕳️ La ventana que se cerró
+* La marca de idempotencia guardaba **cuándo se ejecutó** el cargo, no **qué período saldó**. Eso daba a cada período una ventana —de su día de facturación al fin de mes— y perderla lo borraba: al llegar el mes siguiente, la marca pasaba a leerse como «ya atendido».
+* La ventana era de **un solo día** para una suscripción del día 30. Costó un cargo real: **Netflix, agosto de 2026, USD 13,99**. Al migrar, ese período reaparece y se asienta con su fecha.
+* Ahora la suscripción guarda `fecha_proximo_cobro`. Una fecha que ya pasó sigue pasada. `fecha_renovacion` se funde con ella: eran el mismo hecho con dos nombres.
+* **`dia_facturacion` sobrevive como ancla**, y no por compatibilidad: el recorte a fin de mes no puede persistirse, o una del día 30 cobrada el 28 de febrero quedaría anclada al 28 para siempre.
+
+### 📋 Uno se cobra solo, varios se preguntan
+* Con un período vencido no hay ambigüedad. Con varios, la aplicación no sabe si el proveedor los cobró ni si la suscripción siguió activa: **fabricar cargos que quizá no ocurrieron es peor que señalarlos**.
+* «Sí se cobró» asienta con la fecha del vencimiento. «No se cobró» avanza sin cobrar y **exige un motivo**, que queda como caso de auditoría.
+* La lista tiene tope de doce: más atrás, nadie va a conciliar uno a uno.
+
+### 🐛 Lo que arregla de paso
+* El asiento lleva **la fecha del vencimiento, no la de ejecución**. En la base real un cargo de Google One —que factura el día 9— figuraba asentado el 11.
+
+### ↩️ Lo que deja sin efecto
+* El impedimento por **marca de cobro ilegible** de 1.26.0. Desde que la decisión lee una fecha, la marca no decide nada, así que ya no impide y señalarla sería un aviso que miente. Se conserva la restricción de esquema.
+
+### 🗄️ Base de Datos
+* **Migración 14**: funde `fecha_renovacion` en `fecha_proximo_cobro` y la deriva para las mensuales. Con último cobro, el período siguiente —que para Netflix queda vencido, y por eso reaparece—; sin él, su día en el mes en curso o el siguiente. No se inventa un pasado.
+
+---
+
+## 🚀 Versión 1.26.0 - 2026-09-22
 **Una marca de cobro ilegible deja de cobrar en cada arranque. Era el defecto que invertía la idempotencia.**
 
 ### ⛔ No cobrar, y decirlo

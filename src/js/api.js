@@ -239,9 +239,9 @@ const AppAPI = {
         return await invoke('obtener_suscripciones');
     },
 
-    // `fechaRenovacion` va en dd/mm/aaaa y solo la usan las anuales; el
-    // backend la descarta en una mensual en vez de guardarla sin efecto.
-    async crearSuscripcion(plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaRenovacion = null) {
+    // `fechaProximoCobro` va en dd/mm/aaaa y la usan las dos frecuencias:
+    // desde que la fecha manda, una mensual la necesita igual que una anual.
+    async crearSuscripcion(plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaProximoCobro = null) {
         return await invoke('crear_suscripcion', {
             plataforma,
             monto: Number(monto),
@@ -249,13 +249,13 @@ const AppAPI = {
             frecuencia,
             diaFacturacion: Number(diaFacturacion),
             divisa,
-            fechaRenovacion
+            fechaProximoCobro
         });
     },
 
     // Edita una suscripción conservando fecha_ultimo_pago. Borrar y recrear
     // reiniciaría esa marca y provocaría un cobro duplicado en el mismo mes.
-    async actualizarSuscripcion(id, plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaRenovacion = null) {
+    async actualizarSuscripcion(id, plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaProximoCobro = null) {
         return await invoke('actualizar_suscripcion', {
             id: Number(id),
             plataforma,
@@ -264,15 +264,23 @@ const AppAPI = {
             frecuencia,
             diaFacturacion: Number(diaFacturacion),
             divisa,
-            fechaRenovacion
+            fechaProximoCobro
         });
     },
 
-    // La única vía para escribir a mano la fecha del último cobro. Existe
-    // solo para sacar de la parada a una suscripción cuya fecha no se
-    // entiende; la edición normal la conserva a propósito.
-    async corregirUltimoCobro(id, fecha) {
-        return await invoke('corregir_ultimo_cobro', { id: Number(id), fecha });
+    // La salida cuando una suscripción se queda sin fecha y por tanto parada.
+    async corregirProximoCobro(id, fecha) {
+        return await invoke('corregir_proximo_cobro', { id: Number(id), fecha });
+    },
+
+    // Los períodos que vencieron sin que la aplicación estuviera abierta no
+    // se cobran solos: se confirman uno a uno contra el estado de cuenta.
+    async asentarPeriodoPendiente(id) {
+        return await invoke('asentar_periodo_pendiente', { id: Number(id) });
+    },
+
+    async descartarPeriodoPendiente(id, motivo) {
+        return await invoke('descartar_periodo_pendiente', { id: Number(id), motivo });
     },
 
     async eliminarSuscripcion(id) {
