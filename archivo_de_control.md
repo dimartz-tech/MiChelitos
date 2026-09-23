@@ -2,6 +2,8 @@
 
 Este archivo sirve como registro de control para documentar los cambios realizados, las lecciones aprendidas y las reglas de diseño para evitar regresiones o repetir errores en futuras actualizaciones del proyecto.
 
+> **Método futuro de copias:** la [propuesta para la versión 2027](METODO_RESPALDOS_VERSION_2027.md) define copias diarias cifradas en carpeta sincronizada, mensuales locales y cierre anual del 31 de diciembre. Está parcialmente implementada en una rama independiente; el respaldo actual de `main` no cambia.
+
 ---
 
 ## 🛠️ Registro de Cambios (Versión 1.3.5)
