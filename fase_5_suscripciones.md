@@ -36,10 +36,10 @@ sujeto por una prueba que muere si alguien cambia la conducta:
 | **Anual** | ~~Se recobra al cambiar el año~~ — **corregido**: la fecha se anota, no se deduce | `s12b` |
 | **Períodos vencidos** | ~~Tres meses sin abrir generan un cargo~~ — **corregido**, ver abajo | `s13b`–`s13h` |
 | Marca de cobro **ilegible** | ~~Cobra en cada arranque~~ — **corregido**, ver abajo | `s14b` |
-| Sin la categoría **«Suscripciones»** ni **«Otros»** | El gasto cae en el identificador 1 literal, que hoy es «Alimentación» | `s17` |
+| Sin la categoría **«Suscripciones»** ni **«Otros»** | ~~El gasto cae en el identificador 1 literal~~ — **corregido**, ver abajo | `s17` |
 
 **Tres de los seis quedan cerrados**, cada uno por decisión del titular y con
-el estado de cuenta delante; los capítulos del final cuentan cómo. Sigue abierta la **categoría de respaldo** (`s17`).
+el estado de cuenta delante; los capítulos del final cuentan cómo. No queda ninguno abierto de los seis originales.
 
 ### Por qué no se corrigen aquí
 
@@ -349,3 +349,41 @@ decide nada**, así que ya no impide y señalarla sería un aviso que miente —
 mismo error que `s14` corrigió en las anuales—. Se retira el impedimento y se
 conserva la restricción de esquema, que sigue impidiendo escribir una fecha
 sin forma de fecha.
+
+
+---
+
+# La categoría de respaldo
+
+El último de los seis, y el más barato: sin `Suscripciones` ni `Otros`, el
+gasto caía en el **identificador 1 literal**, fuera lo que fuera esa
+categoría en ese momento.
+
+## Por qué importaba
+
+`categoria_de_suscripciones` buscaba por nombre, en cascada, y las dos
+categorías que reconocía nacen en la siembra inicial. Pero el titular puede
+renombrarlas o borrarlas desde la propia aplicación, y en ese caso la función
+no fallaba: devolvía `1`. Un cargo de suscripción podía terminar archivado
+como alquiler o gasolina, sin ningún error que lo delatara.
+
+## La corrección
+
+Agotadas las dos búsquedas, se **crea** `Suscripciones` en el momento, en vez
+de usar lo que hubiera en la posición 1. Ya no hace falta improvisar con un
+identificador arbitrario: la categoría que falta se repone.
+
+Es idempotente — un segundo cargo, con la categoría ya creada por el primero,
+no la duplica — y no toca nada cuando `Suscripciones` u `Otros` ya existen,
+que es el caso de la base real hoy.
+
+## Verificación
+
+483 pruebas en verde. Sobre una copia de la base real, con las 25 categorías
+existentes (`Suscripciones` incluida), procesar las suscripciones no crea
+ninguna categoría nueva: el cambio solo actúa cuando de verdad falta.
+
+| Mutación | Resultado |
+|---|---|
+| Se restaura el respaldo al identificador 1 | mueren 2 |
+| Se elimina la búsqueda de «Otros» | muere 1 |
