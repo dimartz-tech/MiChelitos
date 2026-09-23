@@ -4,7 +4,18 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.28.0 (Versión Actual) - 2026-09-23
+## 🚀 Versión 1.29.0 (Versión Actual) - 2026-09-23
+**Registra el método de respaldos previsto para la versión 2027. No cambia el mecanismo vigente.**
+
+### 📄 Documentación
+* `METODO_RESPALDOS_VERSION_2027.md` fija la cadencia acordada para el rediseño: diarios cifrados en carpeta sincronizada (366 × 24 horas de retención mínima), mensuales locales, y un cierre anual del 31 de diciembre sin borrado automático.
+* Los componentes de captura, cifrado, custodia, entrega local y calendario ya existen —probados con datos sintéticos— en una rama aislada de otro repositorio. Aún no están conectados al arranque ni a una carpeta real de nube.
+* **El respaldo operativo de `main` no cambia**: sigue siendo el de [`src-tauri/src/respaldo.rs`](src-tauri/src/respaldo.rs), que copia antes de tocar el esquema y conserva diez.
+* Cherry-pick de un commit hecho directamente sobre el `main` de otra copia local, para que el registro quede también en el historial versionado del repositorio.
+
+---
+
+## 🚀 Versión 1.28.0 - 2026-09-23
 **Cierra la Fase 5: sin «Suscripciones» ni «Otros», la categoría se crea en vez de improvisar con la posición 1.**
 
 ### 🐛 El último de los seis defectos
