@@ -4,7 +4,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.29.0 (Versión Actual) - 2026-09-23
+## 🚀 Versión 1.31.0 (Versión Actual) - 2026-09-29
+**Cuatro acciones que la aplicación instalada no habría podido ejecutar: borrar un gasto, borrar un traspaso, revertir un abono y borrar un ingreso informal.**
+
+### 🔌 El defecto
+* Desde que borrar un movimiento abre un caso de auditoría, los cuatro comandos de Rust exigen un `motivo`. La interfaz lo pedía al usuario y se lo pasaba al wrapper de `api.js`, pero **el wrapper no lo reenviaba**. Tauri rechaza una llamada a la que le falta una clave obligatoria, así que las cuatro habrían fallado en cuanto la aplicación se instalara.
+* Ninguna prueba lo veía: las de Rust llaman a los comandos directamente, sin pasar por `invoke`, y las de JavaScript no leían `api.js` contra los comandos. Compilaba y pasaba todo.
+* Solo `eliminarIngreso` reenviaba el motivo.
+* No afecta a la aplicación en uso: sigue en una versión anterior a los casos de auditoría. Habría aparecido al instalar la nueva.
+
+### 📏 La regla
+* `src/js/contrato/ipc.test.js` lee `api.js` y `main.rs` como texto y exige tres cosas: que cada wrapper envíe todo lo que su comando exige, que no envíe claves que el comando no conoce, y que no invoque un comando inexistente. Sin dependencias, y `herramientas/revisar.py` ya la ejecuta con el resto.
+* No sustituye a ejecutar la aplicación, pero cierra una clase de error que ninguna otra prueba cubría. Se comprobó con cuatro mutaciones: el defecto original, una clave inventada, un comando que no existe y descartar de nuevo el motivo. Las cuatro fallan.
+
+---
+
+## 🚀 Versión 1.29.0 - 2026-09-23
 **Registra el método de respaldos previsto para la versión 2027. No cambia el mecanismo vigente.**
 
 ### 📄 Documentación
