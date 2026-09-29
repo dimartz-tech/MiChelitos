@@ -3824,7 +3824,9 @@ fn c132_una_cuenta_con_un_ingreso_informal_cobrado_en_ella_no_se_puede_eliminar(
 #[test]
 fn c133_una_cuenta_que_pago_un_abono_no_se_elimina_aunque_borren_el_gasto_de_su_comision() {
     // Antes solo la frenaba, de rebote, el gasto de la comisión del abono. Ese
-    // gasto se puede borrar por separado, y con él caía la única protección.
+    // gasto ya no se puede borrar por separado (c136), pero la guarda de la
+    // cuenta no debe depender de eso: se reproduce el estado de una base a la
+    // que se le quitó la comisión por otra vía, con SQL directo.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(1_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000.0);
@@ -3832,7 +3834,7 @@ fn c133_una_cuenta_que_pago_un_abono_no_se_elimina_aunque_borren_el_gasto_de_su_
     let gasto_comision: i64 = conexion()
         .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
         .unwrap();
-    eliminar_gasto(gasto_comision, motivo_de_prueba()).unwrap();
+    conexion().execute("DELETE FROM gastos WHERE id = ?;", [gasto_comision]).unwrap();
     assert_eq!(total_gastos(), 0, "la comisión ya no existe como gasto");
 
     let error = crate::eliminar_cuenta(cuenta).unwrap_err();
@@ -3863,14 +3865,37 @@ fn c135_una_cuenta_sin_ninguna_relacion_si_se_elimina() {
 }
 
 #[test]
-fn c136_defecto_conocido_borrar_la_comision_de_un_abono_por_separado_lo_devuelve_dos_veces() {
-    // DEFECTO CONOCIDO, fijado tal cual está hoy (protocolo de hallazgos: se
-    // documenta y se fija antes de corregir). Ver `abonos_y_su_comision.md`.
-    //
-    // La comisión de un abono es un gasto que se puede borrar por separado.
-    // Borrarlo devuelve su importe a la cuenta, pero el abono conserva anotado
-    // que la comisión salió; revertir después el abono la devuelve otra vez.
-    // La cuenta acaba con más dinero del que tenía.
+fn c136_la_comision_de_un_abono_no_se_puede_borrar_por_separado() {
+    // Antes se permitía: la cuenta recuperaba la comisión, el abono conservaba
+    // anotado que había salido, y al revertirlo se devolvía otra vez. Ver
+    // `abonos_y_su_comision.md`.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(30_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
+    registrar_pago_tarjeta(
+        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+    )
+    .unwrap();
+    let gasto_comision: i64 = conexion()
+        .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
+        .unwrap();
+
+    let r = eliminar_gasto(gasto_comision, motivo_de_prueba());
+
+    assert!(r.unwrap_err().contains("comisión de un abono"));
+    assert_importe(saldo_cuenta_id(cuenta), 87_976.0, "la cuenta no se movió");
+    assert_eq!(total_gastos(), 1, "la comisión sigue existiendo");
+    let vinculo: Option<i64> = conexion()
+        .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(vinculo, Some(gasto_comision), "y el abono sigue enlazado a ella");
+    let casos: i64 = conexion().query_row("SELECT COUNT(*) FROM correcciones;", [], |r| r.get(0)).unwrap();
+    assert_eq!(casos, 0, "un borrado rechazado no abre caso");
+}
+
+#[test]
+fn c137_tras_el_rechazo_revertir_el_abono_deja_la_cuenta_exactamente_como_estaba() {
+    // La vía correcta sigue funcionando y no devuelve nada de más.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(30_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
@@ -3879,25 +3904,45 @@ fn c136_defecto_conocido_borrar_la_comision_de_un_abono_por_separado_lo_devuelve
     )
     .unwrap();
     let abono = ultimo_abono();
-    assert_importe(saldo_cuenta_id(cuenta), 87_976.0, "salieron 12 000 + 24 de comisión");
     let gasto_comision: i64 = conexion()
         .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
         .unwrap();
+    assert!(eliminar_gasto(gasto_comision, motivo_de_prueba()).is_err());
 
-    // Hoy se permite, y la cuenta recupera solo la comisión.
-    eliminar_gasto(gasto_comision, motivo_de_prueba()).expect("hoy se permite");
-    assert_importe(saldo_cuenta_id(cuenta), 88_000.0, "la comisión volvió a la cuenta");
-    let vinculo: Option<i64> = conexion()
-        .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(vinculo, None, "y el abono perdió el vínculo con ella");
-
-    // El abono sigue diciendo que debitó 12 024: al revertirlo los devuelve.
     revertir_abono_tarjeta(abono, motivo_de_prueba()).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 100_000.0, "ni un centavo de más");
     assert_importe(balances_tarjeta(tarjeta).0, 30_000.0, "la deuda vuelve");
-    assert_importe(
-        saldo_cuenta_id(cuenta),
-        100_024.0,
-        "DEFECTO: la cuenta acaba 24 por encima de los 100 000 que tenía",
-    );
+    assert_eq!(total_gastos(), 0, "y la comisión se fue con el abono");
+}
+
+#[test]
+fn c138_un_gasto_con_bonificacion_se_puede_borrar_porque_el_vinculo_solo_informa() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10_000.0, 0.0);
+    let categoria: i64 = conexion()
+        .query_row("SELECT id FROM categorias ORDER BY id LIMIT 1;", [], |r| r.get(0))
+        .unwrap();
+    let gasto = crear_gasto(GastoInput {
+        fecha: "09/09/2026".to_string(),
+        monto: 1_234.56,
+        divisa: "DOP".to_string(),
+        descripcion: "Compra".to_string(),
+        categoria_id: categoria,
+        metodo_pago: "tarjeta".to_string(),
+        es_lbtr: false,
+        tarjeta_id: Some(tarjeta),
+        cuenta_ahorro_id: None,
+        tasa_cambio: None,
+    })
+    .unwrap();
+    crate::crear_bonificacion(
+        "09/09/2026".to_string(), tarjeta, 61.73, "DOP".to_string(),
+        "Cashback".to_string(), Some(gasto),
+    )
+    .unwrap();
+
+    let r = eliminar_gasto(gasto, motivo_de_prueba());
+
+    assert!(r.is_ok(), "la bonificación no es una operación que dependa del gasto: {r:?}");
 }
