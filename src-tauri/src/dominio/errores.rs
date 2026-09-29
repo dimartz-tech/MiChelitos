@@ -21,6 +21,15 @@ pub enum ErrorDominio {
     CobroParcialExcedeElNeto { parcial: f64, neto: f64 },
     /// El texto recibido no es un importe.
     ImporteIlegible { texto: String },
+    /// Un avance de efectivo tiene que mover un importe positivo.
+    AvanceNoPositivo,
+    /// El porcentaje de un avance cae fuera de la banda que cobran las
+    /// entidades. Casi siempre es un tecleo: 0.8 por 8, o 80 por 8.
+    CargoDeAvanceFueraDeRango { porcentaje: f64, minimo: f64, maximo: f64 },
+    /// Un cargo fijo de cero es una exoneración y debe declararse como tal.
+    CargoFijoNoPositivo,
+    /// El avance se acredita en la divisa en que se carga a la tarjeta.
+    AvanceEnOtraDivisa { cuenta: Divisa, avance: Divisa },
 }
 
 impl fmt::Display for ErrorDominio {
@@ -35,6 +44,24 @@ impl fmt::Display for ErrorDominio {
             ErrorDominio::ImporteIlegible { texto } => {
                 write!(f, "«{}» no es un importe válido.", texto)
             }
+            ErrorDominio::AvanceNoPositivo => {
+                write!(f, "Un avance de efectivo debe ser de un importe mayor que cero.")
+            }
+            ErrorDominio::CargoDeAvanceFueraDeRango { porcentaje, minimo, maximo } => write!(
+                f,
+                "Un cargo del {}% queda fuera de lo que cobran las entidades por un avance, entre {}% y {}%. Si es un cargo fijo o una exoneración, indícalo así.",
+                porcentaje, minimo, maximo
+            ),
+            ErrorDominio::CargoFijoNoPositivo => write!(
+                f,
+                "Un cargo fijo debe ser mayor que cero. Si el avance no paga cargo, márcalo como exonerado."
+            ),
+            ErrorDominio::AvanceEnOtraDivisa { cuenta, avance } => write!(
+                f,
+                "La cuenta es en {} y el avance en {}: un avance se acredita en la misma divisa en que se carga a la tarjeta.",
+                cuenta.codigo(),
+                avance.codigo()
+            ),
             ErrorDominio::CobroParcialExcedeElNeto { parcial, neto } => write!(
                 f,
                 "Un cobro parcial de {:.2} no puede superar el neto de la factura, que es {:.2}.",

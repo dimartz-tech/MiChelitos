@@ -249,6 +249,56 @@ impl<T> AlmacenAbonos for T where
 {
 }
 
+/// Un avance de efectivo tal como quedó guardado.
+///
+/// Guarda el **cargo cobrado**, no la regla que lo produjo: revertir es
+/// reponer lo que ocurrió, no lo que hoy se recalcularía.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AvanceGuardado {
+    pub id: i64,
+    pub tarjeta_id: i64,
+    pub cuenta_ahorro_id: i64,
+    pub monto: Dinero,
+    pub cargo: Dinero,
+    pub gasto_cargo_id: Option<i64>,
+}
+
+/// Un avance a punto de guardarse, ya vinculado al gasto de su cargo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AvanceAPersistir {
+    pub tarjeta_id: i64,
+    pub cuenta_ahorro_id: i64,
+    pub fecha: String,
+    pub monto: Dinero,
+    /// `porcentaje`, `fijo` o `exonerado`.
+    pub tipo_cargo: &'static str,
+    /// Solo en la forma porcentual, tal como se escribe: `6.25`.
+    pub tasa: Option<f64>,
+    pub cargo: Dinero,
+    pub gasto_cargo_id: Option<i64>,
+    pub nota: Option<String>,
+}
+
+pub trait RepositorioAvances {
+    fn insertar_avance(&mut self, avance: &AvanceAPersistir) -> Result<i64, ErrorAlmacen>;
+    fn obtener_avance(&self, avance_id: i64) -> Result<AvanceGuardado, ErrorAlmacen>;
+    fn eliminar_avance(&mut self, avance_id: i64) -> Result<(), ErrorAlmacen>;
+    /// Cuántos avances acreditaron esta cuenta. Guarda su borrado.
+    fn avances_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen>;
+}
+
+/// Persistencia de un avance: el registro, la deuda que sube, la cuenta que
+/// recibe el dinero y el gasto que recoge el cargo.
+pub trait AlmacenAvances:
+    RepositorioAvances + RepositorioTarjetas + RepositorioCuentas + RepositorioGastos
+{
+}
+
+impl<T> AlmacenAvances for T where
+    T: RepositorioAvances + RepositorioTarjetas + RepositorioCuentas + RepositorioGastos
+{
+}
+
 pub trait RepositorioCuentas {
     /// Suma `delta` al saldo. Un delta negativo lo debita.
     ///
@@ -341,6 +391,16 @@ pub trait RepositorioTransferencias {
 }
 
 /// Persistencia que necesita una operación sobre transferencias.
-pub trait AlmacenTransferencias: RepositorioCuentas + RepositorioTransferencias {}
+///
+/// Incluye `RepositorioAvances` solo para la guarda de borrado de cuentas: una
+/// cuenta que recibió un avance no se elimina, porque borrarla se llevaría el
+/// rastro de dónde salió ese dinero.
+pub trait AlmacenTransferencias:
+    RepositorioCuentas + RepositorioTransferencias + RepositorioAvances
+{
+}
 
-impl<T> AlmacenTransferencias for T where T: RepositorioCuentas + RepositorioTransferencias {}
+impl<T> AlmacenTransferencias for T where
+    T: RepositorioCuentas + RepositorioTransferencias + RepositorioAvances
+{
+}

@@ -489,6 +489,9 @@ pub const COLUMNAS_DE_DINERO: &[(&str, &str)] = &[
     ("pagos_tarjeta", "monto_debitado"),
     ("pagos_tarjeta", "comision"),
     ("correcciones", "importe"),
+    // Nacen con su restricción ya puesta, en la migración 15.
+    ("avances_efectivo", "monto"),
+    ("avances_efectivo", "cargo"),
 ];
 
 /// Columnas `REAL` que **no** son dinero: tasas y porcentajes.
@@ -499,6 +502,7 @@ pub const COLUMNAS_DE_DINERO: &[(&str, &str)] = &[
 /// entre el dinero— y protegía de meter de más, no de olvidar de menos. Cuatro
 /// columnas de dinero se olvidaron por ahí.
 pub const COLUMNAS_DE_TASA: &[(&str, &str)] = &[
+    ("avances_efectivo", "tasa"),
     ("gastos", "tasa_conversion"),
     ("ingresos", "porcentaje_retencion"),
     ("pagos_tarjeta", "tasa_cambio"),
@@ -1627,6 +1631,51 @@ fn en_el_mes(anio: i32, mes: u32, ancla: u32) -> Option<chrono::NaiveDate> {
 fn siguiente_mes_en(anio: i32, mes: u32, ancla: u32) -> Option<chrono::NaiveDate> {
     let (anio, mes) = if mes == 12 { (anio + 1, 1) } else { (anio, mes + 1) };
     en_el_mes(anio, mes, ancla)
+}
+
+const MIG15: &str = "avances de efectivo";
+
+/// Tabla de avances de efectivo: dinero que una tarjeta pone en una cuenta.
+///
+/// Nace **con sus restricciones ya puestas**: importes exactos al céntimo,
+/// fechas con forma de fecha, importe positivo y cargo no negativo. Las
+/// migraciones 10, 11 y 13 tuvieron que reconstruir tablas ya existentes para
+/// añadirlas; una tabla nueva no tiene por qué repetir ese rodeo.
+///
+/// `tasa` solo existe en la forma porcentual —y la restricción lo exige en los
+/// dos sentidos—: un cargo fijo o exonerado con tasa, o un porcentual sin
+/// ella, es un registro que se contradice.
+///
+/// Las claves ajenas son `RESTRICT`. Borrar una tarjeta o una cuenta que
+/// intervino en un avance se llevaría el rastro de dónde salió el dinero, y
+/// la guarda del caso de uso da el mensaje que una restricción cruda no daría.
+pub fn migracion_15_avances_de_efectivo(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::paso(
+        tx,
+        MIG15,
+        "crear avances_efectivo",
+        "CREATE TABLE IF NOT EXISTS avances_efectivo (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             tarjeta_id INTEGER NOT NULL,
+             cuenta_ahorro_id INTEGER NOT NULL,
+             fecha TEXT NOT NULL,
+             monto REAL NOT NULL,
+             divisa TEXT CHECK(divisa IN ('DOP', 'USD')) NOT NULL,
+             tipo_cargo TEXT CHECK(tipo_cargo IN ('porcentaje', 'fijo', 'exonerado')) NOT NULL,
+             tasa REAL,
+             cargo REAL NOT NULL DEFAULT 0.0,
+             gasto_cargo_id INTEGER REFERENCES gastos(id) ON DELETE SET NULL,
+             nota TEXT,
+             FOREIGN KEY (tarjeta_id) REFERENCES tarjetas(id) ON DELETE RESTRICT,
+             FOREIGN KEY (cuenta_ahorro_id) REFERENCES cuentas_ahorro(id) ON DELETE RESTRICT,
+             CHECK (ROUND(monto, 2) = monto),
+             CHECK (ROUND(cargo, 2) = cargo),
+             CHECK (monto > 0),
+             CHECK (cargo >= 0),
+             CHECK ((tipo_cargo = 'porcentaje') = (tasa IS NOT NULL)),
+             CHECK (fecha GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]')
+         );",
+    )
 }
 
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
