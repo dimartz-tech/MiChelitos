@@ -4,7 +4,25 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.34.0 (Versión Actual) - 2026-09-29
+## 🚀 Versión 1.35.0 (Versión Actual) - 2026-09-29
+**El cobro de suscripciones pasa por `Dinero` y por el registro de gastos: un cargo en dólares a una tarjeta que traduce ya puede liquidarse.**
+
+### 💳 Lo que el SQL directo se saltaba
+* Un cargo recurrente es un consumo con tarjeta, pero se cobraba con SQL directo, duplicando lo que `registrar_gasto` ya hace y con el importe como `f64`. `registrar_gasto` decide, según la política de la tarjeta, si un consumo en divisa **queda pendiente de liquidar**; el cobro directo no, así que **un cargo en dólares a una tarjeta que traduce jamás figuraba como pendiente y no podía liquidarse**.
+* No es teórico: diez de las once suscripciones son en dólares y las cobran dos tarjetas, y la política se declara por tarjeta.
+* Ahora `cobrar_suscripcion` delega en `registrar_gasto`: no repite la regla, la hereda. Y cobrar a una tarjeta inexistente **falla**; el `UPDATE` directo no se enteraba de que no actualizaba nada.
+
+### ✅ Las condiciones se validan
+* Solo el `CHECK` del esquema atajaba algo, con su mensaje crudo, y atajaba poco: un importe **cero o negativo** entraba —y cobrarlo abonaba a la tarjeta cada período—, y también un día de facturación fuera de 1 a 31. El alta y la edición validan importe, divisa, frecuencia y día, y dicen cuál falla.
+* El importe entra como **texto**, como el resto: `500.005` sube a `500.01`. El mensaje del cobro automático lleva el importe con dos decimales.
+
+### 🔍 Comprobado con datos reales
+* Sobre una copia de la base real, cobrando todo lo vencido: 6 cargos; la deuda de cada tarjeta y divisa sube **exactamente** lo que suman los gastos nuevos (invariante calculado aparte, en centavos enteros); repetir no duplica ninguno.
+* Con la política `traduce` en todas las tarjetas, **los 6 quedan pendientes de liquidar**; con las tarjetas como están hoy, ninguno. Cinco mutaciones, las cinco fallan.
+
+---
+
+## 🚀 Versión 1.34.0 - 2026-09-29
 **El capital pasa por `Dinero`: cierra la última vía de dinero que se guardaba sin comprobar nada.**
 
 ### 💰 Qué se exige al guardar
