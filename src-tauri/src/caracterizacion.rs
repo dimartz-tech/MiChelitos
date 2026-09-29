@@ -3861,3 +3861,43 @@ fn c135_una_cuenta_sin_ninguna_relacion_si_se_elimina() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
     assert!(crate::eliminar_cuenta(cuenta).is_ok());
 }
+
+#[test]
+fn c136_defecto_conocido_borrar_la_comision_de_un_abono_por_separado_lo_devuelve_dos_veces() {
+    // DEFECTO CONOCIDO, fijado tal cual está hoy (protocolo de hallazgos: se
+    // documenta y se fija antes de corregir). Ver `abonos_y_su_comision.md`.
+    //
+    // La comisión de un abono es un gasto que se puede borrar por separado.
+    // Borrarlo devuelve su importe a la cuenta, pero el abono conserva anotado
+    // que la comisión salió; revertir después el abono la devuelve otra vez.
+    // La cuenta acaba con más dinero del que tenía.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(30_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
+    registrar_pago_tarjeta(
+        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+    )
+    .unwrap();
+    let abono = ultimo_abono();
+    assert_importe(saldo_cuenta_id(cuenta), 87_976.0, "salieron 12 000 + 24 de comisión");
+    let gasto_comision: i64 = conexion()
+        .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
+        .unwrap();
+
+    // Hoy se permite, y la cuenta recupera solo la comisión.
+    eliminar_gasto(gasto_comision, motivo_de_prueba()).expect("hoy se permite");
+    assert_importe(saldo_cuenta_id(cuenta), 88_000.0, "la comisión volvió a la cuenta");
+    let vinculo: Option<i64> = conexion()
+        .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(vinculo, None, "y el abono perdió el vínculo con ella");
+
+    // El abono sigue diciendo que debitó 12 024: al revertirlo los devuelve.
+    revertir_abono_tarjeta(abono, motivo_de_prueba()).unwrap();
+    assert_importe(balances_tarjeta(tarjeta).0, 30_000.0, "la deuda vuelve");
+    assert_importe(
+        saldo_cuenta_id(cuenta),
+        100_024.0,
+        "DEFECTO: la cuenta acaba 24 por encima de los 100 000 que tenía",
+    );
+}
