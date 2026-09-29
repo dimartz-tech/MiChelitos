@@ -699,3 +699,79 @@ impl RepositorioTransferencias for AlmacenSqlite<'_> {
             .map_err(fallo)
     }
 }
+
+impl RepositorioAvances for AlmacenSqlite<'_> {
+    fn insertar_avance(&mut self, a: &AvanceAPersistir) -> Result<i64, ErrorAlmacen> {
+        self.tx
+            .execute(
+                "INSERT INTO avances_efectivo
+                     (tarjeta_id, cuenta_ahorro_id, fecha, monto, divisa, tipo_cargo,
+                      tasa, cargo, gasto_cargo_id, nota)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+                params![
+                    a.tarjeta_id,
+                    a.cuenta_ahorro_id,
+                    a.fecha,
+                    a.monto.unidades(),
+                    a.monto.divisa().codigo(),
+                    a.tipo_cargo,
+                    a.tasa,
+                    a.cargo.unidades(),
+                    a.gasto_cargo_id,
+                    a.nota,
+                ],
+            )
+            .map_err(fallo)?;
+        Ok(self.tx.last_insert_rowid())
+    }
+
+    fn obtener_avance(&self, avance_id: i64) -> Result<AvanceGuardado, ErrorAlmacen> {
+        type Fila = (i64, i64, f64, String, f64, Option<i64>);
+        let fila: Option<Fila> = self
+            .tx
+            .query_row(
+                "SELECT tarjeta_id, cuenta_ahorro_id, monto, divisa, cargo, gasto_cargo_id
+                 FROM avances_efectivo WHERE id = ?;",
+                [avance_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            )
+            .optional()
+            .map_err(fallo)?;
+        let (tarjeta_id, cuenta_ahorro_id, monto, divisa, cargo, gasto_cargo_id) =
+            fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "avance", id: avance_id })?;
+
+        let divisa = divisa_desde_texto(&divisa);
+        let importe = |v: f64| {
+            Dinero::nuevo(v, divisa).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))
+        };
+        Ok(AvanceGuardado {
+            id: avance_id,
+            tarjeta_id,
+            cuenta_ahorro_id,
+            monto: importe(monto)?,
+            cargo: importe(cargo)?,
+            gasto_cargo_id,
+        })
+    }
+
+    fn eliminar_avance(&mut self, avance_id: i64) -> Result<(), ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute("DELETE FROM avances_efectivo WHERE id = ?;", [avance_id])
+            .map_err(fallo)?;
+        if filas == 0 {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "avance", id: avance_id });
+        }
+        Ok(())
+    }
+
+    fn avances_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
+        self.tx
+            .query_row(
+                "SELECT COUNT(*) FROM avances_efectivo WHERE cuenta_ahorro_id = ?;",
+                [cuenta_id],
+                |r| r.get(0),
+            )
+            .map_err(fallo)
+    }
+}

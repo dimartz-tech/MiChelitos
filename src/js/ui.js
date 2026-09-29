@@ -941,6 +941,61 @@ class AppUI {
                                     <button onclick="appUI.alternarAbonos(${t.id})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">🧾 Abonos registrados</button>
                                     <div id="abonos_${t.id}" hidden style="font-size:0.75rem;"></div>
 
+                                    <!-- Avance de efectivo -->
+                                    <button onclick="appUI.alternarAvance(${t.id})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">💵 Avance de efectivo</button>
+                                    <form id="avance_${t.id}" hidden onsubmit="appUI.handleAvanceEfectivo(event, ${t.id})" style="font-size:0.75rem;">
+                                        <div style="display:flex; flex-direction:column; gap:0.5rem;">
+                                            <p style="font-size:0.7rem; color:var(--text-secondary); margin:0;">
+                                                La tarjeta pone el dinero en una cuenta de ahorro. La deuda sube por el monto <strong>y</strong> su cargo; la cuenta recibe el monto sin el cargo.
+                                            </p>
+                                            <div style="display:flex; gap:0.4rem; align-items:flex-end;">
+                                                <div style="flex:1.2;">
+                                                    <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
+                                                    <input type="text" id="avc_fecha_${t.id}" value="${hoyStr}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
+                                                </div>
+                                                <div style="flex:1;">
+                                                    <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Divisa</label>
+                                                    <select id="avc_div_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem;" onchange="appUI.aplicarTipoAvance(${t.id})">
+                                                        <option value="DOP">DOP</option>
+                                                        <option value="USD">USD</option>
+                                                    </select>
+                                                </div>
+                                                <div style="flex:1.2;">
+                                                    <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Monto</label>
+                                                    <input type="number" step="0.01" id="avc_monto_${t.id}" placeholder="0.00" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Cuenta que recibe *</label>
+                                                <select id="avc_cuenta_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;" required>
+                                                    <option value="">-- Selecciona --</option>
+                                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
+                                                </select>
+                                            </div>
+                                            <div style="display:flex; gap:0.4rem; align-items:flex-end;">
+                                                <div style="flex:1.3;">
+                                                    <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Cargo</label>
+                                                    <select id="avc_tipo_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;" onchange="appUI.aplicarTipoAvance(${t.id})">
+                                                        <option value="porcentaje">Porcentaje</option>
+                                                        <option value="fijo">Monto fijo</option>
+                                                        <option value="exonerado">Exonerado</option>
+                                                    </select>
+                                                </div>
+                                                <div id="avc_valor_caja_${t.id}" style="flex:1;">
+                                                    <label id="avc_valor_et_${t.id}" style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Porcentaje (%)</label>
+                                                    <input type="number" step="0.01" id="avc_valor_${t.id}" placeholder="6.25" class="form-control" style="padding:0.4rem; font-size:0.75rem;">
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Nota (opcional; por qué se exoneró, por ejemplo)</label>
+                                                <input type="text" id="avc_nota_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem;">
+                                            </div>
+                                            <button type="submit" class="btn" style="padding:0.4rem 0.6rem; font-size:0.75rem; background: linear-gradient(135deg, #6366f1, #4f46e5); color:white;">Registrar avance</button>
+                                        </div>
+                                    </form>
+                                    <button onclick="appUI.alternarAvances(${t.id})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">🧾 Avances registrados</button>
+                                    <div id="avances_${t.id}" hidden style="font-size:0.75rem;"></div>
+
                                     <!-- Configurar límites -->
                                     <button onclick="appUI.abrirEdicionLimitesTarjeta('${tEscaped}')" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">⚙️ Configurar Límites / Corte</button>
                                 </div>
@@ -3153,6 +3208,175 @@ class AppUI {
             // Se vuelve a abrir el desplegable para que se vea el resultado
             // en lugar de dejar al usuario frente a una tarjeta cerrada.
             await this.alternarAbonos(tarjetaId);
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
+    }
+
+    // --- AVANCES DE EFECTIVO ---
+
+    /// Despliega el formulario de avance de una tarjeta.
+    alternarAvance(id) {
+        const forma = document.getElementById(`avance_${id}`);
+        if (!forma) return;
+        forma.hidden = !forma.hidden;
+        if (!forma.hidden) this.aplicarTipoAvance(id);
+    }
+
+    /// Ajusta el formulario a la divisa y al tipo de cargo elegidos.
+    ///
+    /// Solo se ofrecen las cuentas de la divisa del avance: el núcleo lo exige
+    /// y es mejor no dejar elegir lo que se va a rechazar. Que la cuenta y el
+    /// avance coincidan en divisa es una regla; aquí solo se evita el
+    /// tropiezo, y el núcleo la sigue comprobando.
+    aplicarTipoAvance(id) {
+        const divisa = document.getElementById(`avc_div_${id}`).value;
+        const tipo = document.getElementById(`avc_tipo_${id}`).value;
+        const cuenta = document.getElementById(`avc_cuenta_${id}`);
+
+        for (const opcion of cuenta.options) {
+            if (!opcion.value) continue;
+            const coincide = opcion.dataset.divisa === divisa;
+            opcion.hidden = !coincide;
+            opcion.disabled = !coincide;
+        }
+        if (cuenta.selectedOptions[0]?.disabled) cuenta.value = '';
+
+        const caja = document.getElementById(`avc_valor_caja_${id}`);
+        const etiqueta = document.getElementById(`avc_valor_et_${id}`);
+        const valor = document.getElementById(`avc_valor_${id}`);
+        caja.hidden = tipo === 'exonerado';
+        valor.required = tipo !== 'exonerado';
+        if (tipo === 'porcentaje') {
+            etiqueta.textContent = 'Porcentaje (%)';
+            valor.placeholder = '6.25';
+        } else if (tipo === 'fijo') {
+            etiqueta.textContent = `Cargo fijo (${divisa})`;
+            valor.placeholder = '0.00';
+        } else {
+            valor.value = '';
+        }
+    }
+
+    /// Lo que el formulario dice del cargo, en la forma que el núcleo espera.
+    ///
+    /// El monto y el cargo fijo se mandan **como texto**, tal cual se
+    /// escribieron; el porcentaje, que es una tasa y no un importe, como
+    /// número.
+    valoresDeAvance(id) {
+        const tipo = document.getElementById(`avc_tipo_${id}`).value;
+        const bruto = document.getElementById(`avc_valor_${id}`).value.trim();
+        return {
+            tipo,
+            porcentaje: tipo === 'porcentaje' && bruto !== '' ? Number(bruto) : null,
+            fijo: tipo === 'fijo' && bruto !== '' ? bruto : null,
+        };
+    }
+
+    /// Registra un avance, enseñando antes lo que va a mover.
+    ///
+    /// El cargo se calcula en el núcleo —`simularAvanceEfectivo`—, no aquí:
+    /// una regla en el HTML es una regla sin pruebas, y la cifra que se
+    /// confirma tiene que ser exactamente la que se va a asentar.
+    async handleAvanceEfectivo(e, id) {
+        e.preventDefault();
+        const fecha = document.getElementById(`avc_fecha_${id}`).value.trim();
+        const divisa = document.getElementById(`avc_div_${id}`).value;
+        const monto = document.getElementById(`avc_monto_${id}`).value.trim();
+        const cuentaSel = document.getElementById(`avc_cuenta_${id}`);
+        const cuentaId = cuentaSel.value;
+        const nota = document.getElementById(`avc_nota_${id}`).value.trim();
+        const { tipo, porcentaje, fijo } = this.valoresDeAvance(id);
+
+        if (!cuentaId) {
+            this.showToast("Elige la cuenta que recibe el avance.", "error");
+            return;
+        }
+
+        try {
+            const sim = await AppAPI.simularAvanceEfectivo(monto, divisa, tipo, porcentaje, fijo);
+            const cargoTxt = tipo === 'porcentaje' ? `Cargo (${porcentaje}%)`
+                : tipo === 'fijo' ? 'Cargo fijo'
+                : 'Cargo (exonerado)';
+            const ok = confirm(
+                `Avance de efectivo\n\n` +
+                `Monto: ${divisa} ${this.formatMoney(sim.monto)} → ${cuentaSel.selectedOptions[0].text.split(' - ')[0]}\n` +
+                `${cargoTxt}: ${divisa} ${this.formatMoney(sim.cargo)}\n` +
+                `La deuda de la tarjeta sube: ${divisa} ${this.formatMoney(sim.a_la_tarjeta)}\n\n` +
+                `¿Registrar?`
+            );
+            if (!ok) return;
+
+            const resumen = await AppAPI.registrarAvanceEfectivo(
+                id, cuentaId, fecha, monto, divisa, tipo, porcentaje, fijo, nota
+            );
+            this.showToast(resumen);
+            await this.render('tarjetas');
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
+        }
+    }
+
+    /// Despliega los avances de una tarjeta para poder deshacer uno.
+    ///
+    /// Se cargan al abrir y no al pintar la vista, igual que los abonos: es un
+    /// histórico que casi nunca se mira.
+    async alternarAvances(id) {
+        const caja = document.getElementById(`avances_${id}`);
+        if (!caja) return;
+        if (!caja.hidden) {
+            caja.hidden = true;
+            return;
+        }
+        caja.hidden = false;
+        caja.innerHTML = `<p style="color:var(--text-muted); padding:0.5rem;">Cargando…</p>`;
+
+        try {
+            const avances = await AppAPI.obtenerAvancesTarjeta(id);
+            if (avances.length === 0) {
+                caja.innerHTML = `<p style="color:var(--text-muted); padding:0.5rem;">Sin avances registrados.</p>`;
+                return;
+            }
+            caja.innerHTML = avances.map(a => {
+                const cargo = a.tipo_cargo === 'porcentaje' ? `cargo ${a.tasa}% = ${a.divisa} ${this.formatMoney(a.cargo)}`
+                    : a.tipo_cargo === 'fijo' ? `cargo fijo ${a.divisa} ${this.formatMoney(a.cargo)}`
+                    : 'exonerado';
+                const nota = a.nota ? `<div style="font-size:0.7rem; color:var(--text-muted); font-style:italic;">${a.nota}</div>` : '';
+                return `
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-color);">
+                        <div>
+                            <strong>${a.divisa} ${this.formatMoney(a.monto)}</strong>
+                            <div style="font-size:0.7rem; color:var(--text-muted);">${a.fecha} · ${a.cuenta_nombre} · ${cargo}</div>
+                            ${nota}
+                        </div>
+                        <button onclick="appUI.handleRevertirAvance(${a.id}, ${id})" class="btn btn-danger" style="padding:0.2rem 0.45rem; font-size:0.7rem;" title="Deshacer este avance">↩︎</button>
+                    </div>`;
+            }).join('');
+        } catch (err) {
+            caja.innerHTML = `<p style="color:var(--color-danger); padding:0.5rem;">${err.toString()}</p>`;
+        }
+    }
+
+    /// Deshace un avance, avisando de todo lo que va a mover.
+    async handleRevertirAvance(avanceId, tarjetaId) {
+        const confirmado = confirm(
+            "¿Deshacer este avance de efectivo?\n\n" +
+            "La deuda de la tarjeta bajará por el monto y su cargo, la cuenta devolverá el monto, " +
+            "y se eliminará el gasto que recogía el cargo.\n\n" +
+            "Si ya gastaste ese dinero, la cuenta quedará en negativo: es el estado verdadero, y no se recorta."
+        );
+        if (!confirmado) return;
+
+        try {
+            const motivo = this.pedirMotivoDeCorreccion(
+                `Vas a borrar este avance de efectivo`,
+                'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
+            );
+            if (motivo === null) return;
+            const resumen = await AppAPI.revertirAvanceEfectivo(avanceId, motivo);
+            this.showToast(resumen);
+            await this.render('tarjetas');
+            await this.alternarAvances(tarjetaId);
         } catch (err) {
             this.showToast(err.toString(), 'error');
         }

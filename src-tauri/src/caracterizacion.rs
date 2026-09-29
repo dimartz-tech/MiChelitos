@@ -2968,3 +2968,405 @@ fn c98_una_comision_negativa_se_sigue_rechazando() {
     assert!(r.is_err());
 }
 
+
+// =====================================================================
+//  Avance de efectivo — la tarjeta pone dinero en una cuenta
+// =====================================================================
+
+/// Un avance con los valores de siempre; cada prueba cambia solo lo suyo.
+fn avance(
+    tarjeta: i64,
+    cuenta: i64,
+    monto: &str,
+    tipo: &str,
+    porcentaje: Option<f64>,
+    fijo: Option<&str>,
+) -> Result<String, String> {
+    crate::registrar_avance_efectivo(
+        tarjeta,
+        cuenta,
+        "01/10/2026".into(),
+        importe(monto),
+        "DOP".into(),
+        tipo.into(),
+        porcentaje,
+        fijo.map(importe),
+        None,
+    )
+}
+
+fn filas_de_avances() -> i64 {
+    conexion()
+        .query_row("SELECT COUNT(*) FROM avances_efectivo;", [], |r| r.get(0))
+        .expect("contar avances")
+}
+
+#[test]
+fn c108_un_avance_porcentual_sube_la_deuda_por_importe_y_cargo_y_la_cuenta_recibe_el_importe() {
+    // El caso real más reciente del titular: un cargo del 6.25 %.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(5_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+
+    let resumen = avance(tarjeta, cuenta, "12500.00", "porcentaje", Some(6.25), None).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 18_281.25, "5 000 + 12 500 + 781,25 de cargo");
+    assert_importe(saldo_cuenta_id(cuenta), 13_500.0, "la cuenta recibe el importe, sin el cargo");
+    assert!(resumen.contains("781.25"), "el resumen debe decir el cargo: {resumen}");
+}
+
+#[test]
+fn c109_el_cargo_queda_como_gasto_de_la_tarjeta_y_como_registro_del_avance() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    avance(tarjeta, cuenta, "12500.00", "porcentaje", Some(8.0), None).unwrap();
+
+    assert_eq!(total_gastos(), 1, "el cargo cuenta como gasto");
+    let (monto, divisa, _) = ultimo_gasto();
+    assert_importe(monto, 1_000.0, "el gasto es el cargo, no el importe");
+    assert_eq!(divisa, "DOP");
+
+    let (tipo, tasa, cargo, gasto_id): (String, Option<f64>, f64, Option<i64>) = conexion()
+        .query_row(
+            "SELECT tipo_cargo, tasa, cargo, gasto_cargo_id FROM avances_efectivo;",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!((tipo.as_str(), tasa), ("porcentaje", Some(8.0)));
+    assert_importe(cargo, 1_000.0, "cargo guardado");
+    assert!(gasto_id.is_some(), "el avance queda enlazado a su gasto");
+}
+
+#[test]
+fn c110_un_cargo_fijo_se_suma_tal_cual() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    avance(tarjeta, cuenta, "4600.00", "fijo", None, Some("300.00")).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 4_900.0, "importe más cargo fijo");
+    assert_importe(saldo_cuenta_id(cuenta), 4_600.0, "la cuenta recibe el importe");
+    let tasa: Option<f64> = conexion()
+        .query_row("SELECT tasa FROM avances_efectivo;", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(tasa, None, "un cargo fijo no tiene tasa");
+}
+
+#[test]
+fn c111_un_avance_exonerado_no_paga_cargo_ni_genera_gasto() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    avance(tarjeta, cuenta, "2400.00", "exonerado", None, None).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 2_400.0, "solo sube el importe");
+    assert_importe(saldo_cuenta_id(cuenta), 2_400.0, "y la cuenta lo recibe");
+    assert_eq!(total_gastos(), 0, "sin cargo no hay gasto");
+    assert_eq!(filas_de_avances(), 1);
+}
+
+#[test]
+fn c112_la_nota_de_exoneracion_se_guarda_sin_espacios_sobrantes() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    crate::registrar_avance_efectivo(
+        tarjeta, cuenta, "01/10/2026".into(), importe("1350.00"), "DOP".into(),
+        "exonerado".into(), None, None, Some("  Promoción de la entidad  ".into()),
+    )
+    .unwrap();
+
+    let nota: Option<String> = conexion()
+        .query_row("SELECT nota FROM avances_efectivo;", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(nota.as_deref(), Some("Promoción de la entidad"));
+}
+
+#[test]
+fn c113_una_cuenta_en_otra_divisa_se_rechaza_sin_mover_nada() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(1_000.0, 0.0);
+    let cuenta_usd = crear_cuenta("Cuenta Ahorros USD", "USD", 50.0);
+
+    let r = avance(tarjeta, cuenta_usd, "500.00", "exonerado", None, None);
+
+    assert!(r.unwrap_err().contains("misma divisa"));
+    assert_importe(balances_tarjeta(tarjeta).0, 1_000.0, "la deuda no se movió");
+    assert_importe(saldo_cuenta_id(cuenta_usd), 50.0, "la cuenta tampoco");
+    assert_eq!(filas_de_avances(), 0);
+}
+
+#[test]
+fn c114_un_porcentaje_fuera_de_la_banda_se_rechaza() {
+    // 0.8 por 8 es el tecleo que la banda existe para atrapar: el importe
+    // entraría en la deuda sin que nada lo cuestionara.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    for p in [0.8, 5.99, 10.01, 80.0] {
+        let r = avance(tarjeta, cuenta, "1350.00", "porcentaje", Some(p), None);
+        assert!(r.is_err(), "aceptó {p} %");
+    }
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "nada se movió");
+    assert_eq!(filas_de_avances(), 0);
+}
+
+#[test]
+fn c115_los_extremos_de_la_banda_se_aceptan() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    assert!(avance(tarjeta, cuenta, "1350.00", "porcentaje", Some(6.0), None).is_ok());
+    assert!(avance(tarjeta, cuenta, "1350.00", "porcentaje", Some(10.0), None).is_ok());
+}
+
+#[test]
+fn c116_los_datos_contradictorios_se_rechazan_en_vez_de_elegir_uno() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    // Un porcentaje con un cargo fijo, una exoneración con valor, un tipo
+    // que no existe, y un tipo sin su valor.
+    assert!(avance(tarjeta, cuenta, "1350.00", "porcentaje", Some(8.0), Some("100.00")).is_err());
+    assert!(avance(tarjeta, cuenta, "1350.00", "exonerado", Some(8.0), None).is_err());
+    assert!(avance(tarjeta, cuenta, "1350.00", "gratis", None, None).is_err());
+    assert!(avance(tarjeta, cuenta, "1350.00", "porcentaje", None, None).is_err());
+    assert!(avance(tarjeta, cuenta, "1350.00", "fijo", None, None).is_err());
+    assert_eq!(filas_de_avances(), 0);
+}
+
+#[test]
+fn c117_un_cargo_fijo_de_cero_se_rechaza_porque_eso_es_una_exoneracion() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    assert!(avance(tarjeta, cuenta, "1350.00", "fijo", None, Some("0.00")).is_err());
+}
+
+#[test]
+fn c118_el_centimo_lo_deciden_los_digitos_escritos() {
+    // Entra por texto, como el resto de importes que no pasan por el
+    // formulario: 1000.005 sube a 1000.01.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    avance(tarjeta, cuenta, "1000.005", "exonerado", None, None).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.01, "la regla del sistema, sin binario");
+}
+
+#[test]
+fn c119_una_fecha_ilegible_o_inexistente_se_rechaza() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    for fecha in ["2026-10-01", "1/10/2026", "31/02/2026", "ayer", ""] {
+        let r = crate::registrar_avance_efectivo(
+            tarjeta, cuenta, fecha.into(), importe("100.00"), "DOP".into(),
+            "exonerado".into(), None, None, None,
+        );
+        assert!(r.is_err(), "aceptó la fecha «{fecha}»");
+    }
+    assert_eq!(filas_de_avances(), 0);
+}
+
+#[test]
+fn c120_revertir_un_avance_deja_tarjeta_cuenta_y_gastos_como_estaban_y_abre_un_caso() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(5_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    avance(tarjeta, cuenta, "12500.00", "porcentaje", Some(6.25), None).unwrap();
+    let id: i64 = conexion().query_row("SELECT id FROM avances_efectivo;", [], |r| r.get(0)).unwrap();
+
+    let resumen = crate::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 5_000.0, "la deuda vuelve, cargo incluido");
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "la cuenta devuelve el importe");
+    assert_eq!(total_gastos(), 0, "el gasto del cargo desaparece");
+    assert_eq!(filas_de_avances(), 0);
+    assert!(resumen.contains("COR-"), "debe informar el número de caso: {resumen}");
+    let casos: i64 = conexion()
+        .query_row("SELECT COUNT(*) FROM correcciones WHERE tipo = 'avance de efectivo';", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(casos, 1, "queda constancia de qué se deshizo");
+}
+
+#[test]
+fn c121_revertir_sin_explicar_se_rechaza_y_no_mueve_nada() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+    avance(tarjeta, cuenta, "1350.00", "exonerado", None, None).unwrap();
+    let id: i64 = conexion().query_row("SELECT id FROM avances_efectivo;", [], |r| r.get(0)).unwrap();
+
+    assert!(crate::revertir_avance_efectivo(id, "error".into()).is_err());
+
+    assert_importe(balances_tarjeta(tarjeta).0, 1_350.0, "sigue todo como estaba");
+    assert_eq!(filas_de_avances(), 1);
+}
+
+#[test]
+fn c122_revertir_dos_veces_falla_la_segunda_sin_duplicar_la_devolucion() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 500.0);
+    avance(tarjeta, cuenta, "1350.00", "exonerado", None, None).unwrap();
+    let id: i64 = conexion().query_row("SELECT id FROM avances_efectivo;", [], |r| r.get(0)).unwrap();
+
+    crate::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
+    assert!(crate::revertir_avance_efectivo(id, motivo_de_prueba()).is_err());
+
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "una sola devolución");
+    assert_importe(saldo_cuenta_id(cuenta), 500.0, "una sola devolución");
+}
+
+#[test]
+fn c123_el_gasto_del_cargo_no_se_puede_borrar_por_separado() {
+    // Bajaría la deuda por el cargo y dejaría el avance registrado con un
+    // cargo que ya no existe.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+    avance(tarjeta, cuenta, "12500.00", "porcentaje", Some(8.0), None).unwrap();
+    let gasto_id: i64 = conexion()
+        .query_row("SELECT gasto_cargo_id FROM avances_efectivo;", [], |r| r.get(0))
+        .unwrap();
+
+    let r = crate::eliminar_gasto(gasto_id, motivo_de_prueba());
+
+    assert!(r.unwrap_err().contains("avance de efectivo"));
+    assert_importe(balances_tarjeta(tarjeta).0, 13_500.0, "la deuda no se movió");
+    assert_eq!(total_gastos(), 1);
+    let casos: i64 = conexion().query_row("SELECT COUNT(*) FROM correcciones;", [], |r| r.get(0)).unwrap();
+    assert_eq!(casos, 0, "un borrado rechazado no abre caso");
+}
+
+#[test]
+fn c124_una_cuenta_que_recibio_un_avance_no_se_puede_eliminar() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+    avance(tarjeta, cuenta, "1350.00", "exonerado", None, None).unwrap();
+
+    let r = crate::eliminar_cuenta(cuenta);
+    assert!(r.unwrap_err().contains("avances de efectivo"));
+
+    // Revertido el avance, la guarda se levanta.
+    let id: i64 = conexion().query_row("SELECT id FROM avances_efectivo;", [], |r| r.get(0)).unwrap();
+    crate::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
+    assert!(crate::eliminar_cuenta(cuenta).is_ok());
+}
+
+#[test]
+fn c125_el_esquema_rechaza_un_avance_que_se_contradice() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+    let insertar = |monto: f64, tipo: &str, tasa: Option<f64>, cargo: f64, fecha: &str| {
+        conexion().execute(
+            "INSERT INTO avances_efectivo
+                 (tarjeta_id, cuenta_ahorro_id, fecha, monto, divisa, tipo_cargo, tasa, cargo)
+             VALUES (?, ?, ?, ?, 'DOP', ?, ?, ?);",
+            params![tarjeta, cuenta, fecha, monto, tipo, tasa, cargo],
+        )
+    };
+
+    assert!(insertar(100.005, "exonerado", None, 0.0, "01/10/2026").is_err(), "fracción de céntimo");
+    assert!(insertar(0.0, "exonerado", None, 0.0, "01/10/2026").is_err(), "importe cero");
+    assert!(insertar(100.0, "exonerado", None, -1.0, "01/10/2026").is_err(), "cargo negativo");
+    assert!(insertar(100.0, "fijo", Some(8.0), 5.0, "01/10/2026").is_err(), "fijo con tasa");
+    assert!(insertar(100.0, "porcentaje", None, 8.0, "01/10/2026").is_err(), "porcentual sin tasa");
+    assert!(insertar(100.0, "exonerado", None, 0.0, "2026-10-01").is_err(), "fecha sin forma");
+    assert!(insertar(100.0, "porcentaje", Some(8.0), 8.0, "01/10/2026").is_ok(), "el válido entra");
+}
+
+#[test]
+fn c126_la_lista_de_avances_de_una_tarjeta_los_devuelve_del_mas_reciente() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let otra = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+    avance(tarjeta, cuenta, "1350.00", "exonerado", None, None).unwrap();
+    avance(tarjeta, cuenta, "2750.00", "porcentaje", Some(6.25), None).unwrap();
+    avance(otra, cuenta, "3900.00", "exonerado", None, None).unwrap();
+
+    let lista = crate::obtener_avances_tarjeta(tarjeta).unwrap();
+
+    assert_eq!(lista.len(), 2, "solo los de esa tarjeta");
+    assert_importe(lista[0].monto, 2_750.0, "el más reciente primero");
+    assert_eq!(lista[0].tasa, Some(6.25));
+    assert_eq!(lista[0].cuenta_nombre, "Cuenta Ahorros DOP");
+}
+
+#[test]
+fn c127_simular_enseña_lo_que_el_avance_va_a_mover_sin_guardar_nada() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    let s = crate::simular_avance_efectivo(
+        importe("12500.00"), "DOP".into(), "porcentaje".into(), Some(6.25), None,
+    )
+    .unwrap();
+
+    assert_importe(s.monto, 12_500.0, "monto");
+    assert_importe(s.cargo, 781.25, "cargo");
+    assert_importe(s.a_la_tarjeta, 13_281.25, "lo que sube la deuda");
+    assert_importe(s.a_la_cuenta, 12_500.0, "lo que recibe la cuenta");
+    assert_eq!(filas_de_avances(), 0, "simular no guarda nada");
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "ni mueve saldos");
+    assert_importe(saldo_cuenta_id(cuenta), 0.0, "ni mueve saldos");
+}
+
+#[test]
+fn c128_la_cifra_que_se_simula_es_exactamente_la_que_se_asienta() {
+    // La razón de que exista `simular`: la interfaz enseña una cifra para
+    // confirmar, y esa cifra no puede diferir de la que luego se guarda. Se
+    // comprueba con importes que redondean, no solo con los redondos.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+
+    for (monto, p) in [("1234.56", 8.5), ("0.50", 7.0), ("99999.99", 6.25), ("1000.005", 9.99)] {
+        let s = crate::simular_avance_efectivo(
+            importe(monto), "DOP".into(), "porcentaje".into(), Some(p), None,
+        )
+        .unwrap();
+        let antes = balances_tarjeta(tarjeta).0;
+
+        avance(tarjeta, cuenta, monto, "porcentaje", Some(p), None).unwrap();
+
+        assert_importe(
+            balances_tarjeta(tarjeta).0 - antes,
+            s.a_la_tarjeta,
+            &format!("la deuda con monto {monto} al {p} %"),
+        );
+        let cargo: f64 = conexion()
+            .query_row("SELECT cargo FROM avances_efectivo ORDER BY id DESC LIMIT 1;", [], |r| r.get(0))
+            .unwrap();
+        assert_importe(cargo, s.cargo, &format!("el cargo con monto {monto} al {p} %"));
+    }
+}
+
+#[test]
+fn c129_simular_rechaza_lo_mismo_que_registrar() {
+    let _g = entorno_aislado();
+    // Las mismas reglas, por el mismo camino: banda, contradicciones, cero.
+    assert!(crate::simular_avance_efectivo(importe("1350.00"), "DOP".into(), "porcentaje".into(), Some(0.8), None).is_err());
+    assert!(crate::simular_avance_efectivo(importe("1350.00"), "DOP".into(), "fijo".into(), None, None).is_err());
+    assert!(crate::simular_avance_efectivo(importe("1350.00"), "DOP".into(), "exonerado".into(), Some(8.0), None).is_err());
+    assert!(crate::simular_avance_efectivo(importe("0.00"), "DOP".into(), "exonerado".into(), None, None).is_err());
+    assert!(crate::simular_avance_efectivo(importe("1350.00"), "EUR".into(), "exonerado".into(), None, None).is_err());
+}

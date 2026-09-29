@@ -4,7 +4,28 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.29.0 (Versión Actual) - 2026-09-23
+## 🚀 Versión 1.32.0 (Versión Actual) - 2026-09-29
+**Avance de efectivo: la tarjeta pone dinero en una cuenta de ahorro, con su cargo porcentual, fijo o exonerado.**
+
+### 💵 La función
+* La deuda de la tarjeta sube por el monto **y** por el cargo; la cuenta recibe el monto **sin** el cargo. Con 10 000 y un cargo del 6,25 %: la deuda sube 10 625, la cuenta recibe 10 000 y aparece un gasto de 625.
+* **El cargo tiene tres formas**: porcentaje entre el 6 % y el 10 %, monto fijo, o exonerado. Son tres variantes de un tipo y no un porcentaje con casos especiales: una exoneración no es «un cargo del cero por ciento» sino la declaración de que no hubo cargo. Un cargo fijo de cero se rechaza por eso.
+* **La banda del 6 % al 10 %** se exige porque casi todo porcentaje fuera de ella es un tecleo —`0,8` por `8`— y entraría en la deuda sin que nada lo cuestionara. Admite dos decimales: el cargo más reciente del titular fue del 6,25 %.
+* La interfaz enseña lo que se va a mover y pide confirmación. Las cifras vienen del núcleo (`simular_avance_efectivo`), no de una cuenta hecha en JavaScript: una prueba comprueba que la cifra simulada es **exactamente** la que se asienta, con importes que redondean.
+
+### ↩️ Se puede deshacer
+* Revertir es el inverso exacto, con caso de auditoría y motivo escrito. Se repone **lo guardado**, no lo que hoy se recalcularía; y sin recorte: si el dinero ya se gastó, devolverlo deja la cuenta en negativo, que es el estado verdadero.
+* El gasto del cargo **no se borra por separado**: bajaría la deuda por el cargo y dejaría el avance con un cargo que ya no existe. Una cuenta que recibió un avance tampoco se elimina.
+
+### 🗄️ Base de Datos
+* **Migración 15**: tabla `avances_efectivo`, que nace con sus restricciones ya puestas —importes exactos al céntimo, fecha con forma de fecha, importe positivo, cargo no negativo, y `tasa` solo en la forma porcentual, exigido en los dos sentidos—. Las claves ajenas son `RESTRICT`.
+
+### 🔍 Decisiones tomadas sin que estuvieran especificadas
+* El cargo lo paga la tarjeta, no la cuenta. Un avance se acredita en la misma divisa en que se carga: no convierte. No comprueba el disponible de la tarjeta ni calcula intereses del avance. Todo está en `avance_de_efectivo.md`.
+
+---
+
+## 🚀 Versión 1.29.0 - 2026-09-23
 **Registra el método de respaldos previsto para la versión 2027. No cambia el mecanismo vigente.**
 
 ### 📄 Documentación
