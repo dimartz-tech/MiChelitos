@@ -4,7 +4,20 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.38.0 (Versión Actual) - 2026-09-29
+## 🚀 Versión 1.39.0 (Versión Actual) - 2026-09-29
+**Se fija un defecto conocido y se documenta su corrección: la comisión de un abono se puede borrar por separado.** No cambia comportamiento.
+
+### 🔎 El hallazgo
+* La comisión de un abono a tarjeta es un gasto que aparece en la lista y se puede borrar por separado. Borrarlo devuelve su importe a la cuenta, pero el abono conserva anotado que la comisión salió; al revertir después el abono, se devuelve **otra vez**. La cuenta acaba por encima de lo que tenía. Es la misma clase de defecto que ya se cerró para el cargo de un avance de efectivo.
+* Comprobado en solo lectura sobre los datos vivos: **no ha ocurrido**.
+
+### 📌 Qué se hace en esta versión
+* La prueba `c136` fija el comportamiento tal cual está hoy, con importes sintéticos, marcado como defecto conocido.
+* `abonos_y_su_comision.md` recoge el plan: una lista `GASTOS_DERIVADOS` con prueba de esquema que obligue a declarar toda clave foránea hacia `gastos`, y el rechazo con mensaje claro. **La corrección queda pendiente de visto bueno** (protocolo de hallazgos: primero documentar y fijar).
+
+---
+
+## 🚀 Versión 1.38.0 - 2026-09-29
 **Restaurar ya no se bloquea cuando lo actual está dañado.**
 
 ### 🐞 Qué fallaba
