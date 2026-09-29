@@ -2241,6 +2241,27 @@ fn crear_respaldo() -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Nombres de los respaldos disponibles, del más reciente al más antiguo.
+#[tauri::command]
+fn listar_respaldos() -> Vec<String> {
+    respaldo::listar()
+}
+
+/// Devuelve la base y el capital al estado de un respaldo. Antes toma uno del
+/// estado actual, de modo que la restauración se puede deshacer.
+#[tauri::command]
+fn restaurar_respaldo(nombre: String) -> Result<serde_json::Value, String> {
+    respaldo::restaurar(&nombre)
+        .map(|r| {
+            serde_json::json!({
+                "respaldo_de_seguridad": r.respaldo_de_seguridad.to_string_lossy(),
+                "capital_restaurado": r.capital_restaurado,
+                "version_del_esquema": r.version_del_esquema,
+            })
+        })
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn obtener_cuentas() -> Result<Vec<CuentaAhorro>, String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
@@ -2914,6 +2935,8 @@ fn main() {
             crear_cliente,
             eliminar_cliente,
             crear_respaldo,
+            listar_respaldos,
+            restaurar_respaldo,
             obtener_cuentas,
             revertir_abono_tarjeta,
             simular_avance_efectivo,
