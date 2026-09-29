@@ -4,7 +4,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.36.0 (Versión Actual) - 2026-09-29
+## 🚀 Versión 1.37.0 (Versión Actual) - 2026-09-29
+**Restaurar un respaldo desde Ajustes, sin comandos.**
+
+### 🖱️ Qué se añade
+* En **Ajustes → Respaldo de la base**, debajo de «Respaldar ahora», un selector con los respaldos disponibles, del más reciente al más antiguo, y el botón «Restaurar este respaldo». Cada uno se muestra como `29/09/2026 19:03:25 · antes de instalar`; los nombres antiguos que no siguen el patrón se muestran tal cual.
+* Antes de restaurar, un aviso dice qué se sustituye (base y capital) y que se guardará una copia del estado actual. Al terminar se avisa si el respaldo traía capital o se conservó el actual, y cómo deshacerlo: restaurar la copia «antes de restaurar» más reciente.
+* Si no hay respaldos, la tarjeta lo dice; si la lista no se puede leer, el resto de Ajustes sigue funcionando.
+* Los nombres se escapan antes de ir al HTML: salen de una carpeta del usuario.
+
+### ✅ Pruebas
+* 4 pruebas nuevas del formato de los nombres y del escape (19 de JavaScript en total). La lógica de restaurar ya estaba probada en Rust (1.36.0); el contrato entre `api.js` y `main.rs` cubre los dos wrappers nuevos.
+* Comprobado en el navegador con un backend simulado: el selector, la confirmación, la llamada con `nombre`, la lista actualizada y el mensaje final. **No se probó contra la base real dentro de la aplicación empaquetada.**
+
+---
+
+## 🚀 Versión 1.36.0 - 2026-09-29
 **Los respaldos se pueden restaurar y ya incluyen el capital.**
 
 ### 💾 Qué faltaba

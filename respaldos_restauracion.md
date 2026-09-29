@@ -9,6 +9,8 @@
 * Antes de cada restauración («antes de restaurar»).
 
 ## Cómo restaurar
+**Desde la aplicación:** Ajustes → Respaldo de la base → elegir en el selector → «Restaurar este respaldo». Es lo mismo que los comandos:
+
 1. `listar_respaldos` → elegir un nombre.
 2. `restaurar_respaldo(nombre)`. Devuelve dónde quedó el respaldo del estado sustituido, si se restauró el capital y la versión del esquema.
 3. Para deshacer: `restaurar_respaldo` con el nombre de ese respaldo «antes de restaurar».
