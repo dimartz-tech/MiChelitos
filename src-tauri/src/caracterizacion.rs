@@ -2328,6 +2328,8 @@ fn c57_preparar_el_esquema_respalda_antes_de_tocar_una_base_existente() {
         .read_dir()
         .expect("leer respaldos")
         .filter_map(|e| e.ok())
+        // La copia del capital que acompaña a cada base no es otro respaldo.
+        .filter(|e| e.path().extension().map(|x| x == "db").unwrap_or(false))
         .collect();
     assert_eq!(respaldos.len(), 1, "se tomó exactamente un respaldo");
 
