@@ -4,7 +4,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.35.0 (Versión Actual) - 2026-09-29
+## 🚀 Versión 1.36.0 (Versión Actual) - 2026-09-29
+**Los respaldos se pueden restaurar y ya incluyen el capital.**
+
+### 💾 Qué faltaba
+* Hasta ahora se sabía **crear** un respaldo verificado, pero no había forma de usarlo: restaurar era copiar un archivo a mano, sin comprobar nada y sin red. Y el respaldo dejaba fuera `capital.json`, que no se puede reconstruir desde los gastos.
+
+### ✅ Qué hace ahora
+* Cada respaldo lleva, junto a la base, una copia del capital con el mismo nombre (`…​.capital.json`); la poda se lleva las dos.
+* `restaurar_respaldo(nombre)` devuelve base y capital al estado de un respaldo. Antes comprueba que el respaldo **abre, es íntegro y no viene de un esquema más nuevo** que el que esta versión conoce; **respalda el estado actual** («antes de restaurar») para poder deshacer; y sustituye con un renombrado, de modo que queda la base vieja entera o la nueva entera. Un respaldo antiguo sin capital **no borra** el capital actual, y la respuesta lo dice.
+* `listar_respaldos` devuelve los nombres, del más reciente al más antiguo. Solo se aceptan nombres de la carpeta de respaldos: una ruta se rechaza.
+* Un cambio solo en el capital también hace que el siguiente arranque tome copia.
+* Procedimiento y límites en `respaldos_restauracion.md`. No hay interfaz todavía: son comandos.
+
+---
+
+## 🚀 Versión 1.35.0 - 2026-09-29
 **El cobro de suscripciones pasa por `Dinero` y por el registro de gastos: un cargo en dólares a una tarjeta que traduce ya puede liquidarse.**
 
 ### 💳 Lo que el SQL directo se saltaba
