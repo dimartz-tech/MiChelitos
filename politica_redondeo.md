@@ -171,3 +171,76 @@ De modo que las migraciones corren ahora con las claves ajenas apagadas, como
 SQLite prescribe, y cada una termina con `foreign_key_check` **dentro de su
 transacción**: la comprobación pasa de ser por sentencia a ser por migración,
 que para un cambio de esquema es el grano correcto.
+
+## Tramo 4c — los importes que todavía viajan como número (análisis, 2026-09-29)
+
+Estado: **análisis, sin cambios de código. La decisión es del titular.**
+
+El tramo 4a dejó pendientes «cuarenta y un parámetros» de importe que llegan a
+Rust como `f64`. Antes de convertirlos se midió qué exponen.
+
+### Inventario
+Doce comandos reciben algún importe como número: cobrar una factura formal e
+informal, crear un ingreso informal, crear una tarjeta y actualizar sus
+límites, abonar a una tarjeta, crear una cuenta, transferir (y retirar a
+efectivo), corregir una factura, cobrar en efectivo, crear una bonificación y
+liquidar un consumo pendiente. Además hay **tasas** como número
+(`tasa_cambio`, `porcentaje_retencion`, `porcentaje` del avance): no son
+dinero y no entran en este análisis.
+
+Los doce se alimentan **solo** de campos de formulario. El recorrido de la
+interfaz da esto:
+
+| Hecho | Medida |
+|---|---|
+| Campos `type="number"` | 61 |
+| Con `step="0.01"` (todo el dinero) | 52 |
+| Otros: tasa (`0.0001`), días de facturación y cuotas | 9, ninguno es dinero |
+| Formularios con `novalidate` | 0 |
+| Manejadores que envían dinero | 12 de 12 por `onsubmit`, es decir, tras la validación del navegador |
+| Importes calculados en JavaScript y enviados | 0 (el único derivado, el cobro parcial de una factura, ya viaja como texto) |
+
+### Qué se pierde al viajar como número
+Se midió el recorrido exacto que hace un importe: texto del campo → número JSON
+→ `f64` → `(x · 100).round()` en `Dinero::nuevo`.
+
+* **Con dos decimales no se pierde nada.** Barrido exhaustivo de 0,00 a
+  2 000 000,00 (2·10⁸ importes) y 5·10⁷ importes más repartidos por
+  magnitudes hasta ~10¹⁵ centavos: **0 discrepancias**.
+* **Con más de dos decimales sí se decide distinto.** De cada 100 importes
+  terminados en 5 en el tercer decimal, **6,6** los decide `f64` de forma
+  diferente a la regla del sistema (mitad alejándose de cero sobre los
+  dígitos): `1.005` baja a 1,00 en vez de subir a 1,01.
+
+Es decir, **el camino por número solo falla si llega un importe con más de dos
+decimales**, y eso es justo lo que `step="0.01"` impide al enviar.
+
+### Lo que no se ha comprobado
+La validación de `step` se apoya en el navegador. Se ha visto en el código que
+no se desactiva, pero **no se ha probado en la vista web de la aplicación
+empaquetada** (WKWebView). Hay una prueba de cinco segundos que lo aclara:
+escribir `1.005` en cualquier campo de importe e intentar guardar; debe
+aparecer el aviso del navegador y no guardarse nada.
+
+### Opciones
+1. **No convertir y fijar la premisa con una prueba** *(recomendada)*. Una
+   prueba de contrato sobre `ui.js` exige que todo campo de importe lleve
+   `step="0.01"`, que ningún formulario use `novalidate` y que cada envío de
+   dinero pase por `onsubmit`. Un campo nuevo sin `step` **falla la prueba**.
+   Coste: una prueba. Es el mismo desenlace que los tramos 3 y 4b: se cierra
+   declarándolo innecesario y la medición queda como comprobación.
+2. **Convertir los doce comandos a `ImporteDecimal`** y enviar el texto del
+   campo en lugar de `Number(...)`. Elimina la dependencia del navegador.
+   Coste: unos cuarenta parámetros, doce comandos, sus envoltorios en `api.js`
+   y las pruebas que los llaman; el riesgo de regresión es real y el beneficio
+   solo aparece si el `step` fallara. Se puede hacer por lotes, un comando por
+   PR, si más adelante se decide.
+3. **Rechazar en Rust cualquier número con fracción de céntimo** en esos doce
+   comandos, sin cambiar la interfaz. Defensa en profundidad barata, pero
+   repartida en muchos puntos de entrada y sin la ventaja de tipo que da la
+   opción 2.
+
+### Recomendación
+La opción 1 ahora, y la 2 solo si la prueba manual de `1.005` falla en la
+aplicación empaquetada o si aparece una vía nueva que envíe importes sin pasar
+por un formulario (una importación, un atajo de teclado).
