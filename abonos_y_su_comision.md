@@ -7,12 +7,12 @@ Un abono a tarjeta pagado desde una cuenta crea dos cosas: el abono (`pagos_tarj
 
 1. Al borrarlo, `revertir_gasto` devuelve su importe a la cuenta y la clave foránea (`ON DELETE SET NULL`) deja el vínculo del abono en `NULL`.
 2. El abono conserva anotado que debitó `importe + comisión`.
-3. Al revertir el abono después, se devuelve `importe + comisión`: **la comisión vuelve dos veces** y la cuenta acaba por encima de lo que tenía (24 sobre 100 000 en la prueba).
+3. Al revertir el abono después, se devuelve `importe + comisión`: **la comisión vuelve dos veces** y la cuenta acaba por encima de lo que tenía (24 sobre el saldo inicial en la prueba, con importes sintéticos).
 
 Es la misma clase de defecto que tuvo el cargo del avance de efectivo, que sí está protegido (`eliminar_gasto` lo rechaza).
 
 ## En los datos reales
-Comprobado en solo lectura: 17 abonos, los 17 con cuenta, comisión y gasto enlazado; ningún abono con comisión sin su gasto. **No ha ocurrido.**
+Comprobado en solo lectura con una consulta agregada: ningún abono con comisión ha perdido su gasto enlazado. **No ha ocurrido.** (No se anotan aquí cifras ni importes de los datos vivos.)
 
 ## Corrección propuesta (pendiente de visto bueno)
 1. **Guarda por lista, como la de eliminar cuenta.** Las claves foráneas hacia `gastos` son tres: `pagos_tarjeta.gasto_comision_id` (comisión de un abono), `avances_efectivo.gasto_cargo_id` (cargo de un avance) y `bonificaciones.gasto_id` (vínculo informativo, el gasto no depende de él). Una lista `GASTOS_DERIVADOS` con las dos primeras y el motivo de cada una sustituye la comprobación suelta del avance en `eliminar_gasto`.
