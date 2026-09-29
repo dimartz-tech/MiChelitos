@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod bonificacion;
+pub mod capital;
 pub mod cargos;
 pub mod conversion;
 pub mod cuenta;

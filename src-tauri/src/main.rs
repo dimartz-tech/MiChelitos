@@ -1459,41 +1459,10 @@ fn obtener_capital() -> Result<Value, String> {
     let mut data = db_nosql::leer_coleccion("capital");
     let hoy = Local::now().naive_local().date();
 
-    // Enriquecer Certificados e Inversiones en bolsa con alertas (10 días)
-    if let Some(certificados) = data.get_mut("certificados").and_then(|v| v.as_array_mut()) {
-        for c in certificados {
-            c["alerta_vencimiento"] = serde_json::Value::Bool(false);
-            if let Some(venc_str) = c.get("vencimiento").and_then(|v| v.as_str()) {
-                if let Ok(venc_date) = NaiveDate::parse_from_str(venc_str, "%d/%m/%Y") {
-                    let diff = venc_date.signed_duration_since(hoy).num_days();
-                    c["dias_restantes"] = serde_json::Value::Number(serde_json::Number::from(diff));
-                    if diff >= 0 && diff <= 10 {
-                        c["alerta_vencimiento"] = serde_json::Value::Bool(true);
-                        c["alerta_msg"] = serde_json::Value::String(format!("¡Vence en {} días!", diff));
-                    } else if diff < 0 {
-                        c["alerta_vencimiento"] = serde_json::Value::Bool(true);
-                        c["alerta_msg"] = serde_json::Value::String("¡Vencido!".to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(bolsa) = data.get_mut("bolsa").and_then(|v| v.as_array_mut()) {
-        for b in bolsa {
-            b["alerta_vencimiento"] = serde_json::Value::Bool(false);
-            if let Some(venc_str) = b.get("vencimiento").and_then(|v| v.as_str()) {
-                if let Ok(venc_date) = NaiveDate::parse_from_str(venc_str, "%d/%m/%Y") {
-                    let diff = venc_date.signed_duration_since(hoy).num_days();
-                    b["dias_restantes"] = serde_json::Value::Number(serde_json::Number::from(diff));
-                    if diff >= 0 && diff <= 10 {
-                        b["alerta_vencimiento"] = serde_json::Value::Bool(true);
-                        b["alerta_msg"] = serde_json::Value::String(format!("¡Vence en {} días!", diff));
-                    } else if diff < 0 {
-                        b["alerta_vencimiento"] = serde_json::Value::Bool(true);
-                        b["alerta_msg"] = serde_json::Value::String("¡Vencido!".to_string());
-                    }
-                }
+    for coleccion in ["certificados", "bolsa"] {
+        if let Some(entradas) = data.get_mut(coleccion).and_then(|v| v.as_array_mut()) {
+            for entrada in entradas {
+                marcar_alerta_de_vencimiento(entrada, hoy);
             }
         }
     }
@@ -1501,8 +1470,57 @@ fn obtener_capital() -> Result<Value, String> {
     Ok(data)
 }
 
+/// Añade al `Value` de una entrada las tres claves de presentación que
+/// dependen de la fecha de hoy. **Ninguna sobrevive a un guardado**: ver
+/// `retirar_campos_calculados` y `dominio::capital`.
+fn marcar_alerta_de_vencimiento(entrada: &mut Value, hoy: NaiveDate) {
+    entrada["alerta_vencimiento"] = serde_json::Value::Bool(false);
+    let Some(venc_str) = entrada.get("vencimiento").and_then(|v| v.as_str()) else {
+        return;
+    };
+    let Ok(venc_date) = NaiveDate::parse_from_str(venc_str, "%d/%m/%Y") else {
+        return;
+    };
+    let alerta = dominio::capital::calcular(venc_date, hoy);
+    entrada["dias_restantes"] = serde_json::Value::Number(alerta.dias_restantes.into());
+    entrada["alerta_vencimiento"] = serde_json::Value::Bool(alerta.activa());
+    if let Some(mensaje) = alerta.mensaje() {
+        entrada["alerta_msg"] = serde_json::Value::String(mensaje);
+    }
+}
+
+/// Retira de cada certificado y cada inversión de bolsa las claves que
+/// `obtener_capital` calcula al leer.
+///
+/// **Existe porque sin esto se guardaban.** Las seis acciones de la vista de
+/// capital —añadir o quitar un certificado, una inversión, un bien— siguen
+/// todas el mismo patrón: leer el capital completo (que trae la alerta ya
+/// calculada), mutar una sola colección y guardar el objeto entero de vuelta.
+/// El campo calculado el día de la última escritura quedaba grabado en el
+/// archivo como si el titular lo hubiera declarado, y no volvía a cambiar
+/// hasta la siguiente escritura. Se confirmó contra la base real: una
+/// inversión de bolsa ya tenía `alerta_vencimiento` y `dias_restantes` en
+/// disco.
+///
+/// Se limpia aquí, en el único punto de escritura, en vez de confiar en que
+/// cada acción de la interfaz recuerde omitirlos.
+fn retirar_campos_calculados(data: &mut Value) {
+    for coleccion in ["certificados", "bolsa"] {
+        if let Some(entradas) = data.get_mut(coleccion).and_then(|v| v.as_array_mut()) {
+            for entrada in entradas {
+                if let Some(objeto) = entrada.as_object_mut() {
+                    for campo in dominio::capital::CAMPOS_CALCULADOS {
+                        objeto.remove(*campo);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[tauri::command]
-fn guardar_capital(data: Value) -> Result<(), String> {
+fn guardar_capital(mut data: Value) -> Result<(), String> {
+    retirar_campos_calculados(&mut data);
     db_nosql::guardar_coleccion("capital", &data)
 }
 

@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.29.0 (Versión Actual) - 2026-09-23
+## 🚀 Versión 1.30.0 (Versión Actual) - 2026-09-23
+**Arranca la Fase 6 — Capital y préstamos. Un valor calculado que se guardaba como declarado, corregido y confirmado contra la base real.**
+
+### 🏦 Préstamos, documentado en retrospectiva
+* El saldo vivo, el desglose de cuota y la conciliación de la versión 1.6.0 quedan registrados en `fase_6_capital_y_prestamos.md`: no había trabajo pendiente, solo el documento de la fase.
+
+### 📉 Capital: el defecto de fondo
+* `obtener_capital` calculaba la alerta de vencimiento **sobre el mismo objeto** que devolvía. Las seis acciones de la vista de capital —añadir o quitar un certificado, una inversión, un bien— leen el capital completo, mutan una colección y guardan el objeto entero de vuelta, así que ese cálculo **se grababa en el archivo** como si el titular lo hubiera declarado.
+* No era teórico: la base real ya tenía `alerta_vencimiento` y `dias_restantes` guardados en disco para una inversión de bolsa, sin actualizarse desde el día en que se escribieron.
+* `dominio::capital::calcular` centraliza la fórmula —antes duplicada entre certificados y bolsa— y `guardar_capital` retira los tres campos calculados **antes de persistir**, en el único punto de escritura, sin depender de que cada acción de la interfaz recuerde omitirlos.
+* La base real, ya contaminada, se limpió a mano con un respaldo tomado antes de escribir.
+
+### 🔍 Lo que queda declarado y sin resolver
+* El capital no pasa por `Dinero`: un monto negativo, con fracción de céntimo o una fecha ilegible se acepta tal cual. Es la vía de dinero menos vigilada del proyecto, y se deja fuera por ser justo el motivo de que esta fase tenga menor densidad de reglas.
+
+---
+
+## 🚀 Versión 1.29.0 - 2026-09-23
 **Registra el método de respaldos previsto para la versión 2027. No cambia el mecanismo vigente.**
 
 ### 📄 Documentación
