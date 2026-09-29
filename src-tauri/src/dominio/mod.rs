@@ -4,6 +4,7 @@
 
 pub mod avance;
 pub mod bonificacion;
+pub mod capital;
 pub mod cargos;
 pub mod conversion;
 pub mod cuenta;
