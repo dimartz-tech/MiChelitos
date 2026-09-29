@@ -2,6 +2,7 @@
 // Se permite código sin usar mientras los comandos siguen sin migrarse (Fase 1).
 #![allow(dead_code)]
 
+pub mod avance;
 pub mod bonificacion;
 pub mod capital;
 pub mod cargos;
