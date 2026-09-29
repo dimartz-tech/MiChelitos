@@ -153,8 +153,7 @@ De los seis defectos quedan **dos**:
   vencidos es una decisión, y no se toma de lado.
 * **Sin la categoría esperada, el gasto cae en el identificador 1** (`s17`).
 
-Y sigue pendiente que el cobro pase por `Dinero`: hoy se lee como `f64` y se
-carga a la tarjeta directamente.
+El cobro pasa por `Dinero` desde la versión 1.35.0; ver el último capítulo.
 
 ---
 
@@ -387,3 +386,48 @@ ninguna categoría nueva: el cambio solo actúa cuando de verdad falta.
 |---|---|
 | Se restaura el respaldo al identificador 1 | mueren 2 |
 | Se elimina la búsqueda de «Otros» | muere 1 |
+
+
+---
+
+# El cobro pasa por `Dinero` y por el registro de gastos
+
+Era lo último que la fase dejó pendiente: el importe se leía como `f64` y se
+cargaba a la tarjeta con SQL directo.
+
+## Lo que el SQL directo se saltaba
+
+Un cargo recurrente **es un consumo con tarjeta**, y `registrar_gasto` ya sabe
+qué hacer con uno. Entre otras cosas decide, según la política de la tarjeta,
+si un consumo en divisa queda **pendiente de liquidar**: un emisor que traduce
+a moneda local no informa el importe hasta después, y estimarlo nunca cuadraría
+con el estado de cuenta.
+
+El cobro directo cargaba siempre la deuda en la divisa de origen y dejaba el
+gasto como si no hubiera nada que traducir. Resultado: **un cargo en dólares a
+una tarjeta que traduce jamás podía liquidarse**, porque no figuraba como
+pendiente. Diez de las once suscripciones del titular son en dólares y las
+cobran dos tarjetas.
+
+Ahora `cobrar_suscripcion` delega en `registrar_gasto`. No escribe la regla
+otra vez: la hereda, y hereda también que cobrar a una tarjeta inexistente
+**falle**, porque el `UPDATE` directo no se enteraba de que no había
+actualizado nada.
+
+## Las condiciones de una suscripción se validan
+
+Solo el `CHECK` del esquema atajaba algo, con su mensaje crudo, y atajaba poco:
+un importe **cero o negativo** entraba, y cobrarlo abonaba a la tarjeta cada
+período; un día de facturación fuera de 1 a 31 también. El alta y la edición
+validan importe, divisa, frecuencia y día, y dicen cuál falla.
+
+El importe entra como **texto**, como el resto: `500.005` sube a `500.01`.
+
+## Comprobación contra la base real
+
+Sobre una copia de la base del titular, cobrando todo lo vencido: 6 cargos, la
+deuda de cada tarjeta y divisa sube **exactamente** lo que suman los gastos
+nuevos (invariante calculado aparte, en centavos enteros), repetir no duplica
+ninguno, y con la política `traduce` puesta en todas las tarjetas **los 6
+quedan pendientes de liquidar**, mientras que con las tarjetas como están hoy
+ninguno lo está.

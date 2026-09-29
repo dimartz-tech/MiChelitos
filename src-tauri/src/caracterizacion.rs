@@ -82,6 +82,12 @@ fn importe(texto: &str) -> crate::ipc::ImporteDecimal {
     crate::ipc::ImporteDecimal::desde_texto(texto).expect("importe de prueba")
 }
 
+/// Un importe en pesos a partir de un literal numérico de prueba, ya como el
+/// texto que la interfaz mandaría.
+fn monto(unidades: f64) -> crate::ipc::ImporteDecimal {
+    importe(&format!("{:.2}", unidades))
+}
+
 fn motivo_de_prueba() -> String {
     "Corrección de prueba automatizada del sistema".to_string()
 }
@@ -783,7 +789,7 @@ fn avisa_en(anio: i32, mes: u32, dia: u32) -> bool {
 fn suscripcion_mensual(dia: u32, proximo: &str) -> (i64, i64) {
     let tarjeta = crear_tarjeta(0.0, 0.0);
     let sub = crear_suscripcion(
-        "Plataforma".into(), 500.0, tarjeta, "mensual".into(), dia as i32, "DOP".into(),
+        "Plataforma".into(), monto(500.0), tarjeta, "mensual".into(), dia as i32, "DOP".into(),
         Some(proximo.into()),
     )
     .unwrap();
@@ -837,7 +843,7 @@ fn s3_procesar_dos_veces_seguidas_no_duplica_el_cargo() {
 fn s4_una_anual_no_vuelve_a_cobrarse_dentro_del_ano() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(),
+    crear_suscripcion("Anual".into(), monto(3_600.0), tarjeta, "anual".into(), 5, "DOP".into(),
                       Some("05/07/2026".into())).unwrap();
 
     procesar_en(2026, 7, 5);
@@ -850,7 +856,7 @@ fn s4_una_anual_no_vuelve_a_cobrarse_dentro_del_ano() {
 fn s5_el_cargo_en_dolares_solo_mueve_el_balance_en_dolares() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(1000.0, 50.0);
-    crear_suscripcion("Plataforma".into(), 15.0, tarjeta, "mensual".into(), 1, "USD".into(),
+    crear_suscripcion("Plataforma".into(), monto(15.0), tarjeta, "mensual".into(), 1, "USD".into(),
                       Some("01/03/2026".into())).unwrap();
 
     procesar_en(2026, 3, 1);
@@ -870,7 +876,7 @@ fn s7_editar_conserva_el_puntero_y_no_recobra() {
     procesar_en(2026, 3, 15);
     let puntero = proximo_cobro_de(sub);
 
-    crate::actualizar_suscripcion(sub, "Otro nombre".into(), 600.0, tarjeta, "mensual".into(), 15,
+    crate::actualizar_suscripcion(sub, "Otro nombre".into(), monto(600.0), tarjeta, "mensual".into(), 15,
                                   "DOP".into(), puntero.clone()).unwrap();
 
     assert_eq!(proximo_cobro_de(sub), puntero, "el puntero se conserva");
@@ -884,7 +890,7 @@ fn s8_editar_no_altera_los_cargos_ya_realizados() {
     let (sub, tarjeta) = suscripcion_mensual(15, "15/03/2026");
     procesar_en(2026, 3, 15);
 
-    crate::actualizar_suscripcion(sub, "Otro".into(), 999.0, tarjeta, "anual".into(), 20,
+    crate::actualizar_suscripcion(sub, "Otro".into(), monto(999.0), tarjeta, "anual".into(), 20,
                                   "USD".into(), Some("20/01/2027".into())).unwrap();
 
     let (monto, _, _) = ultimo_gasto();
@@ -896,7 +902,7 @@ fn s8_editar_no_altera_los_cargos_ya_realizados() {
 fn s9_editar_una_suscripcion_inexistente_es_error() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    assert!(crate::actualizar_suscripcion(9999, "X".into(), 1.0, tarjeta, "mensual".into(), 1,
+    assert!(crate::actualizar_suscripcion(9999, "X".into(), monto(1.0), tarjeta, "mensual".into(), 1,
                                           "DOP".into(), None).is_err());
 }
 
@@ -1069,7 +1075,7 @@ fn s11e_el_ancla_devuelve_la_suscripcion_a_su_dia_tras_un_mes_corto() {
 fn s12b_una_anual_espera_a_la_fecha_que_tiene_anotada() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(),
+    crear_suscripcion("Anual".into(), monto(3_600.0), tarjeta, "anual".into(), 5, "DOP".into(),
                       Some("05/07/2026".into())).unwrap();
 
     assert!(procesar_en(2026, 1, 5).is_empty(), "enero no dispara nada");
@@ -1081,7 +1087,7 @@ fn s12b_una_anual_espera_a_la_fecha_que_tiene_anotada() {
 fn s12c_al_cobrar_una_anual_la_fecha_avanza_un_ano() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(),
+    let sub = crear_suscripcion("Anual".into(), monto(3_600.0), tarjeta, "anual".into(), 5, "DOP".into(),
                                 Some("05/07/2026".into())).unwrap();
 
     procesar_en(2026, 9, 22); // se abre casi tres meses tarde
@@ -1096,7 +1102,7 @@ fn s12c_al_cobrar_una_anual_la_fecha_avanza_un_ano() {
 fn s12e_una_suscripcion_sin_fecha_no_se_cobra() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(), None).unwrap();
+    crear_suscripcion("Anual".into(), monto(3_600.0), tarjeta, "anual".into(), 5, "DOP".into(), None).unwrap();
 
     assert!(procesar_en(2026, 12, 31).is_empty());
     assert_importe(balances_tarjeta(tarjeta).0, 0.0, "sin fecha no hay cargo");
@@ -1109,7 +1115,7 @@ fn s12f_una_fecha_que_no_se_entiende_se_rechaza_al_guardarla() {
 
     for mala in ["2026-07-05", "31/02/2026", "1009/2026"] {
         assert!(
-            crear_suscripcion("X".into(), 100.0, tarjeta, "anual".into(), 5, "DOP".into(),
+            crear_suscripcion("X".into(), monto(100.0), tarjeta, "anual".into(), 5, "DOP".into(),
                               Some(mala.into())).is_err(),
             "aceptó «{mala}»"
         );
@@ -1120,7 +1126,7 @@ fn s12f_una_fecha_que_no_se_entiende_se_rechaza_al_guardarla() {
 fn s18_el_aviso_se_enciende_una_semana_antes_del_cobro_anual() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Anual".into(), 3_600.0, tarjeta, "anual".into(), 5, "DOP".into(),
+    crear_suscripcion("Anual".into(), monto(3_600.0), tarjeta, "anual".into(), 5, "DOP".into(),
                       Some("05/07/2026".into())).unwrap();
 
     assert!(!avisa_en(2026, 6, 27), "ocho días antes todavía no");
@@ -1184,7 +1190,7 @@ fn s14c_una_suscripcion_sin_fecha_lo_dice_en_la_lista() {
     // ninguna parte.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
+    crear_suscripcion("Plataforma".into(), monto(500.0), tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
 
     assert!(procesar_en(2026, 12, 31).is_empty(), "sin fecha no se cobra");
 
@@ -1199,7 +1205,7 @@ fn s14c_una_suscripcion_sin_fecha_lo_dice_en_la_lista() {
 fn s14d_poner_la_fecha_devuelve_la_suscripcion_al_ciclo() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
+    let sub = crear_suscripcion("Plataforma".into(), monto(500.0), tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
     assert!(procesar_en(2026, 3, 20).is_empty(), "parada");
 
     crate::corregir_proximo_cobro(sub, "15/03/2026".into()).unwrap();
@@ -1212,7 +1218,7 @@ fn s14d_poner_la_fecha_devuelve_la_suscripcion_al_ciclo() {
 fn s14e_corregir_con_una_fecha_que_no_se_entiende_se_rechaza() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    let sub = crear_suscripcion("Plataforma".into(), 500.0, tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
+    let sub = crear_suscripcion("Plataforma".into(), monto(500.0), tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
 
     for mala in ["2026-02-15", "15-02-2026", "ayer", "", "31/02/2026", "1009/2026"] {
         assert!(crate::corregir_proximo_cobro(sub, mala.into()).is_err(), "aceptó «{mala}»");
@@ -1236,6 +1242,125 @@ fn s14f_el_esquema_rechaza_una_fecha_sin_forma_de_fecha() {
             assert!(r.is_err(), "el esquema aceptó «{mala}» en {columna}");
         }
     }
+}
+
+// --- El cobro pasa por Dinero y por el registro de gastos ---
+
+fn id_del_ultimo_gasto() -> i64 {
+    conexion()
+        .query_row("SELECT id FROM gastos ORDER BY id DESC LIMIT 1;", [], |r| r.get(0))
+        .expect("leer el último gasto")
+}
+
+#[test]
+fn s20_un_cargo_en_dolares_a_una_tarjeta_que_traduce_queda_pendiente_y_se_puede_liquidar() {
+    // **Lo que el cobro directo se saltaba.** Sin la política de la tarjeta, el
+    // cargo se asentaba como si no hubiera nada que traducir y nunca figuraba
+    // como pendiente: no había forma de registrar lo que el emisor cargó de
+    // verdad. Diez de las once suscripciones del titular son en dólares.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    fijar_politica(tarjeta, "traduce");
+    crear_suscripcion("Plataforma".into(), monto(15.0), tarjeta, "mensual".into(), 1, "USD".into(),
+                      Some("01/03/2026".into())).unwrap();
+
+    procesar_en(2026, 3, 1);
+
+    let gasto = id_del_ultimo_gasto();
+    assert_eq!(estado_conversion(gasto).as_deref(), Some("pendiente"), "queda pendiente de liquidar");
+    let (pesos, dolares) = balances_tarjeta(tarjeta);
+    assert_importe(dolares, 15.0, "la deuda sube en dólares hasta que el emisor informe");
+    assert_importe(pesos, 0.0, "y todavía no existe cifra en pesos");
+
+    // El titular registra lo que el emisor cargó: 15 USD a 60.50 = 907.50.
+    crate::liquidar_consumo_pendiente(gasto, 907.5).unwrap();
+
+    assert_eq!(estado_conversion(gasto).as_deref(), Some("liquidado"));
+    let (pesos, dolares) = balances_tarjeta(tarjeta);
+    assert_importe(dolares, 0.0, "baja de la divisa de origen");
+    assert_importe(pesos, 907.5, "y sube en moneda local");
+}
+
+#[test]
+fn s21_un_cargo_en_dolares_a_una_tarjeta_que_conserva_la_divisa_no_queda_pendiente() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Plataforma".into(), monto(15.0), tarjeta, "mensual".into(), 1, "USD".into(),
+                      Some("01/03/2026".into())).unwrap();
+
+    procesar_en(2026, 3, 1);
+
+    assert_ne!(estado_conversion(id_del_ultimo_gasto()).as_deref(), Some("pendiente"));
+    assert_importe(balances_tarjeta(tarjeta).1, 15.0, "la deuda queda en dólares");
+}
+
+#[test]
+fn s22_las_condiciones_de_una_suscripcion_se_validan_con_un_mensaje_que_se_entiende() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let crear = |m: &str, fre: &str, dia: i32, div: &str| {
+        crear_suscripcion("X".into(), importe(m), tarjeta, fre.into(), dia, div.into(),
+                          Some("01/03/2026".into()))
+    };
+
+    // Un importe que no cobra: cero o negativo abonaría a la tarjeta.
+    assert!(crear("0.00", "mensual", 1, "DOP").unwrap_err().contains("mayor que cero"));
+    assert!(crear("-15.00", "mensual", 1, "DOP").unwrap_err().contains("mayor que cero"));
+    // La divisa, la frecuencia y el día, con su nombre y no con una restricción cruda.
+    assert!(crear("15.00", "mensual", 1, "EUR").unwrap_err().contains("EUR"));
+    assert!(crear("15.00", "semanal", 1, "DOP").unwrap_err().contains("semanal"));
+    assert!(crear("15.00", "mensual", 0, "DOP").unwrap_err().contains("entre 1 y 31"));
+    assert!(crear("15.00", "mensual", 32, "DOP").unwrap_err().contains("entre 1 y 31"));
+
+    let filas: i64 = conexion().query_row("SELECT COUNT(*) FROM suscripciones;", [], |r| r.get(0)).unwrap();
+    assert_eq!(filas, 0, "ninguna llegó a guardarse");
+    assert!(crear("15.00", "mensual", 31, "DOP").is_ok(), "el día 31 sí es un día");
+}
+
+#[test]
+fn s23_el_importe_de_una_suscripcion_lo_deciden_los_digitos_escritos() {
+    // Entra por texto, como el resto de importes: 500.005 sube a 500.01.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("X".into(), importe("500.005"), tarjeta, "mensual".into(), 1,
+                                "DOP".into(), Some("01/03/2026".into())).unwrap();
+
+    let guardado: f64 = conexion()
+        .query_row("SELECT monto FROM suscripciones WHERE id = ?;", [sub], |r| r.get(0))
+        .unwrap();
+    assert_importe(guardado, 500.01, "la regla del sistema, sin binario");
+}
+
+#[test]
+fn s24_editar_una_suscripcion_aplica_las_mismas_reglas() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let sub = crear_suscripcion("X".into(), monto(500.0), tarjeta, "mensual".into(), 1, "DOP".into(),
+                                Some("01/03/2026".into())).unwrap();
+
+    let editar = |m: &str, fre: &str, dia: i32| {
+        crate::actualizar_suscripcion(sub, "X".into(), importe(m), tarjeta, fre.into(), dia,
+                                      "DOP".into(), Some("01/03/2026".into()))
+    };
+    assert!(editar("-1.00", "mensual", 1).is_err());
+    assert!(editar("500.00", "semanal", 1).is_err());
+    assert!(editar("500.00", "mensual", 40).is_err());
+    let guardado: f64 = conexion()
+        .query_row("SELECT monto FROM suscripciones WHERE id = ?;", [sub], |r| r.get(0)).unwrap();
+    assert_importe(guardado, 500.0, "los rechazos no tocaron nada");
+    assert!(editar("600.00", "mensual", 1).is_ok());
+}
+
+#[test]
+fn s25_el_mensaje_del_cobro_automatico_lleva_el_importe_con_dos_decimales() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    crear_suscripcion("Plataforma".into(), monto(500.0), tarjeta, "mensual".into(), 1, "DOP".into(),
+                      Some("01/03/2026".into())).unwrap();
+
+    let mensajes = procesar_en(2026, 3, 1);
+
+    assert!(mensajes[0].contains("DOP 500.00"), "mensaje obtenido: {}", mensajes[0]);
 }
 
 // --- El reloj ---

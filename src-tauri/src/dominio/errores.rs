@@ -30,6 +30,13 @@ pub enum ErrorDominio {
     CargoFijoNoPositivo,
     /// El avance se acredita en la divisa en que se carga a la tarjeta.
     AvanceEnOtraDivisa { cuenta: Divisa, avance: Divisa },
+    /// Una suscripción cobra un importe mayor que cero: uno de cero o negativo
+    /// no cobra, abonaría a la tarjeta cada período.
+    SuscripcionSinImporte,
+    /// El día de facturación tiene que ser un día del mes.
+    DiaDeFacturacionInvalido { dia: i32 },
+    /// La frecuencia no es ninguna de las que admite el esquema.
+    FrecuenciaDesconocida { codigo: String },
 }
 
 impl fmt::Display for ErrorDominio {
@@ -55,6 +62,20 @@ impl fmt::Display for ErrorDominio {
             ErrorDominio::CargoFijoNoPositivo => write!(
                 f,
                 "Un cargo fijo debe ser mayor que cero. Si el avance no paga cargo, márcalo como exonerado."
+            ),
+            ErrorDominio::SuscripcionSinImporte => write!(
+                f,
+                "Una suscripción debe cobrar un importe mayor que cero: con cero o menos no cobraría, abonaría a la tarjeta cada período."
+            ),
+            ErrorDominio::DiaDeFacturacionInvalido { dia } => write!(
+                f,
+                "El día de facturación debe estar entre 1 y 31; se recibió {}.",
+                dia
+            ),
+            ErrorDominio::FrecuenciaDesconocida { codigo } => write!(
+                f,
+                "Frecuencia «{}» desconocida. Las admitidas son mensual y anual.",
+                codigo
             ),
             ErrorDominio::AvanceEnOtraDivisa { cuenta, avance } => write!(
                 f,
