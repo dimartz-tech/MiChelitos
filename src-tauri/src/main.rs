@@ -36,6 +36,7 @@ use aplicacion::registrar_pago_tarjeta::{registrar_pago_tarjeta as registrar_pag
 use aplicacion::revertir_pago_tarjeta::revertir_pago_tarjeta;
 use aplicacion::registrar_avance_de_efectivo::{registrar_avance_de_efectivo, DatosAvance};
 use aplicacion::revertir_avance_de_efectivo::revertir_avance_de_efectivo;
+use aplicacion::cobrar_suscripcion::{cobrar_suscripcion, DatosCobro};
 use dominio::avance::CargoDeAvance;
 use aplicacion::transferir::{revertir_transferencia, transferir, DatosTransferencia};
 use puertos::repositorios::RepositorioCuentas;
@@ -1295,14 +1296,46 @@ fn fecha_desde_texto(texto: &str) -> Option<chrono::NaiveDate> {
 }
 
 #[tauri::command]
-fn crear_suscripcion(plataforma: String, monto: f64, tarjeta_id: i64, frecuencia: String, dia_facturacion: i32, divisa: String, fecha_proximo_cobro: Option<String>) -> Result<i64, String> {
+fn crear_suscripcion(plataforma: String, monto: ipc::ImporteDecimal, tarjeta_id: i64, frecuencia: String, dia_facturacion: i32, divisa: String, fecha_proximo_cobro: Option<String>) -> Result<i64, String> {
     let proximo = validar_proximo_cobro(fecha_proximo_cobro)?;
+    let monto = validar_condiciones_de_suscripcion(monto, &frecuencia, dia_facturacion, &divisa)?;
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO suscripciones (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, fecha_proximo_cobro) VALUES (?, ?, ?, ?, ?, ?, ?);",
         (plataforma, monto, tarjeta_id, frecuencia, dia_facturacion, divisa, proximo)
     ).map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
+}
+
+/// Las condiciones de una suscripción: cuánto, en qué divisa, cada cuánto y
+/// qué día. Devuelve el importe **en unidades**, ya exacto al céntimo.
+///
+/// Antes solo el `CHECK` del esquema atajaba algo, con su mensaje crudo, y
+/// atajaba poco: un importe **negativo o cero** entraba, y cobrarlo abonaba a
+/// la tarjeta cada período; un día de facturación fuera de 1 a 31 también.
+/// Se valida aquí para que el titular lea qué falla y no una restricción.
+fn validar_condiciones_de_suscripcion(
+    monto: ipc::ImporteDecimal,
+    frecuencia: &str,
+    dia_facturacion: i32,
+    divisa: &str,
+) -> Result<f64, String> {
+    let divisa = Divisa::desde_codigo(divisa)?;
+    let importe = monto.con_divisa(divisa);
+    if importe.es_cero() || importe.es_negativo() {
+        return Err(dominio::errores::ErrorDominio::SuscripcionSinImporte.to_string());
+    }
+    if Frecuencia::desde_codigo(frecuencia).is_none() {
+        return Err(dominio::errores::ErrorDominio::FrecuenciaDesconocida {
+            codigo: frecuencia.to_string(),
+        }
+        .to_string());
+    }
+    if !(1..=31).contains(&dia_facturacion) {
+        return Err(dominio::errores::ErrorDominio::DiaDeFacturacionInvalido { dia: dia_facturacion }
+            .to_string());
+    }
+    Ok(importe.unidades())
 }
 
 /// La fecha del próximo cobro tiene que entenderse.
@@ -1337,7 +1370,7 @@ fn validar_proximo_cobro(fecha: Option<String>) -> Result<Option<String>, String
 fn actualizar_suscripcion(
     id: i64,
     plataforma: String,
-    monto: f64,
+    monto: ipc::ImporteDecimal,
     tarjeta_id: i64,
     frecuencia: String,
     dia_facturacion: i32,
@@ -1345,6 +1378,7 @@ fn actualizar_suscripcion(
     fecha_proximo_cobro: Option<String>,
 ) -> Result<(), String> {
     let proximo = validar_proximo_cobro(fecha_proximo_cobro)?;
+    let monto = validar_condiciones_de_suscripcion(monto, &frecuencia, dia_facturacion, &divisa)?;
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let filas = conn
         .execute(
@@ -1427,7 +1461,7 @@ pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> R
         tx.commit().map_err(|e| e.to_string())?;
 
         mensajes.push(format!(
-            "Cargo automático realizado para {} ({} {}) con fecha {}",
+            "Cargo automático realizado para {} ({} {:.2}) con fecha {}",
             sub.plataforma,
             sub.divisa,
             sub.monto,
@@ -1538,19 +1572,25 @@ fn asentar_cargo(
 ) -> Result<(), String> {
     let fecha = vencimiento.format("%d/%m/%Y").to_string();
 
-    let columna = if sub.divisa == "USD" { "balance_dolares" } else { "balance_pesos" };
-    tx.execute(
-        &format!("UPDATE tarjetas SET {c} = ROUND({c} + ?, 2) WHERE id = ?;", c = columna),
-        (sub.monto, sub.tarjeta_id),
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional, tarjeta_id)
-         VALUES (?, ?, ?, ?, ?, 'tarjeta', 0.0, ?);",
-        (&fecha, sub.monto, &sub.divisa, format!("Cargo recurrente: {}", sub.plataforma), categoria, sub.tarjeta_id),
-    )
-    .map_err(|e| e.to_string())?;
+    // El cobro es un consumo con tarjeta: pasa por el mismo caso de uso que
+    // cualquier gasto, y hereda su regla de divisa y la política de la tarjeta.
+    // Antes se escribía SQL directo, con el importe como `f64`, y se saltaba
+    // que un consumo en divisa quede pendiente de liquidar.
+    let divisa = Divisa::desde_codigo(&sub.divisa)?;
+    let monto = Dinero::nuevo(sub.monto, divisa)?;
+    {
+        let mut almacen = AlmacenSqlite::nuevo(tx);
+        cobrar_suscripcion(
+            DatosCobro {
+                plataforma: sub.plataforma.clone(),
+                monto,
+                tarjeta_id: sub.tarjeta_id,
+                fecha: fecha.clone(),
+                categoria_id: categoria,
+            },
+            &mut almacen,
+        )?;
+    }
 
     avanzar_el_puntero(tx, sub.id, regla, vencimiento, Some(&fecha))
 }
