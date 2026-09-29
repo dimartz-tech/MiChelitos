@@ -4,7 +4,21 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.40.0 (Versión Actual) - 2026-09-29
+## 🚀 Versión 1.41.0 (Versión Actual) - 2026-09-29
+**El tramo 4 del redondeo se cierra sin convertir nada: la premisa que lo hace innecesario queda fijada con una prueba.**
+
+### 📏 Qué se midió
+* Un importe con dos decimales viaja como número y da los mismos centavos que sus dígitos: **0 discrepancias** en 2·10⁸ importes exhaustivos y 5·10⁷ muestreados hasta ~10¹⁵ centavos. Con más de dos decimales, 6,6 de cada 100 importes terminados en 5 se deciden distinto: solo pasaría si llegara una fracción de céntimo.
+* Esa fracción no llega: 52 de 61 campos numéricos llevan `step="0.01"` y los otros 9 no son dinero, ningún formulario desactiva la validación, y los 16 envíos de dinero salen de `onsubmit`. **Comprobado a mano en la aplicación empaquetada** (WKWebView): escribir `1.005` en un campo de importe muestra el aviso del navegador y no guarda nada.
+
+### ✅ Qué se añade
+* `src/js/contrato/importes.test.js` (25 pruebas de JavaScript en total): todo campo numérico lleva `step="0.01"` o está declarado por su id exacto como no monetario, sin `novalidate`, con todos los envíos de dinero por `onsubmit` y sin importes calculados en el navegador. Cinco mutaciones, las cinco fallan.
+* Corrección al análisis: eran **16** flujos con dinero, no 12; los cuatro que llegan en una estructura pasan por los mismos formularios.
+* Se retoma la conversión a `ImporteDecimal` solo si aparece una vía que envíe importes sin formulario o si el navegador dejara de aplicar el `step`.
+
+---
+
+## 🚀 Versión 1.40.0 - 2026-09-29
 **La comisión de un abono ya no se puede borrar por separado.**
 
 ### 🛡️ Qué se corrige
