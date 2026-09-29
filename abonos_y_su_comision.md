@@ -1,6 +1,6 @@
 # Abonos: la comisión que se puede borrar por separado
 
-Estado: **defecto conocido, fijado con una prueba (`c136`), sin corregir.** Este documento es el plan.
+Estado: **corregido en 1.40.0.** Este documento recoge el defecto, la corrección y lo que no se hizo.
 
 ## Qué pasa hoy
 Un abono a tarjeta pagado desde una cuenta crea dos cosas: el abono (`pagos_tarjeta`) y un gasto con su comisión (`gastos`, método `transferencia`), enlazado por `pagos_tarjeta.gasto_comision_id`. Ese gasto aparece en la lista de gastos y **se puede borrar por separado**:
@@ -14,14 +14,11 @@ Es la misma clase de defecto que tuvo el cargo del avance de efectivo, que sí e
 ## En los datos reales
 Comprobado en solo lectura con una consulta agregada: ningún abono con comisión ha perdido su gasto enlazado. **No ha ocurrido.** (No se anotan aquí cifras ni importes de los datos vivos.)
 
-## Corrección propuesta (pendiente de visto bueno)
-1. **Guarda por lista, como la de eliminar cuenta.** Las claves foráneas hacia `gastos` son tres: `pagos_tarjeta.gasto_comision_id` (comisión de un abono), `avances_efectivo.gasto_cargo_id` (cargo de un avance) y `bonificaciones.gasto_id` (vínculo informativo, el gasto no depende de él). Una lista `GASTOS_DERIVADOS` con las dos primeras y el motivo de cada una sustituye la comprobación suelta del avance en `eliminar_gasto`.
-2. **Prueba de esquema**, como `toda_clave_ajena_hacia_una_cuenta_esta_declarada…`: toda clave foránea hacia `gastos` debe estar en `GASTOS_DERIVADOS` o en la lista de vínculos informativos. Una tabla nueva que enlace un gasto **falla la prueba** hasta que alguien decida.
-3. **Mensaje** parecido al del avance: «Este gasto es la comisión de un abono. Revierte el abono completo…».
-4. `c136` se convierte en la prueba de que se rechaza y la cuenta no cambia; se añade una para el avance (ya cubierto por `c123`) usando la misma lista.
+## Corrección (1.40.0)
+1. **Guarda por lista**: `db_sql::GASTOS_DERIVADOS` declara qué gastos creó otra operación y por qué no se borran solos (el cargo de un avance y la comisión de un abono); `motivo_de_no_borrar_gasto` la consulta y `eliminar_gasto` la aplica. Sustituye la comprobación suelta del avance, con el mismo mensaje.
+2. **Prueba de esquema** (`toda_clave_ajena_hacia_un_gasto_esta_declarada_como_derivada_o_informativa`): toda clave foránea real hacia `gastos` debe estar en `GASTOS_DERIVADOS` o en `VINCULOS_INFORMATIVOS_CON_GASTOS` (hoy, `bonificaciones.gasto_id`, que solo informa). Una tabla nueva que enlace un gasto falla la prueba hasta que alguien decida.
+3. Pruebas: `c136` (se rechaza y nada se mueve), `c137` (revertir el abono deja la cuenta exacta), `c138` (un gasto con bonificación sí se borra). `c133` reproduce con SQL directo el estado que ya no se puede provocar desde la aplicación.
+4. Sin migración: no hay datos afectados.
 
-## Qué no cambia
-Revertir el abono completo sigue borrando la comisión, como hasta ahora (`c64`). Los datos existentes no se tocan: no hay migración.
-
-## Preguntas abiertas
-* Si un abono ya perdió su vínculo (caso hipotético, no presente en los datos), ¿se ofrece reparar?: **propuesta: no**, se documenta y se rechaza revertirlo a ciegas.
+## Lo que no se hizo, y por qué
+Se había propuesto también **rechazar revertir un abono que perdió su vínculo**. No se implementó: un abono con cuenta y comisión pero sin gasto enlazado **no se distingue** de un abono histórico legítimo (las pruebas de reversión ya lo dan por válido), así que rechazarlo bloquearía casos que hoy funcionan. Como el vínculo solo se perdía al borrar la comisión por separado, y eso ya no es posible, el caso no puede aparecer de nuevo. Si algún día apareciera, se trataría como un caso aparte, con los datos delante.

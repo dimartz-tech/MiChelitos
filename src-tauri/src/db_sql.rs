@@ -524,6 +524,54 @@ pub const RELACIONES_CON_CUENTAS: &[(&str, &str)] = &[
     ("avances_efectivo", "cuenta_ahorro_id"),
 ];
 
+/// Gastos que **no se pueden borrar por separado** porque otra operación los
+/// creó y depende de ellos: (tabla, columna que apunta al gasto, motivo).
+///
+/// Borrar uno sin la operación que lo creó devuelve su importe a la cuenta o
+/// baja la deuda de la tarjeta, mientras la operación conserva anotado que ese
+/// importe salió: al revertirla después se devuelve **otra vez**. Como la clave
+/// foránea es `SET NULL`, nada lo impide ni deja rastro.
+///
+/// Una prueba compara esta lista, junto con `VINCULOS_INFORMATIVOS_CON_GASTOS`,
+/// con las claves ajenas **reales** hacia `gastos`: una relación nueva sin
+/// declarar hace fallar las pruebas, en lugar de dejar el borrado silencioso.
+pub const GASTOS_DERIVADOS: &[(&str, &str, &str)] = &[
+    (
+        "avances_efectivo",
+        "gasto_cargo_id",
+        "Este gasto es el cargo de un avance de efectivo. Revierte el avance completo: es la única forma de que la deuda de la tarjeta y la cuenta sigan cuadrando.",
+    ),
+    (
+        "pagos_tarjeta",
+        "gasto_comision_id",
+        "Este gasto es la comisión de un abono a tarjeta. Revierte el abono completo: es la única forma de que la cuenta y la deuda de la tarjeta sigan cuadrando.",
+    ),
+];
+
+/// Claves ajenas hacia `gastos` que solo **informan**: el gasto existe por sí
+/// mismo y borrarlo no descuadra nada (la bonificación queda sin gasto de
+/// referencia).
+pub const VINCULOS_INFORMATIVOS_CON_GASTOS: &[(&str, &str)] = &[("bonificaciones", "gasto_id")];
+
+/// Si el gasto lo creó otra operación, devuelve por qué no se puede borrar solo.
+pub fn motivo_de_no_borrar_gasto(
+    tx: &Transaction,
+    gasto_id: i64,
+) -> rusqlite::Result<Option<&'static str>> {
+    for (tabla, columna, motivo) in GASTOS_DERIVADOS {
+        // Tabla y columna son constantes de esta lista, nunca entrada externa.
+        let n: i64 = tx.query_row(
+            &format!("SELECT COUNT(*) FROM {tabla} WHERE {columna} = ?;"),
+            [gasto_id],
+            |r| r.get(0),
+        )?;
+        if n > 0 {
+            return Ok(Some(motivo));
+        }
+    }
+    Ok(None)
+}
+
 pub const COLUMNAS_DE_TASA: &[(&str, &str)] = &[
     ("avances_efectivo", "tasa"),
     ("gastos", "tasa_conversion"),
