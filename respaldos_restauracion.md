@@ -17,6 +17,7 @@
 
 ## Qué garantiza
 * Se rechaza un respaldo que no abre, no es íntegro, tiene referencias rotas o es de un esquema más nuevo. En esos casos no cambia nada.
+* La copia del estado actual se toma **aunque esté dañado**; si no supera la verificación lleva `-sin-verificar` en el nombre y la aplicación no la vuelve a restaurar (queda para rescatar datos a mano).
 * La base se sustituye con un renombrado atómico y se descartan los archivos `-wal`/`-shm` de la anterior.
 
 ## Límites
