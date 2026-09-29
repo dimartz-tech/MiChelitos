@@ -45,6 +45,10 @@ pub struct AlmacenEnMemoria {
     pub transferencias: HashMap<i64, TransferenciaGuardada>,
     pub pagos: HashMap<i64, PagoGuardado>,
     pub avances: HashMap<i64, AvanceGuardado>,
+    /// Cuentas en las que se cobró una factura. El doble no modela ingresos;
+    /// basta saber a qué cuenta apuntan para ejercitar la guarda de borrado.
+    pub ingresos_en_cuenta: Vec<i64>,
+    pub informales_en_cuenta: Vec<i64>,
     pub falla_al_insertar: bool,
     /// Cuando está activo, `ajustar_deuda` falla. Permite comprobar que un
     /// fallo a mitad de operación no deja saldos alterados.
@@ -173,6 +177,18 @@ impl AlmacenEnMemoria {
     pub fn con_tarjeta(mut self, id: i64, deuda: Dinero) -> Self {
         self.tarjetas.insert(id);
         self.deudas.insert((id, deuda.divisa()), deuda);
+        self
+    }
+
+    /// Una factura cobrada en esa cuenta.
+    pub fn con_factura_cobrada_en(mut self, cuenta_id: i64) -> Self {
+        self.ingresos_en_cuenta.push(cuenta_id);
+        self
+    }
+
+    /// Un ingreso informal cobrado en esa cuenta.
+    pub fn con_informal_cobrado_en(mut self, cuenta_id: i64) -> Self {
+        self.informales_en_cuenta.push(cuenta_id);
         self
     }
 
@@ -338,10 +354,6 @@ impl RepositorioAvances for AlmacenEnMemoria {
             .map(|_| ())
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "avance", id: avance_id })
     }
-
-    fn avances_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
-        Ok(self.avances.values().filter(|a| a.cuenta_ahorro_id == cuenta_id).count() as i64)
-    }
 }
 
 impl RepositorioBonificaciones for AlmacenEnMemoria {
@@ -434,11 +446,33 @@ impl RepositorioCuentas for AlmacenEnMemoria {
         Ok(self.cajas.values().any(|&id| id == cuenta_id))
     }
 
-    fn gastos_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
+    fn referencias_a_la_cuenta(&self, cuenta_id: i64) -> Result<Vec<ReferenciaACuenta>, ErrorAlmacen> {
         if !self.cuentas.contains_key(&cuenta_id) {
             return Err(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id });
         }
-        Ok(self.gastos.values().filter(|g| g.cuenta_ahorro_id == Some(cuenta_id)).count() as i64)
+        let contar = |ids: &[i64]| ids.iter().filter(|&&c| c == cuenta_id).count() as i64;
+        let cuentas_de_gastos: Vec<i64> =
+            self.gastos.values().filter_map(|g| g.cuenta_ahorro_id).collect();
+        let origenes: Vec<i64> = self.transferencias.values().map(|t| t.origen_id).collect();
+        let destinos: Vec<i64> = self.transferencias.values().map(|t| t.destino_id).collect();
+        let pagos: Vec<i64> = self.pagos.values().filter_map(|p| p.cuenta_ahorro_id).collect();
+        let avances: Vec<i64> = self.avances.values().map(|a| a.cuenta_ahorro_id).collect();
+
+        // El mismo orden y los mismos nombres que `RELACIONES_CON_CUENTAS`.
+        let todas: [(&'static str, &'static str, i64); 7] = [
+            ("gastos", "cuenta_ahorro_id", contar(&cuentas_de_gastos)),
+            ("transacciones_cuentas", "cuenta_origen_id", contar(&origenes)),
+            ("transacciones_cuentas", "cuenta_destino_id", contar(&destinos)),
+            ("ingresos", "cuenta_ahorro_id", contar(&self.ingresos_en_cuenta)),
+            ("ingresos_informales", "cuenta_ahorro_id", contar(&self.informales_en_cuenta)),
+            ("pagos_tarjeta", "cuenta_ahorro_id", contar(&pagos)),
+            ("avances_efectivo", "cuenta_ahorro_id", contar(&avances)),
+        ];
+        Ok(todas
+            .into_iter()
+            .filter(|(_, _, n)| *n > 0)
+            .map(|(tabla, columna, cantidad)| ReferenciaACuenta { tabla, columna, cantidad })
+            .collect())
     }
 
     fn eliminar_cuenta(&mut self, cuenta_id: i64) -> Result<(), ErrorAlmacen> {
@@ -697,13 +731,5 @@ impl RepositorioTransferencias for AlmacenEnMemoria {
             .remove(&id)
             .map(|_| ())
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "transferencia", id })
-    }
-
-    fn transferencias_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
-        Ok(self
-            .transferencias
-            .values()
-            .filter(|t| t.origen_id == cuenta_id || t.destino_id == cuenta_id)
-            .count() as i64)
     }
 }

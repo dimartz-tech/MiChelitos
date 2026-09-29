@@ -38,9 +38,10 @@ toca.
 
 ## Decisiones tomadas sin que estuvieran especificadas
 
-1. **El cargo lo paga la tarjeta, no la cuenta.** Es como lo asienta el emisor.
-   Si en algún caso el banco lo descuenta del monto acreditado, la regla cambia
-   aquí y en el caso de uso.
+1. **El cargo lo paga la tarjeta, no la cuenta.** *Confirmada por el titular el
+   2026-09-29:* la cuenta recibe el monto solicitado íntegro, sumado a su
+   balance. Si en algún caso el banco lo descuenta del monto acreditado, la
+   regla cambia aquí y en el caso de uso.
 2. **Misma divisa.** Un avance se acredita en la divisa en que se carga. Una
    cuenta en otra divisa se rechaza en vez de convertir: convertir sería
    inventar una tasa que nadie ha declarado.
@@ -49,7 +50,8 @@ toca.
    el cargo y dejaría el avance con un cargo que ya no existe. El comando
    `eliminar_gasto` lo rechaza y exige revertir el avance entero.
 4. **Una cuenta que recibió un avance no se elimina.** Borrarla se llevaría el
-   rastro de la tarjeta de la que salió el dinero.
+   rastro de la tarjeta de la que salió el dinero. Es una de las relaciones de
+   `RELACIONES_CON_CUENTAS`, la lista que gobierna el borrado de cuentas.
 
 ## Se puede deshacer
 
