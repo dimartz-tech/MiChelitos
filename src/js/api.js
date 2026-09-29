@@ -284,7 +284,8 @@ const AppAPI = {
     async crearSuscripcion(plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaProximoCobro = null) {
         return await invoke('crear_suscripcion', {
             plataforma,
-            monto: Number(monto),
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            monto: String(monto),
             tarjetaId: Number(tarjetaId),
             frecuencia,
             diaFacturacion: Number(diaFacturacion),
@@ -299,7 +300,8 @@ const AppAPI = {
         return await invoke('actualizar_suscripcion', {
             id: Number(id),
             plataforma,
-            monto: Number(monto),
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            monto: String(monto),
             tarjetaId: Number(tarjetaId),
             frecuencia,
             diaFacturacion: Number(diaFacturacion),

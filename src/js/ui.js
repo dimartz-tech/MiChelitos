@@ -3522,7 +3522,7 @@ class AppUI {
     async handleAgregarSuscripcion(e) {
         e.preventDefault();
         const pla = document.getElementById('sus_pla').value;
-        const mon = Number(document.getElementById('sus_mon').value);
+        const mon = document.getElementById('sus_mon').value.trim();
         const div = document.getElementById('sus_div').value;
         const dia = Number(document.getElementById('sus_dia').value);
         const fre = document.getElementById('sus_fre').value;
@@ -3607,7 +3607,7 @@ class AppUI {
     async handleEdicionSuscripcionSubmit(e, id) {
         e.preventDefault();
         const pla = document.getElementById(`es_pla_${id}`).value.trim();
-        const mon = Number(document.getElementById(`es_mon_${id}`).value);
+        const mon = document.getElementById(`es_mon_${id}`).value.trim();
         const div = document.getElementById(`es_div_${id}`).value;
         const dia = Number(document.getElementById(`es_dia_${id}`).value);
         const fre = document.getElementById(`es_fre_${id}`).value;
