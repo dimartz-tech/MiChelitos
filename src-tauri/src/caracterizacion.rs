@@ -3127,23 +3127,116 @@ fn c106_una_propiedad_no_lleva_ni_lleva_campos_calculados() {
 }
 
 #[test]
-fn c107_guardar_capital_no_valida_los_importes_declarados() {
-    // DIVERGENCIA DECLARADA, sin resolver. A diferencia del resto del
-    // sistema, el capital no pasa por `Dinero`: un monto negativo, con
-    // fracción de céntimo o directamente ilegible se guarda tal cual. Es la
-    // vía de dinero menos vigilada del proyecto, y queda fuera de esta
-    // entrega por «menor densidad de reglas» — el motivo por el que esta
-    // fase va al final del plan.
+fn c107_guardar_capital_rechaza_lo_que_antes_aceptaba_sin_comprobar() {
+    // **CAMBIO DE CONDUCTA — cierra la divergencia declarada en la Fase 6.**
+    //
+    // Antes el capital era la única vía de dinero que no pasaba por `Dinero`:
+    // un monto negativo, con fracción de céntimo o ilegible, una tasa negativa
+    // y una fecha que no existe se guardaban tal cual. Ahora se rechazan, y
+    // el archivo queda como estaba.
+    let _g = entorno_aislado();
+    let bueno = capital_con_una_entrada("certificados", "31/12/2030");
+    escribir_capital_de_prueba(&bueno);
+
+    for (que, entrada) in [
+        ("monto negativo", serde_json::json!({"banco": "X", "monto": -500.0, "tasa": 5.0, "vencimiento": "31/12/2030"})),
+        ("fracción de céntimo", serde_json::json!({"banco": "X", "monto": 500.005, "tasa": 5.0, "vencimiento": "31/12/2030"})),
+        ("monto ilegible", serde_json::json!({"banco": "X", "monto": "abc", "tasa": 5.0, "vencimiento": "31/12/2030"})),
+        ("tasa negativa", serde_json::json!({"banco": "X", "monto": 500.0, "tasa": -1.0, "vencimiento": "31/12/2030"})),
+        ("fecha inexistente", serde_json::json!({"banco": "X", "monto": 500.0, "tasa": 5.0, "vencimiento": "31/02/2030"})),
+        ("fecha en otro formato", serde_json::json!({"banco": "X", "monto": 500.0, "tasa": 5.0, "vencimiento": "2030-12-31"})),
+    ] {
+        let mut datos = bueno.clone();
+        datos["certificados"].as_array_mut().unwrap().push(entrada);
+        let r = crate::guardar_capital(datos);
+        assert!(r.is_err(), "aceptó {que}");
+        assert!(r.unwrap_err().contains("Certificado 2"), "el error no dice cuál entrada: {que}");
+    }
+    assert_eq!(capital_en_disco(), bueno, "un guardado rechazado no toca el archivo");
+}
+
+#[test]
+fn c108b_un_importe_escrito_como_texto_se_guarda_como_numero_y_lo_deciden_los_digitos() {
+    // El formato en disco no cambia —la aplicación instalada lee el mismo
+    // archivo—, pero al entrar, el céntimo lo deciden los dígitos.
+    let _g = entorno_aislado();
+    let mut datos = capital_con_una_entrada("certificados", "31/12/2030");
+    datos["bolsa"] = serde_json::json!([{"emisor": "Emisor Ejemplo", "monto": "1234.565", "tasa": 6.25, "vencimiento": "01/01/2031"}]);
+
+    crate::guardar_capital(datos).unwrap();
+
+    let en_disco = capital_en_disco();
+    assert_eq!(en_disco["bolsa"][0]["monto"], serde_json::json!(1234.57), "un número, y el 5 sube");
+    assert!(en_disco["bolsa"][0]["monto"].is_number());
+}
+
+#[test]
+fn c109b_una_entrada_antigua_mal_formada_no_bloquea_borrar_otra() {
+    // Sin edición en la interfaz, la única salida para una entrada mala es
+    // borrarla; exigir todo cada vez impediría borrar cualquier otra antes.
+    let _g = entorno_aislado();
+    let antigua = serde_json::json!({"banco": "Antiguo", "monto": -500.005, "tasa": -1.0, "vencimiento": "no es una fecha"});
+    let mut guardado = capital_con_una_entrada("certificados", "31/12/2030");
+    guardado["certificados"].as_array_mut().unwrap().push(antigua.clone());
+    // Se siembra saltándose el comando, como si viniera de antes.
+    crate::db_nosql::guardar_coleccion("capital", &guardado).unwrap();
+
+    // Se borra la buena y la antigua vuelve tal cual, como hace la interfaz.
+    let mut datos = crate::obtener_capital().unwrap();
+    datos["certificados"].as_array_mut().unwrap().remove(0);
+    assert!(crate::guardar_capital(datos).is_ok(), "no debe bloquear por una entrada que no se tocó");
+    assert_eq!(capital_en_disco()["certificados"][0]["banco"], "Antiguo");
+
+    // Y borrar la antigua también se puede.
+    let mut datos = crate::obtener_capital().unwrap();
+    datos["certificados"].as_array_mut().unwrap().clear();
+    assert!(crate::guardar_capital(datos).is_ok());
+}
+
+#[test]
+fn c110b_obtener_capital_trae_los_totales_sumados_en_centavos() {
     let _g = entorno_aislado();
     let datos = serde_json::json!({
-        "propiedades": {"inmobiliario": [], "vehiculos": [], "maquinaria": []},
-        "certificados": [{"banco": "X", "monto": -500.005, "tasa": -1.0, "vencimiento": "no es una fecha"}],
+        "propiedades": {"inmobiliario": [{"id": "1", "nombre": "Casa", "subtipo": "r", "valor_estimado": 100000.10},
+                                          {"id": "2", "nombre": "Local", "subtipo": "c", "valor_estimado": 200000.20}],
+                          "vehiculos": [], "maquinaria": []},
+        "certificados": [{"banco": "A", "monto": 0.1, "tasa": 8.0, "vencimiento": "31/12/2030"},
+                         {"banco": "B", "monto": 0.2, "tasa": 8.0, "vencimiento": "31/12/2030"}],
         "bolsa": [],
     });
+    crate::guardar_capital(datos).unwrap();
 
-    assert!(crate::guardar_capital(datos).is_ok(), "hoy se acepta sin comprobar nada");
-    let en_disco = capital_en_disco();
-    assert_eq!(en_disco["certificados"][0]["monto"], -500.005);
+    let t = &crate::obtener_capital().unwrap()["totales"];
+
+    assert_eq!(t["certificados"], serde_json::json!(0.3), "0.1 + 0.2, sin el ruido de la coma flotante");
+    assert_eq!(t["inmobiliario"], serde_json::json!(300000.3));
+    assert_eq!(t["patrimonio"], serde_json::json!(300000.6));
+}
+
+#[test]
+fn c111b_los_totales_no_se_guardan_aunque_la_interfaz_los_devuelva() {
+    // Igual que la alerta de vencimiento: se calculan al leer, y la interfaz
+    // guarda el documento entero de vuelta.
+    let _g = entorno_aislado();
+    escribir_capital_de_prueba(&capital_con_una_entrada("certificados", "31/12/2030"));
+
+    let leido = crate::obtener_capital().unwrap();
+    assert!(leido.get("totales").is_some(), "obtener sí los trae");
+    crate::guardar_capital(leido).unwrap();
+
+    assert!(capital_en_disco().get("totales").is_none(), "no deben quedar en el archivo");
+}
+
+#[test]
+fn c112b_un_identificador_de_bien_repetido_se_rechaza() {
+    let _g = entorno_aislado();
+    let datos = serde_json::json!({
+        "propiedades": {"inmobiliario": [{"id": "7", "nombre": "A", "subtipo": "r", "valor_estimado": 10.0}],
+                          "vehiculos": [{"id": "7", "nombre": "B", "subtipo": "s", "valor_estimado": 20.0}],
+                          "maquinaria": []},
+        "certificados": [], "bolsa": [],
+    });
+    assert!(crate::guardar_capital(datos).unwrap_err().contains("repetido"));
 }
 
 // =====================================================================

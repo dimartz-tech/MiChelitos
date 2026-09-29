@@ -4,7 +4,30 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.33.0 (Versión Actual) - 2026-09-29
+## 🚀 Versión 1.34.0 (Versión Actual) - 2026-09-29
+**El capital pasa por `Dinero`: cierra la última vía de dinero que se guardaba sin comprobar nada.**
+
+### 💰 Qué se exige al guardar
+* Un importe **positivo y exacto al céntimo**, una tasa de 0 a 100, una fecha `dd/mm/aaaa` que **exista**, un emisor o nombre no vacío y un identificador de bien único. Antes se guardaba tal cual un monto negativo, una tasa del 850 % o un `31/02`.
+* El mensaje dice **qué entrada y qué campo** —«Certificado 2 (Banco X): el monto no puede ser negativo»—: el capital se guarda entero y un error genérico deja al titular buscando entre todas.
+* Una tasa absurda sugiere lo que probablemente se quiso escribir: `850` propone `8.5`.
+
+### 🕰️ Solo lo que entra o cambia
+* El documento se guarda completo en cada acción, así que exigir todo cada vez bloquearía por una entrada antigua que no se tocó, y como no hay edición la única salida sería borrarla. **Lo ya guardado que vuelve idéntico se conserva**; lo nuevo y lo modificado pasa por las reglas. La comparación no distingue `500` de `500.0`.
+
+### 🔌 El formato en disco no cambia
+* Los importes siguen siendo **números** exactos al céntimo, porque la aplicación instalada lee el mismo archivo. Al entrar se admite también un importe como **texto**, tal como se escribió, y lo deciden los dígitos. Un **número** que llega con fracción de céntimo se rechaza en vez de redondearse.
+
+### ➕ Los totales se suman en el núcleo
+* Antes había dos sumas de decimales en JavaScript (el panel y el resumen) con el ruido de coma flotante que eso arrastra. Ahora se suman en centavos enteros en el núcleo. Como la alerta de vencimiento, se calculan al leer y **no se guardan**.
+
+### ✅ Comprobado con datos reales
+* Contra el `capital.json` real: la validación estricta lo acepta entero, leer y guardar de vuelta lo deja idéntico, y el patrimonio coincide con una suma independiente en enteros.
+* Cinco mutaciones, las cinco fallan: perder la excepción de lo ya guardado, no validar nunca, guardar los totales, redondear una fracción en silencio y aceptar un monto de cero.
+
+---
+
+## 🚀 Versión 1.33.0 - 2026-09-29
 **Eliminar una cuenta protege ya todas las relaciones que la referencian, y una prueba impide que una nueva quede sin guarda.**
 
 ### 🕳️ El hueco
