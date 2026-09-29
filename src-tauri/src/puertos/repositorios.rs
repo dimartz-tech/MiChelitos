@@ -283,8 +283,6 @@ pub trait RepositorioAvances {
     fn insertar_avance(&mut self, avance: &AvanceAPersistir) -> Result<i64, ErrorAlmacen>;
     fn obtener_avance(&self, avance_id: i64) -> Result<AvanceGuardado, ErrorAlmacen>;
     fn eliminar_avance(&mut self, avance_id: i64) -> Result<(), ErrorAlmacen>;
-    /// Cuántos avances acreditaron esta cuenta. Guarda su borrado.
-    fn avances_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen>;
 }
 
 /// Persistencia de un avance: el registro, la deuda que sube, la cuenta que
@@ -297,6 +295,14 @@ pub trait AlmacenAvances:
 impl<T> AlmacenAvances for T where
     T: RepositorioAvances + RepositorioTarjetas + RepositorioCuentas + RepositorioGastos
 {
+}
+
+/// Una relación que todavía apunta a una cuenta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReferenciaACuenta {
+    pub tabla: &'static str,
+    pub columna: &'static str,
+    pub cantidad: i64,
 }
 
 pub trait RepositorioCuentas {
@@ -339,8 +345,13 @@ pub trait RepositorioCuentas {
     /// una guarda explícita, y por eso el puerto expone la pregunta.
     fn es_caja(&self, cuenta_id: i64) -> Result<bool, ErrorAlmacen>;
 
-    /// Cuántos gastos referencian la cuenta. Es la guarda vigente del borrado.
-    fn gastos_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen>;
+    /// Qué relaciones apuntan todavía a esta cuenta, y cuántas filas cada una.
+    ///
+    /// Solo devuelve las que tienen filas. Recorre `RELACIONES_CON_CUENTAS`,
+    /// la lista que una prueba compara con las claves ajenas del esquema: así
+    /// la guarda de borrado cubre todas las relaciones que existen y no las
+    /// que alguien recordó escribir.
+    fn referencias_a_la_cuenta(&self, cuenta_id: i64) -> Result<Vec<ReferenciaACuenta>, ErrorAlmacen>;
 
     fn eliminar_cuenta(&mut self, cuenta_id: i64) -> Result<(), ErrorAlmacen>;
 }
@@ -381,26 +392,9 @@ pub trait RepositorioTransferencias {
 
     fn eliminar_transferencia(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
 
-    /// Cuántas transferencias tienen la cuenta en alguno de sus extremos.
-    ///
-    /// La guarda de borrado no lo consulta hoy (**H13**), y como la clave
-    /// foránea es `ON DELETE CASCADE`, borrar la cuenta se lleva su historial
-    /// en silencio. El puerto lo expone para que el caso de uso pueda
-    /// decidirlo cuando se resuelva el hallazgo.
-    fn transferencias_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen>;
 }
 
 /// Persistencia que necesita una operación sobre transferencias.
-///
-/// Incluye `RepositorioAvances` solo para la guarda de borrado de cuentas: una
-/// cuenta que recibió un avance no se elimina, porque borrarla se llevaría el
-/// rastro de dónde salió ese dinero.
-pub trait AlmacenTransferencias:
-    RepositorioCuentas + RepositorioTransferencias + RepositorioAvances
-{
-}
+pub trait AlmacenTransferencias: RepositorioCuentas + RepositorioTransferencias {}
 
-impl<T> AlmacenTransferencias for T where
-    T: RepositorioCuentas + RepositorioTransferencias + RepositorioAvances
-{
-}
+impl<T> AlmacenTransferencias for T where T: RepositorioCuentas + RepositorioTransferencias {}

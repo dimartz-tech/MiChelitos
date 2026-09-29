@@ -3547,3 +3547,97 @@ fn c129_simular_rechaza_lo_mismo_que_registrar() {
     assert!(crate::simular_avance_efectivo(importe("0.00"), "DOP".into(), "exonerado".into(), None, None).is_err());
     assert!(crate::simular_avance_efectivo(importe("1350.00"), "EUR".into(), "exonerado".into(), None, None).is_err());
 }
+
+// =====================================================================
+//  Eliminar una cuenta — todas las relaciones que la referencian
+// =====================================================================
+//
+// Las claves ajenas de facturas cobradas, ingresos informales y abonos son
+// `SET NULL`: borrar la cuenta se permitía y dejaba el cobro «pagado» sin
+// constancia de dónde entró el dinero. Se reprodujo antes de corregir: una
+// factura cobrada, la cuenta borrada sin error, la factura pagada con
+// `cuenta_ahorro_id` nulo, y borrar esa factura después sin devolver nada a
+// ninguna parte.
+
+#[test]
+fn c130_una_cuenta_con_una_factura_cobrada_en_ella_no_se_puede_eliminar() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
+    let id = crear_ingreso(factura("Z-001", 5_000.0, 15.0)).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 4_250.0).unwrap();
+
+    let error = crate::eliminar_cuenta(cuenta).unwrap_err();
+
+    assert!(error.contains("facturas"), "explica por qué: {error}");
+    let destino: Option<i64> = conexion()
+        .query_row("SELECT cuenta_ahorro_id FROM ingresos WHERE id = ?;", [id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(destino, Some(cuenta), "la factura conserva su cuenta de depósito");
+}
+
+#[test]
+fn c131_revertida_la_factura_la_cuenta_vuelve_a_poder_eliminarse() {
+    // La guarda no puede volverse un candado: al deshacer el cobro, se levanta.
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
+    let id = crear_ingreso(factura("Z-002", 5_000.0, 15.0)).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 4_250.0).unwrap();
+    assert!(crate::eliminar_cuenta(cuenta).is_err());
+
+    eliminar_ingreso(id, motivo_de_prueba()).unwrap();
+
+    assert!(crate::eliminar_cuenta(cuenta).is_ok());
+}
+
+#[test]
+fn c132_una_cuenta_con_un_ingreso_informal_cobrado_en_ella_no_se_puede_eliminar() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
+    let id = crear_ingreso_informal("20/09/2026".into(), "Trabajo puntual".into(), 3_000.0).unwrap();
+    marcar_informal_pagado(id, cuenta, "20/09/2026".into(), 3_000.0).unwrap();
+
+    let error = crate::eliminar_cuenta(cuenta).unwrap_err();
+
+    assert!(error.contains("informales"), "explica por qué: {error}");
+}
+
+#[test]
+fn c133_una_cuenta_que_pago_un_abono_no_se_elimina_aunque_borren_el_gasto_de_su_comision() {
+    // Antes solo la frenaba, de rebote, el gasto de la comisión del abono. Ese
+    // gasto se puede borrar por separado, y con él caía la única protección.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(1_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000.0);
+    registrar_pago_tarjeta(tarjeta, "20/09/2026".into(), 500.0, "DOP".into(), Some(cuenta), 0.0).unwrap();
+    let gasto_comision: i64 = conexion()
+        .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
+        .unwrap();
+    eliminar_gasto(gasto_comision, motivo_de_prueba()).unwrap();
+    assert_eq!(total_gastos(), 0, "la comisión ya no existe como gasto");
+
+    let error = crate::eliminar_cuenta(cuenta).unwrap_err();
+
+    assert!(error.contains("abonos"), "explica por qué: {error}");
+}
+
+#[test]
+fn c134_las_guardas_que_ya_existian_siguen_diciendo_lo_mismo() {
+    // La lista sustituyó a tres comprobaciones sueltas; los mensajes que ya
+    // conocía el titular no cambian.
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Origen", "DOP", 1_000.0);
+    let destino = crear_cuenta("Destino", "DOP", 0.0);
+    crate::transferir_entre_cuentas("20/09/2026".into(), origen, destino, 500.0, 500.0, 0.0, "x".into()).unwrap();
+
+    let error = crate::eliminar_cuenta(destino).unwrap_err();
+
+    assert!(error.contains("transferencias"), "{error}");
+    assert!(error.contains("historial"), "{error}");
+}
+
+#[test]
+fn c135_una_cuenta_sin_ninguna_relacion_si_se_elimina() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
+    assert!(crate::eliminar_cuenta(cuenta).is_ok());
+}

@@ -411,14 +411,24 @@ impl RepositorioCuentas for AlmacenSqlite<'_> {
         Ok(marca == 1)
     }
 
-    fn gastos_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
-        self.tx
-            .query_row(
-                "SELECT COUNT(*) FROM gastos WHERE cuenta_ahorro_id = ?;",
-                [cuenta_id],
-                |r| r.get(0),
-            )
-            .map_err(fallo)
+    fn referencias_a_la_cuenta(&self, cuenta_id: i64) -> Result<Vec<ReferenciaACuenta>, ErrorAlmacen> {
+        let mut referencias = Vec::new();
+        for (tabla, columna) in crate::db_sql::RELACIONES_CON_CUENTAS {
+            // Los identificadores salen de una constante del propio código,
+            // nunca de la entrada: no hay nada que escapar.
+            let cantidad: i64 = self
+                .tx
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {tabla} WHERE {columna} = ?;"),
+                    [cuenta_id],
+                    |r| r.get(0),
+                )
+                .map_err(fallo)?;
+            if cantidad > 0 {
+                referencias.push(ReferenciaACuenta { tabla, columna, cantidad });
+            }
+        }
+        Ok(referencias)
     }
 
     fn eliminar_cuenta(&mut self, cuenta_id: i64) -> Result<(), ErrorAlmacen> {
@@ -687,17 +697,6 @@ impl RepositorioTransferencias for AlmacenSqlite<'_> {
         }
         Ok(())
     }
-
-    fn transferencias_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
-        self.tx
-            .query_row(
-                "SELECT COUNT(*) FROM transacciones_cuentas
-                 WHERE cuenta_origen_id = ? OR cuenta_destino_id = ?;",
-                [cuenta_id, cuenta_id],
-                |r| r.get(0),
-            )
-            .map_err(fallo)
-    }
 }
 
 impl RepositorioAvances for AlmacenSqlite<'_> {
@@ -763,15 +762,5 @@ impl RepositorioAvances for AlmacenSqlite<'_> {
             return Err(ErrorAlmacen::NoEncontrado { entidad: "avance", id: avance_id });
         }
         Ok(())
-    }
-
-    fn avances_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
-        self.tx
-            .query_row(
-                "SELECT COUNT(*) FROM avances_efectivo WHERE cuenta_ahorro_id = ?;",
-                [cuenta_id],
-                |r| r.get(0),
-            )
-            .map_err(fallo)
     }
 }
