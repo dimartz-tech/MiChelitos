@@ -2391,6 +2391,8 @@ class AppUI {
         const informales = await AppAPI.obtenerIngresosInformales();
         const transacciones = await AppAPI.obtenerTransaccionesCuentas();
         const ingresos = await AppAPI.obtenerIngresos();
+        // Sin respaldos legibles el resto de Ajustes debe seguir funcionando.
+        const respaldos = await AppAPI.listarRespaldos().catch(() => []);
 
         this.contentContainer.innerHTML = `
             <div class="section-title">
@@ -2407,6 +2409,19 @@ class AppUI {
                     </p>
                     <button onclick="appUI.handleCrearRespaldo(this)" class="btn" style="width:100%;">Respaldar ahora</button>
                     <div id="respaldo_resultado" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.75rem; word-break:break-all;"></div>
+
+                    <hr style="border:none; border-top:1px solid var(--border-color, rgba(128,128,128,0.25)); margin:1.25rem 0;">
+                    <h4 style="font-size:0.95rem; margin-bottom:0.4rem;">Restaurar un respaldo</h4>
+                    <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+                        Devuelve la base y el capital al estado del respaldo elegido. Antes se guarda una copia de lo que hay ahora, así que se puede deshacer.
+                    </p>
+                    ${respaldos.length === 0
+                        ? `<p style="font-size:0.75rem; color:var(--text-muted);">Todavía no hay respaldos.</p>`
+                        : `<select id="respaldo_elegido" class="form-control" style="margin-bottom:0.6rem;">
+                               ${respaldos.map(n => `<option value="${escaparHtml(n)}">${escaparHtml(describirRespaldo(n))}</option>`).join('')}
+                           </select>
+                           <button onclick="appUI.handleRestaurarRespaldo(this)" class="btn" style="width:100%;">Restaurar este respaldo</button>`}
+                    <div id="restauracion_resultado" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.75rem; word-break:break-all;"></div>
                 </div>
 
                 <!-- Categorías -->
@@ -4192,6 +4207,47 @@ class AppUI {
             this.showToast(err.toString(), 'error');
             if (salida) salida.textContent = '';
         } finally {
+            boton.disabled = false;
+            boton.textContent = textoOriginal;
+        }
+    }
+
+    /**
+     * Restaura un respaldo elegido de la lista.
+     *
+     * La confirmación dice qué se sustituye y dónde queda la red: es una
+     * acción que reemplaza datos vivos y no se debe poder disparar sin leerlo.
+     * Al terminar se vuelve a dibujar Ajustes; el resto de pantallas pide sus
+     * datos al abrirse, así que no muestran nada anterior.
+     */
+    async handleRestaurarRespaldo(boton) {
+        const elegido = document.getElementById('respaldo_elegido');
+        if (!elegido || !elegido.value) return;
+        const etiqueta = elegido.options[elegido.selectedIndex].textContent;
+        const nombre = elegido.value;
+
+        if (!confirm(
+            `Se restaurará el respaldo:\n${etiqueta}\n\n` +
+            `Todo lo registrado después de esa fecha se perderá de la vista (base y capital). ` +
+            `Antes se guardará una copia del estado actual para poder deshacerlo.\n\n¿Restaurar?`
+        )) return;
+
+        boton.disabled = true;
+        const textoOriginal = boton.textContent;
+        boton.textContent = 'Restaurando…';
+        try {
+            const r = await AppAPI.restaurarRespaldo(nombre);
+            this.showToast('Respaldo restaurado.');
+            await this.render('ajustes');
+            const salida = document.getElementById('restauracion_resultado');
+            if (salida) {
+                salida.textContent =
+                    `Restaurado: ${etiqueta}. ` +
+                    (r.capital_restaurado ? 'El capital también. ' : 'Ese respaldo no traía capital: se conservó el actual. ') +
+                    `Para deshacer, restaura la copia «antes de restaurar» más reciente.`;
+            }
+        } catch (err) {
+            this.showToast(err.toString(), 'error');
             boton.disabled = false;
             boton.textContent = textoOriginal;
         }

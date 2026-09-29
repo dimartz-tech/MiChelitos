@@ -46,6 +46,14 @@ const AppAPI = {
         return await invoke('crear_respaldo');
     },
 
+    async listarRespaldos() {
+        return await invoke('listar_respaldos');
+    },
+
+    async restaurarRespaldo(nombre) {
+        return await invoke('restaurar_respaldo', { nombre: String(nombre) });
+    },
+
     async obtenerCuentas() {
         return await invoke('obtener_cuentas');
     },
