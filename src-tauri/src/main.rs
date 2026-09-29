@@ -1679,6 +1679,11 @@ fn obtener_capital() -> Result<Value, String> {
         }
     }
 
+    // Los totales se suman aquí, en centavos, y no en la vista: una suma de
+    // decimales en JavaScript arrastra ruido y es una regla sin pruebas.
+    let totales = aplicacion::guardar_capital::totales_de(&data);
+    data["totales"] = aplicacion::guardar_capital::totales_como_json(&totales);
+
     Ok(data)
 }
 
@@ -1701,39 +1706,14 @@ fn marcar_alerta_de_vencimiento(entrada: &mut Value, hoy: NaiveDate) {
     }
 }
 
-/// Retira de cada certificado y cada inversión de bolsa las claves que
-/// `obtener_capital` calcula al leer.
-///
-/// **Existe porque sin esto se guardaban.** Las seis acciones de la vista de
-/// capital —añadir o quitar un certificado, una inversión, un bien— siguen
-/// todas el mismo patrón: leer el capital completo (que trae la alerta ya
-/// calculada), mutar una sola colección y guardar el objeto entero de vuelta.
-/// El campo calculado el día de la última escritura quedaba grabado en el
-/// archivo como si el titular lo hubiera declarado, y no volvía a cambiar
-/// hasta la siguiente escritura. Se confirmó contra la base real: una
-/// inversión de bolsa ya tenía `alerta_vencimiento` y `dias_restantes` en
-/// disco.
-///
-/// Se limpia aquí, en el único punto de escritura, en vez de confiar en que
-/// cada acción de la interfaz recuerde omitirlos.
-fn retirar_campos_calculados(data: &mut Value) {
-    for coleccion in ["certificados", "bolsa"] {
-        if let Some(entradas) = data.get_mut(coleccion).and_then(|v| v.as_array_mut()) {
-            for entrada in entradas {
-                if let Some(objeto) = entrada.as_object_mut() {
-                    for campo in dominio::capital::CAMPOS_CALCULADOS {
-                        objeto.remove(*campo);
-                    }
-                }
-            }
-        }
-    }
-}
-
 #[tauri::command]
-fn guardar_capital(mut data: Value) -> Result<(), String> {
-    retirar_campos_calculados(&mut data);
-    db_nosql::guardar_coleccion("capital", &data)
+fn guardar_capital(data: Value) -> Result<(), String> {
+    // Se exige lo que entra o cambia contra lo que ya estaba guardado; ver
+    // `aplicacion::guardar_capital`.
+    let guardado = db_nosql::leer_coleccion("capital");
+    let limpio = aplicacion::guardar_capital::preparar_para_guardar(data, &guardado)
+        .map_err(|e| e.to_string())?;
+    db_nosql::guardar_coleccion("capital", &limpio)
 }
 
 // --- COMANDOS: DEUDAS Y FINANCIAMIENTOS ---
