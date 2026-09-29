@@ -4,7 +4,26 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.32.0 (Versión Actual) - 2026-09-29
+## 🚀 Versión 1.33.0 (Versión Actual) - 2026-09-29
+**Eliminar una cuenta protege ya todas las relaciones que la referencian, y una prueba impide que una nueva quede sin guarda.**
+
+### 🕳️ El hueco
+* El comando protegía cuatro de las siete relaciones que apuntan a una cuenta. Faltaban las **facturas cobradas en ella**, los **ingresos informales cobrados** y, salvo de rebote, los **abonos que pagó**. Sus claves ajenas son `SET NULL`: borrar la cuenta se permitía sin error y dejaba el cobro «pagado» sin constancia de dónde entró el dinero.
+* Se reprodujo antes de corregir: una factura cobrada, la cuenta borrada sin error, la factura pagada con la cuenta de depósito nula, y borrar esa factura después sin devolver nada a ninguna parte. No se pierde ningún saldo, pero se pierde el rastro.
+* Los abonos estaban cubiertos por casualidad: la comisión de un abono es un gasto que lleva la cuenta, y la guarda de gastos los frenaba. Ese gasto se puede borrar por separado, y con él caía la única protección.
+
+### 📏 La regla
+* `RELACIONES_CON_CUENTAS` declara las siete relaciones. El adaptador cuenta por esa lista, el comando bloquea si alguna tiene filas, y **una prueba la compara con las claves ajenas reales del esquema migrado**: una relación nueva sin declarar hace fallar las pruebas, en lugar de dejar el borrado silencioso para cuando alguien pierda un rastro.
+* Sustituye a tres comprobaciones escritas a mano, una por relación, cada una nacida cuando alguien tropezó con su caso. Los mensajes que ya conocía el titular no cambian.
+* Una segunda prueba exige que cada relación declarada tenga su frase propia de qué se perdería. La frase genérica del comando es una red, no un sustituto.
+* Cuatro mutaciones: olvidar declarar facturas —el defecto original—, olvidar los abonos, un adaptador que no informa de nada y una relación sin frase. Las cuatro fallan.
+
+### 📄 Documentación
+* `avance_de_efectivo.md` marca como confirmada por el titular la decisión de que el cargo lo paga la tarjeta y la cuenta recibe el monto íntegro.
+
+---
+
+## 🚀 Versión 1.32.0 - 2026-09-29
 **Avance de efectivo: la tarjeta pone dinero en una cuenta de ahorro, con su cargo porcentual, fijo o exonerado.**
 
 ### 💵 La función

@@ -501,6 +501,29 @@ pub const COLUMNAS_DE_DINERO: &[(&str, &str)] = &[
 /// dos listas. Antes solo había una guardiana —la que impide meter una tasa
 /// entre el dinero— y protegía de meter de más, no de olvidar de menos. Cuatro
 /// columnas de dinero se olvidaron por ahí.
+/// Toda relación que apunta a una cuenta: `(tabla, columna)`.
+///
+/// **Es la lista que decide si una cuenta se puede eliminar.** Existe porque
+/// las guardas de borrado se escribían a mano, una por relación, y cada una
+/// nacía cuando alguien tropezaba con su caso: la de gastos, la de traspasos
+/// (H13), la de avances. Las de facturas cobradas, ingresos informales y
+/// abonos no llegaron a escribirse, y borrar una cuenta que había recibido un
+/// cobro se permitía en silencio: la clave foránea es `SET NULL` y la factura
+/// quedaba «pagada» sin constancia de dónde entró el dinero.
+///
+/// Una prueba compara esta lista con las claves ajenas **reales** del
+/// esquema migrado. Añadir una relación nueva sin declararla aquí hace fallar
+/// las pruebas, en lugar de dejar la guarda para cuando alguien pierda algo.
+pub const RELACIONES_CON_CUENTAS: &[(&str, &str)] = &[
+    ("gastos", "cuenta_ahorro_id"),
+    ("transacciones_cuentas", "cuenta_origen_id"),
+    ("transacciones_cuentas", "cuenta_destino_id"),
+    ("ingresos", "cuenta_ahorro_id"),
+    ("ingresos_informales", "cuenta_ahorro_id"),
+    ("pagos_tarjeta", "cuenta_ahorro_id"),
+    ("avances_efectivo", "cuenta_ahorro_id"),
+];
+
 pub const COLUMNAS_DE_TASA: &[(&str, &str)] = &[
     ("avances_efectivo", "tasa"),
     ("gastos", "tasa_conversion"),

@@ -1105,6 +1105,58 @@ mod tests_centavos {
         assert_eq!(f, "01/01/2030", "lo anotado por el titular manda sobre lo derivado");
     }
 
+
+    #[test]
+    fn toda_clave_ajena_hacia_una_cuenta_esta_declarada_para_la_guarda_de_borrado() {
+        // **La regla que mantiene honesta la guarda de `eliminar_cuenta`.**
+        //
+        // Se recorren las claves ajenas REALES del esquema migrado y se
+        // comparan con `RELACIONES_CON_CUENTAS`. Una relación nueva que apunte
+        // a una cuenta sin declararse hace fallar esta prueba, en lugar de
+        // dejar el borrado silencioso para cuando alguien pierda un rastro:
+        // así ocurrió con facturas cobradas, ingresos informales y abonos, que
+        // se podían dejar sin cuenta de depósito sin que nada lo impidiera.
+        use crate::db_sql::RELACIONES_CON_CUENTAS;
+        use std::collections::BTreeSet;
+
+        let c = base_migrada();
+        let tablas: Vec<String> = {
+            let mut s = c
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+                .unwrap();
+            s.query_map([], |r| r.get(0)).unwrap().filter_map(|x| x.ok()).collect()
+        };
+
+        let mut reales = BTreeSet::new();
+        for tabla in &tablas {
+            let mut s = c
+                .prepare(&format!(
+                    "SELECT \"from\" FROM pragma_foreign_key_list('{tabla}') WHERE \"table\" = 'cuentas_ahorro';"
+                ))
+                .unwrap();
+            for columna in s.query_map([], |r| r.get::<_, String>(0)).unwrap().filter_map(|x| x.ok()) {
+                reales.insert((tabla.clone(), columna));
+            }
+        }
+        let declaradas: BTreeSet<(String, String)> = RELACIONES_CON_CUENTAS
+            .iter()
+            .map(|(t, c)| (t.to_string(), c.to_string()))
+            .collect();
+
+        let sin_declarar: Vec<_> = reales.difference(&declaradas).collect();
+        let obsoletas: Vec<_> = declaradas.difference(&reales).collect();
+        assert!(
+            sin_declarar.is_empty(),
+            "apuntan a una cuenta y no están en RELACIONES_CON_CUENTAS —bórrala del comando \
+             solo si de verdad se puede—: {sin_declarar:?}. Declárala también en \
+             `motivo_de_no_eliminar` y en el doble de pruebas."
+        );
+        assert!(
+            obsoletas.is_empty(),
+            "están declaradas y ya no existen en el esquema: {obsoletas:?}"
+        );
+    }
+
     #[test]
     fn ninguna_columna_esta_en_las_dos_listas() {
         // Clasificarla dos veces sería una contradicción declarada, y la
