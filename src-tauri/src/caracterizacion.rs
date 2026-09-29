@@ -2968,3 +2968,180 @@ fn c98_una_comision_negativa_se_sigue_rechazando() {
     assert!(r.is_err());
 }
 
+
+// =====================================================================
+//  Capital — la alerta de vencimiento no debe sobrevivir a un guardado
+// =====================================================================
+
+fn capital_con_una_entrada(coleccion: &str, vencimiento: &str) -> serde_json::Value {
+    serde_json::json!({
+        "propiedades": {"inmobiliario": [], "vehiculos": [], "maquinaria": []},
+        "certificados": if coleccion == "certificados" {
+            serde_json::json!([{"banco": "Banco Ejemplo", "monto": 10000.0, "tasa": 8.0, "vencimiento": vencimiento}])
+        } else { serde_json::json!([]) },
+        "bolsa": if coleccion == "bolsa" {
+            serde_json::json!([{"emisor": "Emisor Ejemplo", "monto": 5000.0, "tasa": 6.0, "vencimiento": vencimiento}])
+        } else { serde_json::json!([]) },
+    })
+}
+
+fn escribir_capital_de_prueba(datos: &serde_json::Value) {
+    crate::db_nosql::guardar_coleccion("capital", datos).expect("sembrar capital");
+}
+
+/// Lo que hay en el archivo, sin pasar por `obtener_capital`: es la única
+/// forma de ver si un campo calculado quedó grabado.
+fn capital_en_disco() -> serde_json::Value {
+    crate::db_nosql::leer_coleccion("capital")
+}
+
+#[test]
+fn c99_un_certificado_lejos_de_vencer_no_lleva_alerta() {
+    let _g = entorno_aislado();
+    escribir_capital_de_prueba(&capital_con_una_entrada("certificados", "31/12/2030"));
+
+    let leido = crate::obtener_capital().unwrap();
+    let c = &leido["certificados"][0];
+    assert_eq!(c["alerta_vencimiento"], false);
+    assert!(c.get("alerta_msg").is_none());
+}
+
+#[test]
+fn c100_un_certificado_que_vence_en_diez_dias_avisa_con_la_cuenta_regresiva() {
+    let _g = entorno_aislado();
+    let hoy = chrono::Local::now().naive_local().date();
+    let vence = (hoy + chrono::Duration::days(10)).format("%d/%m/%Y").to_string();
+    escribir_capital_de_prueba(&capital_con_una_entrada("certificados", &vence));
+
+    let leido = crate::obtener_capital().unwrap();
+    let c = &leido["certificados"][0];
+    assert_eq!(c["alerta_vencimiento"], true);
+    assert_eq!(c["dias_restantes"], 10);
+    assert_eq!(c["alerta_msg"], "¡Vence en 10 días!");
+}
+
+#[test]
+fn c101_un_certificado_vencido_lo_dice_sin_recortar_los_dias() {
+    let _g = entorno_aislado();
+    let hoy = chrono::Local::now().naive_local().date();
+    let vencio = (hoy - chrono::Duration::days(5)).format("%d/%m/%Y").to_string();
+    escribir_capital_de_prueba(&capital_con_una_entrada("certificados", &vencio));
+
+    let leido = crate::obtener_capital().unwrap();
+    let c = &leido["certificados"][0];
+    assert_eq!(c["alerta_vencimiento"], true);
+    assert_eq!(c["dias_restantes"], -5, "negativo, sin recortar");
+    assert_eq!(c["alerta_msg"], "¡Vencido!");
+}
+
+#[test]
+fn c102_lo_mismo_vale_para_una_inversion_de_bolsa() {
+    let _g = entorno_aislado();
+    let hoy = chrono::Local::now().naive_local().date();
+    let vencio = (hoy - chrono::Duration::days(1)).format("%d/%m/%Y").to_string();
+    escribir_capital_de_prueba(&capital_con_una_entrada("bolsa", &vencio));
+
+    let leido = crate::obtener_capital().unwrap();
+    let b = &leido["bolsa"][0];
+    assert_eq!(b["alerta_vencimiento"], true);
+    assert_eq!(b["alerta_msg"], "¡Vencido!");
+}
+
+#[test]
+fn c103_guardar_no_persiste_la_alerta_que_obtener_calculo() {
+    // **CAMBIO DE CONDUCTA — el defecto de fondo.**
+    //
+    // Antes: `obtener_capital` calculaba la alerta y la escribía en el mismo
+    // `Value`. Como las seis acciones de la vista de capital hacen
+    // leer → mutar una colección → guardar el objeto entero, ese cálculo
+    // quedaba grabado en el archivo. Confirmado contra la base real: una
+    // inversión de bolsa ya tenía `alerta_vencimiento` y `dias_restantes` en
+    // disco, calculados el día de la última escritura y nunca más.
+    let _g = entorno_aislado();
+    let hoy = chrono::Local::now().naive_local().date();
+    let vencio = (hoy - chrono::Duration::days(3)).format("%d/%m/%Y").to_string();
+    escribir_capital_de_prueba(&capital_con_una_entrada("bolsa", &vencio));
+
+    // Exactamente el patrón de la interfaz: leer todo, guardar todo.
+    let leido = crate::obtener_capital().unwrap();
+    assert_eq!(leido["bolsa"][0]["alerta_vencimiento"], true, "obtener sí la calcula");
+    crate::guardar_capital(leido).unwrap();
+
+    let en_disco = capital_en_disco();
+    let b = &en_disco["bolsa"][0];
+    assert!(b.get("alerta_vencimiento").is_none(), "no debe quedar en el archivo");
+    assert!(b.get("dias_restantes").is_none());
+    assert!(b.get("alerta_msg").is_none());
+    // Y lo declarado por el titular sigue intacto.
+    assert_eq!(b["emisor"], "Emisor Ejemplo");
+    assert_eq!(b["vencimiento"], vencio);
+}
+
+#[test]
+fn c104_guardar_limpia_certificados_y_bolsa_por_igual() {
+    let _g = entorno_aislado();
+    let mut datos = capital_con_una_entrada("certificados", "01/01/2020");
+    datos["bolsa"] = serde_json::json!([{"emisor": "X", "monto": 1.0, "tasa": 1.0, "vencimiento": "01/01/2020"}]);
+    escribir_capital_de_prueba(&datos);
+
+    let leido = crate::obtener_capital().unwrap();
+    crate::guardar_capital(leido).unwrap();
+
+    let en_disco = capital_en_disco();
+    for coleccion in ["certificados", "bolsa"] {
+        let entrada = &en_disco[coleccion][0];
+        assert!(entrada.get("alerta_vencimiento").is_none(), "{coleccion} quedó con alerta");
+    }
+}
+
+#[test]
+fn c105_guardar_no_falla_si_los_campos_nunca_llegaron_a_calcularse() {
+    // Un alta nueva no pasa por `obtener_capital` con esa entrada todavía
+    // dentro: `retirar_campos_calculados` no puede asumir que el campo existe.
+    let _g = entorno_aislado();
+    let datos = serde_json::json!({
+        "propiedades": {"inmobiliario": [], "vehiculos": [], "maquinaria": []},
+        "certificados": [{"banco": "Nuevo", "monto": 500.0, "tasa": 5.0, "vencimiento": "01/01/2030"}],
+        "bolsa": [],
+    });
+
+    assert!(crate::guardar_capital(datos).is_ok());
+    let en_disco = capital_en_disco();
+    assert_eq!(en_disco["certificados"][0]["banco"], "Nuevo");
+}
+
+#[test]
+fn c106_una_propiedad_no_lleva_ni_lleva_campos_calculados() {
+    // Las propiedades no tienen vencimiento; la limpieza no debe tocarlas.
+    let _g = entorno_aislado();
+    let datos = serde_json::json!({
+        "propiedades": {"inmobiliario": [{"id": "1", "nombre": "Casa", "subtipo": "residencial", "valor_estimado": 100000.0}],
+                          "vehiculos": [], "maquinaria": []},
+        "certificados": [],
+        "bolsa": [],
+    });
+
+    crate::guardar_capital(datos).unwrap();
+    let en_disco = capital_en_disco();
+    assert_eq!(en_disco["propiedades"]["inmobiliario"][0]["nombre"], "Casa");
+}
+
+#[test]
+fn c107_guardar_capital_no_valida_los_importes_declarados() {
+    // DIVERGENCIA DECLARADA, sin resolver. A diferencia del resto del
+    // sistema, el capital no pasa por `Dinero`: un monto negativo, con
+    // fracción de céntimo o directamente ilegible se guarda tal cual. Es la
+    // vía de dinero menos vigilada del proyecto, y queda fuera de esta
+    // entrega por «menor densidad de reglas» — el motivo por el que esta
+    // fase va al final del plan.
+    let _g = entorno_aislado();
+    let datos = serde_json::json!({
+        "propiedades": {"inmobiliario": [], "vehiculos": [], "maquinaria": []},
+        "certificados": [{"banco": "X", "monto": -500.005, "tasa": -1.0, "vencimiento": "no es una fecha"}],
+        "bolsa": [],
+    });
+
+    assert!(crate::guardar_capital(datos).is_ok(), "hoy se acepta sin comprobar nada");
+    let en_disco = capital_en_disco();
+    assert_eq!(en_disco["certificados"][0]["monto"], -500.005);
+}
