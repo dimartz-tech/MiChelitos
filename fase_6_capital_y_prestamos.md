@@ -63,13 +63,40 @@ exactamente la confianza que produjo el defecto.
 La base real ya tenía el archivo contaminado. Se limpió a mano, con un
 respaldo tomado antes de escribir, fuera del repositorio.
 
-### Lo que queda declarado y sin resolver
+### Cerrado después: el capital pasa por `Dinero`
 
-**El capital no pasa por `Dinero`.** Un monto negativo, con fracción de
-céntimo o una fecha ilegible se guarda tal cual: es la vía de dinero menos
-vigilada del proyecto. Es justo el motivo por el que esta fase tiene menor
-densidad de reglas, y se deja fuera de esta entrega en vez de ampliarla sin
-que se haya pedido.
+La divergencia que este documento dejó declarada —un monto negativo, con
+fracción de céntimo o una fecha ilegible se guardaba tal cual— se cierra en la
+versión 1.34.0.
+
+**Qué se exige.** Un importe positivo y exacto al céntimo, una tasa de 0 a 100,
+una fecha `dd/mm/aaaa` que exista, un emisor o nombre no vacío y un
+identificador de bien único. El mensaje dice **qué entrada y qué campo**
+—«Certificado 2 (Banco X): el monto no puede ser negativo»—, porque el capital
+se guarda entero y un error genérico deja al titular buscando entre todas.
+
+**Solo lo que entra o cambia.** El documento se guarda completo en cada
+acción, así que exigir todo cada vez bloquearía por una entrada antigua que no
+se tocó, y como no hay edición la única salida sería borrarla. Lo ya guardado
+que vuelve idéntico se conserva; lo nuevo y lo modificado pasa por las reglas.
+La comparación no distingue `500` de `500.0`, que para `serde_json` son
+distintos y para el titular no.
+
+**El formato en disco no cambia.** Los importes siguen siendo números, exactos
+al céntimo, porque la aplicación instalada lee el mismo archivo. Lo que sí se
+admite al entrar es un importe como **texto**, tal como se escribió, para que
+lo decidan los dígitos. Un número que llega ya con fracción de céntimo se
+**rechaza** en vez de redondearse: no se puede saber qué quiso escribir quien
+lo tecleó.
+
+**Los totales se suman en el núcleo**, en centavos enteros, y no en la vista.
+Antes había dos sumas de decimales en JavaScript —el panel y el resumen—, con
+el ruido de coma flotante que eso arrastra. Como la alerta de vencimiento, se
+calculan al leer y no se guardan.
+
+Se comprobó contra el `capital.json` real: la validación estricta lo acepta
+entero, leer y guardar de vuelta lo deja idéntico, y el patrimonio del núcleo
+coincide con una suma independiente en enteros.
 
 ## Verificación
 

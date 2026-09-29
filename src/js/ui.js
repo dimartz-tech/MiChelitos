@@ -95,12 +95,16 @@ class AppUI {
         const mesAnioActual = "/" + (hoy.getMonth() + 1).toString().padStart(2, '0') + '/' + hoy.getFullYear();
 
         // 1. Patrimonio total
-        const totalCertificados = (capital?.certificados || []).reduce((sum, c) => sum + Number(c.monto || 0), 0);
-        const totalBolsa = (capital?.bolsa || []).reduce((sum, b) => sum + Number(b.monto || 0), 0);
-        const totalInmueble = (capital?.propiedades?.inmobiliario || []).reduce((sum, p) => sum + Number(p.valor_estimado || 0), 0);
-        const totalVehiculo = (capital?.propiedades?.vehiculos || []).reduce((sum, p) => sum + Number(p.valor_estimado || 0), 0);
-        const totalMaquinaria = (capital?.propiedades?.maquinaria || []).reduce((sum, p) => sum + Number(p.valor_estimado || 0), 0);
-        const patrimonioTotal = totalCertificados + totalBolsa + totalInmueble + totalVehiculo + totalMaquinaria;
+        // Los totales los suma el núcleo, en centavos enteros: una suma de
+        // decimales aquí arrastraría ruido de coma flotante, y sería una
+        // regla de dinero sin pruebas.
+        const totales = capital?.totales || {};
+        const totalCertificados = totales.certificados ?? 0;
+        const totalBolsa = totales.bolsa ?? 0;
+        const totalInmueble = totales.inmobiliario ?? 0;
+        const totalVehiculo = totales.vehiculos ?? 0;
+        const totalMaquinaria = totales.maquinaria ?? 0;
+        const patrimonioTotal = totales.patrimonio ?? 0;
 
         // 2. Gastos del mes
         const gastosMes = gastos.filter(g => g.fecha.endsWith(mesAnioActual));
@@ -2224,13 +2228,17 @@ class AppUI {
         const mesAnioActual = "/" + (hoy.getMonth() + 1).toString().padStart(2, '0') + '/' + hoy.getFullYear();
 
         // 1. Activos
-        const totalCertificados = (capital?.certificados || []).reduce((sum, c) => sum + Number(c.monto || 0), 0);
-        const totalBolsa = (capital?.bolsa || []).reduce((sum, b) => sum + Number(b.monto || 0), 0);
-        const totalInmueble = (capital?.propiedades?.inmobiliario || []).reduce((sum, p) => sum + Number(p.valor_estimado || 0), 0);
-        const totalVehiculo = (capital?.propiedades?.vehiculos || []).reduce((sum, p) => sum + Number(p.valor_estimado || 0), 0);
-        const totalMaquinaria = (capital?.propiedades?.maquinaria || []).reduce((sum, p) => sum + Number(p.valor_estimado || 0), 0);
+        // Los totales los suma el núcleo, en centavos enteros: una suma de
+        // decimales aquí arrastraría ruido de coma flotante, y sería una
+        // regla de dinero sin pruebas.
+        const totales = capital?.totales || {};
+        const totalCertificados = totales.certificados ?? 0;
+        const totalBolsa = totales.bolsa ?? 0;
+        const totalInmueble = totales.inmobiliario ?? 0;
+        const totalVehiculo = totales.vehiculos ?? 0;
+        const totalMaquinaria = totales.maquinaria ?? 0;
         
-        const totalActivos = totalCertificados + totalBolsa + totalInmueble + totalVehiculo + totalMaquinaria;
+        const totalActivos = totales.patrimonio ?? 0;
 
         // 2. Pasivos
         const totalTarjetas = tarjetas.reduce((sum, t) => sum + t.balance_pesos + (t.balance_dolares * TASA_USD_A_DOP), 0);
@@ -3975,7 +3983,8 @@ class AppUI {
     async handleAgregarCertificado(e) {
         e.preventDefault();
         const ban = document.getElementById('cer_ban').value;
-        const mon = Number(document.getElementById('cer_mon').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos.
+        const mon = document.getElementById('cer_mon').value.trim();
         const tas = Number(document.getElementById('cer_tas').value);
         const ven = document.getElementById('cer_ven').value;
         const pag = document.getElementById('cer_pag').value;
@@ -4005,7 +4014,8 @@ class AppUI {
     async handleAgregarBolsa(e) {
         e.preventDefault();
         const emi = document.getElementById('bol_emi').value;
-        const mon = Number(document.getElementById('bol_mon').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos.
+        const mon = document.getElementById('bol_mon').value.trim();
         const tas = Number(document.getElementById('bol_tas').value);
         const ven = document.getElementById('bol_ven').value;
         const pag = document.getElementById('bol_pag').value;
@@ -4037,7 +4047,8 @@ class AppUI {
         const tip = document.getElementById('pro_tip').value;
         const sub = document.getElementById('pro_sub').value;
         const nom = document.getElementById('pro_nom').value;
-        const val = Number(document.getElementById('pro_val').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos.
+        const val = document.getElementById('pro_val').value.trim();
 
         try {
             const capital = await AppAPI.obtenerCapital();
