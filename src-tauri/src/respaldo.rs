@@ -89,6 +89,22 @@ pub fn respaldar_si_hace_falta(motivo: &str) -> Result<Option<PathBuf>, ErrorRes
 
 /// Respalda la base incondicionalmente.
 pub fn respaldar(motivo: &str) -> Result<PathBuf, ErrorRespaldo> {
+    let destino = tomar_copia(motivo)?;
+
+    if let Err(e) = verificar(&destino) {
+        // Un respaldo que no se puede abrir es peor que ninguno: da confianza
+        // falsa. Se retira.
+        let _ = std::fs::remove_file(&destino);
+        let _ = std::fs::remove_file(copia_de_capital(&destino));
+        return Err(e);
+    }
+
+    podar(&directorio_de_respaldos());
+    Ok(destino)
+}
+
+/// Escribe la copia de la base y del capital, sin verificarla.
+fn tomar_copia(motivo: &str) -> Result<PathBuf, ErrorRespaldo> {
     let origen = crate::db_sql::obtener_ruta_db();
     if !Path::new(&origen).exists() {
         return Err(ErrorRespaldo::Fallo("la base todavía no existe".into()));
@@ -112,26 +128,58 @@ pub fn respaldar(motivo: &str) -> Result<PathBuf, ErrorRespaldo> {
         .execute("VACUUM INTO ?;", [destino.to_string_lossy().as_ref()])
         .map_err(fallo)?;
 
-    if let Err(e) = verificar(&destino) {
-        // Un respaldo que no se puede abrir es peor que ninguno: da confianza
-        // falsa. Se retira.
-        let _ = std::fs::remove_file(&destino);
-        return Err(e);
-    }
-
     // El capital vive fuera de SQLite, en un JSON. Una copia sin él dejaría
     // sin recuperar justo lo que no se puede reconstruir desde los gastos.
     let capital = ruta_capital();
     if capital.exists() {
         if let Err(e) = std::fs::copy(&capital, copia_de_capital(&destino)) {
             let _ = std::fs::remove_file(&destino);
-            let _ = std::fs::remove_file(copia_de_capital(&destino));
             return Err(fallo(e));
         }
     }
 
-    podar(&directorio);
     Ok(destino)
+}
+
+/// La red de seguridad de una restauración: guarda el estado actual **aunque
+/// esté dañado**.
+///
+/// Restaurar se pide, sobre todo, cuando algo salió mal, y un estado con
+/// referencias rotas no supera la verificación de un respaldo normal. Negarse
+/// a restaurar por eso dejaría al titular sin salida justo entonces. Lo dañado
+/// se conserva igualmente, con «sin verificar» en el nombre para que nadie lo
+/// tome por una copia sana, y solo si ni siquiera se puede copiar se aborta.
+fn copia_de_seguridad_previa() -> Result<PathBuf, ErrorRespaldo> {
+    match tomar_copia("antes de restaurar") {
+        Ok(copia) => match verificar(&copia) {
+            Ok(()) => {
+                podar(&directorio_de_respaldos());
+                Ok(copia)
+            }
+            Err(_) => marcar_sin_verificar(copia),
+        },
+        Err(e) => {
+            // VACUUM INTO no pudo leer la base: se copia el archivo tal cual.
+            let origen = PathBuf::from(crate::db_sql::obtener_ruta_db());
+            let marca = Local::now().format("%Y-%m-%dT%H-%M-%S");
+            let destino = ruta_libre(directorio_de_respaldos().join(format!(
+                "michelitos_{}_antes-de-restaurar-sin-verificar.db",
+                marca
+            )));
+            std::fs::copy(&origen, &destino).map(|_| destino).map_err(|_| e)
+        }
+    }
+}
+
+fn marcar_sin_verificar(copia: PathBuf) -> Result<PathBuf, ErrorRespaldo> {
+    let nombre = copia.file_stem().unwrap_or_default().to_string_lossy().to_string();
+    let nueva = ruta_libre(copia.with_file_name(format!("{nombre}-sin-verificar.db")));
+    std::fs::rename(&copia, &nueva).map_err(fallo)?;
+    let capital = copia_de_capital(&copia);
+    if capital.exists() {
+        let _ = std::fs::rename(&capital, copia_de_capital(&nueva));
+    }
+    Ok(nueva)
 }
 
 /// Abre el respaldo y comprueba que sirve.
@@ -278,7 +326,7 @@ pub fn restaurar(nombre: &str) -> Result<Restauracion, ErrorRespaldo> {
     }
 
     let destino = PathBuf::from(crate::db_sql::obtener_ruta_db());
-    let respaldo_de_seguridad = respaldar("antes de restaurar")?;
+    let respaldo_de_seguridad = copia_de_seguridad_previa()?;
 
     // Se prepara al lado y se sustituye con un renombrado: o queda la base
     // vieja entera o la nueva entera, nunca una mezcla.
@@ -626,5 +674,68 @@ mod tests {
 
         assert_eq!(nombres.len(), 2);
         assert!(nombres[0] > nombres[1], "{nombres:?}");
+    }
+
+    #[test]
+    fn se_puede_restaurar_aunque_el_estado_actual_tenga_referencias_rotas() {
+        let _g = entorno();
+        crear_base_con_datos();
+        let bueno = respaldar("bueno").unwrap();
+        // Se daña el estado actual: una referencia que apunta a nada.
+        let c = Connection::open(crate::db_sql::obtener_ruta_db()).unwrap();
+        c.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             CREATE TABLE padre (id INTEGER PRIMARY KEY);
+             CREATE TABLE hijo (padre_id INTEGER REFERENCES padre(id));
+             INSERT INTO hijo VALUES (99);",
+        )
+        .unwrap();
+        drop(c);
+
+        let r = restaurar(&bueno.file_name().unwrap().to_string_lossy())
+            .expect("restaurar no se bloquea por lo dañado que está lo actual");
+
+        assert_eq!(valores(), vec!["uno", "dos"], "la base volvió");
+        let nombre = r.respaldo_de_seguridad.file_name().unwrap().to_string_lossy().to_string();
+        assert!(nombre.contains("sin-verificar"), "la copia dañada no se hace pasar por sana: {nombre}");
+        assert!(r.respaldo_de_seguridad.exists(), "pero se conserva, por si hay que rescatar algo");
+        let rescatada: i64 = Connection::open(&r.respaldo_de_seguridad)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM hijo;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rescatada, 1, "con el estado dañado dentro");
+    }
+
+    #[test]
+    fn la_copia_sin_verificar_no_se_puede_volver_a_restaurar() {
+        let _g = entorno();
+        crear_base_con_datos();
+        let bueno = respaldar("bueno").unwrap();
+        Connection::open(crate::db_sql::obtener_ruta_db())
+            .unwrap()
+            .execute_batch(
+                "PRAGMA foreign_keys = OFF;
+                 CREATE TABLE padre (id INTEGER PRIMARY KEY);
+                 CREATE TABLE hijo (padre_id INTEGER REFERENCES padre(id));
+                 INSERT INTO hijo VALUES (99);",
+            )
+            .unwrap();
+        let r = restaurar(&bueno.file_name().unwrap().to_string_lossy()).unwrap();
+        let sin_verificar = r.respaldo_de_seguridad.file_name().unwrap().to_string_lossy().to_string();
+
+        assert!(restaurar(&sin_verificar).is_err(), "solo se restaura lo que se puede verificar");
+        assert_eq!(valores(), vec!["uno", "dos"], "y la base no se tocó");
+    }
+
+    #[test]
+    fn la_copia_de_seguridad_de_un_estado_sano_lleva_el_nombre_de_siempre() {
+        let _g = entorno();
+        crear_base_con_datos();
+        let bueno = respaldar("bueno").unwrap();
+
+        let r = restaurar(&bueno.file_name().unwrap().to_string_lossy()).unwrap();
+
+        let nombre = r.respaldo_de_seguridad.file_name().unwrap().to_string_lossy().to_string();
+        assert!(nombre.ends_with("_antes-de-restaurar.db"), "{nombre}");
     }
 }

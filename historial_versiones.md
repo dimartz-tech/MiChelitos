@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.37.0 (Versión Actual) - 2026-09-29
+## 🚀 Versión 1.38.0 (Versión Actual) - 2026-09-29
+**Restaurar ya no se bloquea cuando lo actual está dañado.**
+
+### 🐞 Qué fallaba
+* Al ensayar la restauración sobre una copia de la base real, con el estado actual estropeado a propósito (una referencia rota), `restaurar_respaldo` se **negaba**: la copia de seguridad que toma antes de sustituir pasaba por la misma verificación que un respaldo normal, la suspendía y abortaba. Es decir, fallaba justo cuando hace falta restaurar. Lo introduje en 1.36.0.
+
+### ✅ Qué hace ahora
+* La copia de seguridad previa se guarda **aunque el estado esté dañado**. Si no supera la verificación, se conserva con `-sin-verificar` en el nombre para que nadie la tome por una copia sana; si ni `VACUUM INTO` puede leer la base, se copia el archivo tal cual; solo si tampoco se puede copiar se aborta.
+* Una copia `sin-verificar` **no se puede volver a restaurar** desde la aplicación (solo se restaura lo que se puede verificar): se conserva para rescatar datos a mano.
+
+### 🔍 Ensayo con datos reales (copia temporal, ya destruida)
+* Esquema 15: se respaldó, se estropeó (5 gastos borrados, una cuenta renombrada, capital vaciado) y se restauró: **mismo contenido en todas las filas** y capital idéntico; la aplicación lee las cuentas, gastos, tarjetas y capital restaurados; preparar el esquema no toca nada.
+* Respaldo anterior a la migración (esquema 0): se restauró y la aplicación lo migró al 15 con las mismas filas, integridad correcta y sin referencias rotas.
+* Tres mutaciones (volver a bloquear, no marcar la copia, borrar la copia dañada): las tres hacen fallar pruebas.
+
+---
+
+## 🚀 Versión 1.37.0 - 2026-09-29
 **Restaurar un respaldo desde Ajustes, sin comandos.**
 
 ### 🖱️ Qué se añade
