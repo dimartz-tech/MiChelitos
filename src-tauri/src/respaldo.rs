@@ -51,6 +51,16 @@ fn fallo(e: impl fmt::Display) -> ErrorRespaldo {
     ErrorRespaldo::Fallo(e.to_string())
 }
 
+fn ruta_capital() -> PathBuf {
+    PathBuf::from(crate::db_nosql::obtener_ruta_nosql("capital"))
+}
+
+/// La copia del capital de un respaldo lleva su mismo nombre, con otro sufijo:
+/// `michelitos_X.db` → `michelitos_X.capital.json`.
+fn copia_de_capital(respaldo: &Path) -> PathBuf {
+    respaldo.with_extension("capital.json")
+}
+
 /// Dónde viven los respaldos: fuera del directorio de la base, dentro del de
 /// la aplicación. Nunca en el repositorio.
 pub fn directorio_de_respaldos() -> PathBuf {
@@ -109,6 +119,17 @@ pub fn respaldar(motivo: &str) -> Result<PathBuf, ErrorRespaldo> {
         return Err(e);
     }
 
+    // El capital vive fuera de SQLite, en un JSON. Una copia sin él dejaría
+    // sin recuperar justo lo que no se puede reconstruir desde los gastos.
+    let capital = ruta_capital();
+    if capital.exists() {
+        if let Err(e) = std::fs::copy(&capital, copia_de_capital(&destino)) {
+            let _ = std::fs::remove_file(&destino);
+            let _ = std::fs::remove_file(copia_de_capital(&destino));
+            return Err(fallo(e));
+        }
+    }
+
     podar(&directorio);
     Ok(destino)
 }
@@ -147,6 +168,11 @@ fn verificar(ruta: &Path) -> Result<(), ErrorRespaldo> {
 /// respuesta es que sí: un respaldo de más no cuesta nada y uno de menos sí.
 fn ha_cambiado_desde_el_ultimo_respaldo(origen: &Path) -> Result<bool, ErrorRespaldo> {
     let modificada = std::fs::metadata(origen).and_then(|m| m.modified()).ok();
+    // Un cambio solo en el capital también merece copia.
+    let modificada = match (modificada, std::fs::metadata(ruta_capital()).and_then(|m| m.modified()).ok()) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, _) => a,
+    };
     let ultimo = respaldos_existentes()
         .into_iter()
         .filter_map(|r| std::fs::metadata(&r).and_then(|m| m.modified()).ok())
@@ -196,7 +222,90 @@ fn podar(_directorio: &Path) {
     }
     for viejo in &existentes[..existentes.len() - RESPALDOS_A_CONSERVAR] {
         let _ = std::fs::remove_file(viejo);
+        let _ = std::fs::remove_file(copia_de_capital(viejo));
     }
+}
+
+/// Lo que se hizo al restaurar, para que quien lo pidió lo pueda leer.
+#[derive(Debug, PartialEq)]
+pub struct Restauracion {
+    /// Dónde quedó la copia tomada del estado que se sustituyó.
+    pub respaldo_de_seguridad: PathBuf,
+    /// Si el respaldo traía capital y se restauró. Si no, el actual se deja.
+    pub capital_restaurado: bool,
+    pub version_del_esquema: u32,
+}
+
+/// Respaldos disponibles, del más reciente al más antiguo.
+pub fn listar() -> Vec<String> {
+    let mut nombres: Vec<String> = respaldos_existentes()
+        .iter()
+        .filter_map(|r| r.file_name().map(|n| n.to_string_lossy().to_string()))
+        .collect();
+    nombres.reverse();
+    nombres
+}
+
+/// Devuelve la base y el capital al estado de un respaldo.
+///
+/// Es de ida, así que se protege por los dos lados: **antes** se comprueba
+/// que el respaldo sirve y que no viene de una versión más nueva que la que
+/// esta aplicación sabe abrir, y **se respalda el estado actual** para poder
+/// deshacer la restauración. Si algo falla antes de sustituir, nada cambió.
+///
+/// `nombre` es el nombre de archivo tal como lo devuelve [`listar`]; una ruta
+/// se rechaza, para que no se pueda restaurar nada de fuera de la carpeta.
+pub fn restaurar(nombre: &str) -> Result<Restauracion, ErrorRespaldo> {
+    if Path::new(nombre).file_name().map(|n| n.to_string_lossy()) != Some(nombre.into())
+        || !nombre.ends_with(".db")
+    {
+        return Err(fallo("nombre de respaldo no válido"));
+    }
+    let respaldo = directorio_de_respaldos().join(nombre);
+    if !respaldo.exists() {
+        return Err(fallo(format!("no existe el respaldo {nombre}")));
+    }
+
+    verificar(&respaldo)?;
+    let version: u32 = Connection::open(&respaldo)
+        .and_then(|c| c.query_row("PRAGMA user_version;", [], |r| r.get(0)))
+        .map_err(fallo)?;
+    if version > crate::migraciones::VERSION_OBJETIVO {
+        return Err(fallo(format!(
+            "el respaldo es del esquema {version} y esta versión solo llega al {}",
+            crate::migraciones::VERSION_OBJETIVO
+        )));
+    }
+
+    let destino = PathBuf::from(crate::db_sql::obtener_ruta_db());
+    let respaldo_de_seguridad = respaldar("antes de restaurar")?;
+
+    // Se prepara al lado y se sustituye con un renombrado: o queda la base
+    // vieja entera o la nueva entera, nunca una mezcla.
+    let provisional = destino.with_extension("db.restaurando");
+    std::fs::copy(&respaldo, &provisional).map_err(fallo)?;
+    if let Err(e) = verificar(&provisional) {
+        let _ = std::fs::remove_file(&provisional);
+        return Err(e);
+    }
+    // Un diario de escritura de la base anterior no debe aplicarse a la nueva.
+    for sufijo in ["-wal", "-shm"] {
+        let mut viejo = destino.clone().into_os_string();
+        viejo.push(sufijo);
+        let _ = std::fs::remove_file(PathBuf::from(viejo));
+    }
+    std::fs::rename(&provisional, &destino).map_err(fallo)?;
+
+    let capital_guardado = copia_de_capital(&respaldo);
+    let capital_restaurado = capital_guardado.exists();
+    if capital_restaurado {
+        let capital = ruta_capital();
+        let provisional = capital.with_extension("json.restaurando");
+        std::fs::copy(&capital_guardado, &provisional).map_err(fallo)?;
+        std::fs::rename(&provisional, &capital).map_err(fallo)?;
+    }
+
+    Ok(Restauracion { respaldo_de_seguridad, capital_restaurado, version_del_esquema: version })
 }
 
 fn sanear(motivo: &str) -> String {
@@ -342,5 +451,180 @@ mod tests {
         assert_eq!(sanear("   "), "manual");
         assert_eq!(sanear("///"), "manual");
         assert_eq!(sanear("Antes de Migrar 3"), "Antes-de-Migrar-3");
+    }
+
+    fn escribir_capital(contenido: &str) {
+        crate::db_nosql::guardar_coleccion("capital", &serde_json::from_str(contenido).unwrap())
+            .unwrap();
+    }
+
+    fn valores() -> Vec<String> {
+        let c = Connection::open(crate::db_sql::obtener_ruta_db()).unwrap();
+        let mut s = c.prepare("SELECT valor FROM prueba ORDER BY id;").unwrap();
+        let v = s.query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        v
+    }
+
+    #[test]
+    fn el_respaldo_lleva_una_copia_del_capital() {
+        let _g = entorno();
+        crear_base_con_datos();
+        escribir_capital(r#"{"certificados":[{"monto":500}]}"#);
+
+        let destino = respaldar("prueba").unwrap();
+
+        let copia = std::fs::read_to_string(copia_de_capital(&destino)).unwrap();
+        assert!(copia.contains("500"), "el capital viaja con la base");
+    }
+
+    #[test]
+    fn sin_capital_no_se_inventa_una_copia() {
+        let _g = entorno();
+        crear_base_con_datos();
+
+        let destino = respaldar("prueba").unwrap();
+
+        assert!(!copia_de_capital(&destino).exists());
+    }
+
+    #[test]
+    fn podar_se_lleva_tambien_la_copia_del_capital() {
+        let _g = entorno();
+        crear_base_con_datos();
+        escribir_capital(r#"{"certificados":[]}"#);
+
+        for n in 0..RESPALDOS_A_CONSERVAR + 3 {
+            respaldar(&format!("n{n}")).unwrap();
+        }
+
+        let sueltas = std::fs::read_dir(directorio_de_respaldos())
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().to_string_lossy().ends_with(".capital.json"))
+            .count();
+        assert_eq!(sueltas, RESPALDOS_A_CONSERVAR, "ni una copia de capital huérfana");
+    }
+
+    #[test]
+    fn restaurar_devuelve_base_y_capital_y_deja_red_para_deshacer() {
+        let _g = entorno();
+        crear_base_con_datos();
+        escribir_capital(r#"{"certificados":[{"monto":500}]}"#);
+        let bueno = respaldar("bueno").unwrap();
+        let nombre = bueno.file_name().unwrap().to_string_lossy().to_string();
+
+        // Se estropea todo después del respaldo.
+        let c = Connection::open(crate::db_sql::obtener_ruta_db()).unwrap();
+        c.execute("DELETE FROM prueba;", []).unwrap();
+        c.execute("INSERT INTO prueba (valor) VALUES ('roto');", []).unwrap();
+        drop(c);
+        escribir_capital(r#"{"certificados":[]}"#);
+
+        let r = restaurar(&nombre).expect("restaurar");
+
+        assert_eq!(valores(), vec!["uno", "dos"], "la base volvió");
+        assert!(r.capital_restaurado);
+        assert!(crate::db_nosql::leer_coleccion("capital").to_string().contains("500"));
+        // Lo que había antes de restaurar se puede recuperar.
+        let seguridad = Connection::open(&r.respaldo_de_seguridad).unwrap();
+        let valor: String =
+            seguridad.query_row("SELECT valor FROM prueba;", [], |r| r.get(0)).unwrap();
+        assert_eq!(valor, "roto", "el estado sustituido quedó respaldado");
+    }
+
+    #[test]
+    fn un_respaldo_sin_capital_no_borra_el_capital_actual() {
+        let _g = entorno();
+        crear_base_con_datos();
+        let bueno = respaldar("bueno").unwrap();
+        escribir_capital(r#"{"certificados":[{"monto":700}]}"#);
+
+        let r = restaurar(&bueno.file_name().unwrap().to_string_lossy()).unwrap();
+
+        assert!(!r.capital_restaurado, "y así se dice");
+        assert!(crate::db_nosql::leer_coleccion("capital").to_string().contains("700"));
+    }
+
+    #[test]
+    fn no_se_restaura_un_respaldo_de_un_esquema_mas_nuevo() {
+        let _g = entorno();
+        crear_base_con_datos();
+        let futuro = respaldar("futuro").unwrap();
+        Connection::open(&futuro)
+            .unwrap()
+            .execute_batch(&format!(
+                "PRAGMA user_version = {};",
+                crate::migraciones::VERSION_OBJETIVO + 1
+            ))
+            .unwrap();
+        Connection::open(crate::db_sql::obtener_ruta_db())
+            .unwrap()
+            .execute("INSERT INTO prueba (valor) VALUES ('intacto');", [])
+            .unwrap();
+
+        let r = restaurar(&futuro.file_name().unwrap().to_string_lossy());
+
+        assert!(r.is_err());
+        assert_eq!(valores(), vec!["uno", "dos", "intacto"], "no se tocó nada");
+    }
+
+    #[test]
+    fn un_respaldo_corrupto_no_sustituye_a_la_base() {
+        let _g = entorno();
+        crear_base_con_datos();
+        let malo = directorio_de_respaldos().join("michelitos_2026-01-01T00-00-00_roto.db");
+        std::fs::create_dir_all(malo.parent().unwrap()).unwrap();
+        std::fs::write(&malo, b"esto no es una base").unwrap();
+
+        assert!(restaurar("michelitos_2026-01-01T00-00-00_roto.db").is_err());
+        assert_eq!(valores(), vec!["uno", "dos"]);
+    }
+
+    #[test]
+    fn un_respaldo_con_referencias_rotas_se_rechaza_sin_tomar_otro_respaldo() {
+        let _g = entorno();
+        crear_base_con_datos();
+        let roto = directorio_de_respaldos().join("michelitos_2026-01-01T00-00-00_rotas.db");
+        std::fs::create_dir_all(roto.parent().unwrap()).unwrap();
+        let c = Connection::open(&roto).unwrap();
+        c.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             CREATE TABLE padre (id INTEGER PRIMARY KEY);
+             CREATE TABLE hijo (padre_id INTEGER REFERENCES padre(id));
+             INSERT INTO hijo VALUES (99);",
+        )
+        .unwrap();
+        drop(c);
+
+        assert!(restaurar("michelitos_2026-01-01T00-00-00_rotas.db").is_err());
+        assert_eq!(respaldos_existentes().len(), 1, "no se tomó copia de seguridad en vano");
+        assert_eq!(valores(), vec!["uno", "dos"]);
+    }
+
+    #[test]
+    fn solo_se_restauran_nombres_de_la_carpeta_de_respaldos() {
+        let _g = entorno();
+        crear_base_con_datos();
+
+        // Existe de verdad, para que solo la extensión pueda rechazarlo.
+        let ajeno = directorio_de_respaldos().join("notas.txt");
+        std::fs::create_dir_all(ajeno.parent().unwrap()).unwrap();
+        std::fs::write(&ajeno, b"x").unwrap();
+
+        for nombre in ["../databases/sql/michelitos.db", "/etc/passwd", "notas.txt", "", "a/b.db"] {
+            assert!(restaurar(nombre).is_err(), "rechazado: {nombre:?}");
+        }
+    }
+
+    #[test]
+    fn listar_devuelve_del_mas_reciente_al_mas_antiguo() {
+        let _g = entorno();
+        crear_base_con_datos();
+        respaldar("a").unwrap();
+        respaldar("b").unwrap();
+
+        let nombres = listar();
+
+        assert_eq!(nombres.len(), 2);
+        assert!(nombres[0] > nombres[1], "{nombres:?}");
     }
 }
