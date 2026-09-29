@@ -174,13 +174,13 @@ que para un cambio de esquema es el grano correcto.
 
 ## Tramo 4c — los importes que todavía viajan como número (análisis, 2026-09-29)
 
-Estado: **análisis, sin cambios de código. La decisión es del titular.**
+Estado: **cerrado con la opción 1 (1.41.0): no se convierte, y la premisa queda fijada con una prueba.** Decisión del titular el 2026-09-29.
 
 El tramo 4a dejó pendientes «cuarenta y un parámetros» de importe que llegan a
 Rust como `f64`. Antes de convertirlos se midió qué exponen.
 
 ### Inventario
-Doce comandos reciben algún importe como número: cobrar una factura formal e
+Dieciséis flujos envían algún importe como número (el análisis original contó doce por mirar solo los parámetros sueltos; los cuatro que llegan en una estructura —crear gasto, crear ingreso, crear y editar préstamo— pasan por los mismos formularios y quedan cubiertos igual). Los doce sueltos son: cobrar una factura formal e
 informal, crear un ingreso informal, crear una tarjeta y actualizar sus
 límites, abonar a una tarjeta, crear una cuenta, transferir (y retirar a
 efectivo), corregir una factura, cobrar en efectivo, crear una bonificación y
@@ -197,7 +197,7 @@ interfaz da esto:
 | Con `step="0.01"` (todo el dinero) | 52 |
 | Otros: tasa (`0.0001`), días de facturación y cuotas | 9, ninguno es dinero |
 | Formularios con `novalidate` | 0 |
-| Manejadores que envían dinero | 12 de 12 por `onsubmit`, es decir, tras la validación del navegador |
+| Manejadores que envían dinero | 16 de 16 por `onsubmit`, es decir, tras la validación del navegador |
 | Importes calculados en JavaScript y enviados | 0 (el único derivado, el cobro parcial de una factura, ya viaja como texto) |
 
 ### Qué se pierde al viajar como número
@@ -215,12 +215,11 @@ Se midió el recorrido exacto que hace un importe: texto del campo → número J
 Es decir, **el camino por número solo falla si llega un importe con más de dos
 decimales**, y eso es justo lo que `step="0.01"` impide al enviar.
 
-### Lo que no se ha comprobado
-La validación de `step` se apoya en el navegador. Se ha visto en el código que
-no se desactiva, pero **no se ha probado en la vista web de la aplicación
-empaquetada** (WKWebView). Hay una prueba de cinco segundos que lo aclara:
-escribir `1.005` en cualquier campo de importe e intentar guardar; debe
-aparecer el aviso del navegador y no guardarse nada.
+### Comprobado en la aplicación empaquetada
+La validación de `step` se apoya en el navegador. El titular escribió `1.005`
+en un campo de importe de la aplicación empaquetada (WKWebView) e intentó
+guardar: **el navegador mostró su aviso de valor no válido y no se guardó
+nada.** La premisa se cumple donde importa, no solo en el código.
 
 ### Opciones
 1. **No convertir y fijar la premisa con una prueba** *(recomendada)*. Una
@@ -240,7 +239,20 @@ aparecer el aviso del navegador y no guardarse nada.
    repartida en muchos puntos de entrada y sin la ventaja de tipo que da la
    opción 2.
 
-### Recomendación
-La opción 1 ahora, y la 2 solo si la prueba manual de `1.005` falla en la
-aplicación empaquetada o si aparece una vía nueva que envíe importes sin pasar
-por un formulario (una importación, un atajo de teclado).
+### Decisión
+**Opción 1.** La opción 2 solo se retoma si aparece una vía nueva que envíe
+importes sin pasar por un formulario (una importación, un atajo de teclado) o
+si un cambio de navegador dejara de aplicar el `step`.
+
+### Qué fija la prueba (`src/js/contrato/importes.test.js`)
+* Todo campo numérico de la interfaz lleva `step="0.01"` o está **declarado por
+  su id exacto** como no monetario, con su razón (una comparación por prefijo
+  dejaría pasar `tar_cor_dop`, un importe, detrás de `tar_cor`, un día).
+* La lista de no monetarios no tiene entradas obsoletas ni lleva `step` de
+  céntimo.
+* Ningún formulario usa `novalidate`.
+* Los dieciséis envíos de dinero salen de un manejador enlazado con `onsubmit`
+  —tras la validación—, y ninguno recibe un importe calculado en el navegador.
+* Cinco mutaciones (quitar un `step`, añadir `novalidate`, calcular un importe,
+  pasar un envío a `onclick`, dejar un id sin declarar): las cinco hacen fallar
+  la prueba.
