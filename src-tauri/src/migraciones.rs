@@ -1107,6 +1107,53 @@ mod tests_centavos {
 
 
     #[test]
+    fn toda_clave_ajena_hacia_un_gasto_esta_declarada_como_derivada_o_informativa() {
+        // **La regla que mantiene honesta la guarda de `eliminar_gasto`.**
+        //
+        // Igual que la de cuentas: se recorren las claves ajenas REALES hacia
+        // `gastos` y se comparan con las dos listas. Una tabla nueva que
+        // enlace un gasto hace fallar esta prueba hasta que alguien decida si
+        // ese gasto depende de la operación (derivado) o solo la menciona
+        // (informativo). Así quedó sin proteger la comisión de un abono.
+        use crate::db_sql::{GASTOS_DERIVADOS, VINCULOS_INFORMATIVOS_CON_GASTOS};
+        use std::collections::BTreeSet;
+
+        let c = base_migrada();
+        let tablas: Vec<String> = {
+            let mut s = c
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+                .unwrap();
+            s.query_map([], |r| r.get(0)).unwrap().filter_map(|x| x.ok()).collect()
+        };
+        let mut reales = BTreeSet::new();
+        for tabla in &tablas {
+            let mut s = c
+                .prepare(&format!(
+                    "SELECT \"from\" FROM pragma_foreign_key_list('{tabla}') WHERE \"table\" = 'gastos';"
+                ))
+                .unwrap();
+            for columna in s.query_map([], |r| r.get::<_, String>(0)).unwrap().filter_map(|x| x.ok()) {
+                reales.insert((tabla.clone(), columna));
+            }
+        }
+        let declaradas: BTreeSet<(String, String)> = GASTOS_DERIVADOS
+            .iter()
+            .map(|(t, c, _)| (t.to_string(), c.to_string()))
+            .chain(VINCULOS_INFORMATIVOS_CON_GASTOS.iter().map(|(t, c)| (t.to_string(), c.to_string())))
+            .collect();
+
+        let sin_declarar: Vec<_> = reales.difference(&declaradas).collect();
+        let obsoletas: Vec<_> = declaradas.difference(&reales).collect();
+        assert!(
+            sin_declarar.is_empty(),
+            "apuntan a un gasto y no están declaradas: {sin_declarar:?}. Añádelas a \
+             `GASTOS_DERIVADOS` (si el gasto depende de la operación) o a \
+             `VINCULOS_INFORMATIVOS_CON_GASTOS` (si solo la menciona)."
+        );
+        assert!(obsoletas.is_empty(), "declaradas pero ya no existen en el esquema: {obsoletas:?}");
+    }
+
+    #[test]
     fn toda_clave_ajena_hacia_una_cuenta_esta_declarada_para_la_guarda_de_borrado() {
         // **La regla que mantiene honesta la guarda de `eliminar_cuenta`.**
         //

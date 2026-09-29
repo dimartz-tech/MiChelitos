@@ -2778,19 +2778,11 @@ fn eliminar_gasto(id: i64, motivo: String) -> Result<String, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // El cargo de un avance sube la deuda de la tarjeta **junto con el
-    // importe**, en una sola operación. Borrarlo por separado bajaría la
-    // deuda por el cargo y dejaría el avance registrado con un cargo que ya
-    // no existe: la tarjeta y su historial dejarían de cuadrar.
-    let es_cargo_de_avance: i64 = tx
-        .query_row(
-            "SELECT COUNT(*) FROM avances_efectivo WHERE gasto_cargo_id = ?;",
-            [id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if es_cargo_de_avance > 0 {
-        return Err("Este gasto es el cargo de un avance de efectivo. Revierte el avance completo: es la única forma de que la deuda de la tarjeta y la cuenta sigan cuadrando.".to_string());
+    // Un gasto que creó otra operación —el cargo de un avance, la comisión de
+    // un abono— no se borra por separado: se revierte la operación entera. La
+    // lista y el porqué viven en `db_sql::GASTOS_DERIVADOS`.
+    if let Some(motivo) = db_sql::motivo_de_no_borrar_gasto(&tx, id).map_err(|e| e.to_string())? {
+        return Err(motivo.to_string());
     }
 
     let caso = abrir_caso(&tx, "gasto", id, "SELECT descripcion, monto, divisa FROM gastos WHERE id = ?;", &motivo)?;

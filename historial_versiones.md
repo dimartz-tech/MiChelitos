@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.39.0 (Versión Actual) - 2026-09-29
+## 🚀 Versión 1.40.0 (Versión Actual) - 2026-09-29
+**La comisión de un abono ya no se puede borrar por separado.**
+
+### 🛡️ Qué se corrige
+* Borrar por separado el gasto de la comisión de un abono devolvía su importe a la cuenta, y al revertir después el abono se devolvía **otra vez**: la cuenta acababa por encima de lo que tenía. Ahora se rechaza con un mensaje que manda revertir el abono completo. Revertir el abono sigue funcionando y no devuelve nada de más.
+* La guarda es una **lista** (`GASTOS_DERIVADOS`), no una comprobación por caso: el cargo de un avance y la comisión de un abono. Una prueba compara la lista con las claves foráneas reales hacia `gastos`, de modo que **una tabla nueva que enlace un gasto falla las pruebas** hasta que se decida si el gasto depende de la operación o solo la menciona.
+* Sin migración: en los datos vivos no había ningún caso.
+
+### ⚠️ Lo que no se hizo
+* No se rechaza revertir un abono sin vínculo: no se distingue de un abono histórico legítimo y bloquearía casos que hoy funcionan. Como el vínculo solo se perdía al borrar la comisión, y eso ya no es posible, no puede reaparecer. Explicado en `abonos_y_su_comision.md`.
+
+### ✅ Pruebas
+* Nuevas: `c136`, `c137`, `c138` y la de esquema; `c133` reproduce con SQL directo lo que ya no se puede provocar. 613 en Rust. Tres mutaciones (quitar la entrada de la lista, no consultarla, quitar el vínculo informativo): fallan pruebas.
+
+---
+
+## 🚀 Versión 1.39.0 - 2026-09-29
 **Se fija un defecto conocido y se documenta su corrección: la comisión de un abono se puede borrar por separado.** No cambia comportamiento.
 
 ### 🔎 El hallazgo
