@@ -44,6 +44,7 @@ pub struct AlmacenEnMemoria {
     pub bonificaciones: HashMap<i64, BonificacionGuardada>,
     pub transferencias: HashMap<i64, TransferenciaGuardada>,
     pub pagos: HashMap<i64, PagoGuardado>,
+    pub avances: HashMap<i64, AvanceGuardado>,
     pub falla_al_insertar: bool,
     /// Cuando está activo, `ajustar_deuda` falla. Permite comprobar que un
     /// fallo a mitad de operación no deja saldos alterados.
@@ -297,6 +298,49 @@ impl RepositorioPagosTarjeta for AlmacenEnMemoria {
             .remove(&pago_id)
             .map(|_| ())
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "abono", id: pago_id })
+    }
+}
+
+impl RepositorioAvances for AlmacenEnMemoria {
+    fn insertar_avance(&mut self, a: &AvanceAPersistir) -> Result<i64, ErrorAlmacen> {
+        if !self.tarjetas.contains(&a.tarjeta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: a.tarjeta_id });
+        }
+        if !self.cuentas.contains_key(&a.cuenta_ahorro_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: a.cuenta_ahorro_id });
+        }
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.avances.insert(
+            id,
+            AvanceGuardado {
+                id,
+                tarjeta_id: a.tarjeta_id,
+                cuenta_ahorro_id: a.cuenta_ahorro_id,
+                monto: a.monto,
+                cargo: a.cargo,
+                gasto_cargo_id: a.gasto_cargo_id,
+            },
+        );
+        Ok(id)
+    }
+
+    fn obtener_avance(&self, avance_id: i64) -> Result<AvanceGuardado, ErrorAlmacen> {
+        self.avances
+            .get(&avance_id)
+            .cloned()
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "avance", id: avance_id })
+    }
+
+    fn eliminar_avance(&mut self, avance_id: i64) -> Result<(), ErrorAlmacen> {
+        self.avances
+            .remove(&avance_id)
+            .map(|_| ())
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "avance", id: avance_id })
+    }
+
+    fn avances_que_referencian(&self, cuenta_id: i64) -> Result<i64, ErrorAlmacen> {
+        Ok(self.avances.values().filter(|a| a.cuenta_ahorro_id == cuenta_id).count() as i64)
     }
 }
 

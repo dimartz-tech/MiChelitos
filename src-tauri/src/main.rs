@@ -34,6 +34,9 @@ use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
 use aplicacion::revertir_gasto::revertir_gasto;
 use aplicacion::registrar_pago_tarjeta::{registrar_pago_tarjeta as registrar_pago_tarjeta_caso, DatosPago};
 use aplicacion::revertir_pago_tarjeta::revertir_pago_tarjeta;
+use aplicacion::registrar_avance_de_efectivo::{registrar_avance_de_efectivo, DatosAvance};
+use aplicacion::revertir_avance_de_efectivo::revertir_avance_de_efectivo;
+use dominio::avance::CargoDeAvance;
 use aplicacion::transferir::{revertir_transferencia, transferir, DatosTransferencia};
 use puertos::repositorios::RepositorioCuentas;
 use dominio::tarjeta::{LimitesDivisa, PoliticaLiquidacion, MONEDA_LOCAL};
@@ -998,6 +1001,215 @@ fn revertir_abono_tarjeta(id: i64, motivo: String) -> Result<String, String> {
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(format!("{} Caso {}.", resumen, caso))
+}
+
+// --- COMANDOS: AVANCES DE EFECTIVO ---
+
+/// Interpreta el cargo tal como llega de la interfaz.
+///
+/// Lo comparten el registro y la simulación, y por eso está aparte: que lo que
+/// se enseña antes de confirmar y lo que se asienta después salgan del mismo
+/// código es lo único que garantiza que sean la misma cifra.
+///
+/// Llega en **tres formas excluyentes** y se rechaza la contradicción —un
+/// porcentaje con un cargo fijo, o un valor con una exoneración— en vez de
+/// elegir una en silencio: un dato que se ignora sin avisar es el que después
+/// nadie sabe por qué no cuadra.
+fn cargo_de_avance(
+    tipo_cargo: &str,
+    porcentaje: Option<f64>,
+    cargo_fijo: Option<ipc::ImporteDecimal>,
+    divisa: Divisa,
+) -> Result<CargoDeAvance, String> {
+    match (tipo_cargo, porcentaje, cargo_fijo) {
+        ("porcentaje", Some(p), None) => Ok(CargoDeAvance::porcentual(p)?),
+        ("porcentaje", None, _) => Err("Indica el porcentaje del cargo.".to_string()),
+        ("fijo", None, Some(f)) => Ok(CargoDeAvance::fijo(f.con_divisa(divisa))?),
+        ("fijo", _, None) => Err("Indica el importe del cargo fijo.".to_string()),
+        ("exonerado", None, None) => Ok(CargoDeAvance::Exonerado),
+        ("porcentaje" | "fijo" | "exonerado", _, _) => {
+            Err("El tipo de cargo y los valores que se indican se contradicen.".to_string())
+        }
+        (otro, _, _) => Err(format!(
+            "Tipo de cargo «{}» desconocido. Los admitidos son porcentaje, fijo y exonerado.",
+            otro
+        )),
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SimulacionAvance {
+    monto: f64,
+    cargo: f64,
+    a_la_tarjeta: f64,
+    a_la_cuenta: f64,
+}
+
+/// Calcula lo que un avance movería, sin guardar nada.
+///
+/// Existe para que la interfaz enseñe las cifras **antes** de confirmar sin
+/// tener que repetir la regla en JavaScript: una regla en el HTML es una regla
+/// sin pruebas, y la cifra que se confirma debe ser exactamente la que se
+/// asienta.
+#[tauri::command]
+fn simular_avance_efectivo(
+    monto: ipc::ImporteDecimal,
+    divisa: String,
+    tipo_cargo: String,
+    porcentaje: Option<f64>,
+    cargo_fijo: Option<ipc::ImporteDecimal>,
+) -> Result<SimulacionAvance, String> {
+    let divisa = Divisa::desde_codigo(&divisa)?;
+    let cargo = cargo_de_avance(&tipo_cargo, porcentaje, cargo_fijo, divisa)?;
+    let avance = dominio::avance::Avance::calcular(monto.con_divisa(divisa), cargo)?;
+    Ok(SimulacionAvance {
+        monto: avance.monto.unidades(),
+        cargo: avance.cargo.unidades(),
+        a_la_tarjeta: avance.a_la_tarjeta()?.unidades(),
+        a_la_cuenta: avance.monto.unidades(),
+    })
+}
+
+/// Registra un avance de efectivo: la tarjeta pone dinero en una cuenta.
+///
+/// Traducción pura, como el resto de comandos: la regla vive en
+/// `dominio::avance` y en el caso de uso. Aquí solo se interpreta lo que
+/// llega de la interfaz.
+#[tauri::command]
+fn registrar_avance_efectivo(
+    tarjeta_id: i64,
+    cuenta_ahorro_id: i64,
+    fecha: String,
+    monto: ipc::ImporteDecimal,
+    divisa: String,
+    tipo_cargo: String,
+    porcentaje: Option<f64>,
+    cargo_fijo: Option<ipc::ImporteDecimal>,
+    nota: Option<String>,
+) -> Result<String, String> {
+    let fecha = fecha.trim().to_string();
+    if fecha_desde_texto(&fecha).is_none() {
+        return Err(format!("La fecha «{}» no se entiende. Se espera dd/mm/aaaa.", fecha));
+    }
+    let divisa = Divisa::desde_codigo(&divisa)?;
+
+    let cargo = cargo_de_avance(&tipo_cargo, porcentaje, cargo_fijo, divisa)?;
+    let nota = nota.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let categoria = tx
+        .query_row("SELECT id FROM categorias WHERE nombre = 'Otros' LIMIT 1;", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+
+    let registrado = {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        registrar_avance_de_efectivo(
+            DatosAvance {
+                tarjeta_id,
+                cuenta_ahorro_id,
+                fecha,
+                monto: monto.con_divisa(divisa),
+                cargo,
+                nota,
+            },
+            categoria,
+            &mut almacen,
+        )?
+    };
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(format!(
+        "Avance registrado. La cuenta recibe {} {:.2}; el cargo es {} {:.2} y la deuda de la tarjeta sube {} {:.2}.",
+        divisa.codigo(),
+        monto.con_divisa(divisa).unidades(),
+        divisa.codigo(),
+        registrado.cargo.unidades(),
+        divisa.codigo(),
+        registrado.a_la_tarjeta.unidades()
+    ))
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AvanceEfectivo {
+    id: i64,
+    fecha: String,
+    monto: f64,
+    divisa: String,
+    tipo_cargo: String,
+    tasa: Option<f64>,
+    cargo: f64,
+    cuenta_ahorro_id: i64,
+    cuenta_nombre: String,
+    nota: Option<String>,
+}
+
+/// Avances de una tarjeta, del más reciente al más antiguo.
+#[tauri::command]
+fn obtener_avances_tarjeta(tarjeta_id: i64) -> Result<Vec<AvanceEfectivo>, String> {
+    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT a.id, a.fecha, a.monto, a.divisa, a.tipo_cargo, a.tasa, a.cargo,
+                    a.cuenta_ahorro_id, c.nombre, a.nota
+             FROM avances_efectivo a
+             JOIN cuentas_ahorro c ON c.id = a.cuenta_ahorro_id
+             WHERE a.tarjeta_id = ?
+             ORDER BY a.id DESC;",
+        )
+        .map_err(|e| e.to_string())?;
+    let filas = stmt
+        .query_map([tarjeta_id], |r| {
+            Ok(AvanceEfectivo {
+                id: r.get(0)?,
+                fecha: r.get(1)?,
+                monto: r.get(2)?,
+                divisa: r.get(3)?,
+                tipo_cargo: r.get(4)?,
+                tasa: r.get(5)?,
+                cargo: r.get(6)?,
+                cuenta_ahorro_id: r.get(7)?,
+                cuenta_nombre: r.get(8)?,
+                nota: r.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut lista = Vec::new();
+    for f in filas {
+        lista.push(f.map_err(|e| e.to_string())?);
+    }
+    Ok(lista)
+}
+
+/// Deshace un avance de efectivo, con caso de auditoría.
+#[tauri::command]
+fn revertir_avance_efectivo(id: i64, motivo: String) -> Result<String, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let caso = abrir_caso(
+        &tx,
+        "avance de efectivo",
+        id,
+        "SELECT 'Avance del ' || fecha, monto, divisa FROM avances_efectivo WHERE id = ?;",
+        &motivo,
+    )?;
+
+    let r = {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        revertir_avance_de_efectivo(id, &mut almacen)?
+    };
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(format!(
+        "La deuda de la tarjeta baja {} {:.2} y la cuenta devuelve {} {:.2}. Caso {}.",
+        r.deuda_restituida.divisa().codigo(),
+        r.deuda_restituida.unidades(),
+        r.devuelto_por_la_cuenta.divisa().codigo(),
+        r.devuelto_por_la_cuenta.unidades(),
+        caso
+    ))
 }
 
 // --- COMANDOS: SUSCRIPCIONES ---
@@ -2525,6 +2737,21 @@ fn eliminar_gasto(id: i64, motivo: String) -> Result<String, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
+    // El cargo de un avance sube la deuda de la tarjeta **junto con el
+    // importe**, en una sola operación. Borrarlo por separado bajaría la
+    // deuda por el cargo y dejaría el avance registrado con un cargo que ya
+    // no existe: la tarjeta y su historial dejarían de cuadrar.
+    let es_cargo_de_avance: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM avances_efectivo WHERE gasto_cargo_id = ?;",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if es_cargo_de_avance > 0 {
+        return Err("Este gasto es el cargo de un avance de efectivo. Revierte el avance completo: es la única forma de que la deuda de la tarjeta y la cuenta sigan cuadrando.".to_string());
+    }
+
     let caso = abrir_caso(&tx, "gasto", id, "SELECT descripcion, monto, divisa FROM gastos WHERE id = ?;", &motivo)?;
     {
         let mut almacen = AlmacenSqlite::nuevo(&tx);
@@ -2669,6 +2896,10 @@ fn main() {
             crear_respaldo,
             obtener_cuentas,
             revertir_abono_tarjeta,
+            simular_avance_efectivo,
+            registrar_avance_efectivo,
+            obtener_avances_tarjeta,
+            revertir_avance_efectivo,
             obtener_abonos_tarjeta,
             obtener_correcciones,
             crear_cuenta,

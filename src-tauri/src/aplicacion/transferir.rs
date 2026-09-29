@@ -136,6 +136,13 @@ pub fn eliminar_cuenta(
         )));
     }
 
+    if almacen.avances_que_referencian(cuenta_id)? > 0 {
+        return Err(ErrorAplicacion::Almacen(ErrorAlmacen::Fallo(
+            "No se puede eliminar la cuenta porque recibió avances de efectivo: borrarla se llevaría el rastro de la tarjeta de la que salió ese dinero. Revierte primero esos avances."
+                .into(),
+        )));
+    }
+
     almacen.eliminar_cuenta(cuenta_id)?;
     Ok(())
 }

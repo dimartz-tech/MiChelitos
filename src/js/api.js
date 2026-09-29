@@ -58,6 +58,46 @@ const AppAPI = {
         return await invoke('revertir_abono_tarjeta', { id: Number(id), motivo });
     },
 
+    // --- AVANCES DE EFECTIVO ---
+    //
+    // El monto y el cargo fijo viajan como **texto**, tal como se escribieron:
+    // el céntimo lo decide el núcleo con sus dígitos y no una conversión a
+    // coma flotante. El porcentaje es una tasa, no un importe, y va como número.
+
+    // Calcula el cargo sin guardar nada, para enseñarlo antes de confirmar. La
+    // regla vive en el núcleo: la interfaz no la duplica.
+    async simularAvanceEfectivo(monto, divisa, tipoCargo, porcentaje, cargoFijo) {
+        return await invoke('simular_avance_efectivo', {
+            monto: String(monto),
+            divisa,
+            tipoCargo,
+            porcentaje: porcentaje ?? null,
+            cargoFijo: cargoFijo ?? null
+        });
+    },
+
+    async registrarAvanceEfectivo(tarjetaId, cuentaAhorroId, fecha, monto, divisa, tipoCargo, porcentaje, cargoFijo, nota) {
+        return await invoke('registrar_avance_efectivo', {
+            tarjetaId: Number(tarjetaId),
+            cuentaAhorroId: Number(cuentaAhorroId),
+            fecha,
+            monto: String(monto),
+            divisa,
+            tipoCargo,
+            porcentaje: porcentaje ?? null,
+            cargoFijo: cargoFijo ?? null,
+            nota: nota || null
+        });
+    },
+
+    async obtenerAvancesTarjeta(tarjetaId) {
+        return await invoke('obtener_avances_tarjeta', { tarjetaId: Number(tarjetaId) });
+    },
+
+    async revertirAvanceEfectivo(id, motivo) {
+        return await invoke('revertir_avance_efectivo', { id: Number(id), motivo });
+    },
+
     async crearCuenta(nombre, divisa, balance, entidad, comisionPagoImpuestos) {
         return await invoke('crear_cuenta', {
             nombre,
