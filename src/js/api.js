@@ -54,8 +54,8 @@ const AppAPI = {
         return await invoke('obtener_abonos_tarjeta', { tarjetaId: Number(tarjetaId) });
     },
 
-    async revertirAbonoTarjeta(id) {
-        return await invoke('revertir_abono_tarjeta', { id: Number(id) });
+    async revertirAbonoTarjeta(id, motivo) {
+        return await invoke('revertir_abono_tarjeta', { id: Number(id), motivo });
     },
 
     async crearCuenta(nombre, divisa, balance, entidad, comisionPagoImpuestos) {
@@ -351,16 +351,16 @@ const AppAPI = {
         });
     },
 
-    async eliminarGasto(id) {
-        return await invoke('eliminar_gasto', { id: Number(id) });
+    async eliminarGasto(id, motivo) {
+        return await invoke('eliminar_gasto', { id: Number(id), motivo });
     },
 
-    async eliminarTransaccionCuenta(id) {
-        return await invoke('eliminar_transaccion_cuenta', { id: Number(id) });
+    async eliminarTransaccionCuenta(id, motivo) {
+        return await invoke('eliminar_transaccion_cuenta', { id: Number(id), motivo });
     },
 
-    async eliminarIngresoInformal(id) {
-        return await invoke('eliminar_ingreso_informal', { id: Number(id) });
+    async eliminarIngresoInformal(id, motivo) {
+        return await invoke('eliminar_ingreso_informal', { id: Number(id), motivo });
     },
 
     async eliminarIngreso(id, motivo) {
