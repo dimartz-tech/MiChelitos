@@ -4,7 +4,20 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.42.0 (Versión Actual) - 2026-09-30
+## 🚀 Versión 1.43.0 (Versión Actual) - 2026-09-30
+**El aviso «Cobro próximo» de Suscripciones vuelve a mostrar la fecha.**
+
+### 🐞 Qué fallaba
+* El aviso «🔔 Cobro próximo» imprimía `s.fecha_renovacion`, un campo que Rust **dejó de enviar en la Fase 5** (el puntero de cobro pasó a `fecha_proximo_cobro`). Con una suscripción por cobrar aparecía «… USD 10.00 el undefined». Lo encontró la comprobación de tipos del piloto (1.42.0); nada más lo había señalado en cuatro versiones.
+* Está en la versión instalada (1.36.0): un aviso de cobro que no dice cuándo.
+
+### ✅ Qué se hace
+* El aviso lee `fecha_proximo_cobro`. Reproducido y verificado en un navegador con datos simulados: antes «el undefined», ahora «el 30/09/2026».
+* Una prueba fija que la interfaz no lea campos de suscripción que Rust no envía.
+
+---
+
+## 🚀 Versión 1.42.0 - 2026-09-30
 **Piloto de tipos con JSDoc: los tipos del contrato con Rust se generan de `main.rs`, y la comprobación encontró un defecto real.**
 
 ### 🧩 Qué se añade

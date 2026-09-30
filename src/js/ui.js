@@ -1158,7 +1158,7 @@ class AppUI {
                     return `<div class="card" style="border-left:3px solid var(--warning, #e0a020); margin-bottom:1rem;">
                         <strong>🔔 Cobro próximo</strong>
                         <ul style="margin:0.5rem 0 0 1rem; font-size:0.85rem;">
-                            ${avisan.map(s => `<li><strong>${s.plataforma}</strong> — ${s.divisa} ${this.formatMoney(s.monto)} el ${s.fecha_renovacion}</li>`).join('')}
+                            ${avisan.map(s => `<li><strong>${s.plataforma}</strong> — ${s.divisa} ${this.formatMoney(s.monto)} el ${s.fecha_proximo_cobro}</li>`).join('')}
                         </ul>
                     </div>`;
                 })()}

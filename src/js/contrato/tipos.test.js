@@ -39,3 +39,14 @@ test('el traductor de tipos rechaza un tipo de Rust desconocido en vez de invent
     assert.equal(tipoJs('Option<Vec<String>>'), 'string[] | null');
     assert.equal(tipoJs('Option<ipc::ImporteDecimal>'), 'string | number | null');
 });
+
+test('la interfaz no lee campos de suscripción que Rust ya no envía', () => {
+    // `fecha_renovacion` fue el puntero de cobro antes de la Fase 5; hoy Rust
+    // envía `fecha_proximo_cobro`. El aviso «Cobro próximo» siguió leyendo el
+    // viejo y mostraba «undefined» sin que nada lo señalara.
+    const UI = readFileSync(join(RAIZ, 'src', 'js', 'ui.js'), 'utf8');
+    const enviado = /\{\{ ([^}]*) \}\} Suscripcion \*\//.exec(TIPOS)?.[1] ?? '';
+    assert.ok(enviado.includes('fecha_proximo_cobro'), 'Rust ya no envía fecha_proximo_cobro');
+    assert.ok(!enviado.includes('fecha_renovacion'));
+    assert.ok(!UI.includes('.fecha_renovacion'), 'la interfaz lee fecha_renovacion, que Rust no envía');
+});
