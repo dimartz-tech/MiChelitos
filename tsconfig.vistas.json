@@ -1,0 +1,14 @@
+{
+  // EXPERIMENTAL, informativo: `npm run tipos:vistas`. Comprueba las vistas
+  // sin anotarlas, aprovechando solo que `api.js` ya devuelve tipos concretos.
+  // No es una puerta: hay ruido del DOM (ver fase_7_frontend.md, §4).
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "checkJs": true, "strict": false, "noImplicitAny": false },
+  "files": [
+    "src/js/tipos-ipc.js",
+    "src/js/api.js",
+    "src/js/ui.js",
+    "src/js/app.js",
+    "src/js/nucleo/respaldos.js"
+  ]
+}
