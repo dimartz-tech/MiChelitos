@@ -1,0 +1,23 @@
+{
+  // Comprobación de tipos con JSDoc, sin compilar nada: `npm run tipos`.
+  // Solo revisa los archivos que llevan `// @ts-check` y están listados aquí.
+  // Los parámetros de los envoltorios de `api.js` todavía no están tipados
+  // (ver fase_7_frontend.md, §4), de ahí `noImplicitAny: false`.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "target": "es2022",
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom"],
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true
+  },
+  "files": [
+    "src/js/tipos-ipc.js",
+    "src/js/api.js",
+    "src/js/nucleo/dinero.js"
+  ]
+}

@@ -4,7 +4,25 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.41.0 (Versión Actual) - 2026-09-29
+## 🚀 Versión 1.42.0 (Versión Actual) - 2026-09-30
+**Piloto de tipos con JSDoc: los tipos del contrato con Rust se generan de `main.rs`, y la comprobación encontró un defecto real.**
+
+### 🧩 Qué se añade
+* `herramientas/generar_tipos_ipc.mjs` genera `src/js/tipos-ipc.js` desde `main.rs`: las 16 estructuras que Rust devuelve, las de entrada y un mapa de los **61 comandos** con sus argumentos y su respuesta. Una prueba exige que esté al día.
+* `api.js` tipa `invoke` contra ese mapa, así que cada envoltorio hereda los tipos sin anotarse uno a uno; `nucleo/dinero.js` queda tipado y pasa en modo estricto. Sin cambios de comportamiento: solo comentarios y un `const` intermedio.
+* `npm run tipos` (nueva dependencia **de desarrollo**: `typescript`; el `.dmg` no cambia) comprueba esos archivos y forma parte de `npm run test:todo` y de `herramientas/revisar.py`. `npm run tipos:vistas` comprueba `ui.js` sin anotarlo, como experimento informativo.
+* Se comprobó con mutaciones que detecta una clave equivocada en un envoltorio, un comando inexistente, texto donde Rust espera un número y un campo que Rust renombra.
+
+### 🔎 El hallazgo
+* `ui.js` muestra en el aviso «Cobro próximo» de Suscripciones `s.fecha_renovacion`, campo que Rust ya no envía desde la Fase 5 (ahora es `fecha_proximo_cobro`): la fecha sale como `undefined`. **Se corrige en un PR aparte.**
+* Sin tipos de respuesta, la misma comprobación no encontraba nada; con ellos, 1 defecto real entre 204 avisos, y cada cambio de un campo en Rust señala los lugares de la interfaz que lo usan.
+
+### 📐 Validación de TypeScript con solo `tsc`
+* Comprobado en una copia temporal, sin tocar el repositorio: `tsc` desde `beforeBuildCommand` de Tauri, salida en módulos ES sin empaquetador, ejecutada en la aplicación empaquetada. Resultados y comparación en `fase_7_frontend.md`, §4. También corrige el análisis: TypeScript con `tsc` no necesita dependencias de producción; el coste es un paso de compilación y una carpeta generada.
+
+---
+
+## 🚀 Versión 1.41.0 - 2026-09-29
 **El tramo 4 del redondeo se cierra sin convertir nada: la premisa que lo hace innecesario queda fijada con una prueba.**
 
 ### 📏 Qué se midió
