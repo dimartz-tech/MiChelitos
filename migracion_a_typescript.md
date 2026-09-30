@@ -1,6 +1,6 @@
 # Migración del frontend a TypeScript
 
-Estado: **primer paso hecho en 1.44.0** (infraestructura y conversión de todos los archivos; los tipos se aprietan después). Decisión del titular el 2026-09-30: ir a TypeScript con solo `tsc` y **empezar ya**, porque migrar es más caro cuanto más código nuevo se escribe en JavaScript.
+Estado: **1.44.0** infraestructura y conversión de todos los archivos; **1.46.0** `ui.ts` ya se comprueba (ayudante de DOM, sin `@ts-nocheck`). Queda tipar los parámetros (`noImplicitAny`) y dividir `ui.ts`. Decisión del titular el 2026-09-30: ir a TypeScript con solo `tsc` y **empezar ya**, porque migrar es más caro cuanto más código nuevo se escribe en JavaScript.
 
 Contexto y comparación con JSDoc: [fase_7_frontend.md](fase_7_frontend.md), §4.
 
@@ -32,24 +32,26 @@ Sin empaquetador, sin dependencias de producción: la salida son módulos ES (`n
 * En un navegador con datos simulados, el JavaScript compilado de `ui` hace lo mismo que el anterior: las 11 pestañas pintan, el aviso de cobro muestra la fecha, el botón de restaurar llama a `restaurar_respaldo` con el nombre elegido; sin errores en consola.
 * **En la aplicación empaquetada**, construida con `tauri build` **partiendo de cero `.js`** en el propio repositorio: el hook compiló, el binario incluyó los `.js` generados **aunque estén en `.gitignore`**, y `AppAPI`, `appUI`, `describirRespaldo` y `navigate` existían (comprobado con una marca temporal, revertida).
 
-## La deuda, medida
-`ui.ts` es TypeScript pero lleva `// @ts-nocheck`: se renombró tal cual (el historial de git conserva el archivo). Quitar esa línea da hoy **472 errores** con `strict` (y `noImplicitAny` apagado):
+## La deuda
 
-| Causa | Errores |
-|---|---|
-| `getElementById(...)` devuelve `HTMLElement \| null`: hay que aceptar el `null` | 143 + 41 |
-| `.value`, `.checked`… sobre `HTMLElement` | 193 |
-| `catch (err)`: `err` es `unknown` | 51 |
-| Campos de la clase sin declarar (`contentContainer`, `_menuPasivoAbort`…) | 18 |
-| Resto | ~20 |
+### Paso 1, hecho (1.46.0): `ui.ts` ya se comprueba
+`ui.ts` se renombró en 1.44.0 con `@ts-nocheck`: quitarlo daba **472 errores** con `strict`. Hoy **no lleva ninguna supresión y tiene 0 errores**. Lo que se hizo:
 
-Son casi todo **ergonomía del DOM**, no defectos: un ayudante `elemento<T extends HTMLElement>(id)` que devuelva el elemento o falle con un mensaje claro eliminaría de golpe la mayoría (los ~380 de las dos primeras filas).
+| Causa | Errores | Cómo se resolvió |
+|---|---|---|
+| `getElementById` devuelve `HTMLElement \| null` y se lee `.value`, `.style`… | 377 | Dos ayudantes en `src/js/ui/dom.ts`: `elemento<T>(id)` devuelve el elemento o **falla diciendo cuál falta**, y `buscar<T>(id)` conserva el `null` donde la ausencia es legítima. Se aplicaron a los 232 accesos (y a `app.ts`) con un cambio mecánico, demostrado equivalente: el JavaScript compilado es idéntico **byte a byte** una vez normalizados los dos ayudantes |
+| `catch (err)`: `err` es `unknown` | 52 | `String(err)` en lugar de `err.toString()` (idéntico para errores y cadenas) |
+| Campos de la clase sin declarar | 18 | Declarados, con su tipo |
+| Resto (arrays sin tipo, `null` mal inferido, una resta de fechas, tres parámetros por defecto `= null`) | ~25 | Anotaciones y `?? 0` donde la comparación ya trataba `null` igual |
 
-### Orden para apretar los tipos
-1. **Ayudante de DOM y de errores** en un módulo compartido (`ui/dom.ts`) y declarar los campos de la clase. Sin quitar el `@ts-nocheck` todavía.
-2. **`api.ts`**: tipar los parámetros de los envoltorios (más de un centenar) y activar `noImplicitAny`.
-3. **Dividir `ui.ts` por pestañas** (Fase 7): cada vista extraída nace **sin** `@ts-nocheck` y con tipos. El `@ts-nocheck` no se puede quitar «a medias» de un archivo, así que la extracción es el mecanismo: el archivo original se vacía y desaparece con la última vista.
-4. **Opcional**: pasar las pruebas de `pruebas/js/` a TypeScript (hoy son JavaScript escrito a mano que lee lo compilado).
+Al quitar el `@ts-nocheck` apareció además **un defecto real** (el panel «Casos de corrección» llamaba a un método de `AppAPI` que no existía: corregido en 1.45.0).
+
+Reglas que lo conservan (`pruebas/js/contrato/dom.test.js`): ningún fuente del frontend usa `@ts-nocheck`, `@ts-ignore` ni `@ts-expect-error`; nadie llama a `document.getElementById` salvo `ui/dom.ts`; `index.html` carga el ayudante antes que la interfaz.
+
+### Lo que sigue
+1. **Tipar los parámetros y activar `noImplicitAny`.** Con la opción encendida hay **303 errores**: 134 en `api.ts` (los parámetros de los envoltorios) y 169 en `ui.ts` (parámetros de los métodos). Son casi todos TS7006, «parámetro sin tipo». Los de `api.ts` se pueden derivar del mapa `Comandos`; los de `ui.ts` son trabajo a mano y conviene hacerlo **a la vez que se divide**, pestaña a pestaña.
+2. **Dividir `ui.ts` por pestañas** (Fase 7). Con el archivo ya comprobado, cada vista extraída nace tipada y cada PR comprueba que no rompe nada.
+3. **Opcional**: pasar las pruebas de `pruebas/js/` a TypeScript (hoy son JavaScript escrito a mano que lee lo compilado).
 
 ## Costes y riesgos asumidos
 * Hay un **paso de compilación** y archivos generados junto a los fuentes (ignorados). Se eligió compilar en el sitio, y no a una carpeta `dist/`, para no duplicar `index.html`, `css` y `assets` ni tocar `distDir`; el coste es que `src/js` mezcla `.ts` y `.js` generados.
