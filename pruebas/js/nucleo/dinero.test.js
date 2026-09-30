@@ -9,7 +9,7 @@ import {
     sumar,
     totalizarPorDivisa,
     divisasPresentes,
-} from './dinero.js';
+} from '../../../src/js/nucleo/dinero.js';
 
 // --- Divisa ---
 

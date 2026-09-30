@@ -1,3 +1,10 @@
+// @ts-nocheck
+// --- Migración a TypeScript ---
+// Este archivo es TypeScript pero todavía **sin comprobar** (`@ts-nocheck`): se
+// renombró tal cual para que el código nuevo nazca tipado y la migración no se
+// encarezca. La deuda es tipar esta clase; ver `migracion_a_typescript.md`.
+// Para medirla, quita la línea de arriba y ejecuta `npm run tipos`.
+
 // --- MICHELITOS TAURI - RENDERIZADO DINÁMICO DE INTERFAZ (HTML DE ESCRITORIO) ---
 
 // Tasa de referencia para expresar en pesos un pasivo en dólares. Es una

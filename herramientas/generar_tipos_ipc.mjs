@@ -1,4 +1,4 @@
-// Genera `src/js/tipos-ipc.js` —los tipos del contrato entre la interfaz y
+// Genera `src/js/tipos-ipc.d.ts` —los tipos del contrato entre la interfaz y
 // Rust— a partir de `src-tauri/src/main.rs`.
 //
 //   node herramientas/generar_tipos_ipc.mjs            escribe el archivo
@@ -13,11 +13,11 @@ import { fileURLToPath } from 'node:url';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FUENTE = join(RAIZ, 'src-tauri', 'src', 'main.rs');
-const DESTINO = join(RAIZ, 'src', 'js', 'tipos-ipc.js');
+const DESTINO = join(RAIZ, 'src', 'js', 'tipos-ipc.d.ts');
 
 const PRIMITIVOS = { i64: 'number', i32: 'number', u32: 'number', f64: 'number', String: 'string', bool: 'boolean' };
 
-/** Tipo de Rust → tipo de JSDoc. Falla ante uno desconocido: mejor romper que mentir. */
+/** Tipo de Rust → tipo de TypeScript. Falla ante uno desconocido: mejor romper que mentir. */
 export function tipoJs(rust) {
     const t = rust.replace(/\s+/g, ' ').trim();
     let m;
@@ -85,30 +85,25 @@ export function analizar(rust) {
 
 export function generar(rust) {
     const { respuestas, entradas, comandos } = analizar(rust);
-    const campos = cs => cs.map(([n, t]) => `${n}: ${t}`).join(', ');
+    const campos = cs => cs.map(([n, t]) => `${n}: ${t}`).join('; ');
     const lineas = [
         '// GENERADO por herramientas/generar_tipos_ipc.mjs desde src-tauri/src/main.rs. No editar a mano:',
-        '// se regenera con `node herramientas/generar_tipos_ipc.mjs` y una prueba exige que esté al día.',
-        '// Solo contiene tipos de JSDoc; no hay código que se ejecute.',
-        '// @ts-check',
+        '// se regenera con `npm run tipos:generar` y una prueba exige que esté al día.',
+        '// Solo contiene tipos; no hay código que se ejecute.',
         '',
         '// --- Lo que Rust devuelve ---',
-        ...respuestas.map(([n, cs]) => `/** @typedef {{ ${campos(cs)} }} ${n} */`),
+        ...respuestas.map(([n, cs]) => `export type ${n} = { ${campos(cs)} };`),
         '',
         '// --- Lo que Rust recibe en estructuras ---',
-        ...entradas.map(([n, cs]) => `/** @typedef {{ ${campos(cs)} }} ${n} */`),
+        ...entradas.map(([n, cs]) => `export type ${n} = { ${campos(cs)} };`),
         '',
         '// --- Cada comando: sus argumentos (claves en camelCase, como las envía Tauri) y su respuesta ---',
-        '/**',
-        ' * @typedef {{',
+        'export type Comandos = {',
         ...comandos.map(c => {
-            const args = c.argumentos.map(a => `${a.clave}${a.opcional ? '?' : ''}: ${a.tipo}`).join(', ');
-            return ` *   ${c.nombre}: { args: { ${args} }, ret: ${c.retorno} },`;
+            const args = c.argumentos.map(a => `${a.clave}${a.opcional ? '?' : ''}: ${a.tipo}`).join('; ');
+            return `    ${c.nombre}: { args: { ${args} }; ret: ${c.retorno} };`;
         }),
-        ' * }} Comandos',
-        ' */',
-        '',
-        'export {};',
+        '};',
         '',
     ];
     return lineas.join('\n');
@@ -118,7 +113,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const texto = generar(readFileSync(FUENTE, 'utf8'));
     if (process.argv.includes('--comprobar')) {
         if (readFileSync(DESTINO, 'utf8') !== texto) {
-            console.error('src/js/tipos-ipc.js está desactualizado: ejecuta `node herramientas/generar_tipos_ipc.mjs`.');
+            console.error('src/js/tipos-ipc.d.ts está desactualizado: ejecuta `npm run tipos:generar`.');
             process.exit(1);
         }
     } else {

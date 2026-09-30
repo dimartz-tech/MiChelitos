@@ -1,17 +1,18 @@
 {
   "name": "michelitos-tauri",
-  "version": "1.43.0",
+  "version": "1.44.0",
   "description": "Aplicación de escritorio nativa macOS con Tauri y Rust para MiChelitos",
   "main": "src/index.html",
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "test": "node --test src/js/**/*.test.js",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "tipos": "tsc -p tsconfig.json",
-    "tipos:vistas": "tsc -p tsconfig.vistas.json",
+    "compilar": "node herramientas/limpiar_js_generado.mjs && tsc -p tsconfig.build.json",
+    "vigilar": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "tipos": "tsc -p tsconfig.build.json --noEmit",
     "tipos:generar": "node herramientas/generar_tipos_ipc.mjs",
-    "test:todo": "npm run test && npm run test:rust && npm run tipos"
+    "test": "npm run compilar && node --test \"pruebas/js/**/*.test.js\"",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:todo": "npm run test && npm run test:rust"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^1.5.0",
