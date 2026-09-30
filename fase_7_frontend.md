@@ -75,15 +75,58 @@ De los 210 hallazgos en modo laxo:
 
 **Ninguno era un defecto real.** Sin tipos, la comprobación no encuentra nada que valga la pena. Lo que el plan esperaba de B —detectar **campos ausentes en las respuestas IPC**— exige antes escribir los tipos de esas respuestas: hay **16 estructuras** que Rust devuelve al frontend, y `api.js` tiene más de un centenar de métodos.
 
-### Criterios del plan, con datos
-1. *¿B detecta los errores que aparecen en este código?* **Sin anotar, no.** Con anotaciones no está medido; hay que medirlo antes de decidir (ver piloto).
-2. *¿La verbosidad degrada la legibilidad?* Sí en las funciones de render de cientos de líneas con plantillas de HTML; poco en `api.js`, `nucleo/` y la capa compartida.
-3. *¿C introduce `node_modules` de producción o un artefacto generado?* Sí. **C queda descartada**, como preveía el plan.
-4. *A es legítima.* Lo es.
+### El piloto con JSDoc (hecho, 1.42.0)
+
+Se tiparon las tres cosas que el análisis pedía: las **16 estructuras** que Rust devuelve, `api.js` y `nucleo/dinero.js`. La clave es que **no se escribió ningún tipo a mano para las respuestas**: `herramientas/generar_tipos_ipc.mjs` lee `main.rs` y genera `src/js/tipos-ipc.js` con las estructuras, las de entrada y un mapa de los **61 comandos** (argumentos y respuesta). `invoke` se tipa contra ese mapa, de modo que cada envoltorio hereda los tipos sin una anotación propia. Una prueba exige que el archivo esté al día con Rust.
+
+`npm run tipos` (con TypeScript como dependencia de desarrollo; `.dmg` intacto) comprueba `api.js` y `dinero.js` en modo estricto. Se comprobó que detecta, con mutaciones:
+
+| Error introducido | Lo que dice la comprobación |
+|---|---|
+| Una clave equivocada en un envoltorio (`idd` por `id`) | «`idd` does not exist in type `{ id: number; motivo: string }`» |
+| Un comando que no existe | «`"eliminar_gastos"` is not assignable to `keyof Comandos`» |
+| Texto donde Rust espera un número | «Type `string` is not assignable to type `number`» |
+| Rust renombra un campo sin regenerar | falla la prueba de tipos al día |
+
+Y lo que el plan más esperaba de JSDoc, **campos ausentes en las respuestas**: aunque `ui.js` no lleva ni una anotación, al recibir respuestas ya tipadas la comprobación (`npm run tipos:vistas`, informativa) encontró **un defecto real**:
+
+> El aviso «🔔 Cobro próximo» de Suscripciones imprime `s.fecha_renovacion`, un campo que **Rust ya no envía** (desde la Fase 5 el puntero es `fecha_proximo_cobro`). La fecha se muestra como `undefined`.
+
+Sin tipos de respuesta, la misma comprobación sobre el mismo código no encontraba nada (210 hallazgos, ninguno real). Con ellos: 204, de los que **uno es real**, otro es una propiedad que la interfaz añade a un objeto (`dias_para_corte`, benigno) y el resto es el ruido del DOM y de los globales ya descrito. Si Rust cambia un campo, la comprobación señala **cada lugar** de la interfaz que lo usa (se probó renombrando `categoria_nombre`: tres avisos en `ui.js`).
+
+**Lo que costó:** `api.js` quedó sin tipar en sus parámetros (`noImplicitAny` desactivado en `tsconfig.json`): son más de un centenar y tiparlos a mano es lo caro. Un primer intento de anotarlos automáticamente cubrió menos de la mitad y se descartó. Es trabajo para cuando se divida `ui.js`.
+
+### TypeScript con solo `tsc`, validado
+Se comprobó en una copia temporal, sin tocar el repositorio: `dinero.js` y `api.js` convertidos a `.ts`, los tipos de Rust pasados a declaraciones, y `tsc` ejecutado desde `beforeBuildCommand` de Tauri (`npm run compilar` = `tsc` + copiar `index.html`, `css` y `assets` a `dist/`, con `distDir` apuntando a `dist`).
+
+| Comprobación | Resultado |
+|---|---|
+| `tauri build` ejecuta `tsc` antes de compilar | sí; 1 s de `tsc` sobre todo el frontend |
+| Salida | JavaScript normal con módulos ES, sin empaquetador ni dependencias de producción |
+| Se ejecuta en la aplicación empaquetada | sí: `formatear` formatea, `sumar` de pesos con dólares lanza `ErrorDivisa`, y el `api` compilado (script clásico) expone `AppAPI` |
+| Pruebas de JavaScript sobre lo compilado | funcionan, salvo la de contrato `ipc.test.js`: lee `src/js/api.js` **como texto**, y pasaría a ser `api.ts` |
+
+**La corrección a mi análisis:** escribí que TypeScript completo «queda descartado» por necesitar dependencias de producción o un artefacto generado. Con solo `tsc` **no hay dependencias de producción ni empaquetador**; sí hay un paso de compilación y una carpeta generada (`dist/`). Es un coste real, pero no un obstáculo.
+
+### Comparación con lo medido
+
+| | JSDoc + `@ts-check` | TypeScript con `tsc` |
+|---|---|---|
+| Comprobador | el mismo (TypeScript 5.9): mismos errores y mensajes | el mismo |
+| Dependencia de desarrollo | `typescript` | `typescript` |
+| Paso de compilación | no | sí (`tsc`, 1 s) y `dist/` generado |
+| Lo que ejecuta la aplicación | el `.js` escrito | el `.js` generado |
+| Migración de `ui.js` (4 700 líneas) | archivo a archivo, sin cambiar de extensión | cada archivo se convierte a `.ts` antes de compilar |
+| Pruebas y contratos que leen fuentes | sin cambios | hay que apuntarlos a `.ts` o a `dist/` |
+| Escritura de tipos complejos | comentarios más verbosos | sintaxis propia, más legible |
+| Fuerza el control | hay que poner `@ts-check` (o `checkJs`) | un archivo sin tipos no compila |
+
+Ninguna de las dos se impone sobre la otra por capacidad: detectan lo mismo. La diferencia es **el coste de migrar y de operar** frente a **la comodidad de escribir**. Como la división de `ui.js` mueve el código de todos modos, hay un momento natural para convertirlo a `.ts` si se decide ir a TypeScript: **al extraer cada vista**, no antes.
 
 ### Recomendación
-* **Ahora: A**, sin tipar, y **no** meter esto en la división: son decisiones independientes y mezclarlas alarga cada PR.
-* **Después de la división, un piloto acotado de B**: tipar las 16 estructuras IPC, `api.js`, `nucleo/` y la capa compartida (archivos pequeños, opt-in con `@ts-check`, sin tocar las vistas), y ejecutar la comprobación sobre las dos o tres primeras vistas extraídas. Si encuentra defectos reales, se extiende; si solo encuentra ruido, se cierra declarándolo innecesario, como los tramos 3 y 4b del redondeo. TypeScript sería una dependencia **de desarrollo**, sin efecto en el `.dmg`.
+1. **Mantener JSDoc ahora** y las dos comprobaciones incorporadas. El piloto demostró valor (un defecto real) sin un solo cambio de comportamiento.
+2. **Decidir TypeScript o JSDoc al empezar la extracción de vistas**, con esto delante. Si se elige TypeScript, la migración se hace vista a vista durante la división, con el hook de `tsc` ya validado.
+3. Corregir el aviso «Cobro próximo» en un PR aparte.
 
 ## 5. Mejoras de usabilidad (§8 del plan)
 
@@ -102,7 +145,7 @@ La de accesibilidad (#8) es la de mejor relación entre esfuerzo y beneficio: so
 ## 6. Decisiones que se piden
 
 1. **División**: ¿la opción 3 (módulos + puente, una pestaña por PR, con la infraestructura primero)?
-2. **Tipado**: ¿A ahora y piloto de B después de dividir, como se propone?
+2. **Tipado**: ¿JSDoc ahora y decidir JSDoc o TypeScript al empezar la extracción de vistas, como se recomienda arriba?
 3. **Usabilidad**: ¿se hace #8 (accesibilidad) antes de dividir, y #1 (el `prompt()` de la tasa) como parte de la vista de tarjetas?
 4. **Verificación de vistas**: ¿basta la revisión manual con backend simulado, o se acepta una dependencia de desarrollo para pruebas de navegador?
 

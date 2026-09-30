@@ -1,27 +1,40 @@
 // Núcleo puro de dinero: sin DOM, sin Tauri, sin estado global.
 // Es el espejo en el frontend de src-tauri/src/dominio/dinero.rs.
 
-export const DIVISAS = Object.freeze(['DOP', 'USD']);
+// @ts-check
+
+/** @typedef {'DOP' | 'USD'} Divisa */
+/** @typedef {{ monto: number | string, divisa: string }} Importe */
+
+/** @type {readonly Divisa[]} */
+export const DIVISAS = Object.freeze(/** @type {Divisa[]} */ (['DOP', 'USD']));
 
 const LOCALE = 'es-DO';
 
+/** @type {Map<string, Intl.NumberFormat>} */
 const formateadores = new Map();
 
 export class ErrorDivisa extends Error {
+    /** @param {string} mensaje */
     constructor(mensaje) {
         super(mensaje);
         this.name = 'ErrorDivisa';
     }
 }
 
+/**
+ * @param {unknown} codigo
+ * @returns {Divisa}
+ */
 export function normalizarDivisa(codigo) {
     const c = String(codigo ?? '').trim().toUpperCase();
-    if (!DIVISAS.includes(c)) {
+    if (!DIVISAS.includes(/** @type {Divisa} */ (c))) {
         throw new ErrorDivisa(`Divisa no reconocida: '${codigo}'. Las divisas admitidas son DOP y USD.`);
     }
-    return c;
+    return /** @type {Divisa} */ (c);
 }
 
+/** @param {unknown} codigo */
 export function esDivisaValida(codigo) {
     try {
         normalizarDivisa(codigo);
@@ -31,6 +44,11 @@ export function esDivisaValida(codigo) {
     }
 }
 
+/**
+ * @param {number | string} monto
+ * @param {unknown} divisa
+ * @returns {string}
+ */
 export function formatear(monto, divisa) {
     const d = normalizarDivisa(divisa);
     const n = Number(monto);
@@ -45,9 +63,14 @@ export function formatear(monto, divisa) {
             maximumFractionDigits: 2,
         }));
     }
-    return formateadores.get(d).format(n);
+    return /** @type {Intl.NumberFormat} */ (formateadores.get(d)).format(n);
 }
 
+/**
+ * @param {Importe} a
+ * @param {Importe} b
+ * @returns {{ monto: number, divisa: Divisa }}
+ */
 export function sumar(a, b) {
     const da = normalizarDivisa(a.divisa);
     const db = normalizarDivisa(b.divisa);
@@ -62,8 +85,17 @@ export function sumar(a, b) {
  * Es la corrección estructural del descuadre que la versión 1.3.4 resolvió
  * a mano en la vista de Gastos: nunca devuelve una cifra multidivisa.
  */
-export function totalizarPorDivisa(movimientos, obtenerMonto = (m) => m.monto) {
-    const totales = {};
+/**
+ * @template {{ divisa: string }} M
+ * @param {M[] | null | undefined} movimientos
+ * @param {(m: M) => number | string} [obtenerMonto]
+ * @returns {Record<Divisa, number>}
+ */
+export function totalizarPorDivisa(
+    movimientos,
+    obtenerMonto = (m) => /** @type {number | string} */ (/** @type {any} */ (m).monto),
+) {
+    const totales = /** @type {Record<Divisa, number>} */ ({});
     for (const d of DIVISAS) totales[d] = 0;
 
     for (const m of movimientos ?? []) {
@@ -77,6 +109,10 @@ export function totalizarPorDivisa(movimientos, obtenerMonto = (m) => m.monto) {
     return totales;
 }
 
+/**
+ * @param {Record<Divisa, number>} totales
+ * @returns {Divisa[]}
+ */
 export function divisasPresentes(totales) {
     return DIVISAS.filter((d) => totales[d] !== 0);
 }

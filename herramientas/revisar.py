@@ -11,7 +11,7 @@ Tres comprobaciones, en orden de lo que más duele que falle:
     1. Privacidad — que nada del diff identifique finanzas reales.
     2. Coherencia de versión — que el número no se desincronice entre
        los cuatro archivos que lo declaran.
-    3. Pruebas — Rust y JavaScript.
+    3. Pruebas — Rust, JavaScript y comprobación de tipos.
 
 **Este archivo no contiene ningún dato del titular.** Los importes con los
 que compara se leen de la base viva, que vive fuera del repositorio; si no
@@ -208,6 +208,10 @@ def revisar_pruebas() -> list[str]:
     codigo, salida = ejecutar(["npm", "test"])
     if codigo != 0:
         fallos.append("las pruebas de JavaScript no pasan")
+
+    codigo, salida = ejecutar(["npm", "run", "tipos"])
+    if codigo != 0:
+        fallos.append("la comprobación de tipos no pasa: ejecuta `npm run tipos`")
     return fallos
 
 
