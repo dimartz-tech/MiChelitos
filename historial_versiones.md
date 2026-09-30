@@ -4,7 +4,27 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.43.0 (Versión Actual) - 2026-09-30
+## 🚀 Versión 1.44.0 (Versión Actual) - 2026-09-30
+**El frontend pasa a TypeScript, con solo `tsc`: infraestructura y todos los archivos.** Sin cambios de comportamiento.
+
+### 🔧 Qué cambia
+* `api`, `app`, `ui`, `nucleo/dinero` y `nucleo/respaldos` son ahora `.ts` (`git mv`: el historial se conserva). `tsc` compila a `src/js/**/*.js`, junto a los fuentes, **ignorados por git**; Tauri sigue empaquetando `src` y su `beforeBuildCommand` ejecuta `npm run compilar`. Sin empaquetador ni dependencias de producción.
+* `ui.ts` lleva `// @ts-nocheck`: se renombró tal cual para que el código nuevo nazca tipado y la migración no se encarezca. La deuda está medida: quitar esa línea da 472 errores, casi todo ergonomía del DOM (un ayudante para `getElementById` elimina la mayoría).
+* Los tipos de Rust ahora son `src/js/tipos-ipc.d.ts` (generado con `npm run tipos:generar`).
+* Las pruebas de JavaScript pasan a `pruebas/js/`: **dejan de empaquetarse dentro de la aplicación**. `npm test` compila y las ejecuta sobre lo compilado.
+* `herramientas/limpiar_js_generado.mjs` borra todo `.js` de `src/js` antes de compilar: un `.ts` eliminado no deja un `.js` huérfano que acabe empaquetado.
+
+### ✅ Comprobado
+* 30 pruebas de JavaScript y la comprobación de tipos pasan. Tres mutaciones (error de tipos en `api.ts`, `.js` huérfano, `.ts` con un tipo incorrecto): detectadas.
+* En un navegador con datos simulados, el `ui` compilado hace lo mismo: las 11 pestañas pintan, el aviso de cobro muestra la fecha, restaurar funciona; sin errores en consola.
+* En la aplicación empaquetada, construida con `tauri build` **partiendo de cero `.js`**: el hook compiló y el binario incluyó los `.js` generados aunque estén en `.gitignore`.
+
+### ⚠️ Avisos
+* `cargo build` directo no compila el frontend: usar `npm run tauri build` o `npm run compilar` antes. `tauri dev` no se ha probado con este esquema. Detalle en `migracion_a_typescript.md`.
+
+---
+
+## 🚀 Versión 1.43.0 - 2026-09-30
 **El aviso «Cobro próximo» de Suscripciones vuelve a mostrar la fecha.**
 
 ### 🐞 Qué fallaba

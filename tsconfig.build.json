@@ -1,0 +1,24 @@
+{
+  // Compila el frontend: `src/js/**/*.ts` → `src/js/**/*.js`, junto a los
+  // fuentes. Es lo que empaqueta Tauri (`distDir` es `src`); los `.js` están
+  // en .gitignore porque son generados. Sin empaquetador ni dependencias de
+  // producción: la salida son módulos ES y scripts clásicos normales.
+  //
+  // `noImplicitAny` sigue apagado mientras se tipan los parámetros de los
+  // envoltorios de `api.ts`; `ui.ts` lleva `@ts-nocheck` (ver
+  // migracion_a_typescript.md).
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom"],
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "rootDir": "src",
+    "outDir": "src"
+  },
+  "include": ["src/js/**/*.ts"],
+  // Explícito: por defecto `outDir` (aquí `src`) se excluye y no quedaría nada.
+  "exclude": ["node_modules"]
+}

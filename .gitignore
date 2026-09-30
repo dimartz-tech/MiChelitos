@@ -32,6 +32,10 @@ michelitos.db*
 # --- Dependencias web ---
 node_modules/
 
+# --- Frontend generado ---
+# Todo `.js` de src/js/ lo genera `tsc` desde los `.ts` (npm run compilar).
+src/js/**/*.js
+
 # --- Compilados de Rust ---
 src-tauri/target/
 
