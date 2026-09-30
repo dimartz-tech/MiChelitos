@@ -1,12 +1,13 @@
 {
   "build": {
     "distDir": "../src",
+    "beforeBuildCommand": "npm run compilar",
     "devPath": "../src",
     "withGlobalTauri": true
   },
   "package": {
     "productName": "MiChelitos",
-    "version": "1.43.0"
+    "version": "1.44.0"
   },
   "tauri": {
     "allowlist": {

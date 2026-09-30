@@ -70,13 +70,13 @@ document.addEventListener('DOMContentLoaded', () => {
             sidebar.classList.toggle('collapsed');
             const isCollapsed = sidebar.classList.contains('collapsed');
             sidebarCollapseBtn.textContent = isCollapsed ? '▶️' : '◀️';
-            localStorage.setItem('sidebar-collapsed', isCollapsed);
+            localStorage.setItem('sidebar-collapsed', String(isCollapsed));
         });
     }
 });
 
 // --- ROUTER GLOBAL ---
-function navigate(tab) {
+function navigate(tab: string): void {
     // 1. Alternar active class en la barra lateral
     const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
     navItems.forEach(item => item.classList.remove('active'));

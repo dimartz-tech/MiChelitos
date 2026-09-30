@@ -1,17 +1,18 @@
 // --- MICHELITOS TAURI - PUENTE DE COMUNICACIÓN CON EL BACKEND DE RUST (IPC) ---
 
-// @ts-check
 // Los tipos de cada comando (argumentos y respuesta) salen de Rust: ver
 // `tipos-ipc.js`, generado por `herramientas/generar_tipos_ipc.mjs`.
-/** @typedef {import('./tipos-ipc.js').Comandos} Comandos */
+type Comandos = import('./tipos-ipc').Comandos;
 
-const tauri = /** @type {any} */ (window).__TAURI__;
+const tauri = window.__TAURI__;
 
-/** @type {<K extends keyof Comandos>(comando: K, argumentos?: Comandos[K]['args']) => Promise<Comandos[K]['ret']>} */
-const invoke = /** @type {any} */ ((tauri && tauri.invoke) ||
+const invoke: <K extends keyof Comandos>(
+    comando: K,
+    argumentos?: Comandos[K]['args'],
+) => Promise<Comandos[K]['ret']> = ((tauri && tauri.invoke) ||
                (tauri && tauri.tauri && tauri.tauri.invoke) ||
                (tauri && tauri.core && tauri.core.invoke) ||
-               (async (/** @type {string} */ cmd) => {
+               (async (cmd: string) => {
                    if (cmd === 'obtener_capital') {
                        return {
                            propiedades: { inmobiliario: [], vehiculos: [], maquinaria: [] },
@@ -20,7 +21,7 @@ const invoke = /** @type {any} */ ((tauri && tauri.invoke) ||
                        };
                    }
                    return [];
-               }));
+               })) as any;
 
 const AppAPI = {
     // --- CATEGORÍAS ---

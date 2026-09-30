@@ -1,6 +1,6 @@
 # Fase 7 · Frontend — análisis
 
-Estado: **análisis, sin cambios de código. Las decisiones que pide están al final y son del titular.**
+Estado: **análisis; decidido el tipado (TypeScript con solo `tsc`, 2026-09-30) y empezada su migración: ver [migracion_a_typescript.md](migracion_a_typescript.md).** La división de `ui.js` y la usabilidad siguen pendientes de decisión (§6).
 Fecha: 2026-09-29. Todo lo que sigue se midió sobre `main` (1.41.0); nada usa datos vivos.
 
 La fase tiene tres trabajos que el plan (§4.3, §4.4, §8, §11) dejó juntos: **dividir `ui.js`**, **decidir el tipado** y **las mejoras de usabilidad**. Aquí se separan, porque tienen riesgos distintos y no hace falta decidirlos a la vez.
@@ -123,10 +123,8 @@ Se comprobó en una copia temporal, sin tocar el repositorio: `dinero.js` y `api
 
 Ninguna de las dos se impone sobre la otra por capacidad: detectan lo mismo. La diferencia es **el coste de migrar y de operar** frente a **la comodidad de escribir**. Como la división de `ui.js` mueve el código de todos modos, hay un momento natural para convertirlo a `.ts` si se decide ir a TypeScript: **al extraer cada vista**, no antes.
 
-### Recomendación
-1. **Mantener JSDoc ahora** y las dos comprobaciones incorporadas. El piloto demostró valor (un defecto real) sin un solo cambio de comportamiento.
-2. **Decidir TypeScript o JSDoc al empezar la extracción de vistas**, con esto delante. Si se elige TypeScript, la migración se hace vista a vista durante la división, con el hook de `tsc` ya validado.
-3. Corregir el aviso «Cobro próximo» en un PR aparte.
+### Decisión
+**TypeScript con solo `tsc`** (titular, 2026-09-30), y empezar **ahora**: la migración es más cara cuanto más código nuevo se escribe en JavaScript. El piloto con JSDoc y la validación de `tsc` de arriba son lo que respalda la decisión. Se ejecuta en [migracion_a_typescript.md](migracion_a_typescript.md): todos los archivos pasan a `.ts` en 1.44.0, `ui.ts` con `@ts-nocheck` hasta que la división por pestañas lo retire, y la deuda medida (472 errores, casi todo ergonomía del DOM).
 
 ## 5. Mejoras de usabilidad (§8 del plan)
 
@@ -145,7 +143,7 @@ La de accesibilidad (#8) es la de mejor relación entre esfuerzo y beneficio: so
 ## 6. Decisiones que se piden
 
 1. **División**: ¿la opción 3 (módulos + puente, una pestaña por PR, con la infraestructura primero)?
-2. **Tipado**: ¿JSDoc ahora y decidir JSDoc o TypeScript al empezar la extracción de vistas, como se recomienda arriba?
+2. **Tipado**: ✅ decidido, TypeScript con solo `tsc`; ver arriba.
 3. **Usabilidad**: ¿se hace #8 (accesibilidad) antes de dividir, y #1 (el `prompt()` de la tasa) como parte de la vista de tarjetas?
 4. **Verificación de vistas**: ¿basta la revisión manual con backend simulado, o se acepta una dependencia de desarrollo para pruebas de navegador?
 
