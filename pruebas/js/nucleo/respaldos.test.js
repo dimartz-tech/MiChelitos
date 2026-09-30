@@ -6,7 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 // El script se carga en la aplicación como script clásico, no como módulo: aquí
 // se evalúa su texto para probar exactamente lo que recibe el navegador.
-const fuente = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'respaldos.js'), 'utf8');
+// Se lee el JavaScript **compilado** (`npm test` compila antes).
+const fuente = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'src', 'js', 'nucleo', 'respaldos.js'),
+    'utf8',
+);
 const { describirRespaldo, escaparHtml } = new Function(
     `${fuente}; return { describirRespaldo, escaparHtml };`,
 )();
