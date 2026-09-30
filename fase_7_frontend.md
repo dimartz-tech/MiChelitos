@@ -124,7 +124,7 @@ Se comprobó en una copia temporal, sin tocar el repositorio: `dinero.js` y `api
 Ninguna de las dos se impone sobre la otra por capacidad: detectan lo mismo. La diferencia es **el coste de migrar y de operar** frente a **la comodidad de escribir**. Como la división de `ui.js` mueve el código de todos modos, hay un momento natural para convertirlo a `.ts` si se decide ir a TypeScript: **al extraer cada vista**, no antes.
 
 ### Decisión
-**TypeScript con solo `tsc`** (titular, 2026-09-30), y empezar **ahora**: la migración es más cara cuanto más código nuevo se escribe en JavaScript. El piloto con JSDoc y la validación de `tsc` de arriba son lo que respalda la decisión. Se ejecuta en [migracion_a_typescript.md](migracion_a_typescript.md): todos los archivos pasan a `.ts` en 1.44.0, `ui.ts` con `@ts-nocheck` hasta que la división por pestañas lo retire, y la deuda medida (472 errores, casi todo ergonomía del DOM).
+**TypeScript con solo `tsc`** (titular, 2026-09-30), y empezar **ahora**: la migración es más cara cuanto más código nuevo se escribe en JavaScript. El piloto con JSDoc y la validación de `tsc` de arriba son lo que respalda la decisión. Se ejecuta en [migracion_a_typescript.md](migracion_a_typescript.md): todos los archivos pasan a `.ts` en 1.44.0 y `ui.ts` se comprueba desde 1.46.0 (ayudante de DOM: de 472 errores a 0, y sin `@ts-nocheck`). Quedan los parámetros sin tipo (`noImplicitAny`: 303) y la división por pestañas.
 
 ## 5. Mejoras de usabilidad (§8 del plan)
 

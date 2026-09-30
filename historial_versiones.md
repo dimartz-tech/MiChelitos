@@ -4,7 +4,28 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.45.0 (Versión Actual) - 2026-09-30
+## 🚀 Versión 1.46.0 (Versión Actual) - 2026-09-30
+**Ayudante de DOM: `ui.ts` se comprueba por fin, sin `@ts-nocheck` y con 0 errores.** Sin cambios de comportamiento salvo un mensaje de error mejor.
+
+### 🧰 Qué se añade
+* `src/js/ui/dom.ts` con dos ayudantes: `elemento<T>(id)` devuelve el elemento o **falla diciendo cuál falta** (antes: «Cannot read properties of null», sin decir qué id) y `buscar<T>(id)` conserva el `null` donde la ausencia es legítima. Se aplicaron a los 232 accesos a `getElementById` de `ui.ts` (y a los de `app.ts`), con los tipos correctos (`Campo`, `HTMLSelectElement`…).
+* **Se demostró que el cambio es mecánico:** el JavaScript compilado es idéntico byte a byte con el de `main` una vez normalizados los dos ayudantes; las 123 líneas restantes distintas se revisaron una a una (52 `String(err)` por `err.toString()`, campos de clase y `?? 0` donde la comparación ya trataba `null` igual).
+* `ui.ts` ya no lleva `@ts-nocheck`: de **472 errores** a **0**. Declarados los campos de la clase, tipados los arrays y los parámetros por defecto `= null` de `api.ts`, y `dom.iterable` añadido a `tsconfig.build.json`.
+* Reglas que lo conservan (`dom.test.js`): ningún fuente usa `@ts-nocheck`/`@ts-ignore`/`@ts-expect-error`; nadie llama a `document.getElementById` salvo `ui/dom.ts`; `index.html` carga el ayudante antes que la interfaz. Cuatro mutaciones, las cuatro detectadas.
+
+### 🔎 Qué encontró
+* Un defecto real, corregido aparte en 1.45.0: el panel «Casos de corrección» llamaba a un método de `AppAPI` que nunca existió.
+
+### ⚠️ Un cambio de comportamiento, deliberado
+* Donde el código suponía que el elemento existía, un elemento ausente ahora lanza «No existe el elemento #x en la página» en vez de «Cannot read properties of null»: el mismo fallo, con un mensaje que sirve. Donde ya había una guarda (`if (x)`), se conservó `buscar` y no cambia nada.
+
+### ✅ Comprobado
+* 38 pruebas de JavaScript y `npm run tipos`. En un navegador con datos simulados: las 11 pestañas pintan, el aviso de cobro muestra la fecha, un formulario envía a Rust lo que se escribió, el panel de casos y restaurar funcionan y no hay errores en consola.
+* Siguiente: `noImplicitAny` (303 errores, 300 de parámetros sin tipo) junto con la división de `ui.ts`; ver `migracion_a_typescript.md`.
+
+---
+
+## 🚀 Versión 1.45.0 - 2026-09-30
 **El panel «Casos de corrección» vuelve a abrir: le faltaba el envoltorio de `api`.**
 
 ### 🐞 Qué fallaba

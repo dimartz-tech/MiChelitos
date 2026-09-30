@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 1500); // Dar un pequeño respiro al arranque
 
     // 3. Control de tema Claro/Oscuro
-    const themeToggleBtn = document.getElementById('theme-toggle-btn');
+    const themeToggleBtn = buscar('theme-toggle-btn');
     if (themeToggleBtn) {
         const savedTheme = localStorage.getItem('desktop-theme') || 'dark';
         
@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 4. Control de colapsado del menú lateral (Sidebar)
-    const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
+    const sidebarCollapseBtn = buscar('sidebar-collapse-btn');
     const sidebar = document.querySelector('.app-sidebar');
     if (sidebarCollapseBtn && sidebar) {
         const savedCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
@@ -81,7 +81,7 @@ function navigate(tab: string): void {
     const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
     navItems.forEach(item => item.classList.remove('active'));
 
-    const activeBtn = document.getElementById(`nav-btn-${tab}`);
+    const activeBtn = buscar(`nav-btn-${tab}`);
     if (activeBtn) {
         activeBtn.classList.add('active');
     }

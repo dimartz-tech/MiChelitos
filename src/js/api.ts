@@ -243,7 +243,7 @@ const AppAPI = {
 
     // Los límites ajustados son opcionales: null significa "sin ajuste", y se
     // distingue de 0, que es un tope deliberado que congela la tarjeta.
-    async actualizarLimitesTarjeta(id, limitePesos, limiteDolares, sobregiroPesos, sobregiroDolares, balanceCortePesos, balanceCorteDolares, ajustadoPesos = null, ajustadoDolares = null, politicaLiquidacion = 'origen') {
+    async actualizarLimitesTarjeta(id, limitePesos, limiteDolares, sobregiroPesos, sobregiroDolares, balanceCortePesos, balanceCorteDolares, ajustadoPesos: number | string | null = null, ajustadoDolares: number | string | null = null, politicaLiquidacion = 'origen') {
         return await invoke('actualizar_limites_tarjeta', {
             id: Number(id),
             limitePesos: Number(limitePesos),
@@ -280,7 +280,7 @@ const AppAPI = {
         return await invoke('eliminar_bonificacion', { id: Number(id) });
     },
 
-    async registrarPagoTarjeta(id, fec, mon, div, cuentaAhorroId = null, tasaCambio = 0) {
+    async registrarPagoTarjeta(id, fec, mon, div, cuentaAhorroId: number | null = null, tasaCambio = 0) {
         return await invoke('registrar_pago_tarjeta', { 
             id: Number(id), 
             fecha: fec, 
@@ -298,7 +298,7 @@ const AppAPI = {
 
     // `fechaProximoCobro` va en dd/mm/aaaa y la usan las dos frecuencias:
     // desde que la fecha manda, una mensual la necesita igual que una anual.
-    async crearSuscripcion(plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaProximoCobro = null) {
+    async crearSuscripcion(plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaProximoCobro: string | null = null) {
         return await invoke('crear_suscripcion', {
             plataforma,
             // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
@@ -313,7 +313,7 @@ const AppAPI = {
 
     // Edita una suscripción conservando fecha_ultimo_pago. Borrar y recrear
     // reiniciaría esa marca y provocaría un cobro duplicado en el mismo mes.
-    async actualizarSuscripcion(id, plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaProximoCobro = null) {
+    async actualizarSuscripcion(id, plataforma, monto, tarjetaId, frecuencia, diaFacturacion, divisa, fechaProximoCobro: string | null = null) {
         return await invoke('actualizar_suscripcion', {
             id: Number(id),
             plataforma,
