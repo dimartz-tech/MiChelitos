@@ -266,11 +266,12 @@ const AppAPI = {
         return await invoke('obtener_bonificaciones');
     },
 
-    async crearBonificacion(fecha: string, tarjetaId: number | string, monto: number | string, divisa: string, concepto: string, gastoId: number | string | null = null) {
+    async crearBonificacion(fecha: string, tarjetaId: number | string, monto: string, divisa: string, concepto: string, gastoId: number | string | null = null) {
         return await invoke('crear_bonificacion', {
             fecha,
             tarjetaId: Number(tarjetaId),
-            monto: Number(monto),
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            monto: String(monto),
             divisa,
             concepto,
             gastoId: gastoId === null || gastoId === '' ? null : Number(gastoId)

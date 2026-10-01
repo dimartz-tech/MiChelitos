@@ -318,7 +318,7 @@ const bonificacion = { bon_fecha: ' 22/03/2026 ', bon_tarjeta: '3', bon_divisa: 
 test('bonificación: (fecha, tarjeta, monto, divisa, concepto) con textos recortados', async () => {
     const ui = cargarInterfaz({ campos: bonificacion });
     await ui.appUI.handleAgregarBonificacion(crearEvento());
-    llamoUnaVez(ui, 'crearBonificacion', ['22/03/2026', 3, 66.6, 'DOP', 'Cashback de prueba']);
+    llamoUnaVez(ui, 'crearBonificacion', ['22/03/2026', 3, '66.60', 'DOP', 'Cashback de prueba']);
     avisoExito(ui, /Bonificación registrada/);
     redibujo(ui, 'tarjetas');
 });
