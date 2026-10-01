@@ -4,7 +4,28 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.66.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.67.0 (Versión Actual) - 2026-10-02
+**Corrección: el panel de «Casos de corrección» ya no interpreta como HTML lo que escribe el titular.**
+
+### 🐛 Qué estaba mal
+* El panel pintaba el número de caso, la fecha, el tipo, la descripción, la divisa, **el motivo** y los mensajes de error con `innerHTML` **sin escapar**. El motivo lo escribe el titular y se guarda tal cual, así que un `<` se interpretaba como marcado, y un fragmento como `<img src=x onerror=…>` **ejecutaba código** en el WebView de la aplicación. Comprobado en el navegador con un caso inyectado: la versión anterior creaba las imágenes y ejecutaba el código (dos veces); la nueva no crea nada y muestra el texto tal cual.
+* Quien escribe ese texto es el propio titular, en su propia aplicación, así que el riesgo real es bajo; pero un texto guardado (o importado en el futuro) no debe poder ejecutar nada, y menos en una aplicación cuyo puente con Rust permite todos los comandos.
+
+### 🔧 Qué se hace
+* Todo lo que el panel pinta de los casos y de los errores pasa por `escaparHtml` (el mismo ayudante que ya escapaba la lista de respaldos). El texto corriente se sigue viendo igual: tildes, comas, `&` y comillas.
+
+### ⚠️ Una corrección a lo dicho antes
+* Al anotarlo en la 1.63.0 se dijo que este panel era «el único sitio de la pestaña» que no escapaba. **Era inexacto**: la falta de escape es general. Las plantillas de las once vistas interpolan unos **58 campos de texto libre** (nombres de cuentas, clientes y categorías; descripciones; conceptos; notas; plataformas; entidades…) sin escapar. Este PR corrige **solo** el panel de casos. El resto **queda pendiente**: conviene hacerlo de una vez y con una prueba de contrato que impida que reaparezca (una lista de los campos de texto libre y una comprobación de que ninguno se interpola sin escapar), no sitio a sitio.
+
+### 🧪 Pruebas
+* 3 nuevas en `pruebas/js/vistas/ajustes.test.js`: el marcado del titular no se interpreta (número de caso, fecha, tipo, descripción, divisa y motivo), el texto corriente se sigue viendo igual (`Tom &amp; Jerry`, tildes, comillas angulares) y el mensaje de error también se escapa. **506 pruebas, todas pasan.** Ocho mutaciones (quitar el escape de cada campo y de los errores, y escapar dos veces): las ocho se detectan; una (la fecha) sobrevivió al principio porque el caso de prueba tenía una fecha limpia, y se reforzó.
+
+### ✅ Comprobado a mano
+* **Con tus datos reales** (copia temporal, ya borrada): el panel con tus casos se ve **idéntico** en las dos versiones. Con un caso hostil inyectado: antes, 2 imágenes creadas y 2 ejecuciones de código; ahora, 0 y 0, y el texto aparece literal.
+
+---
+
+## 🚀 Versión 1.66.0 - 2026-10-02
 **Corrección: las cuatro bajas que no avisaban si Rust fallaba.** Baja de una suscripción, de un certificado, de una inversión de bolsa y de un bien del capital.
 
 ### 🐛 Qué estaba mal
@@ -44,7 +65,7 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 * Balance de la división y registro de previsto frente a medido: `division_de_ui_limpia.md` §9.
 
 ### Siguiente
-* La división de `ui.ts` está terminada. Pendientes aparte, anotados sin corregir: el panel de casos de corrección pinta el motivo sin escapar, los importes que aún viajan como `Number` y los riesgos del capital. (Las cuatro bajas sin `try/catch` se corrigieron en la 1.66.0.)
+* La división de `ui.ts` está terminada. Pendientes aparte, anotados sin corregir: el panel de casos de corrección pinta el motivo sin escapar (corregido en la 1.67.0; ver ahí que el problema era más general), los importes que aún viajan como `Number` y los riesgos del capital. (Las cuatro bajas sin `try/catch` se corrigieron en la 1.66.0.)
 
 ---
 
