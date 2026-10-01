@@ -2662,14 +2662,16 @@ fn obtener_bonificaciones() -> Result<Vec<BonificacionDto>, String> {
 fn crear_bonificacion(
     fecha: String,
     tarjeta_id: i64,
-    monto: f64,
+    monto: ipc::ImporteDecimal,
     divisa: String,
     concepto: String,
     gasto_id: Option<i64>,
 ) -> Result<i64, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let divisa = if divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
-    let bonificacion = Bonificacion::nueva(Dinero::nuevo(monto, divisa)?, &concepto)?;
+    // El importe llega como se escribió: el céntimo lo decide el núcleo con esos dígitos, y se casa
+    // con la divisa declarada (la de la bonificación, que es del titular y no de una fila).
+    let bonificacion = Bonificacion::nueva(monto.con_divisa(divisa), &concepto)?;
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let id = {

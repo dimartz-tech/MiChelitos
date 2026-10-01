@@ -423,9 +423,18 @@ test('alta de bonificación: texto recortado, tarjeta y monto como número, y re
     const t = montar({ campos: CAMPOS_BON() });
     await t.vista.handleAgregarBonificacion(t.evento);
     assert.equal(t.evento.evitado, 1);
-    assert.deepEqual(t.llamadas, [['crearBonificacion', '10/03/2027', 7, 12.5, 'USD', 'Cashback de marzo']]);
+    assert.deepEqual(t.llamadas, [['crearBonificacion', '10/03/2027', 7, '12.5', 'USD', 'Cashback de marzo']]);
     assert.match(t.avisos[0].mensaje, /La deuda de la tarjeta se redujo/);
     assert.deepEqual(t.rutas, ['tarjetas']);
+});
+
+test('bonificación: el importe viaja como TEXTO, con los espacios recortados y los dígitos intactos', async () => {
+    for (const [escrito, esperado] of [[' 12.5 ', '12.5'], ['1.005', '1.005'], ['0012.500', '0012.500']]) {
+        const t = montar({ campos: CAMPOS_BON({ bon_monto: el({ value: escrito }) }) });
+        await t.vista.handleAgregarBonificacion(t.evento);
+        assert.strictEqual(t.llamadas[0][3], esperado, JSON.stringify(escrito));
+        assert.equal(typeof t.llamadas[0][3], 'string');
+    }
 });
 
 test('bonificación: sin monto mayor que cero o sin concepto no se envía', async () => {

@@ -1670,7 +1670,7 @@ fn c30_una_bonificacion_reduce_la_deuda_sin_tocar_el_gasto() {
     assert_importe(deuda_pesos(tarjeta), 11234.56, "el consumo sube la deuda");
 
     crate::crear_bonificacion(
-        "09/09/2026".to_string(), tarjeta, 61.73, "DOP".to_string(),
+        "09/09/2026".to_string(), tarjeta, monto(61.73), "DOP".to_string(),
         "Cashback compra por internet".to_string(), Some(gasto),
     ).unwrap();
 
@@ -1700,9 +1700,9 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
     })
     .unwrap();
 
-    crate::crear_bonificacion("09/09/2026".into(), tarjeta, 50.00, "DOP".into(),
+    crate::crear_bonificacion("09/09/2026".into(), tarjeta, monto(50.00), "DOP".into(),
         "Recompensa base".into(), Some(gasto)).unwrap();
-    crate::crear_bonificacion("09/09/2026".into(), tarjeta, 100.00, "DOP".into(),
+    crate::crear_bonificacion("09/09/2026".into(), tarjeta, monto(100.00), "DOP".into(),
         "Bonificación de categoría".into(), Some(gasto)).unwrap();
 
     assert_eq!(crate::obtener_bonificaciones().unwrap().len(), 2);
@@ -1713,7 +1713,7 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
 fn c32_revertir_una_bonificacion_restituye_la_deuda() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10000.0, 0.0);
-    let id = crate::crear_bonificacion("09/09/2026".into(), tarjeta, 61.73, "DOP".into(),
+    let id = crate::crear_bonificacion("09/09/2026".into(), tarjeta, monto(61.73), "DOP".into(),
         "Cashback".into(), None).unwrap();
 
     crate::eliminar_bonificacion(id).unwrap();
@@ -1728,10 +1728,42 @@ fn c33_una_bonificacion_sin_concepto_o_en_cero_se_rechaza() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10000.0, 0.0);
 
-    assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, 61.73, "DOP".into(),
+    assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, monto(61.73), "DOP".into(),
         "   ".into(), None).is_err(), "el concepto es obligatorio");
-    assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, 0.0, "DOP".into(),
+    assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, monto(0.0), "DOP".into(),
         "Cashback".into(), None).is_err(), "cero no es una bonificación");
+    assert_importe(deuda_pesos(tarjeta), 10000.0, "ningún saldo se movió");
+}
+
+#[test]
+fn c33b_la_bonificacion_decide_el_centimo_con_los_digitos_escritos_y_se_casa_con_su_divisa() {
+    // `1.005` sube a 1.01 como en el resto de la frontera, y la divisa declarada decide a qué saldo
+    // de la tarjeta se aplica: la de pesos y la de dólares son independientes.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10000.0, 500.0);
+
+    let id = crate::crear_bonificacion("09/09/2026".into(), tarjeta, importe("1.005"), "DOP".into(), "Cashback".into(), None).unwrap();
+    crate::crear_bonificacion("09/09/2026".into(), tarjeta, importe("20.10"), "USD".into(), "Cashback en dólares".into(), None).unwrap();
+
+    let (pesos, dolares) = balances_tarjeta(tarjeta);
+    assert_importe(pesos, 10000.0 - 1.01, "los pesos bajan el céntimo decidido con los dígitos");
+    assert_importe(dolares, 500.0 - 20.10, "los dólares bajan por su cuenta");
+    let guardada = crate::obtener_bonificaciones().unwrap().into_iter().find(|b| b.id == id).unwrap();
+    assert_importe(guardada.monto, 1.01, "lo guardado es el mismo céntimo");
+}
+
+#[test]
+fn c33c_un_importe_negativo_o_que_redondea_a_cero_no_es_una_bonificacion() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10000.0, 0.0);
+
+    for escrito in ["-5.00", "0.00", "0.004"] {
+        assert!(
+            crate::crear_bonificacion("09/09/2026".into(), tarjeta, importe(escrito), "DOP".into(), "Cashback".into(), None).is_err(),
+            "{escrito} no es una bonificación"
+        );
+    }
+    assert!(crate::obtener_bonificaciones().unwrap().is_empty());
     assert_importe(deuda_pesos(tarjeta), 10000.0, "ningún saldo se movió");
 }
 
@@ -3989,7 +4021,7 @@ fn c138_un_gasto_con_bonificacion_se_puede_borrar_porque_el_vinculo_solo_informa
     })
     .unwrap();
     crate::crear_bonificacion(
-        "09/09/2026".to_string(), tarjeta, 61.73, "DOP".to_string(),
+        "09/09/2026".to_string(), tarjeta, monto(61.73), "DOP".to_string(),
         "Cashback".to_string(), Some(gasto),
     )
     .unwrap();
