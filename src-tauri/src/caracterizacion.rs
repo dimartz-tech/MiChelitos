@@ -3946,3 +3946,70 @@ fn c138_un_gasto_con_bonificacion_se_puede_borrar_porque_el_vinculo_solo_informa
 
     assert!(r.is_ok(), "la bonificación no es una operación que dependa del gasto: {r:?}");
 }
+
+#[test]
+#[ignore = "manual: vuelca los datos de una base REAL para comparar vistas (herramientas/comparar_vistas)"]
+fn volcado_de_datos_para_comparar_vistas() {
+    // Lo que leen las vistas del frontend, tal como lo devuelven los comandos,
+    // escrito en un JSON que **queda en tu equipo**: el repositorio no contiene
+    // datos, solo este código. Uso y limpieza en `herramientas/comparar_vistas/README.md`.
+    //
+    //   VOLCADO_DB=/ruta/copia.db VOLCADO_CAPITAL=/ruta/capital.json \
+    //   VOLCADO_SALIDA=/ruta/volcado.json cargo test volcado_de_datos -- --ignored
+    //
+    // Trabaja siempre sobre una COPIA en un HOME temporal: no toca la base viva.
+    use serde_json::{json, to_value, Map, Value};
+    let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("falta la variable {n}"));
+    let (db_copia, capital, salida) = (var("VOLCADO_DB"), var("VOLCADO_CAPITAL"), var("VOLCADO_SALIDA"));
+
+    let _g = bloquear_entorno();
+    let raiz = std::env::temp_dir().join(format!("volcado-vistas-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&raiz);
+    std::fs::create_dir_all(&raiz).unwrap();
+    std::env::set_var("HOME", &raiz);
+    let destino = std::path::PathBuf::from(db_sql::obtener_ruta_db());
+    std::fs::create_dir_all(destino.parent().unwrap()).unwrap();
+    std::fs::copy(&db_copia, &destino).unwrap();
+    let json_capital = std::path::PathBuf::from(crate::db_nosql::obtener_ruta_nosql("capital"));
+    std::fs::create_dir_all(json_capital.parent().unwrap()).unwrap();
+    std::fs::copy(&capital, &json_capital).unwrap();
+    db_sql::inicializar_db().expect("preparar el esquema sobre la copia");
+
+    let mut v = Map::new();
+    macro_rules! leer { ($n:expr, $e:expr) => {
+        v.insert($n.to_string(), to_value($e.unwrap_or_else(|e| panic!("{} falló: {e}", $n))).unwrap());
+    }; }
+    leer!("obtener_categorias", crate::obtener_categorias());
+    leer!("obtener_clientes", crate::obtener_clientes());
+    leer!("obtener_ingresos", crate::obtener_ingresos());
+    leer!("obtener_ingresos_informales", crate::obtener_ingresos_informales());
+    leer!("obtener_gastos", crate::obtener_gastos());
+    leer!("obtener_tarjetas", crate::obtener_tarjetas());
+    leer!("obtener_cuentas", crate::obtener_cuentas());
+    leer!("obtener_transacciones_cuentas", crate::obtener_transacciones_cuentas());
+    leer!("obtener_suscripciones", crate::obtener_suscripciones());
+    leer!("obtener_prestamos", crate::obtener_prestamos());
+    leer!("obtener_bonificaciones", crate::obtener_bonificaciones());
+    leer!("obtener_correcciones", crate::obtener_correcciones());
+    v.insert("obtener_capital".into(), crate::obtener_capital().expect("capital"));
+    v.insert("listar_respaldos".into(), to_value(crate::listar_respaldos()).unwrap());
+
+    let mut por_tarjeta = Map::new();
+    for t in v["obtener_tarjetas"].as_array().unwrap().clone() {
+        let id = t["id"].as_i64().unwrap();
+        por_tarjeta.insert(id.to_string(), json!({
+            "abonos": to_value(crate::obtener_abonos_tarjeta(id).expect("abonos")).unwrap(),
+            "avances": to_value(crate::obtener_avances_tarjeta(id).expect("avances")).unwrap(),
+        }));
+    }
+    v.insert("por_tarjeta".into(), Value::Object(por_tarjeta));
+    let mut por_prestamo = Map::new();
+    for p in v["obtener_prestamos"].as_array().unwrap().clone() {
+        let id = p["id"].as_i64().unwrap();
+        por_prestamo.insert(id.to_string(), to_value(crate::obtener_movimientos_prestamo(id).expect("movimientos")).unwrap());
+    }
+    v.insert("por_prestamo".into(), Value::Object(por_prestamo));
+
+    std::fs::write(&salida, serde_json::to_string(&Value::Object(v)).unwrap()).unwrap();
+    let _ = std::fs::remove_dir_all(&raiz);
+}
