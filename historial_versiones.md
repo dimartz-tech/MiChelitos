@@ -4,7 +4,27 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.48.0 (Versión Actual) - 2026-10-01
+## 🚀 Versión 1.49.0 (Versión Actual) - 2026-10-01
+**Pruebas de interacción en Node: por fin hay una red de seguridad de lo que ocurre al pulsar.** Sin cambios en la aplicación.
+
+### 🧪 Qué se añade (`pruebas/js/interaccion/`, `pruebas/js/ayudas/`)
+* Los manejadores de `ui` se ejecutan en Node con un **DOM falso mínimo** y una **API falsa**, y se comprueba **qué se envía a Rust** (comando y argumentos) y qué avisos salen. Sin dependencias nuevas.
+* **Los 49 `handle*` están cubiertos** y `cobertura.test.js` lo exige: si aparece uno sin prueba ni declaración, falla. Cada manejador tiene camino feliz, validación de cliente donde existe y «Rust rechaza». Además: los reactores (`aplicarTipoAbono`, `previsualizarTasa`, `actualizarConversionGasto`, `alternarCobroParcial`) y `abrirEdicionCuenta`.
+* 223 pruebas de JavaScript en total (219 pasan, 4 `todo` que describen defectos reales, 0 fallan); 181 son de interacción.
+* **Diseñado para sobrevivir a la división de `ui.ts`:** las pruebas llaman siempre a `appUI.<método>`, como los `onclick`, y el único punto de carga es `cargar_interfaz.js`: tras dividir solo hay que adaptar ese archivo.
+* Un id que el manejador lee y la prueba no declaró, o un `confirm`/`prompt` sin configurar, **falla nombrándolo**, aunque el manejador lo capture en su `try/catch`; el doble de `AppAPI` solo tiene los métodos reales, así que un nombre mal escrito falla.
+
+### ✅ Comprobado
+* El agente que las escribió probó 17 mutaciones sobre `ui.ts` y las 17 fueron detectadas; yo repetí tres más por mi cuenta (restaurar con la etiqueta en vez del nombre, editar una suscripción sin validar el monto, intercambiar dos argumentos de `crearCuenta`): detectadas, esta última ya por el compilador gracias a los tipos de `api.ts`. `ui.ts` queda intacto.
+* Límites declarados en el README: sin CSS ni layout, sin validación nativa del navegador (`required`, `step`), `innerHTML` es una cadena, y no se prueba que los atributos `onclick` interpolen bien los argumentos.
+
+### 🔎 Hallazgos (sin corregir; pruebas `todo`)
+* `handleEliminarSuscripcion`, `handleEliminarCertificado`, `handleEliminarBolsa` y `handleEliminarPropiedad` **no tienen `try/catch`**: si Rust rechaza, la promesa del `onclick` rechaza sin aviso y la pantalla no se redibuja. Las pruebas `todo` describen el comportamiento deseable y pasarán solas al corregirlo. Se corrige en un PR aparte.
+* **Pregunta de dominio:** `crearCuenta` envía la comisión de pago de impuestos como número y `abrirEdicionCuenta` como texto. Se fijó tal cual está.
+
+---
+
+## 🚀 Versión 1.48.0 - 2026-10-01
 **Preparación de la división de `ui.ts` y revisión de la estabilidad de actualizar.** Sin cambios en la aplicación.
 
 ### 🧭 División de `ui.ts` (plan en `division_de_ui.md`)
