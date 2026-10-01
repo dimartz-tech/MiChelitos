@@ -144,7 +144,8 @@ export class VistaEfectivo implements Vista {
         e.preventDefault();
         const { api, avisos, enrutador, dom } = this.dep;
         const fec = dom.elemento<Campo>('efe_inf_fec').value;
-        const mon = Number(dom.elemento<Campo>('efe_inf_mon').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const mon = dom.elemento<Campo>('efe_inf_mon').value.trim();
         const div = dom.elemento<Campo>('efe_inf_div').value;
         const des = dom.elemento<Campo>('efe_inf_des').value;
         try {

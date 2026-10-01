@@ -2755,10 +2755,37 @@ fn c81_un_cobro_informal_en_efectivo_entra_en_la_caja_de_su_divisa() {
     let _g = entorno_aislado();
     let antes = balance_cuenta("Efectivo DOP");
 
-    crear_cobro_efectivo_informal("16/09/2026".into(), "Trabajo suelto".into(), 2_000.0, "DOP".into())
+    crear_cobro_efectivo_informal("16/09/2026".into(), "Trabajo suelto".into(), monto(2_000.0), "DOP".into())
         .unwrap();
 
     assert_importe(balance_cuenta("Efectivo DOP"), antes + 2_000.0, "la caja recibe el importe");
+}
+
+#[test]
+fn c81b_el_cobro_en_efectivo_decide_el_centimo_con_los_digitos_escritos_y_lo_usa_igual_en_los_dos_sitios() {
+    // El importe se usa dos veces —el ingreso y el saldo de la caja—: una sola conversión exacta
+    // garantiza que ambos reciben el mismo valor. `1.005` sube a 1.01 como en el resto de la frontera.
+    let _g = entorno_aislado();
+    let antes = balance_cuenta("Efectivo DOP");
+
+    let id = crear_cobro_efectivo_informal("16/09/2026".into(), "Clase suelta".into(), importe("1.005"), "DOP".into()).unwrap();
+
+    let fila = crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    assert_importe(fila.monto, 1.01, "el ingreso guarda el céntimo decidido");
+    assert_importe(fila.monto_recibido.unwrap(), 1.01, "lo recibido es lo mismo");
+    assert_eq!(fila.estatus, "pagado");
+    assert_importe(balance_cuenta("Efectivo DOP"), antes + 1.01, "la caja recibe exactamente lo mismo");
+}
+
+#[test]
+fn c81c_un_cobro_en_dolares_entra_en_la_caja_de_dolares_y_no_toca_la_de_pesos() {
+    let _g = entorno_aislado();
+    let (dop, usd) = (balance_cuenta("Efectivo DOP"), balance_cuenta("Efectivo USD"));
+
+    crear_cobro_efectivo_informal("16/09/2026".into(), "Cobro en dólares".into(), importe("321.10"), "USD".into()).unwrap();
+
+    assert_importe(balance_cuenta("Efectivo USD"), usd + 321.10, "la caja de dólares recibe el importe");
+    assert_importe(balance_cuenta("Efectivo DOP"), dop, "la de pesos no se mueve");
 }
 
 #[test]
