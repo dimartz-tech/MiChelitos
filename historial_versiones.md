@@ -4,7 +4,30 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.58.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.59.0 (Versión Actual) - 2026-10-02
+**División de `ui.ts`, PR 8: la pestaña «Ingresos» sale de la clase.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* `src/js/vistas/ingresos.ts`: la vista como clase con dependencias inyectadas (API recortada a 9 comandos, avisos, formato, enrutador, pantalla, DOM, **diálogos**, **motivo**, **modales** y reloj). Once métodos: el `render`, las dos altas, la elección de cliente, la edición de una factura con su cobro parcial y el cobro de facturas y de informales. **20 % de las líneas de sus cuerpos reescritas** (96 de 479).
+* El modal de edición lleva `cobrada` y `recibido` en su `dataset`: como `Modales.abrir` no devuelve el elemento, la vista lo busca por su identificador justo después de abrirlo. El comportamiento es el mismo y una prueba lo fija.
+* `ui.ts` pierde 521 líneas; `registro.ts` +4. Parámetros sin tipo en `ui.ts`: 121 → 106.
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/ingresos.test.js` (23): factura siguiente y fecha de hoy desde el reloj, qué facturas ofrecen «cobrar», las dos altas con su carga exacta, elegir cliente, las tres ventanas y sus envíos, la edición de una factura cobrada (motivo con el ajuste, confirmación con las cifras cuando no cambia saldo, cobro parcial como **texto** y sus tres rechazos) y el puente.
+* Las 27 pruebas de interacción del archivo de `ingresos` (21 de esta pestaña, 6 de los borrados con motivo de Ajustes) pasan sin tocarlas.
+* 337 pruebas (333 pasan, 4 `todo` conocidos). Dieciséis mutaciones, las dieciséis detectadas.
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; las dos altas, elegir cliente y la edición de una factura cobrada (mueve saldo y pide motivo) ejercidas en las dos versiones: mismos comandos, argumentos, modal y avisos, 0 errores. El cobro de una factura y el de un informal no se pudieron ejercer (no tienes facturas emitidas ni informales pendientes); los cubren las pruebas.
+* **App empaquetada**: ocho vistas registradas, se dibuja sin error y los modales reales se crean en `<body>`.
+* Previsto frente a medido (≈93 → 96 líneas; esfuerzo 4 → ≈4) y los seis controles: `division_de_ui_limpia.md` §9.
+
+### Siguiente
+* PR 9: `préstamos` (20 métodos, ≈705 líneas).
+
+---
+
+## 🚀 Versión 1.58.0 - 2026-10-02
 **División de `ui.ts`, PR 7: la pestaña «Gastos» sale de la clase.** Sin cambios visibles.
 
 ### 🧩 Qué se hace
