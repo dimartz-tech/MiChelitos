@@ -284,11 +284,12 @@ const AppAPI = {
         return await invoke('eliminar_bonificacion', { id: Number(id) });
     },
 
-    async registrarPagoTarjeta(id: number | string, fec: string, mon: number, div: string, cuentaAhorroId: number | null = null, tasaCambio: number | string = 0) {
+    async registrarPagoTarjeta(id: number | string, fec: string, mon: string, div: string, cuentaAhorroId: number | null = null, tasaCambio: number | string = 0) {
         return await invoke('registrar_pago_tarjeta', { 
             id: Number(id), 
             fecha: fec, 
-            monto: mon, 
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            monto: String(mon), 
             divisa: div, 
             cuentaAhorroId: cuentaAhorroId ? Number(cuentaAhorroId) : null,
             tasaCambio: Number(tasaCambio || 0)

@@ -891,7 +891,7 @@ fn actualizar_limites_tarjeta(
 fn registrar_pago_tarjeta(
     id: i64,
     fecha: String,
-    monto: f64,
+    monto: ipc::ImporteDecimal,
     divisa: String,
     cuenta_ahorro_id: Option<i64>,
     tasa_cambio: f64
@@ -912,7 +912,8 @@ fn registrar_pago_tarjeta(
             DatosPago {
                 tarjeta_id: id,
                 fecha,
-                monto: Dinero::nuevo(monto, Divisa::desde_codigo(&divisa)?)?,
+                // El céntimo lo deciden los dígitos escritos; la divisa es la declarada por el abono.
+                monto: monto.con_divisa(Divisa::desde_codigo(&divisa)?),
                 cuenta_ahorro_id,
                 // Una tasa de cero es como la interfaz dice «no aplica».
                 tasa_cambio: if tasa_cambio > 0.0 {

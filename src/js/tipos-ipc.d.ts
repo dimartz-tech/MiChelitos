@@ -42,7 +42,7 @@ export type Comandos = {
     obtener_tarjetas: { args: {  }; ret: Tarjeta[] };
     crear_tarjeta: { args: { entidad: string; nombre: string; limitePesos: number; limiteDolares: number; sobregiroPesos: number; sobregiroDolares: number; balancePesos: number; balanceDolares: number; balanceCortePesos: number; balanceCorteDolares: number; corte: number; pago: number }; ret: number };
     actualizar_limites_tarjeta: { args: { id: number; limitePesos: number; limiteDolares: number; sobregiroPesos: number; sobregiroDolares: number; balanceCortePesos: number; balanceCorteDolares: number; limiteAjustadoPesos?: number | null; limiteAjustadoDolares?: number | null; politicaLiquidacion?: string | null }; ret: null };
-    registrar_pago_tarjeta: { args: { id: number; fecha: string; monto: number; divisa: string; cuentaAhorroId?: number | null; tasaCambio: number }; ret: null };
+    registrar_pago_tarjeta: { args: { id: number; fecha: string; monto: string | number; divisa: string; cuentaAhorroId?: number | null; tasaCambio: number }; ret: null };
     obtener_abonos_tarjeta: { args: { tarjetaId: number }; ret: AbonoTarjeta[] };
     revertir_abono_tarjeta: { args: { id: number; motivo: string }; ret: string };
     simular_avance_efectivo: { args: { monto: string | number; divisa: string; tipoCargo: string; porcentaje?: number | null; cargoFijo?: string | number | null }; ret: SimulacionAvance };

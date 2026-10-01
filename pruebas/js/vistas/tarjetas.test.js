@@ -182,9 +182,18 @@ test('abono en efectivo: el monto como número, sin cuenta y sin tasa; redibuja 
     const t = montar({ campos: CAMPOS_PAGO() });
     await t.vista.handleAbonoTarjeta(t.evento, 7);
     assert.equal(t.evento.evitado, 1);
-    assert.deepEqual(t.llamadas, [['registrarPagoTarjeta', 7, '10/03/2027', 120.5, 'DOP', null, 0]]);
+    assert.deepEqual(t.llamadas, [['registrarPagoTarjeta', 7, '10/03/2027', '120.5', 'DOP', null, 0]]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Abono a tarjeta guardado.', tipo: undefined }]);
     assert.deepEqual(t.rutas, ['tarjetas']);
+});
+
+test('abono: el importe viaja como TEXTO, recortado y con los dígitos intactos (la tasa sigue siendo un número)', async () => {
+    for (const [escrito, esperado] of [[' 120.5 ', '120.5'], ['1000.005', '1000.005'], ['0120.500', '0120.500']]) {
+        const t = montar({ campos: CAMPOS_PAGO({ pag_monto_7: el({ value: escrito }) }) });
+        await t.vista.handleAbonoTarjeta(t.evento, 7);
+        assert.strictEqual(t.llamadas[0][3], esperado, JSON.stringify(escrito));
+        assert.equal(typeof t.llamadas[0][3], 'string');
+    }
 });
 
 test('abono: un importe que no es mayor que cero se rechaza antes de tocar la API', async () => {
@@ -203,7 +212,7 @@ test('abono en dólares desde una cuenta en pesos pide la tasa, con 60.0 por def
     await espera;
     assert.equal(t.preguntas[0].d, '60.0');
     assert.match(t.preguntas[0].m, /USD 120\.5 desde la cuenta en Pesos "Cuenta Pesos"/);
-    assert.deepEqual(t.llamadas, [['registrarPagoTarjeta', 7, '10/03/2027', 120.5, 'USD', 1, 58.5]]);
+    assert.deepEqual(t.llamadas, [['registrarPagoTarjeta', 7, '10/03/2027', '120.5', 'USD', 1, 58.5]]);
 });
 
 test('abono con la tasa ya escrita, o entre cuentas de la misma divisa, no la pregunta', async () => {

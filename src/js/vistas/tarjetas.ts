@@ -755,10 +755,11 @@ export class VistaTarjetas implements Vista {
 
         const fec = dom.elemento<Campo>(`pag_fecha_${id}`).value;
         const div = dom.elemento<Campo>(`pag_div_${id}`).value;
-        const mon = Number(dom.elemento<Campo>(`pag_monto_${id}`).value);
+        // Texto, tal cual se escribió (convención de 1.21.0); el número solo sirve para comparar.
+        const mon = dom.elemento<Campo>(`pag_monto_${id}`).value.trim();
         const cueId = dom.elemento<Campo>(`pag_cuenta_${id}`).value;
 
-        if (!(mon > 0)) {
+        if (!(Number(mon) > 0)) {
             avisos.mostrar("El monto del abono debe ser mayor que cero.", "error");
             return;
         }
