@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -283,3 +283,33 @@ Fuera del plan, también: **cuatro mutaciones** (retiro siempre a efectivo en pe
 | 6. Revisión manual con tus datos | **el reactor de divisas** (con cuentas de divisas distintas muestra el aviso de cruce y los rótulos «en DOP»/«en USD»; con la misma, lo oculta) **y la transferencia**, en las dos versiones: mismo estado del DOM, mismos comandos, mismos argumentos y mismo aviso, 0 errores |
 
 **Más controles:** cinco mutaciones (importes de origen y destino intercambiados, aviso de cruce siempre visible, vista sin registrar, puente sin un manejador, fecha real en vez del reloj inyectado): las cinco se detectan, dos de ellas por el compilador. **En la aplicación empaquetada**: dos vistas registradas, se dibuja «Cuentas de Ahorro», el formulario existe y los dos manejadores son funciones.
+
+### PR 3 — `resumen` (1.54.0)
+
+| Qué | Previsto (medición del agente) | Medido |
+|---|---|---|
+| Métodos que se mueven | 1 | 1 (`renderResumen`, 164 líneas de cuerpo; solo lectura, sin manejadores) |
+| Líneas a reescribir | 23 (≈26 con la corrección del 15 %) | **25** de 164 (**15 %**) |
+| Diff de `ui.ts` | — | **−171 / +7** (el +7 es la tasa de referencia, ver abajo) |
+| Archivos nuevos | — | `vistas/resumen.ts` (205), `pruebas/js/vistas/resumen.test.js` (150), `pruebas/js/contrato/rutas.test.js` (48); `registro.ts` +4, `servicios.ts` +13 |
+| Esfuerzo relativo (efectivo = 1) | 1 | ≈1,3: hubo que decidir cómo inyectar una constante compartida y se añadió una prueba general |
+| Parámetros sin tipo en `ui.ts` | 163 | 163 (la vista no tiene parámetros) |
+
+**Dos cosas que el modelo anticipó a medias o no anticipó:**
+* **`TASA_USD_A_DOP`.** El modelo la señaló («a `nucleo/`»), pero no que **la leen otros dos sitios de `ui.ts`** que aún no se han extraído. Moverla a `nucleo/` habría obligado a duplicarla (justo lo que su comentario original prohíbe: «dos copias de una tasa se desincronizan») o a que `ui.ts` importara un módulo, cosa que un script clásico no puede. Decisión: **un servicio inyectado, `Referencias`**, que la vista recibe; la constante sigue en `ui.ts` y la clase la expone (`appUI.tasaUsdADop`) mientras queden lectores; cuando se extraiga el último, pasa a la composición. Es el patrón de §2 aplicado a un valor, no a una función. Una prueba comprueba que la vista usa la tasa inyectada y no una escrita dentro (con 50 y con 70).
+* **Un riesgo del `switch`.** `render()` termina en `default: renderDashboard()`: una vista extraída que **deja de registrarse no da error, pinta el Dashboard**. Las pruebas de la vista ejercen la clase, no el registro, y el Resumen no tiene manejadores que lo delaten. **Nueva prueba general** (`rutas.test.js`): cada pestaña del menú se dibuja desde un solo sitio (una vista registrada o un `case`), y ninguna vista registrada tiene una ruta que el menú no ofrezca. Protege también todas las extracciones siguientes.
+
+**Los seis controles del plan:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 254 pruebas (250 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa (la vista no añade manejadores) |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `resumen` incluida (656 caracteres), sin `undefined`/`NaN`/errores |
+| 4. Parámetros tipados en el mismo PR | sí; entra en `tsconfig.estricto.json` |
+| 5. Pruebas de interacción | no hay manejadores que ejercer; en su lugar, **10 pruebas de las reglas de cálculo** (ver abajo) |
+| 6. Revisión manual con tus datos | el Resumen **calcula**, así que se comparó, además del texto, **cada cifra que muestra**: 17 cifras, las mismas en el mismo orden en las dos versiones; y se repintó tres veces y tras ir a otra pestaña y volver: el mismo texto |
+
+**Lo que ganó la vista con la inyección:** el Resumen es una pantalla de solo lectura pero **contiene reglas de dinero** (patrimonio neto, ratio de endeudamiento con sus tres rótulos, qué cuotas cuentan, suscripciones anuales entre 12, qué entra en el mes). **Hasta ahora ninguna prueba las ejercía.** Con datos inventados y resultados comprobables a mano ahora sí: tasa inyectada, mes del reloj inyectado, préstamo flexible frente a uno sin cuotas pendientes, sin activos (sin dividir por cero), balance negativo, capital `null`.
+
+**Más controles:** seis mutaciones (ratio al revés, gastos de todos los meses, tasa escrita dentro, cuota sin cuotas pendientes que sigue sumando, anuales sin dividir entre 12, vista sin registrar): las seis se detectan, y la última solo la detecta la prueba nueva de rutas. **En la aplicación empaquetada**: tres vistas registradas, se dibuja «Resumen Ejecutivo» sin error y la tasa llega como 60. (Una sonda de texto buscó «Patrimonio Neto» y no lo halló: `innerText` aplica el `text-transform: uppercase` del CSS y devuelve «PATRIMONIO NETO»; es un defecto de la sonda, no de la vista, y las pruebas de Node comprueban las etiquetas en el HTML.)

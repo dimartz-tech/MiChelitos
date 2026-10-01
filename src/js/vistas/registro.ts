@@ -12,6 +12,7 @@
 import type { AppUIAntigua, ServiciosComunes } from '../ui/servicios';
 import { VistaCuentas, puenteCuentas } from './cuentas.js';
 import { VistaEfectivo, puenteEfectivo } from './efectivo.js';
+import { VistaResumen, puenteResumen } from './resumen.js';
 
 export function registrarVistas(app: AppUIAntigua, servicios: ServiciosComunes, api: typeof AppAPI): void {
     const efectivo = new VistaEfectivo({ ...servicios, api });
@@ -19,4 +20,7 @@ export function registrarVistas(app: AppUIAntigua, servicios: ServiciosComunes, 
 
     const cuentas = new VistaCuentas({ ...servicios, api });
     app.registrarVista('cuentas', cuentas, puenteCuentas(cuentas));
+
+    const resumen = new VistaResumen({ ...servicios, api });
+    app.registrarVista('resumen', resumen, puenteResumen(resumen));
 }
