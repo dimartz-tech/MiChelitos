@@ -625,6 +625,34 @@ fn c16_una_divisa_distinta_de_usd_se_trata_como_pesos() {
 // =====================================================================
 
 #[test]
+fn c16b_el_abono_decide_el_centimo_con_los_digitos_escritos() {
+    // `1000.005` sube a 1000.01: la deuda baja exactamente ese céntimo, y sin cuenta de ahorro no hay comisión.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(50000.0, 0.0);
+
+    registrar_pago_tarjeta(tarjeta, "08/09/2026".to_string(), importe("1000.005"), "DOP".to_string(), None, 0.0).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 50000.0 - 1000.01, "la deuda baja el céntimo decidido con los dígitos");
+}
+
+#[test]
+fn c16c_hallazgo_el_nucleo_no_rechaza_un_abono_cero_ni_negativo_solo_lo_hace_la_interfaz() {
+    // **HALLAZGO, sin corregir** (protocolo del proyecto: documentar y fijar antes de corregir; el cambio se
+    // consulta). La comprobación «el monto del abono debe ser mayor que cero» vive **solo en la interfaz**
+    // (`handleAbonoTarjeta`). Quien llame al comando por el IPC puede registrar un abono de 0.00, o uno
+    // **negativo, que sube la deuda**. Ya era así con el `f64`; la migración a texto no lo cambia. Esta prueba
+    // describe el comportamiento ACTUAL: si se decide que el núcleo lo rechace, esta prueba se invierte.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(50000.0, 0.0);
+
+    registrar_pago_tarjeta(tarjeta, "08/09/2026".to_string(), importe("0.00"), "DOP".to_string(), None, 0.0).unwrap();
+    assert_importe(balances_tarjeta(tarjeta).0, 50000.0, "un abono de cero no mueve nada");
+
+    registrar_pago_tarjeta(tarjeta, "08/09/2026".to_string(), importe("-100.00"), "DOP".to_string(), None, 0.0).unwrap();
+    assert_importe(balances_tarjeta(tarjeta).0, 50100.0, "un abono negativo SUBE la deuda: lo que hoy no impide el núcleo");
+}
+
+#[test]
 fn c17_el_abono_en_igual_divisa_cobra_la_comision_sobre_el_monto() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(50000.0, 0.0);
@@ -634,7 +662,7 @@ fn c17_el_abono_en_igual_divisa_cobra_la_comision_sobre_el_monto() {
     registrar_pago_tarjeta(
         tarjeta,
         "08/09/2026".to_string(),
-        12345.67,
+        monto(12345.67),
         "DOP".to_string(),
         Some(cuenta),
         0.0,
@@ -662,7 +690,7 @@ fn c18_el_abono_multidivisa_convierte_y_comisiona_al_centavo() {
     registrar_pago_tarjeta(
         tarjeta,
         "08/09/2026".to_string(),
-        250.0,
+        monto(250.0),
         "USD".to_string(),
         Some(cuenta),
         60.25,
@@ -686,7 +714,7 @@ fn c19_un_abono_sin_cuenta_de_origen_no_genera_comision() {
     registrar_pago_tarjeta(
         tarjeta,
         "08/09/2026".to_string(),
-        10000.0,
+        monto(10000.0),
         "DOP".to_string(),
         None,
         0.0,
@@ -708,7 +736,7 @@ fn c20_el_abono_superior_a_la_deuda_deja_saldo_a_favor() {
     registrar_pago_tarjeta(
         tarjeta,
         "08/09/2026".to_string(),
-        800.0,
+        monto(800.0),
         "DOP".to_string(),
         None,
         0.0,
@@ -2512,7 +2540,7 @@ fn c64_registrar_y_revertir_un_abono_deja_tarjeta_y_cuenta_como_estaban() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
 
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+        tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), Some(cuenta), 0.0,
     )
     .unwrap();
     assert_importe(balances_tarjeta(tarjeta).0, 18_000.0, "la deuda bajó");
@@ -2533,7 +2561,7 @@ fn c65_revertir_un_abono_en_divisa_devuelve_los_pesos_que_salieron() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
 
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 100.0, "USD".to_string(), Some(cuenta), 60.0,
+        tarjeta, "14/09/2026".to_string(), monto(100.0), "USD".to_string(), Some(cuenta), 60.0,
     )
     .unwrap();
     assert_importe(balances_tarjeta(tarjeta).1, 400.0, "la deuda en dólares bajó");
@@ -2551,7 +2579,7 @@ fn c66_revertir_un_abono_sin_cuenta_solo_repone_la_deuda() {
     let tarjeta = crear_tarjeta(30_000.0, 0.0);
 
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), None, 0.0,
+        tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), None, 0.0,
     )
     .unwrap();
 
@@ -2571,7 +2599,7 @@ fn c67_revertir_un_abono_que_dejo_saldo_a_favor_lo_deshace_sin_recorte() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 500_000.0);
 
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 5_000.0, "USD".to_string(), Some(cuenta), 59.9,
+        tarjeta, "14/09/2026".to_string(), monto(5_000.0), "USD".to_string(), Some(cuenta), 59.9,
     )
     .unwrap();
     assert_importe(balances_tarjeta(tarjeta).1, -5_000.0, "queda saldo a favor, no cero");
@@ -2588,7 +2616,7 @@ fn c68_revertir_dos_veces_falla_la_segunda_sin_duplicar_la_devolucion() {
     let tarjeta = crear_tarjeta(30_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+        tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), Some(cuenta), 0.0,
     )
     .unwrap();
     let abono = ultimo_abono();
@@ -3984,7 +4012,7 @@ fn c133_una_cuenta_que_pago_un_abono_no_se_elimina_aunque_borren_el_gasto_de_su_
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(1_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000.0);
-    registrar_pago_tarjeta(tarjeta, "20/09/2026".into(), 500.0, "DOP".into(), Some(cuenta), 0.0).unwrap();
+    registrar_pago_tarjeta(tarjeta, "20/09/2026".into(), monto(500.0), "DOP".into(), Some(cuenta), 0.0).unwrap();
     let gasto_comision: i64 = conexion()
         .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
         .unwrap();
@@ -4027,7 +4055,7 @@ fn c136_la_comision_de_un_abono_no_se_puede_borrar_por_separado() {
     let tarjeta = crear_tarjeta(30_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+        tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), Some(cuenta), 0.0,
     )
     .unwrap();
     let gasto_comision: i64 = conexion()
@@ -4054,7 +4082,7 @@ fn c137_tras_el_rechazo_revertir_el_abono_deja_la_cuenta_exactamente_como_estaba
     let tarjeta = crear_tarjeta(30_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+        tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), Some(cuenta), 0.0,
     )
     .unwrap();
     let abono = ultimo_abono();

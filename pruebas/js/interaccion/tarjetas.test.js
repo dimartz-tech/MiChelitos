@@ -99,7 +99,7 @@ const abono = (extra = {}) => ({
 test('abono sin cuenta: (id, fecha, monto, divisa, null, 0) y sin consultar cuentas', async () => {
     const ui = cargarInterfaz({ campos: abono() });
     await ui.appUI.handleAbonoTarjeta(crearEvento(), 3);
-    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', 321.45, 'DOP', null, 0]);
+    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', '321.45', 'DOP', null, 0]);
     noLlamoA(ui, 'obtenerCuentas');
     avisoExito(ui, /Abono a tarjeta guardado/);
     redibujo(ui, 'tarjetas');
@@ -111,7 +111,7 @@ test('abono desde cuenta en la misma divisa: viaja el id de la cuenta elegida (n
         api: { obtenerCuentas: [{ id: 7, divisa: 'DOP', nombre: 'Otra' }, { id: 8, divisa: 'DOP', nombre: 'Cuenta A' }] },
     });
     await ui.appUI.handleAbonoTarjeta(crearEvento(), 3);
-    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', 321.45, 'DOP', 8, 0]);
+    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', '321.45', 'DOP', 8, 0]);
     assert.deepEqual(ui.preguntas, []);
 });
 
@@ -121,7 +121,7 @@ test('abono USD desde cuenta en DOP con tasa tecleada: no se pregunta nada', asy
         api: { obtenerCuentas: [{ id: 8, divisa: 'DOP', nombre: 'Cuenta A' }] },
     });
     await ui.appUI.handleAbonoTarjeta(crearEvento(), 3);
-    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', 321.45, 'USD', 8, 59.5]);
+    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', '321.45', 'USD', 8, 59.5]);
     assert.deepEqual(ui.preguntas, []);
 });
 
@@ -133,7 +133,7 @@ test('abono USD desde cuenta en DOP sin tasa: la pide con prompt y la usa', asyn
     });
     await ui.appUI.handleAbonoTarjeta(crearEvento(), 3);
     assert.equal(ui.preguntas.length, 1);
-    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', 321.45, 'USD', 8, 58.25]);
+    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', '321.45', 'USD', 8, 58.25]);
 });
 
 test('abono con conversión: cancelar el prompt de la tasa cancela el abono', async () => {

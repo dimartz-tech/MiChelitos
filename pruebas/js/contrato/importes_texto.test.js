@@ -38,6 +38,7 @@ const TRES_DECIMALES = '0075.250';
 /** Cada fila: el método, cómo llamarlo con `1.005` en el importe, y los campos que deben llegar tal cual. */
 const MIGRADOS = [
     ['crearIngresoInformal', A => A.crearIngresoInformal('06/03/2027', 'Clase', TRES_DECIMALES), ['monto']],
+    ['registrarPagoTarjeta', A => A.registrarPagoTarjeta(1, '01/01/2027', TRES_DECIMALES, 'DOP', null, 0), ['monto']],
     ['marcarIngresoPagado', A => A.marcarIngresoPagado(1, 2, '01/01/2027', TRES_DECIMALES), ['montoRecibido']],
     ['marcarInformalPagado', A => A.marcarInformalPagado(1, 2, '01/01/2027', TRES_DECIMALES), ['montoRecibido']],
     ['liquidarConsumoPendiente', A => A.liquidarConsumoPendiente(1, TRES_DECIMALES), ['montoLiquidado']],
