@@ -4,7 +4,32 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.50.0 (Versión Actual) - 2026-10-01
+## 🚀 Versión 1.51.0 (Versión Actual) - 2026-10-01
+**División de `ui.ts`, PR 0: la infraestructura del diseño limpio.** Sin mover ninguna vista; sin cambios visibles.
+
+### 🏗️ Qué se añade
+* `src/js/ui/servicios.ts`: las interfaces que reciben las vistas por inyección (`Avisos`, `Formato`, `Enrutador`, `Pantalla`, `Dom`, `Reloj`, `Dialogos`, `Motivo` y la API recortada `ApiDe<K>`) y su cableado con la clase vieja. `Dialogos` y `Motivo` entran ya porque `confirm`/`prompt` (25 usos) impedirían probar los borrados en Node.
+* `src/js/composicion.ts`: la raíz de composición, como módulo ES. Todavía no registra ninguna vista; construye los servicios.
+* `AppUI.registrarVista(ruta, vista, puente)` y un registro de vistas que `render()` consulta antes del `switch`: cada PR siguiente saca una vista de la clase y la registra aquí. Los manejadores en línea siguen llamando a `appUI`.
+* `index.html` carga `composicion.js` como `<script type="module">`; los dos archivos nuevos entran en `tsconfig.estricto.json` (`noImplicitAny`).
+* `division_de_ui_limpia.md` y `herramientas/medir_division_ui.mjs` (obra de un agente independiente, verificada): el modelo del diseño B, con la medición por vista; el titular lo eligió frente al mecánico.
+
+### 🧪 Pruebas
+* **Helper compartido** `pruebas/js/ayudas/fuentes_interfaz.js`: las pruebas de contrato (`importes`, `tipos`, `ipc`, `manejadores`) piden «la interfaz» y no `ui.ts`, así que siguen valiendo cuando las vistas se repartan en `vistas/`.
+* **Hueco cerrado:** `manejadores.test.js` no veía los tres `onclick='…'` con comillas simples (`abrirEdicionSuscripcion`, `abrirMenuPasivo`, `abrirEdicionCuenta`, que reciben un objeto en JSON). Ahora los ve: renombrar `abrirMenuPasivo` lo detecta, y antes no.
+* 223 pruebas de JavaScript (219 pasan, 4 `todo` conocidos) y la comprobación de tipos.
+
+### ✅ Comprobado como se prometió en el plan
+* **Con tus datos reales** (copia temporal, ya borrada): las **once pestañas idénticas** a `main`, sin `undefined`/`NaN`, sin errores de consola y con el módulo cargado y 0 vistas registradas.
+* **En la aplicación empaquetada** (construida con `tauri build`, `HOME` aislado, con una marca temporal ya retirada): el módulo se ejecuta con `document.readyState === 'interactive'`, **antes de `DOMContentLoaded`**, y ya ve `appUI` y `AppAPI`. Era la comprobación que el análisis había dejado abierta.
+* Un detalle de la medición: `appUI` es una `const` de un script clásico, así que **no cuelga de `window`**: los `onclick` lo resuelven, pero código externo debe usar `eval` o inyectarlo. Se tiene en cuenta en las pruebas.
+
+### Siguiente
+* PR 1: `efectivo` (la vista más pequeña) con sus pruebas de Node, y `cargar_interfaz.js` adaptado a módulos.
+
+---
+
+## 🚀 Versión 1.50.0 - 2026-10-01
 **El alta de cuenta envía la comisión como texto, como acordó la convención de 1.21.0.**
 
 ### 🐞 Qué faltaba
