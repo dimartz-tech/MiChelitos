@@ -2765,7 +2765,7 @@ fn c81_un_cobro_informal_en_efectivo_entra_en_la_caja_de_su_divisa() {
 fn c82_h17_el_informal_comparte_el_arreglo() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
-    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), 2_000.0).unwrap();
+    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), monto(2_000.0)).unwrap();
 
     let r = marcar_informal_pagado(id, 9_999, "16/09/2026".into(), 2_000.0);
 
@@ -2777,7 +2777,7 @@ fn c82_h17_el_informal_comparte_el_arreglo() {
 fn c83_borrar_un_informal_cobrado_revierte_su_abono() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
-    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), 2_000.0).unwrap();
+    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), monto(2_000.0)).unwrap();
     marcar_informal_pagado(id, cuenta, "16/09/2026".into(), 2_000.0).unwrap();
 
     eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
@@ -2789,11 +2789,36 @@ fn c83_borrar_un_informal_cobrado_revierte_su_abono() {
 fn c84_un_informal_sin_cobrar_no_mueve_ningun_saldo_al_borrarse() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
-    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), 2_000.0).unwrap();
+    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), monto(2_000.0)).unwrap();
 
     eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "nunca entró, nada sale");
+}
+
+#[test]
+fn c84b_el_importe_de_un_informal_lo_decide_el_nucleo_con_los_digitos_escritos() {
+    // `crear_ingreso_informal` fue el primer comando de los 15 que seguían recibiendo un `f64` que
+    // migró al importe en texto: antes guardaba el número tal cual llegaba, sin que el núcleo
+    // decidiera el céntimo; ahora `1.005` sube a 1.01 como en el resto de la frontera.
+    let _g = entorno_aislado();
+    let id = crear_ingreso_informal("16/09/2026".into(), "Clase suelta".into(), importe("1.005")).unwrap();
+
+    let guardado = crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    assert_importe(guardado.monto, 1.01, "el céntimo se decide con los dígitos escritos");
+    assert_eq!(guardado.estatus, "pendiente");
+}
+
+#[test]
+fn c84c_un_importe_de_dos_decimales_se_guarda_exacto_y_un_texto_ilegible_no_crea_nada() {
+    let _g = entorno_aislado();
+    let id = crear_ingreso_informal("16/09/2026".into(), "Clase suelta".into(), importe("75.25")).unwrap();
+    let guardado = crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    assert_importe(guardado.monto, 75.25, "dos decimales: sin pérdida");
+
+    // El texto ilegible falla **antes** de llegar al comando: en la frontera, al leer el argumento.
+    assert!(crate::ipc::ImporteDecimal::desde_texto("setenta").is_err());
+    assert_eq!(crate::obtener_ingresos_informales().unwrap().len(), 1, "no se creó ningún ingreso");
 }
 
 // ---------------------------------------------------------------------------
@@ -3813,7 +3838,7 @@ fn c131_revertida_la_factura_la_cuenta_vuelve_a_poder_eliminarse() {
 fn c132_una_cuenta_con_un_ingreso_informal_cobrado_en_ella_no_se_puede_eliminar() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
-    let id = crear_ingreso_informal("20/09/2026".into(), "Trabajo puntual".into(), 3_000.0).unwrap();
+    let id = crear_ingreso_informal("20/09/2026".into(), "Trabajo puntual".into(), monto(3_000.0)).unwrap();
     marcar_informal_pagado(id, cuenta, "20/09/2026".into(), 3_000.0).unwrap();
 
     let error = crate::eliminar_cuenta(cuenta).unwrap_err();

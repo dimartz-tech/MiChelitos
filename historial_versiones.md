@@ -4,7 +4,33 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.68.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.69.0 (Versión Actual) - 2026-10-02
+**Importes a texto: `crear_ingreso_informal` es el primero de los que seguían enviándose como número.**
+
+### 🐛 Qué estaba mal
+* La convención de 1.21.0 es que los importes viajan a Rust **como texto, tal cual se escribieron**, para que el núcleo decida el céntimo con los dígitos del titular y no con un `f64` que ya no vale lo que tecleó (`1.005` es 1.00499… en binario). Pero quedaban **once comandos y cuatro estructuras de entrada** que seguían recibiendo un `f64`: la interfaz los convertía con `Number(...)`.
+* `crear_ingreso_informal` era el caso más limpio: **guardaba el número tal cual llegaba**, sin pasar por el núcleo.
+
+### 🔧 Qué se hace
+* **Rust:** `monto` pasa a `ImporteDecimal` y se guarda con `unidades()` (el céntimo ya decidido con los dígitos escritos).
+* **Interfaz:** el envoltorio manda `String(monto)` (antes `Number(monto)`) y la vista envía el texto recortado, sin convertir. El tipo del parámetro pasa de `number | string` a `string`: el compilador impide mandar un número.
+* **Con dos decimales no cambia ningún importe** (la medida de 1.21.0 y el `step="0.01"` lo garantizan). Con tres, en la frontera `1.005` sube a 1.01; el formulario no deja escribirlos.
+* Los tipos generados (`tipos-ipc.d.ts`) reflejan `string | number` para el comando.
+
+### 🛡️ Cómo se lleva la cuenta
+* **`pruebas/js/contrato/importes_texto.test.js`:** (1) cada envoltorio **ya migrado** (nueve) se ejecuta con un `invoke` falso y debe mandar `1.005` **como texto con sus tres decimales**; (2) los envoltorios que **siguen** convirtiendo un importe con `Number(...)` están en una lista, que **solo puede encogerse**: uno nuevo que lo hiciera rompe la prueba, y uno migrado que siguiera listado también. El estado de los 14 que quedan está en `politica_redondeo.md`, «Migración de los importes a texto».
+
+### 🧪 Pruebas
+* **JavaScript:** 13 nuevas (los nueve envoltorios, el texto con ceros y espacios, las dos listas, y el envío desde la vista con espacios, tres decimales, ceros y vacío); dos pruebas existentes pasan de comprobar un número a un texto. **550 pruebas, todas pasan.**
+* **Rust:** 2 nuevas (`c84b`: `1.005` se guarda como 1.01; `c84c`: dos decimales exactos y un texto ilegible no crea nada) y cuatro pruebas existentes se actualizan al nuevo tipo. **615 pruebas, todas pasan.**
+* Mutaciones: el envoltorio de vuelta a `Number`, a `parseFloat`, la vista sin recortar o de vuelta a `Number` (esta la atrapa el compilador), y en Rust el importe multiplicado por 100 o truncado a entero: todas se detectan.
+
+### ✅ Comprobado a mano
+* **En la aplicación empaquetada, con el IPC de Tauri, Rust y la base reales:** `1.005` por el IPC se guarda como **1.01**; un número (`100`) sigue admitido durante la transición; un texto ilegible (`setenta`) **no crea nada** y Rust lo rechaza con un mensaje; y el **formulario real** de ingresos informales guarda **75.25** y avisa del éxito.
+
+---
+
+## 🚀 Versión 1.68.0 - 2026-10-02
 **Corrección: ningún texto escrito por el titular se interpreta ya como HTML ni como código en ninguna pestaña.** Escape general de las plantillas.
 
 ### 🐛 Qué estaba mal
