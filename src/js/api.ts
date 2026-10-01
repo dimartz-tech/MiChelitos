@@ -410,6 +410,11 @@ const AppAPI = {
         });
     },
 
+    // --- CASOS DE CORRECCIÓN (AUDITORÍA) ---
+    async obtenerCorrecciones() {
+        return await invoke('obtener_correcciones');
+    },
+
     async eliminarGasto(id, motivo) {
         return await invoke('eliminar_gasto', { id: Number(id), motivo });
     },
