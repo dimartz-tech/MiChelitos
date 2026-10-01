@@ -1,0 +1,16 @@
+{
+  // Comprobación estricta de los archivos que ya no tienen deuda de tipos:
+  // `noImplicitAny` encendido, así que **todo parámetro lleva su tipo**.
+  // `ui.ts` y `app.ts` quedan fuera hasta que se tipen sus parámetros (ver
+  // migracion_a_typescript.md); se comprueban en el modo normal de
+  // `tsconfig.build.json`.
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": { "noImplicitAny": true, "noEmit": true },
+  "include": [
+    "src/js/globales.d.ts",
+    "src/js/tipos-ipc.d.ts",
+    "src/js/api.ts",
+    "src/js/ui/dom.ts",
+    "src/js/nucleo/*.ts"
+  ]
+}

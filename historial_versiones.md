@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.46.0 (Versión Actual) - 2026-09-30
+## 🚀 Versión 1.47.0 (Versión Actual) - 2026-10-01
+**Los 61 envoltorios de `api.ts` tienen todos sus parámetros tipados, y `noImplicitAny` los vigila.** Sin cambios de comportamiento.
+
+### 🧩 Qué se hace
+* Cada parámetro de `api.ts` lleva su tipo (134 errores de `noImplicitAny` → 0). **Se derivaron, no se escribieron a mano**: del mapa `Comandos` generado desde Rust, según cómo el envoltorio pasa cada parámetro (`Number(x)` → `number | string`, texto de importe → `string | number`, sin conversión → el tipo exacto de Rust, estructuras de entrada → el tipo generado). Cuatro se resolvieron a mano; uno queda como `any` explícito y comentado: el documento de capital, que Rust recibe como JSON libre.
+* `tsconfig.estricto.json` aplica `noImplicitAny` a `api.ts`, `ui/dom.ts`, `nucleo/` y `tipos-ipc.d.ts`, e integra `npm run compilar` y `npm run tipos`: una violación detiene también `tauri build`.
+
+### ✅ Comprobado
+* El JavaScript compilado de `api` es **idéntico byte a byte** al de la versión anterior: los tipos no cambian el código.
+* Ninguna llamada de `ui.ts` incumplía los tipos nuevos. Tres mutaciones, las tres detectadas: un parámetro sin tipo; un tipo que la interfaz no cumple (el error sale **en `ui.ts`**, en la llamada); un envoltorio nuevo sin tipos.
+* 38 pruebas de JavaScript y la comprobación de tipos.
+
+### Siguiente
+* Los 169 parámetros sin tipo de `ui.ts`, a la vez que se divide por pestañas (`migracion_a_typescript.md`).
+
+---
+
+## 🚀 Versión 1.46.0 - 2026-09-30
 **Ayudante de DOM: `ui.ts` se comprueba por fin, sin `@ts-nocheck` y con 0 errores.** Sin cambios de comportamiento salvo un mensaje de error mejor.
 
 ### 🧰 Qué se añade
