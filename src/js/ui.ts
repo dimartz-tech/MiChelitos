@@ -1,10 +1,3 @@
-// @ts-nocheck
-// --- Migración a TypeScript ---
-// Este archivo es TypeScript pero todavía **sin comprobar** (`@ts-nocheck`): se
-// renombró tal cual para que el código nuevo nazca tipado y la migración no se
-// encarezca. La deuda es tipar esta clase; ver `migracion_a_typescript.md`.
-// Para medirla, quita la línea de arriba y ejecuta `npm run tipos`.
-
 // --- MICHELITOS TAURI - RENDERIZADO DINÁMICO DE INTERFAZ (HTML DE ESCRITORIO) ---
 
 // Tasa de referencia para expresar en pesos un pasivo en dólares. Es una
@@ -14,9 +7,16 @@
 const TASA_USD_A_DOP = 60.0;
 
 class AppUI {
+    contentContainer: HTMLElement;
+    notifContainer: HTMLElement;
+    /** Mes elegido en Gastos (`mm/aaaa`); `null` hasta que se elige uno. */
+    selectedGastosMonth: string | null = null;
+    /** Cancela los oyentes del menú de pasivos abierto, si hay uno. */
+    _menuPasivoAbort: AbortController | null = null;
+
     constructor() {
-        this.contentContainer = document.getElementById('app-content');
-        this.notifContainer = document.getElementById('notification-container');
+        this.contentContainer = elemento('app-content');
+        this.notifContainer = elemento('notification-container');
     }
 
     // --- TOASTS / NOTIFICACIONES ---
@@ -83,7 +83,7 @@ class AppUI {
             this.contentContainer.innerHTML = `
                 <div class="card" style="border-left: 4px solid var(--color-danger);">
                     <h3 style="color: var(--color-danger); margin-bottom: 0.5rem;">Error al renderizar el módulo</h3>
-                    <p style="font-size: 0.9rem;">${err.toString()}</p>
+                    <p style="font-size: 0.9rem;">${String(err)}</p>
                 </div>
             `;
         }
@@ -131,7 +131,7 @@ class AppUI {
         const totalRecibidoMes = totalRecibidoFormal + totalInformalRecibido;
 
         // 4. Alertas pendientes
-        const alertas = [];
+        const alertas: { tipo: string; mensaje: string; nivel: string }[] = [];
         tarjetas.forEach(t => {
             if (t.alerta_corte) alertas.push({ tipo: 'Tarjeta (Corte)', mensaje: `${t.entidad} ${t.nombre_tarjeta}: ${t.dias_corte_msg}`, nivel: 'warning' });
             if (t.alerta_pago) alertas.push({ tipo: 'Tarjeta (Pago)', mensaje: `${t.entidad} ${t.nombre_tarjeta}: ${t.dias_pago_msg}`, nivel: 'danger' });
@@ -281,8 +281,8 @@ class AppUI {
                 <!-- Formulario -->
                 <div class="card" style="height: fit-content;">
                     <div style="display: flex; gap: 0.4rem; margin-bottom: 1.2rem; background: rgba(255,255,255,0.02); padding: 3px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-                        <button onclick="document.getElementById('tauri-form-formal').style.display='block'; document.getElementById('tauri-form-informal').style.display='none'; this.className='btn'; document.getElementById('btn-tab-inf').className='btn btn-secondary';" id="btn-tab-for" class="btn" style="flex:1; padding: 0.4rem; font-size: 0.8rem;">📄 Formal</button>
-                        <button onclick="document.getElementById('tauri-form-formal').style.display='none'; document.getElementById('tauri-form-informal').style.display='block'; this.className='btn'; document.getElementById('btn-tab-for').className='btn btn-secondary';" id="btn-tab-inf" class="btn btn-secondary" style="flex:1; padding: 0.4rem; font-size: 0.8rem; border:none;">💸 Informal</button>
+                        <button onclick="elemento('tauri-form-formal').style.display='block'; elemento('tauri-form-informal').style.display='none'; this.className='btn'; elemento('btn-tab-inf').className='btn btn-secondary';" id="btn-tab-for" class="btn" style="flex:1; padding: 0.4rem; font-size: 0.8rem;">📄 Formal</button>
+                        <button onclick="elemento('tauri-form-formal').style.display='none'; elemento('tauri-form-informal').style.display='block'; this.className='btn'; elemento('btn-tab-for').className='btn btn-secondary';" id="btn-tab-inf" class="btn btn-secondary" style="flex:1; padding: 0.4rem; font-size: 0.8rem; border:none;">💸 Informal</button>
                     </div>
 
                     <!-- FORMULARIO FORMAL -->
@@ -461,7 +461,7 @@ class AppUI {
                 return `${parts[1]}/${parts[2]}`; // Formato: "mm/yyyy"
             }
             return null;
-        }).filter(Boolean))].sort((a, b) => {
+        }).filter((m): m is string => Boolean(m)))].sort((a, b) => {
             const [mA, yA] = a.split('/').map(Number);
             const [mB, yB] = b.split('/').map(Number);
             return yB !== yA ? yB - yA : mB - mA;
@@ -485,7 +485,7 @@ class AppUI {
         const totalComisionesUsd = gastosUsd.reduce((sum, g) => sum + g.costo_adicional, 0);
 
         // Agrupar gastos del mes seleccionado por categoría y divisa
-        const categoryTotals = {};
+        const categoryTotals: Record<string, Record<string, number>> = {};
         gastosMes.forEach(g => {
             const cat = g.categoria_nombre || 'Sin Categoría';
             const divisa = g.divisa || 'DOP';
@@ -723,7 +723,7 @@ class AppUI {
                                                 <td style="text-transform:capitalize;">${g.metodo_pago}</td>
                                                 <td class="amount">${g.divisa} ${this.formatMoney(g.monto)}</td>
                                                 <td class="amount expense">${divisaFinal} ${this.formatMoney(g.costo_adicional)}</td>
-                                                <td class="amount" style="font-weight:bold;">${divisaFinal} ${this.formatMoney(montoFinal + g.costo_adicional)}</td>
+                                                <td class="amount" style="font-weight:bold;">${divisaFinal} ${this.formatMoney((montoFinal ?? 0) + g.costo_adicional)}</td>
                                             </tr>
                                         `;}).join('')}
                                     </tbody>
@@ -739,9 +739,9 @@ class AppUI {
     }
 
     toggleMetodoPago(val) {
-        const tarjeta = document.getElementById('gas_tarjeta_container');
-        const cuenta = document.getElementById('gas_cuenta_container');
-        const lbtr = document.getElementById('gas_lbtr_container');
+        const tarjeta = buscar('gas_tarjeta_container');
+        const cuenta = buscar('gas_cuenta_container');
+        const lbtr = buscar('gas_lbtr_container');
         
         if (tarjeta) tarjeta.style.display = val === 'tarjeta' ? 'block' : 'none';
         if (cuenta) cuenta.style.display = val === 'transferencia' ? 'block' : 'none';
@@ -762,7 +762,7 @@ class AppUI {
         const mesActual = hoy.getMonth();
         const anioActual = hoy.getFullYear();
 
-        let mejorTarjeta = null;
+        let mejorTarjeta = null as import('./tipos-ipc').Tarjeta | null;
         let maxDiasRestantes = -1;
 
         tarjetas.forEach(t => {
@@ -776,10 +776,10 @@ class AppUI {
                 fechaProximoCorte = new Date(anioActual, mesActual + 1, diaCorte);
             }
             
-            const diffMs = fechaProximoCorte - hoy;
+            const diffMs = fechaProximoCorte.getTime() - hoy.getTime();
             const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
             
-            t.dias_para_corte = diffDays;
+            (t as import('./tipos-ipc').Tarjeta & { dias_para_corte: number }).dias_para_corte = diffDays;
             
             if (diffDays > maxDiasRestantes) {
                 maxDiasRestantes = diffDays;
@@ -1094,11 +1094,11 @@ class AppUI {
 
     async handleAgregarBonificacion(e) {
         e.preventDefault();
-        const fecha = document.getElementById('bon_fecha').value.trim();
-        const tarjeta = Number(document.getElementById('bon_tarjeta').value);
-        const divisa = document.getElementById('bon_divisa').value;
-        const monto = Number(document.getElementById('bon_monto').value);
-        const concepto = document.getElementById('bon_concepto').value.trim();
+        const fecha = elemento<Campo>('bon_fecha').value.trim();
+        const tarjeta = Number(elemento<Campo>('bon_tarjeta').value);
+        const divisa = elemento<Campo>('bon_divisa').value;
+        const monto = Number(elemento<Campo>('bon_monto').value);
+        const concepto = elemento<Campo>('bon_concepto').value.trim();
 
         if (!(monto > 0)) { this.showToast("El monto de la bonificación debe ser mayor que cero.", "error"); return; }
         if (!concepto) { this.showToast("Indica el concepto: distingue un cashback de una promoción o recompensa.", "error"); return; }
@@ -1108,7 +1108,7 @@ class AppUI {
             this.showToast("Bonificación registrada. La deuda de la tarjeta se redujo.");
             await this.render('tarjetas');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -1118,7 +1118,7 @@ class AppUI {
             this.showToast("Bonificación revertida. La deuda vuelve a su valor anterior.");
             await this.render('tarjetas');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -1821,7 +1821,7 @@ class AppUI {
         // `onchange` no llega a dispararse. Sin esta llamada, los campos
         // condicionales se quedan en un estado que no corresponde al tipo
         // mostrado — y el límite de la línea resultaba imposible de registrar.
-        this.toggleCamposPrestamos(document.getElementById('pre_tip')?.value ?? 'consumo');
+        this.toggleCamposPrestamos(buscar<Campo>('pre_tip')?.value ?? 'consumo');
     }
 
     // --- PASIVOS: agregados y agrupación ---
@@ -2147,7 +2147,7 @@ class AppUI {
             <div data-accion="eliminar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer; color:#fca5a5;">Eliminar</div>
         `;
 
-        menu.querySelectorAll('[data-accion]').forEach(el => {
+        menu.querySelectorAll<HTMLElement>('[data-accion]').forEach(el => {
             el.onmouseenter = () => { el.style.background = 'rgba(255,255,255,0.06)'; };
             el.onmouseleave = () => { el.style.background = 'none'; };
             el.onclick = () => {
@@ -2187,7 +2187,7 @@ class AppUI {
     }
 
     cerrarMenuPasivo() {
-        document.getElementById('menu-pasivo')?.remove();
+        buscar('menu-pasivo')?.remove();
         this._menuPasivoAbort?.abort();
         this._menuPasivoAbort = null;
     }
@@ -2196,14 +2196,14 @@ class AppUI {
         // Se llama también al pintar el formulario, no solo desde el
         // `onchange`: si el tipo llegara ya seleccionado, el campo de límite
         // se quedaba oculto y no había forma de registrarlo.
-        const container = document.getElementById('pre_campos_cuotas');
-        const tot = document.getElementById('pre_tot');
-        const pen = document.getElementById('pre_pen');
+        const container = elemento('pre_campos_cuotas');
+        const tot = elemento<HTMLInputElement>('pre_tot');
+        const pen = elemento<HTMLInputElement>('pre_pen');
 
         // El límite solo significa algo donde hay cupo que reponer; el backend
         // rechaza un amortizable que lo traiga, así que la vista no lo ofrece.
-        const grupoLimite = document.getElementById('pre_grupo_limite');
-        const lim = document.getElementById('pre_lim');
+        const grupoLimite = buscar('pre_grupo_limite');
+        const lim = buscar<HTMLInputElement>('pre_lim');
 
         if (val === 'flexible') {
             container.style.display = 'none';
@@ -2261,7 +2261,7 @@ class AppUI {
         const ratio = totalActivos > 0 ? ((totalPasivos / totalActivos) * 100.0) : 0.0;
 
         // 3. Flujos Fijos
-        const cuotaPrestamos = prestamos.reduce((sum, p) => sum + (p.tipo_prestamo === 'flexible' || p.cuotas_pendientes > 0 ? p.monto_cuota : 0.0), 0);
+        const cuotaPrestamos = prestamos.reduce((sum, p) => sum + (p.tipo_prestamo === 'flexible' || (p.cuotas_pendientes ?? 0) > 0 ? p.monto_cuota : 0.0), 0);
         const cuotaSuscripciones = suscripciones.reduce((sum, s) => sum + (s.frecuencia === 'mensual' ? s.monto : (s.monto / 12.0)), 0);
         const cargaFija = cuotaPrestamos + cuotaSuscripciones;
 
@@ -2620,9 +2620,9 @@ class AppUI {
                 <div id="casos-correccion" hidden style="margin-bottom:1.2rem;"></div>
                 
                 <div style="display:flex; gap:0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
-                    <button type="button" onclick="document.getElementById('corr-gastos').style.display='block'; document.getElementById('corr-ingresos').style.display='none'; document.getElementById('corr-trans').style.display='none'; this.className='btn'; document.getElementById('btn-corr-ing').className='btn btn-secondary'; document.getElementById('btn-corr-tra').className='btn btn-secondary';" id="btn-corr-gas" class="btn" style="padding: 0.35rem 0.75rem; font-size:0.8rem;">💸 Gastos</button>
-                    <button type="button" onclick="document.getElementById('corr-gastos').style.display='none'; document.getElementById('corr-ingresos').style.display='block'; document.getElementById('corr-trans').style.display='none'; this.className='btn'; document.getElementById('btn-corr-gas').className='btn btn-secondary'; document.getElementById('btn-corr-tra').className='btn btn-secondary';" id="btn-corr-ing" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size:0.8rem; border:none;">📈 Ingresos</button>
-                    <button type="button" onclick="document.getElementById('corr-gastos').style.display='none'; document.getElementById('corr-ingresos').style.display='none'; document.getElementById('corr-trans').style.display='block'; this.className='btn'; document.getElementById('btn-corr-gas').className='btn btn-secondary'; document.getElementById('btn-corr-ing').className='btn btn-secondary';" id="btn-corr-tra" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size:0.8rem; border:none;">🔄 Transferencias</button>
+                    <button type="button" onclick="elemento('corr-gastos').style.display='block'; elemento('corr-ingresos').style.display='none'; elemento('corr-trans').style.display='none'; this.className='btn'; elemento('btn-corr-ing').className='btn btn-secondary'; elemento('btn-corr-tra').className='btn btn-secondary';" id="btn-corr-gas" class="btn" style="padding: 0.35rem 0.75rem; font-size:0.8rem;">💸 Gastos</button>
+                    <button type="button" onclick="elemento('corr-gastos').style.display='none'; elemento('corr-ingresos').style.display='block'; elemento('corr-trans').style.display='none'; this.className='btn'; elemento('btn-corr-gas').className='btn btn-secondary'; elemento('btn-corr-tra').className='btn btn-secondary';" id="btn-corr-ing" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size:0.8rem; border:none;">📈 Ingresos</button>
+                    <button type="button" onclick="elemento('corr-gastos').style.display='none'; elemento('corr-ingresos').style.display='none'; elemento('corr-trans').style.display='block'; this.className='btn'; elemento('btn-corr-gas').className='btn btn-secondary'; elemento('btn-corr-ing').className='btn btn-secondary';" id="btn-corr-tra" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size:0.8rem; border:none;">🔄 Transferencias</button>
                 </div>
 
                 <!-- SECCIÓN GASTOS -->
@@ -2786,25 +2786,25 @@ class AppUI {
      * después a revertir el gasto.
      */
     actualizarConversionGasto() {
-        const contenedor = document.getElementById('gas_conversion_container');
+        const contenedor = buscar('gas_conversion_container');
         if (!contenedor) return;
 
-        const metodo = document.getElementById('gas_met')?.value;
-        const selCuenta = document.getElementById('gas_cue');
+        const metodo = buscar<Campo>('gas_met')?.value;
+        const selCuenta = buscar<HTMLSelectElement>('gas_cue');
         const opcion = selCuenta?.selectedOptions?.[0];
         const divisaCuenta = opcion?.dataset?.divisa;
-        const divisaGasto = document.getElementById('gas_div')?.value;
+        const divisaGasto = buscar<Campo>('gas_div')?.value;
 
         const cruzaDivisas = metodo === 'transferencia' && divisaCuenta && divisaGasto && divisaCuenta !== divisaGasto;
         contenedor.style.display = cruzaDivisas ? 'block' : 'none';
 
-        const previa = document.getElementById('gas_conversion_previa');
+        const previa = buscar('gas_conversion_previa');
         if (!cruzaDivisas) { if (previa) previa.textContent = ''; return; }
 
-        const monto = Number(document.getElementById('gas_mon')?.value) || 0;
-        const tasa = Number(document.getElementById('gas_tasa')?.value) || 0;
+        const monto = Number(buscar<Campo>('gas_mon')?.value) || 0;
+        const tasa = Number(buscar<Campo>('gas_tasa')?.value) || 0;
         if (!(monto > 0) || !(tasa > 0)) {
-            previa.textContent = `Indica la tasa para saber cuánto saldrá en ${divisaCuenta}.`;
+            previa!.textContent = `Indica la tasa para saber cuánto saldrá en ${divisaCuenta}.`;
             return;
         }
 
@@ -2812,10 +2812,10 @@ class AppUI {
         const convertido = divisaGasto === 'USD' ? monto * tasa : monto / tasa;
         const convertidoRedondeado = Math.round(convertido * 100) / 100;
         const retencion = Math.round(convertidoRedondeado * 0.002 * 100) / 100;
-        const lbtr = document.getElementById('gas_lbtr')?.checked ? 100 : 0;
+        const lbtr = buscar<HTMLInputElement>('gas_lbtr')?.checked ? 100 : 0;
         const total = convertidoRedondeado + retencion + lbtr;
 
-        previa.innerHTML = `Saldrán <strong>${divisaCuenta} ${this.formatMoney(total)}</strong> `
+        previa!.innerHTML = `Saldrán <strong>${divisaCuenta} ${this.formatMoney(total)}</strong> `
             + `— ${this.formatMoney(convertidoRedondeado)} convertidos`
             + (retencion ? ` + ${this.formatMoney(retencion)} de retención` : '')
             + (lbtr ? ` + ${this.formatMoney(lbtr)} de LBTR` : '');
@@ -2823,22 +2823,22 @@ class AppUI {
 
     async handleAgregarGasto(e) {
         e.preventDefault();
-        const fec = document.getElementById('gas_fec').value;
-        const mon = Number(document.getElementById('gas_mon').value);
-        const div = document.getElementById('gas_div').value;
-        const des = document.getElementById('gas_des').value;
-        const cat = Number(document.getElementById('gas_cat').value);
-        const met = document.getElementById('gas_met').value;
-        const lbtr = document.getElementById('gas_lbtr') ? document.getElementById('gas_lbtr').checked : false;
-        const tar = document.getElementById('gas_tar') ? Number(document.getElementById('gas_tar').value) : null;
-        const cue = document.getElementById('gas_cue') && met === 'transferencia' ? Number(document.getElementById('gas_cue').value) : null;
+        const fec = elemento<Campo>('gas_fec').value;
+        const mon = Number(elemento<Campo>('gas_mon').value);
+        const div = elemento<Campo>('gas_div').value;
+        const des = elemento<Campo>('gas_des').value;
+        const cat = Number(elemento<Campo>('gas_cat').value);
+        const met = elemento<Campo>('gas_met').value;
+        const lbtr = buscar('gas_lbtr') ? elemento<HTMLInputElement>('gas_lbtr').checked : false;
+        const tar = buscar('gas_tar') ? Number(elemento<Campo>('gas_tar').value) : null;
+        const cue = buscar('gas_cue') && met === 'transferencia' ? Number(elemento<Campo>('gas_cue').value) : null;
 
         // La tasa solo viaja si el gasto y la cuenta van en divisas distintas.
         // El backend la exige en ese caso y la ignora en el resto.
-        const opcionCuenta = document.getElementById('gas_cue')?.selectedOptions?.[0];
+        const opcionCuenta = buscar<HTMLSelectElement>('gas_cue')?.selectedOptions?.[0];
         const divisaCuenta = opcionCuenta?.dataset?.divisa;
         const cruzaDivisas = met === 'transferencia' && divisaCuenta && divisaCuenta !== div;
-        const tasa = cruzaDivisas ? Number(document.getElementById('gas_tasa')?.value) || 0 : 0;
+        const tasa = cruzaDivisas ? Number(buscar<Campo>('gas_tasa')?.value) || 0 : 0;
 
         if (cruzaDivisas && !(tasa > 0)) {
             this.showToast(`El gasto va en ${div} y la cuenta en ${divisaCuenta}: indica la tasa de cambio.`, 'error');
@@ -2849,10 +2849,10 @@ class AppUI {
         // rechaza, pero conviene decirlo aquí con el nombre del campo: si no
         // hay ninguna tarjeta registrada el selector ni siquiera existe, y el
         // mensaje de error genérico no daría ninguna pista.
-        if (met === 'tarjeta' && !(tar > 0)) {
+        if (met === 'tarjeta' && !((tar ?? 0) > 0)) {
             // El selector se dibuja aunque no haya ninguna tarjeta, así que lo
             // que distingue los dos casos es si ofrece alguna opción real.
-            const selectorTarjeta = document.getElementById('gas_tar');
+            const selectorTarjeta = buscar<HTMLSelectElement>('gas_tar');
             const hayTarjetas = [...(selectorTarjeta?.options ?? [])].some(o => Number(o.value) > 0);
             this.showToast(
                 hayTarjetas
@@ -2879,7 +2879,7 @@ class AppUI {
             this.showToast("Gasto registrado con éxito.");
             await this.render('gastos');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -2906,7 +2906,7 @@ class AppUI {
                         <div id="liq_tasa_${id}" style="font-size:0.72rem; color:var(--text-secondary); margin-top:0.4rem;"></div>
                     </div>
                     <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                        <button type="button" onclick="document.getElementById('modal-liq-${id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="button" onclick="elemento('modal-liq-${id}').remove()" class="btn btn-secondary">Cancelar</button>
                         <button type="submit" class="btn">Liquidar</button>
                     </div>
                 </form>
@@ -2972,7 +2972,7 @@ class AppUI {
                         <input type="number" min="1" max="31" id="edp_dia_${p.id}" class="form-control" value="${p.dia_pago}" required>
                     </div>
                     <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                        <button type="button" onclick="document.getElementById('modal-pre-${p.id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="button" onclick="elemento('modal-pre-${p.id}').remove()" class="btn btn-secondary">Cancelar</button>
                         <button type="submit" class="btn">Guardar</button>
                     </div>
                 </form>
@@ -2990,9 +2990,9 @@ class AppUI {
      * que alguien lo corrija y no entienda por qué no cambia nada.
      */
     avisarFechasDerivadas(id) {
-        const select = document.getElementById(`edp_tar_${id}`);
-        const aviso = document.getElementById(`edp_aviso_${id}`);
-        const dia = document.getElementById(`edp_dia_${id}`);
+        const select = buscar<HTMLSelectElement>(`edp_tar_${id}`);
+        const aviso = buscar(`edp_aviso_${id}`);
+        const dia = buscar<HTMLInputElement>(`edp_dia_${id}`);
         if (!select || !aviso) return;
 
         const opcion = select.selectedOptions[0];
@@ -3010,58 +3010,58 @@ class AppUI {
 
     async handleEdicionPrestamo(e, id) {
         e.preventDefault();
-        const limiteCampo = document.getElementById(`edp_lim_${id}`);
+        const limiteCampo = buscar<Campo>(`edp_lim_${id}`);
         const limiteTexto = limiteCampo ? limiteCampo.value : '';
-        const tarjeta = document.getElementById(`edp_tar_${id}`).value;
+        const tarjeta = elemento<Campo>(`edp_tar_${id}`).value;
 
         try {
             await AppAPI.actualizarPrestamo({
                 id: Number(id),
-                tasa_actual: Number(document.getElementById(`edp_tas_${id}`).value),
-                monto_cuota: Number(document.getElementById(`edp_cuo_${id}`).value),
-                dia_pago: Number(document.getElementById(`edp_dia_${id}`).value),
+                tasa_actual: Number(elemento<Campo>(`edp_tas_${id}`).value),
+                monto_cuota: Number(elemento<Campo>(`edp_cuo_${id}`).value),
+                dia_pago: Number(elemento<Campo>(`edp_dia_${id}`).value),
                 // En blanco significa «no declarado», que no es lo mismo que cero.
                 limite_credito: limiteTexto === '' ? null : Number(limiteTexto),
                 tarjeta_id: tarjeta === '' ? null : Number(tarjeta),
             });
             this.showToast("Condiciones actualizadas.");
-            document.getElementById(`modal-pre-${id}`)?.remove();
+            buscar(`modal-pre-${id}`)?.remove();
             await this.render('prestamos');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
     previsualizarTasa(id, montoOrigen) {
-        const destino = Number(document.getElementById(`liq_monto_${id}`).value);
-        const salida = document.getElementById(`liq_tasa_${id}`);
+        const destino = Number(elemento<Campo>(`liq_monto_${id}`).value);
+        const salida = elemento(`liq_tasa_${id}`);
         if (!(destino > 0) || !(montoOrigen > 0)) { salida.textContent = ''; return; }
         salida.innerHTML = `Tasa aplicada por el emisor: <strong>${(destino / montoOrigen).toFixed(4)}</strong>`;
     }
 
     async handleLiquidacionSubmit(e, id, montoOrigen) {
         e.preventDefault();
-        const monto = Number(document.getElementById(`liq_monto_${id}`).value);
+        const monto = Number(elemento<Campo>(`liq_monto_${id}`).value);
         if (!(monto > 0)) { this.showToast("El importe en pesos debe ser mayor que cero.", "error"); return; }
 
         try {
             const tasa = await AppAPI.liquidarConsumoPendiente(id, monto);
             this.showToast(`Consumo liquidado a una tasa de ${Number(tasa).toFixed(4)}.`);
-            document.getElementById(`modal-liq-${id}`)?.remove();
+            buscar(`modal-liq-${id}`)?.remove();
             await this.render('gastos');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
     async handleAgregarIngreso(e) {
         e.preventDefault();
-        const fac = document.getElementById('num_fac').value;
-        const fec = document.getElementById('fec_em').value;
-        const cli = document.getElementById('cli_nom').value;
-        const rnc = document.getElementById('cli_rnc').value;
-        const mon = Number(document.getElementById('mon_tot').value);
-        const ret = Number(document.getElementById('ret_por').value);
+        const fac = elemento<Campo>('num_fac').value;
+        const fec = elemento<Campo>('fec_em').value;
+        const cli = elemento<Campo>('cli_nom').value;
+        const rnc = elemento<Campo>('cli_rnc').value;
+        const mon = Number(elemento<Campo>('mon_tot').value);
+        const ret = Number(elemento<Campo>('ret_por').value);
 
         try {
             await AppAPI.crearIngreso({
@@ -3075,46 +3075,46 @@ class AppUI {
             this.showToast("Factura registrada exitosamente.");
             await this.render('ingresos');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
     async handleAgregarIngresoInformal(e) {
         e.preventDefault();
-        const fec = document.getElementById('fecha_inf').value;
-        const mon = Number(document.getElementById('monto_inf').value);
-        const des = document.getElementById('desc_inf').value;
+        const fec = elemento<Campo>('fecha_inf').value;
+        const mon = Number(elemento<Campo>('monto_inf').value);
+        const des = elemento<Campo>('desc_inf').value;
 
         try {
             await AppAPI.crearIngresoInformal(fec, des, mon);
             this.showToast("Ingreso informal guardado.");
             await this.render('ingresos');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
     async handleAgregarTarjeta(e) {
         e.preventDefault();
-        const ent = document.getElementById('tar_ent').value;
-        const nom = document.getElementById('tar_nom').value;
-        const limDop = Number(document.getElementById('tar_lim_dop').value);
-        const sobDop = Number(document.getElementById('tar_sob_dop').value);
-        const balDop = Number(document.getElementById('tar_bal_dop').value);
-        const corDop = Number(document.getElementById('tar_cor_dop').value);
-        const limUsd = Number(document.getElementById('tar_lim_usd').value);
-        const sobUsd = Number(document.getElementById('tar_sob_usd').value);
-        const balUsd = Number(document.getElementById('tar_bal_usd').value);
-        const corUsd = Number(document.getElementById('tar_cor_usd').value);
-        const cor = Number(document.getElementById('tar_cor').value);
-        const pag = Number(document.getElementById('tar_pag').value);
+        const ent = elemento<Campo>('tar_ent').value;
+        const nom = elemento<Campo>('tar_nom').value;
+        const limDop = Number(elemento<Campo>('tar_lim_dop').value);
+        const sobDop = Number(elemento<Campo>('tar_sob_dop').value);
+        const balDop = Number(elemento<Campo>('tar_bal_dop').value);
+        const corDop = Number(elemento<Campo>('tar_cor_dop').value);
+        const limUsd = Number(elemento<Campo>('tar_lim_usd').value);
+        const sobUsd = Number(elemento<Campo>('tar_sob_usd').value);
+        const balUsd = Number(elemento<Campo>('tar_bal_usd').value);
+        const corUsd = Number(elemento<Campo>('tar_cor_usd').value);
+        const cor = Number(elemento<Campo>('tar_cor').value);
+        const pag = Number(elemento<Campo>('tar_pag').value);
 
         try {
             await AppAPI.crearTarjeta(ent, nom, limDop, limUsd, sobDop, sobUsd, balDop, balUsd, corDop, corUsd, cor, pag);
             this.showToast("Tarjeta registrada.");
             await this.render('tarjetas');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3124,9 +3124,9 @@ class AppUI {
      * forma opaca al enviar el formulario.
      */
     aplicarTipoAbono(id, cortePesos, corteDolares, balPesos, balDolares) {
-        const tipo = document.getElementById(`pag_tipo_${id}`).value;
-        const divisa = document.getElementById(`pag_div_${id}`).value;
-        const campoMonto = document.getElementById(`pag_monto_${id}`);
+        const tipo = elemento<Campo>(`pag_tipo_${id}`).value;
+        const divisa = elemento<Campo>(`pag_div_${id}`).value;
+        const campoMonto = elemento<HTMLInputElement>(`pag_monto_${id}`);
 
         if (tipo === 'personalizado') {
             campoMonto.readOnly = false;
@@ -3169,7 +3169,7 @@ class AppUI {
      * siempre por lo que se usa de vez en cuando.
      */
     async alternarAbonos(id) {
-        const caja = document.getElementById(`abonos_${id}`);
+        const caja = buscar(`abonos_${id}`);
         if (!caja) return;
 
         if (!caja.hidden) {
@@ -3207,7 +3207,7 @@ class AppUI {
                     </div>`;
             }).join('');
         } catch (err) {
-            caja.innerHTML = `<p style="color:var(--color-danger); padding:0.5rem;">${err.toString()}</p>`;
+            caja.innerHTML = `<p style="color:var(--color-danger); padding:0.5rem;">${String(err)}</p>`;
         }
     }
 
@@ -3239,7 +3239,7 @@ class AppUI {
             // en lugar de dejar al usuario frente a una tarjeta cerrada.
             await this.alternarAbonos(tarjetaId);
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3247,7 +3247,7 @@ class AppUI {
 
     /// Despliega el formulario de avance de una tarjeta.
     alternarAvance(id) {
-        const forma = document.getElementById(`avance_${id}`);
+        const forma = buscar(`avance_${id}`);
         if (!forma) return;
         forma.hidden = !forma.hidden;
         if (!forma.hidden) this.aplicarTipoAvance(id);
@@ -3260,9 +3260,9 @@ class AppUI {
     /// avance coincidan en divisa es una regla; aquí solo se evita el
     /// tropiezo, y el núcleo la sigue comprobando.
     aplicarTipoAvance(id) {
-        const divisa = document.getElementById(`avc_div_${id}`).value;
-        const tipo = document.getElementById(`avc_tipo_${id}`).value;
-        const cuenta = document.getElementById(`avc_cuenta_${id}`);
+        const divisa = elemento<Campo>(`avc_div_${id}`).value;
+        const tipo = elemento<Campo>(`avc_tipo_${id}`).value;
+        const cuenta = elemento<HTMLSelectElement>(`avc_cuenta_${id}`);
 
         for (const opcion of cuenta.options) {
             if (!opcion.value) continue;
@@ -3272,9 +3272,9 @@ class AppUI {
         }
         if (cuenta.selectedOptions[0]?.disabled) cuenta.value = '';
 
-        const caja = document.getElementById(`avc_valor_caja_${id}`);
-        const etiqueta = document.getElementById(`avc_valor_et_${id}`);
-        const valor = document.getElementById(`avc_valor_${id}`);
+        const caja = elemento(`avc_valor_caja_${id}`);
+        const etiqueta = elemento(`avc_valor_et_${id}`);
+        const valor = elemento<HTMLInputElement>(`avc_valor_${id}`);
         caja.hidden = tipo === 'exonerado';
         valor.required = tipo !== 'exonerado';
         if (tipo === 'porcentaje') {
@@ -3294,8 +3294,8 @@ class AppUI {
     /// escribieron; el porcentaje, que es una tasa y no un importe, como
     /// número.
     valoresDeAvance(id) {
-        const tipo = document.getElementById(`avc_tipo_${id}`).value;
-        const bruto = document.getElementById(`avc_valor_${id}`).value.trim();
+        const tipo = elemento<Campo>(`avc_tipo_${id}`).value;
+        const bruto = elemento<Campo>(`avc_valor_${id}`).value.trim();
         return {
             tipo,
             porcentaje: tipo === 'porcentaje' && bruto !== '' ? Number(bruto) : null,
@@ -3310,12 +3310,12 @@ class AppUI {
     /// confirma tiene que ser exactamente la que se va a asentar.
     async handleAvanceEfectivo(e, id) {
         e.preventDefault();
-        const fecha = document.getElementById(`avc_fecha_${id}`).value.trim();
-        const divisa = document.getElementById(`avc_div_${id}`).value;
-        const monto = document.getElementById(`avc_monto_${id}`).value.trim();
-        const cuentaSel = document.getElementById(`avc_cuenta_${id}`);
+        const fecha = elemento<Campo>(`avc_fecha_${id}`).value.trim();
+        const divisa = elemento<Campo>(`avc_div_${id}`).value;
+        const monto = elemento<Campo>(`avc_monto_${id}`).value.trim();
+        const cuentaSel = elemento<HTMLSelectElement>(`avc_cuenta_${id}`);
         const cuentaId = cuentaSel.value;
-        const nota = document.getElementById(`avc_nota_${id}`).value.trim();
+        const nota = elemento<Campo>(`avc_nota_${id}`).value.trim();
         const { tipo, porcentaje, fijo } = this.valoresDeAvance(id);
 
         if (!cuentaId) {
@@ -3343,7 +3343,7 @@ class AppUI {
             this.showToast(resumen);
             await this.render('tarjetas');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3352,7 +3352,7 @@ class AppUI {
     /// Se cargan al abrir y no al pintar la vista, igual que los abonos: es un
     /// histórico que casi nunca se mira.
     async alternarAvances(id) {
-        const caja = document.getElementById(`avances_${id}`);
+        const caja = buscar(`avances_${id}`);
         if (!caja) return;
         if (!caja.hidden) {
             caja.hidden = true;
@@ -3383,7 +3383,7 @@ class AppUI {
                     </div>`;
             }).join('');
         } catch (err) {
-            caja.innerHTML = `<p style="color:var(--color-danger); padding:0.5rem;">${err.toString()}</p>`;
+            caja.innerHTML = `<p style="color:var(--color-danger); padding:0.5rem;">${String(err)}</p>`;
         }
     }
 
@@ -3408,24 +3408,24 @@ class AppUI {
             await this.render('tarjetas');
             await this.alternarAvances(tarjetaId);
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
     async handleAbonoTarjeta(e, id) {
         e.preventDefault();
 
-        const fec = document.getElementById(`pag_fecha_${id}`).value;
-        const div = document.getElementById(`pag_div_${id}`).value;
-        const mon = Number(document.getElementById(`pag_monto_${id}`).value);
-        const cueId = document.getElementById(`pag_cuenta_${id}`).value;
+        const fec = elemento<Campo>(`pag_fecha_${id}`).value;
+        const div = elemento<Campo>(`pag_div_${id}`).value;
+        const mon = Number(elemento<Campo>(`pag_monto_${id}`).value);
+        const cueId = elemento<Campo>(`pag_cuenta_${id}`).value;
 
         if (!(mon > 0)) {
             this.showToast("El monto del abono debe ser mayor que cero.", "error");
             return;
         }
 
-        let tasaCambio = Number(document.getElementById(`pag_tasa_${id}`).value) || 0;
+        let tasaCambio = Number(elemento<Campo>(`pag_tasa_${id}`).value) || 0;
         if (cueId) {
             try {
                 const cuentas = await AppAPI.obtenerCuentas();
@@ -3445,7 +3445,7 @@ class AppUI {
                     }
                 }
             } catch (err) {
-                this.showToast("Error al validar cuenta: " + err.toString(), 'error');
+                this.showToast("Error al validar cuenta: " + String(err), 'error');
                 return;
             }
         }
@@ -3455,7 +3455,7 @@ class AppUI {
             this.showToast("Abono a tarjeta guardado.");
             await this.render('tarjetas');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3465,7 +3465,7 @@ class AppUI {
     /// formatos con dos públicos, y mezclarlos es lo que produce fechas que
     /// nadie sabe leer.
     fechaDeEntrada(elementoId) {
-        const iso = document.getElementById(elementoId)?.value;
+        const iso = buscar<Campo>(elementoId)?.value;
         if (!iso) return null;
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
         return m ? `${m[3]}/${m[2]}/${m[1]}` : null;
@@ -3505,7 +3505,7 @@ class AppUI {
             this.showToast("Fecha puesta. La suscripción vuelve a su ciclo.");
             await this.render('suscripciones');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3516,7 +3516,7 @@ class AppUI {
             this.showToast(await AppAPI.asentarPeriodoPendiente(id));
             await this.render('suscripciones');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3537,18 +3537,18 @@ class AppUI {
             this.showToast(await AppAPI.descartarPeriodoPendiente(id, motivo));
             await this.render('suscripciones');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
     async handleAgregarSuscripcion(e) {
         e.preventDefault();
-        const pla = document.getElementById('sus_pla').value;
-        const mon = document.getElementById('sus_mon').value.trim();
-        const div = document.getElementById('sus_div').value;
-        const dia = Number(document.getElementById('sus_dia').value);
-        const fre = document.getElementById('sus_fre').value;
-        const tar = Number(document.getElementById('sus_tar').value);
+        const pla = elemento<Campo>('sus_pla').value;
+        const mon = elemento<Campo>('sus_mon').value.trim();
+        const div = elemento<Campo>('sus_div').value;
+        const dia = Number(elemento<Campo>('sus_dia').value);
+        const fre = elemento<Campo>('sus_fre').value;
+        const tar = Number(elemento<Campo>('sus_tar').value);
         const ren = this.fechaDeEntrada('sus_ren');
         if (ren === null) {
             this.showToast("Indica la fecha del próximo cobro.", "error");
@@ -3560,7 +3560,7 @@ class AppUI {
             this.showToast("Suscripción recurrente guardada.");
             await this.render('suscripciones');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3617,7 +3617,7 @@ class AppUI {
                         </select>
                     </div>
                     <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                        <button type="button" onclick="document.getElementById('modal-edit-sus-${s.id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="button" onclick="elemento('modal-edit-sus-${s.id}').remove()" class="btn btn-secondary">Cancelar</button>
                         <button type="submit" class="btn">Guardar Cambios</button>
                     </div>
                 </form>
@@ -3628,15 +3628,15 @@ class AppUI {
 
     async handleEdicionSuscripcionSubmit(e, id) {
         e.preventDefault();
-        const pla = document.getElementById(`es_pla_${id}`).value.trim();
-        const mon = document.getElementById(`es_mon_${id}`).value.trim();
-        const div = document.getElementById(`es_div_${id}`).value;
-        const dia = Number(document.getElementById(`es_dia_${id}`).value);
-        const fre = document.getElementById(`es_fre_${id}`).value;
-        const tar = Number(document.getElementById(`es_tar_${id}`).value);
+        const pla = elemento<Campo>(`es_pla_${id}`).value.trim();
+        const mon = elemento<Campo>(`es_mon_${id}`).value.trim();
+        const div = elemento<Campo>(`es_div_${id}`).value;
+        const dia = Number(elemento<Campo>(`es_dia_${id}`).value);
+        const fre = elemento<Campo>(`es_fre_${id}`).value;
+        const tar = Number(elemento<Campo>(`es_tar_${id}`).value);
 
         if (!pla) { this.showToast("El nombre del servicio no puede estar vacío.", "error"); return; }
-        if (!(mon > 0)) { this.showToast("El monto debe ser mayor que cero.", "error"); return; }
+        if (!(Number(mon) > 0)) { this.showToast("El monto debe ser mayor que cero.", "error"); return; }
         if (!(dia >= 1 && dia <= 31)) { this.showToast("El día de facturación debe estar entre 1 y 31.", "error"); return; }
 
         try {
@@ -3647,10 +3647,10 @@ class AppUI {
             }
             await AppAPI.actualizarSuscripcion(id, pla, mon, tar, fre, dia, div, ren);
             this.showToast("Suscripción actualizada. Los cargos ya realizados no se alteran.");
-            document.getElementById(`modal-edit-sus-${id}`).remove();
+            elemento(`modal-edit-sus-${id}`).remove();
             await this.render('suscripciones');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3664,14 +3664,14 @@ class AppUI {
 
     async handleAgregarCliente(e) {
         e.preventDefault();
-        const nom = document.getElementById('cli_aj_nom').value;
-        const rnc = document.getElementById('cli_aj_rnc').value;
+        const nom = elemento<Campo>('cli_aj_nom').value;
+        const rnc = elemento<Campo>('cli_aj_rnc').value;
         try {
             await AppAPI.crearCliente(rnc, nom);
             this.showToast("Cliente registrado.");
             await this.render('ajustes');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3682,27 +3682,27 @@ class AppUI {
                 this.showToast("Cliente eliminado.");
                 await this.render('ajustes');
             } catch (err) {
-                this.showToast(err.toString(), 'error');
+                this.showToast(String(err), 'error');
             }
         }
     }
 
     async handleAgregarCuenta(e) {
         e.preventDefault();
-        const nom = document.getElementById('cue_aj_nom').value;
-        const div = document.getElementById('cue_aj_div').value;
-        const bal = Number(document.getElementById('cue_aj_bal').value);
-        const ent = document.getElementById('cue_aj_ent').value;
+        const nom = elemento<Campo>('cue_aj_nom').value;
+        const div = elemento<Campo>('cue_aj_div').value;
+        const bal = Number(elemento<Campo>('cue_aj_bal').value);
+        const ent = elemento<Campo>('cue_aj_ent').value;
         // Un campo en blanco es «no declarada», no cero: se envía nulo para
         // que la ausencia siga siendo distinguible de una tarifa gratuita.
-        const comTexto = document.getElementById('cue_aj_com').value;
+        const comTexto = elemento<Campo>('cue_aj_com').value;
         const com = comTexto.trim() === '' ? null : Number(comTexto);
         try {
             await AppAPI.crearCuenta(nom, div, bal, ent, com);
             this.showToast("Cuenta de ahorro registrada.");
             await this.render('ajustes');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3750,7 +3750,7 @@ class AppUI {
             this.showToast("Cuenta actualizada.");
             await this.render('ajustes');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3761,7 +3761,7 @@ class AppUI {
                 this.showToast("Cuenta eliminada.");
                 await this.render('ajustes');
             } catch (err) {
-                this.showToast(err.toString(), 'error');
+                this.showToast(String(err), 'error');
             }
         }
     }
@@ -3777,18 +3777,18 @@ class AppUI {
      * donde se comete.
      */
     rotularDivisasTransferencia() {
-        const divisaDe = (id) => document.getElementById(id)?.selectedOptions?.[0]?.dataset?.divisa ?? '';
+        const divisaDe = (id) => buscar<HTMLSelectElement>(id)?.selectedOptions?.[0]?.dataset?.divisa ?? '';
         const origen = divisaDe('tra_ori');
         const destino = divisaDe('tra_des');
 
         const rotulo = (id, divisa) => {
-            const el = document.getElementById(id);
+            const el = buscar(id);
             if (el) el.textContent = divisa ? `en ${divisa}` : '';
         };
         rotulo('tra_div_ori', origen);
         rotulo('tra_div_des', destino);
 
-        const aviso = document.getElementById('tra_aviso_divisas');
+        const aviso = buscar('tra_aviso_divisas');
         if (!aviso) return;
 
         if (origen && destino && origen !== destino) {
@@ -3802,44 +3802,44 @@ class AppUI {
 
     async handleTransferirCuentas(e) {
         e.preventDefault();
-        const fec = document.getElementById('tra_fec').value;
-        const ori = Number(document.getElementById('tra_ori').value);
-        const des = Number(document.getElementById('tra_des').value);
-        const monOri = Number(document.getElementById('tra_mon_ori').value);
-        const monDes = Number(document.getElementById('tra_mon_des').value);
-        const car = Number(document.getElementById('tra_car').value);
-        const txt = document.getElementById('tra_des_txt').value;
+        const fec = elemento<Campo>('tra_fec').value;
+        const ori = Number(elemento<Campo>('tra_ori').value);
+        const des = Number(elemento<Campo>('tra_des').value);
+        const monOri = Number(elemento<Campo>('tra_mon_ori').value);
+        const monDes = Number(elemento<Campo>('tra_mon_des').value);
+        const car = Number(elemento<Campo>('tra_car').value);
+        const txt = elemento<Campo>('tra_des_txt').value;
         try {
             await AppAPI.transferirEntreCuentas(fec, ori, des, monOri, monDes, car, txt);
             this.showToast("Transacción ejecutada con éxito.");
             await this.render('cuentas');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
     async handleAgregarEfectivoInformal(e) {
         e.preventDefault();
-        const fec = document.getElementById('efe_inf_fec').value;
-        const mon = Number(document.getElementById('efe_inf_mon').value);
-        const div = document.getElementById('efe_inf_div').value;
-        const des = document.getElementById('efe_inf_des').value;
+        const fec = elemento<Campo>('efe_inf_fec').value;
+        const mon = Number(elemento<Campo>('efe_inf_mon').value);
+        const div = elemento<Campo>('efe_inf_div').value;
+        const des = elemento<Campo>('efe_inf_des').value;
         try {
             await AppAPI.crearCobroEfectivoInformal(fec, des, mon, div);
             this.showToast("Entrada en efectivo registrada correctamente.");
             await this.render('efectivo');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
     async handleRetirarAEfectivo(e) {
         e.preventDefault();
-        const fec = document.getElementById('efe_ret_fec').value;
-        const oriId = Number(document.getElementById('efe_ret_ori').value);
-        const mon = Number(document.getElementById('efe_ret_mon').value);
-        const car = Number(document.getElementById('efe_ret_car').value);
-        const desTxt = document.getElementById('efe_ret_des_txt').value;
+        const fec = elemento<Campo>('efe_ret_fec').value;
+        const oriId = Number(elemento<Campo>('efe_ret_ori').value);
+        const mon = Number(elemento<Campo>('efe_ret_mon').value);
+        const car = Number(elemento<Campo>('efe_ret_car').value);
+        const desTxt = elemento<Campo>('efe_ret_des_txt').value;
 
         try {
             const cuentas = await AppAPI.obtenerCuentas();
@@ -3854,7 +3854,7 @@ class AppUI {
             this.showToast("Retiro de efectivo ejecutado exitosamente.");
             await this.render('efectivo');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -3866,7 +3866,7 @@ class AppUI {
      * histórico que se mira de vez en cuando.
      */
     async alternarCasosDeCorreccion() {
-        const caja = document.getElementById('casos-correccion');
+        const caja = buscar('casos-correccion');
         if (!caja) return;
         if (!caja.hidden) { caja.hidden = true; return; }
 
@@ -3895,7 +3895,7 @@ class AppUI {
                     `).join('')}
                 </div>`;
         } catch (err) {
-            caja.innerHTML = `<p style="color:var(--color-danger); font-size:0.75rem; padding:0.5rem;">${err.toString()}</p>`;
+            caja.innerHTML = `<p style="color:var(--color-danger); font-size:0.75rem; padding:0.5rem;">${String(err)}</p>`;
         }
     }
 
@@ -3937,7 +3937,7 @@ class AppUI {
                 this.showToast(`Gasto revertido y eliminado. Caso ${caso}.`);
                 await this.render('ajustes');
             } catch (err) {
-                this.showToast(err.toString(), 'error');
+                this.showToast(String(err), 'error');
             }
         }
     }
@@ -3954,7 +3954,7 @@ class AppUI {
                 this.showToast("Ingreso informal revertido y eliminado.");
                 await this.render('ajustes');
             } catch (err) {
-                this.showToast(err.toString(), 'error');
+                this.showToast(String(err), 'error');
             }
         }
     }
@@ -3971,7 +3971,7 @@ class AppUI {
                 this.showToast("Ingreso formal eliminado.");
                 await this.render('ajustes');
             } catch (err) {
-                this.showToast(err.toString(), 'error');
+                this.showToast(String(err), 'error');
             }
         }
     }
@@ -3988,28 +3988,28 @@ class AppUI {
                 this.showToast("Transferencia revertida y eliminada.");
                 await this.render('ajustes');
             } catch (err) {
-                this.showToast(err.toString(), 'error');
+                this.showToast(String(err), 'error');
             }
         }
     }
 
     handleSelectCliente(val) {
-        const select = document.getElementById('cli_select');
+        const select = elemento<HTMLSelectElement>('cli_select');
         const option = select.options[select.selectedIndex];
         if (option) {
-            document.getElementById('cli_nom').value = option.getAttribute('data-nombre') || "";
-            document.getElementById('cli_rnc').value = option.getAttribute('data-rnc') || "";
+            elemento<Campo>('cli_nom').value = option.getAttribute('data-nombre') || "";
+            elemento<Campo>('cli_rnc').value = option.getAttribute('data-rnc') || "";
         }
     }
 
     async handleAgregarCertificado(e) {
         e.preventDefault();
-        const ban = document.getElementById('cer_ban').value;
+        const ban = elemento<Campo>('cer_ban').value;
         // Texto, tal cual se escribió: el céntimo lo deciden los dígitos.
-        const mon = document.getElementById('cer_mon').value.trim();
-        const tas = Number(document.getElementById('cer_tas').value);
-        const ven = document.getElementById('cer_ven').value;
-        const pag = document.getElementById('cer_pag').value;
+        const mon = elemento<Campo>('cer_mon').value.trim();
+        const tas = Number(elemento<Campo>('cer_tas').value);
+        const ven = elemento<Campo>('cer_ven').value;
+        const pag = elemento<Campo>('cer_pag').value;
 
         try {
             const capital = await AppAPI.obtenerCapital();
@@ -4019,7 +4019,7 @@ class AppUI {
             this.showToast("Certificado guardado.");
             await this.render('capital');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -4035,12 +4035,12 @@ class AppUI {
 
     async handleAgregarBolsa(e) {
         e.preventDefault();
-        const emi = document.getElementById('bol_emi').value;
+        const emi = elemento<Campo>('bol_emi').value;
         // Texto, tal cual se escribió: el céntimo lo deciden los dígitos.
-        const mon = document.getElementById('bol_mon').value.trim();
-        const tas = Number(document.getElementById('bol_tas').value);
-        const ven = document.getElementById('bol_ven').value;
-        const pag = document.getElementById('bol_pag').value;
+        const mon = elemento<Campo>('bol_mon').value.trim();
+        const tas = Number(elemento<Campo>('bol_tas').value);
+        const ven = elemento<Campo>('bol_ven').value;
+        const pag = elemento<Campo>('bol_pag').value;
 
         try {
             const capital = await AppAPI.obtenerCapital();
@@ -4050,7 +4050,7 @@ class AppUI {
             this.showToast("Inversión de bolsa guardada.");
             await this.render('capital');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -4066,11 +4066,11 @@ class AppUI {
 
     async handleAgregarPropiedad(e) {
         e.preventDefault();
-        const tip = document.getElementById('pro_tip').value;
-        const sub = document.getElementById('pro_sub').value;
-        const nom = document.getElementById('pro_nom').value;
+        const tip = elemento<Campo>('pro_tip').value;
+        const sub = elemento<Campo>('pro_sub').value;
+        const nom = elemento<Campo>('pro_nom').value;
         // Texto, tal cual se escribió: el céntimo lo deciden los dígitos.
-        const val = document.getElementById('pro_val').value.trim();
+        const val = elemento<Campo>('pro_val').value.trim();
 
         try {
             const capital = await AppAPI.obtenerCapital();
@@ -4087,7 +4087,7 @@ class AppUI {
             this.showToast("Propiedad registrada.");
             await this.render('capital');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -4105,16 +4105,16 @@ class AppUI {
 
     async handleAgregarPrestamo(e) {
         e.preventDefault();
-        const tip = document.getElementById('pre_tip').value;
-        const ins = document.getElementById('pre_ins').value;
-        const mon = Number(document.getElementById('pre_mon').value);
-        const tas = Number(document.getElementById('pre_tas').value);
-        const tot = document.getElementById('pre_tot') && document.getElementById('pre_tot').value ? Number(document.getElementById('pre_tot').value) : null;
-        const pen = document.getElementById('pre_pen') && document.getElementById('pre_pen').value ? Number(document.getElementById('pre_pen').value) : null;
-        const cuo = Number(document.getElementById('pre_cuo').value);
-        const dia = Number(document.getElementById('pre_dia').value);
-        const salTexto = document.getElementById('pre_sal')?.value ?? '';
-        const limTexto = document.getElementById('pre_lim')?.value ?? '';
+        const tip = elemento<Campo>('pre_tip').value;
+        const ins = elemento<Campo>('pre_ins').value;
+        const mon = Number(elemento<Campo>('pre_mon').value);
+        const tas = Number(elemento<Campo>('pre_tas').value);
+        const tot = buscar('pre_tot') && elemento<Campo>('pre_tot').value ? Number(elemento<Campo>('pre_tot').value) : null;
+        const pen = buscar('pre_pen') && elemento<Campo>('pre_pen').value ? Number(elemento<Campo>('pre_pen').value) : null;
+        const cuo = Number(elemento<Campo>('pre_cuo').value);
+        const dia = Number(elemento<Campo>('pre_dia').value);
+        const salTexto = buscar<Campo>('pre_sal')?.value ?? '';
+        const limTexto = buscar<Campo>('pre_lim')?.value ?? '';
         // En blanco significa "no declarado", que no es lo mismo que cero.
         const sal = salTexto === '' ? null : Number(salTexto);
         const lim = tip === 'flexible' && limTexto !== '' ? Number(limTexto) : null;
@@ -4136,7 +4136,7 @@ class AppUI {
             await this.render('prestamos');
         } catch (err) {
             // Captura y presentación de la excepción del backend de Rust
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -4169,7 +4169,7 @@ class AppUI {
             this.showToast("Saldo conciliado con el estado de cuenta.");
             await this.render('prestamos');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -4179,7 +4179,7 @@ class AppUI {
             this.showToast("Abono de cuota registrado.");
             await this.render('prestamos');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -4190,7 +4190,7 @@ class AppUI {
                 this.showToast("Registro eliminado.");
                 await this.render('prestamos');
             } catch (err) {
-                this.showToast(err.toString(), 'error');
+                this.showToast(String(err), 'error');
             }
         }
     }
@@ -4202,7 +4202,7 @@ class AppUI {
      * grande tarda, y sin esto se acumularían copias por impaciencia.
      */
     async handleCrearRespaldo(boton) {
-        const salida = document.getElementById('respaldo_resultado');
+        const salida = buscar('respaldo_resultado');
         boton.disabled = true;
         const textoOriginal = boton.textContent;
         boton.textContent = 'Respaldando…';
@@ -4211,7 +4211,7 @@ class AppUI {
             this.showToast('Respaldo creado y verificado.');
             if (salida) salida.textContent = ruta;
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
             if (salida) salida.textContent = '';
         } finally {
             boton.disabled = false;
@@ -4228,7 +4228,7 @@ class AppUI {
      * datos al abrirse, así que no muestran nada anterior.
      */
     async handleRestaurarRespaldo(boton) {
-        const elegido = document.getElementById('respaldo_elegido');
+        const elegido = buscar<HTMLSelectElement>('respaldo_elegido');
         if (!elegido || !elegido.value) return;
         const etiqueta = elegido.options[elegido.selectedIndex].textContent;
         const nombre = elegido.value;
@@ -4246,7 +4246,7 @@ class AppUI {
             const r = await AppAPI.restaurarRespaldo(nombre);
             this.showToast('Respaldo restaurado.');
             await this.render('ajustes');
-            const salida = document.getElementById('restauracion_resultado');
+            const salida = buscar('restauracion_resultado');
             if (salida) {
                 salida.textContent =
                     `Restaurado: ${etiqueta}. ` +
@@ -4254,7 +4254,7 @@ class AppUI {
                     `Para deshacer, restaura la copia «antes de restaurar» más reciente.`;
             }
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
             boton.disabled = false;
             boton.textContent = textoOriginal;
         }
@@ -4262,13 +4262,13 @@ class AppUI {
 
     async handleAgregarCategoria(e) {
         e.preventDefault();
-        const nom = document.getElementById('cat_nom').value;
+        const nom = elemento<Campo>('cat_nom').value;
         try {
             await AppAPI.crearCategoria(nom);
             this.showToast("Categoría agregada.");
             await this.render('ajustes');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -4279,7 +4279,7 @@ class AppUI {
                 this.showToast("Categoría eliminada.");
                 await this.render('ajustes');
             } catch (err) {
-                this.showToast(err.toString(), 'error');
+                this.showToast(String(err), 'error');
             }
         }
     }
@@ -4343,14 +4343,14 @@ class AppUI {
                             </div>
                         </div>
                         <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                            <button type="button" onclick="document.getElementById('modal-edit-for-${i.id}').remove()" class="btn btn-secondary">Cancelar</button>
+                            <button type="button" onclick="elemento('modal-edit-for-${i.id}').remove()" class="btn btn-secondary">Cancelar</button>
                             <button type="submit" class="btn">Guardar Cambios</button>
                         </div>
                     </form>
                 </div>
             `;
             document.body.appendChild(overlay);
-        }).catch(err => this.showToast(err.toString(), 'error'));
+        }).catch(err => this.showToast(String(err), 'error'));
     }
 
     /// Despliega el importe del cobro parcial solo cuando se declara.
@@ -4359,8 +4359,8 @@ class AppUI {
     /// siempre visible invitaría a rellenarlo y convertiría la excepción en
     /// costumbre.
     alternarCobroParcial(id) {
-        const caja = document.getElementById(`edit_parcial_caja_${id}`);
-        const marca = document.getElementById(`edit_parcial_chk_${id}`);
+        const caja = buscar(`edit_parcial_caja_${id}`);
+        const marca = buscar<HTMLInputElement>(`edit_parcial_chk_${id}`);
         if (caja && marca) {
             caja.hidden = !marca.checked;
         }
@@ -4368,20 +4368,20 @@ class AppUI {
 
     async handleEdicionFormalSubmit(e, id) {
         e.preventDefault();
-        const fac = document.getElementById(`edit_num_fac_${id}`).value;
-        const fec = document.getElementById(`edit_fec_em_${id}`).value;
-        const cliId = Number(document.getElementById(`edit_cli_select_${id}`).value);
-        const mon = Number(document.getElementById(`edit_mon_tot_${id}`).value);
-        const ret = Number(document.getElementById(`edit_ret_por_${id}`).value);
+        const fac = elemento<Campo>(`edit_num_fac_${id}`).value;
+        const fec = elemento<Campo>(`edit_fec_em_${id}`).value;
+        const cliId = Number(elemento<Campo>(`edit_cli_select_${id}`).value);
+        const mon = Number(elemento<Campo>(`edit_mon_tot_${id}`).value);
+        const ret = Number(elemento<Campo>(`edit_ret_por_${id}`).value);
 
         // Corregir una factura cobrada mueve dinero, así que se confirma con
         // las cifras delante en vez de con una advertencia genérica.
-        const cobrada = document.getElementById(`modal-edit-for-${id}`)?.dataset?.cobrada === 'si';
-        let parcial = null;
-        let motivo = null;
+        const cobrada = buscar(`modal-edit-for-${id}`)?.dataset?.cobrada === 'si';
+        let parcial: string | null = null;
+        let motivo: string | null = null;
 
         if (cobrada) {
-            const quiereParcial = document.getElementById(`edit_parcial_chk_${id}`)?.checked;
+            const quiereParcial = buscar<HTMLInputElement>(`edit_parcial_chk_${id}`)?.checked;
             const neto = Math.round((mon - mon * (ret / 100)) * 100) / 100;
 
             if (quiereParcial) {
@@ -4390,7 +4390,7 @@ class AppUI {
                 // `.value` directamente, así que el `step="0.01"` nunca llega
                 // a comprobarse. Se valida la **forma**, y el céntimo lo
                 // decide el núcleo.
-                const texto = document.getElementById(`edit_parcial_mon_${id}`).value;
+                const texto = elemento<Campo>(`edit_parcial_mon_${id}`).value;
                 parcial = texto.trim() === '' ? null : texto.trim();
                 if (parcial === null || !/^\d*\.?\d+$/.test(parcial.replace(/,/g, ''))) {
                     this.showToast("Indica cuánto se cobró de verdad, o desmarca el cobro parcial.", "error");
@@ -4406,7 +4406,7 @@ class AppUI {
 
             const cobrado = parcial === null ? neto : Number(parcial.replace(/,/g, ''));
             const recibidoAntes = Number(
-                document.getElementById(`modal-edit-for-${id}`)?.dataset?.recibido ?? 0
+                buscar(`modal-edit-for-${id}`)?.dataset?.recibido ?? 0
             );
             const ajuste = Math.round((cobrado - recibidoAntes) * 100) / 100;
 
@@ -4434,10 +4434,10 @@ class AppUI {
         try {
             const resumen = await AppAPI.actualizarIngreso(id, fac, cliId, fec, mon, ret, parcial, motivo);
             this.showToast(resumen || "Factura corregida.");
-            document.getElementById(`modal-edit-for-${id}`).remove();
+            elemento(`modal-edit-for-${id}`).remove();
             await this.render('ingresos');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -4503,7 +4503,7 @@ class AppUI {
                     </div>
 
                     <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                        <button type="button" onclick="document.getElementById('modal-edit-tar-${t.id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="button" onclick="elemento('modal-edit-tar-${t.id}').remove()" class="btn btn-secondary">Cancelar</button>
                         <button type="submit" class="btn">Guardar Parámetros</button>
                     </div>
                 </form>
@@ -4514,17 +4514,17 @@ class AppUI {
 
     async handleEdicionLimitesTarjetaSubmit(e, id) {
         e.preventDefault();
-        const limDop = Number(document.getElementById(`edit_lim_dop_${id}`).value);
-        const sobDop = Number(document.getElementById(`edit_sob_dop_${id}`).value);
-        const corDop = Number(document.getElementById(`edit_cor_dop_${id}`).value);
-        const limUsd = Number(document.getElementById(`edit_lim_usd_${id}`).value);
-        const sobUsd = Number(document.getElementById(`edit_sob_usd_${id}`).value);
-        const corUsd = Number(document.getElementById(`edit_cor_usd_${id}`).value);
+        const limDop = Number(elemento<Campo>(`edit_lim_dop_${id}`).value);
+        const sobDop = Number(elemento<Campo>(`edit_sob_dop_${id}`).value);
+        const corDop = Number(elemento<Campo>(`edit_cor_dop_${id}`).value);
+        const limUsd = Number(elemento<Campo>(`edit_lim_usd_${id}`).value);
+        const sobUsd = Number(elemento<Campo>(`edit_sob_usd_${id}`).value);
+        const corUsd = Number(elemento<Campo>(`edit_cor_usd_${id}`).value);
 
         // Vacío es "sin ajuste"; cero es un tope deliberado. Se leen como texto
         // para no confundir ambos casos.
-        const ajuDopTexto = document.getElementById(`edit_aju_dop_${id}`).value.trim();
-        const ajuUsdTexto = document.getElementById(`edit_aju_usd_${id}`).value.trim();
+        const ajuDopTexto = elemento<Campo>(`edit_aju_dop_${id}`).value.trim();
+        const ajuUsdTexto = elemento<Campo>(`edit_aju_usd_${id}`).value.trim();
         const ajuDop = ajuDopTexto === '' ? null : Number(ajuDopTexto);
         const ajuUsd = ajuUsdTexto === '' ? null : Number(ajuUsdTexto);
 
@@ -4534,13 +4534,13 @@ class AppUI {
         }
 
         try {
-            const politica = document.getElementById(`edit_pol_${id}`)?.value || 'origen';
+            const politica = buscar<Campo>(`edit_pol_${id}`)?.value || 'origen';
             await AppAPI.actualizarLimitesTarjeta(id, limDop, limUsd, sobDop, sobUsd, corDop, corUsd, ajuDop, ajuUsd, politica);
             this.showToast("Parámetros actualizados correctamente.");
-            document.getElementById(`modal-edit-tar-${id}`).remove();
+            elemento(`modal-edit-tar-${id}`).remove();
             await this.render('tarjetas');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -4576,7 +4576,7 @@ class AppUI {
                             </div>
                         </div>
                         <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                            <button type="button" onclick="document.getElementById('modal-cobro-for-${id}').remove()" class="btn btn-secondary">Cancelar</button>
+                            <button type="button" onclick="elemento('modal-cobro-for-${id}').remove()" class="btn btn-secondary">Cancelar</button>
                             <button type="submit" class="btn">Cobrar</button>
                         </div>
                     </form>
@@ -4584,23 +4584,23 @@ class AppUI {
             `;
             document.body.appendChild(overlay);
         } catch (err) {
-            this.showToast("Error al obtener cuentas: " + err.toString(), 'error');
+            this.showToast("Error al obtener cuentas: " + String(err), 'error');
         }
     }
 
     async handleCobroFormalSubmit(e, id) {
         e.preventDefault();
-        const ban = document.getElementById(`cob_ban_${id}`).value;
-        const fec = document.getElementById(`cob_fec_${id}`).value;
-        const mon = Number(document.getElementById(`cob_mon_${id}`).value);
+        const ban = elemento<Campo>(`cob_ban_${id}`).value;
+        const fec = elemento<Campo>(`cob_fec_${id}`).value;
+        const mon = Number(elemento<Campo>(`cob_mon_${id}`).value);
 
         try {
             await AppAPI.marcarIngresoPagado(id, ban, fec, mon);
             this.showToast("Factura marcada como pagada.");
-            document.getElementById(`modal-cobro-for-${id}`).remove();
+            elemento(`modal-cobro-for-${id}`).remove();
             await this.render('ingresos');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
@@ -4635,7 +4635,7 @@ class AppUI {
                             </div>
                         </div>
                         <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                            <button type="button" onclick="document.getElementById('modal-cobro-inf-${id}').remove()" class="btn btn-secondary">Cancelar</button>
+                            <button type="button" onclick="elemento('modal-cobro-inf-${id}').remove()" class="btn btn-secondary">Cancelar</button>
                             <button type="submit" class="btn" style="background: linear-gradient(135deg, #10b981, #059669); color:white;">Cobrar</button>
                         </div>
                     </form>
@@ -4643,23 +4643,23 @@ class AppUI {
             `;
             document.body.appendChild(overlay);
         } catch (err) {
-            this.showToast("Error al obtener cuentas: " + err.toString(), 'error');
+            this.showToast("Error al obtener cuentas: " + String(err), 'error');
         }
     }
 
     async handleCobroInformalSubmit(e, id) {
         e.preventDefault();
-        const ban = document.getElementById(`cob_ban_inf_${id}`).value;
-        const fec = document.getElementById(`cob_fec_inf_${id}`).value;
-        const mon = Number(document.getElementById(`cob_mon_inf_${id}`).value);
+        const ban = elemento<Campo>(`cob_ban_inf_${id}`).value;
+        const fec = elemento<Campo>(`cob_fec_inf_${id}`).value;
+        const mon = Number(elemento<Campo>(`cob_mon_inf_${id}`).value);
 
         try {
             await AppAPI.marcarInformalPagado(id, ban, fec, mon);
             this.showToast("Ingreso informal registrado como pagado.");
-            document.getElementById(`modal-cobro-inf-${id}`).remove();
+            elemento(`modal-cobro-inf-${id}`).remove();
             await this.render('ingresos');
         } catch (err) {
-            this.showToast(err.toString(), 'error');
+            this.showToast(String(err), 'error');
         }
     }
 
