@@ -275,6 +275,43 @@ test('el panel de casos: sin casos lo dice, y un fallo se muestra en el panel si
     assert.match(roto.innerHTML, /Sin acceso/);
 });
 
+// El motivo (y la descripción) los escribe el titular y se guardan tal cual: si llegaran al
+// HTML sin escapar, un `<` en un motivo se interpretaría como marcado, y un `<img onerror=…>`
+// ejecutaría código en el WebView de la aplicación (que tiene acceso a todos los comandos).
+const CASO_HOSTIL = (extra = {}) => ({
+    numero_caso: 'C-<0007>', fecha: '14/03/<2027>', tipo: 'gasto<script>', descripcion: 'Cena <img src=x onerror="alert(1)"> y más',
+    importe: 105, divisa: 'D<O>P', motivo: 'Lo cobraron "dos" veces & <b>nadie</b> avisó', ...extra,
+});
+
+test('el panel de casos escapa lo que escribe el titular: el marcado no se interpreta', async () => {
+    const caja = el({ hidden: true });
+    const t = montar({ campos: { 'casos-correccion': caja }, correcciones: [CASO_HOSTIL()] });
+    await t.vista.alternarCasosDeCorreccion();
+    const html = caja.innerHTML;
+    assert.doesNotMatch(html, /<img|<script|<b>nadie|<0007>|<O>|<2027>/, 'ningún texto del titular se coló como marcado');
+    assert.match(html, /Cena &lt;img src=x onerror=&quot;alert\(1\)&quot;&gt; y más/);
+    assert.match(html, /Lo cobraron &quot;dos&quot; veces &amp; &lt;b&gt;nadie&lt;\/b&gt; avisó/);
+    assert.match(html, /C-&lt;0007&gt;/);
+    assert.match(html, /14\/03\/&lt;2027&gt; · gasto&lt;script&gt;/);
+    assert.match(html, /D&lt;O&gt;P #105#/);
+});
+
+test('el panel de casos sigue mostrando igual el texto corriente: tildes, comas y ampersand se ven como se escribieron', async () => {
+    const caja = el({ hidden: true });
+    const t = montar({ campos: { 'casos-correccion': caja }, correcciones: [CASO_HOSTIL({ numero_caso: 'C-0008', fecha: '14/03/2027', tipo: 'ingreso', descripcion: 'Tom & Jerry, S.A. — año nuevo', divisa: 'USD', motivo: 'Corrección por el día 5: «error» de captura' })] });
+    await t.vista.alternarCasosDeCorreccion();
+    assert.match(caja.innerHTML, /Tom &amp; Jerry, S\.A\. — año nuevo — USD #105#/);
+    assert.match(caja.innerHTML, /Corrección por el día 5: «error» de captura/);
+});
+
+test('el error del panel también se escapa: el mensaje de Rust puede traer texto del titular', async () => {
+    const caja = el({ hidden: true });
+    const t = montar({ campos: { 'casos-correccion': caja }, falla: { obtenerCorrecciones: 'No se encontró <b>Cliente "X"</b>' } });
+    await t.vista.alternarCasosDeCorreccion();
+    assert.doesNotMatch(caja.innerHTML, /<b>/);
+    assert.match(caja.innerHTML, /No se encontró &lt;b&gt;Cliente &quot;X&quot;&lt;\/b&gt;/);
+});
+
 test('el panel de casos: si la página no tiene el panel, no hace nada', async () => {
     await assert.doesNotReject(() => montar().vista.alternarCasosDeCorreccion());
 });

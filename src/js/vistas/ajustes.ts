@@ -628,18 +628,18 @@ export class VistaAjustes implements Vista {
                     ${casos.map(c => `
                         <div style="padding:0.5rem 0.7rem; border-bottom:1px solid var(--border-color); font-size:0.75rem;">
                             <div style="display:flex; justify-content:space-between; gap:0.5rem;">
-                                <strong style="color:var(--accent-primary);">${c.numero_caso}</strong>
-                                <span style="color:var(--text-muted);">${c.fecha} · ${c.tipo}</span>
+                                <strong style="color:var(--accent-primary);">${escaparHtml(c.numero_caso)}</strong>
+                                <span style="color:var(--text-muted);">${escaparHtml(c.fecha)} · ${escaparHtml(c.tipo)}</span>
                             </div>
                             <div style="margin-top:0.2rem;">
-                                ${c.descripcion}${c.importe != null ? ` — ${c.divisa || ''} ${formato.importe(c.importe)}` : ''}
+                                ${escaparHtml(c.descripcion)}${c.importe != null ? ` — ${escaparHtml(c.divisa || '')} ${formato.importe(c.importe)}` : ''}
                             </div>
-                            <div style="margin-top:0.2rem; color:var(--text-secondary); font-style:italic;">${c.motivo}</div>
+                            <div style="margin-top:0.2rem; color:var(--text-secondary); font-style:italic;">${escaparHtml(c.motivo)}</div>
                         </div>
                     `).join('')}
                 </div>`;
         } catch (err) {
-            caja.innerHTML = `<p style="color:var(--color-danger); font-size:0.75rem; padding:0.5rem;">${String(err)}</p>`;
+            caja.innerHTML = `<p style="color:var(--color-danger); font-size:0.75rem; padding:0.5rem;">${escaparHtml(String(err))}</p>`;
         }
     }
 
