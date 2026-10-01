@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`; PR 8 en 1.59.0: `ingresos`; PR 9 en 1.61.0: `préstamos`; PR 10 en 1.63.0: `ajustes`; PR 11 en 1.64.0: `tarjetas`, la última vista** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`; PR 8 en 1.59.0: `ingresos`; PR 9 en 1.61.0: `préstamos`; PR 10 en 1.63.0: `ajustes`; PR 11 en 1.64.0: `tarjetas`, la última vista; PR 12 en 1.65.0: la clase `AppUI` se retira y la división termina** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -582,3 +582,37 @@ Al probar a mano en la aplicación, eliminar una transacción no hacía nada. La
 ### Lo que queda tras el PR 11
 
 `ui.ts` queda en **130 líneas**: la clase `AppUI` con `showToast`, el enrutador (`render` con su `switch` y el respaldo al Dashboard), `formatMoney`, `pedirMotivoDeCorreccion`, el constructor, `registrarVista` y la constante `TASA_USD_A_DOP`. Las once vistas viven en `src/js/vistas/`. Falta el **PR 12**: pasar esos últimos métodos a sus servicios (`Avisos`, `Formato`, `Motivo`, y el enrutador del registro de vistas), retirar la clase y el puente `window.appUI`, y quitar `serviciosDesdeAppUI`.
+
+### PR 12 — se retira la clase `AppUI` (1.65.0): la división termina
+
+| Qué | Previsto | Medido |
+|---|---|---|
+| Lo que quedaba en `ui.ts` | 130 líneas: `showToast`, el enrutador, `formatMoney`, `pedirMotivoDeCorreccion`, el constructor, `registrarVista` y la constante de la tasa | **todo pasó a un servicio** y `ui.ts` se borró (−130) |
+| Archivos nuevos | — | `ui/componer.ts` (89); en `servicios.ts` +`crearAvisos`, `formatoDelNavegador`, `crearMotivo`, `crearEnrutador`, `TASA_USD_A_DOP` (361 líneas en total, ya sin el cableado con la clase); `app.ts` pasa a módulo (112) |
+| Archivos retirados | — | `ui.ts`, `tsconfig.estricto.json`, los scripts `ui.js` y `app.js` de `index.html`, `AppUIAntigua` y `serviciosDesdeAppUI` |
+| Parámetros sin tipo | 5 | **0 en todo el árbol**: la configuración estricta se unifica |
+
+**Qué se hizo, en el orden del plan:**
+* **Cada método que quedaba pasó a su servicio real**, con la misma lógica: `showToast` → `crearAvisos` (con su contenedor y su temporizador inyectables), `formatMoney` → `formatoDelNavegador`, `pedirMotivoDeCorreccion` → `crearMotivo(dialogos, avisos)`, `render` → `crearEnrutador(pantalla, vistas)` (que ya no tiene `switch`: solo el registro, y una ruta desconocida cae en el Dashboard), y la tasa → `Referencias`.
+* **`componerInterfaz` sustituye a la clase** como lo que arma la aplicación: crea los servicios, registra las vistas en el enrutador y compone el puente `appUI` de los manejadores. Es una función para que **la aplicación y las pruebas ejecuten el mismo cableado**. Además **rechaza lo que antes se pisaba en silencio**: dos vistas con la misma ruta o con un manejador del mismo nombre (con `Object.assign` sobre la clase, la segunda sustituía a la primera sin avisar).
+* **`window.appUI` ya no es una clase**: es un objeto plano con los 70 manejadores de las once vistas, y nada más. Lo siguen llamando los atributos `onclick`/`onsubmit`/`onchange` del HTML; cambiarlos por `data-accion` queda como mejora opcional, fuera de la división.
+* **`app.ts` es un módulo** que recibe el enrutador, los avisos, el DOM y la API en lugar de llamar al global `appUI`. Sigue colgando `navigate` de `window` porque lo llaman los manejadores en línea.
+
+**Los controles:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 496 pruebas (492 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. Contratos | `manejadores.test.js` comprueba ahora además que **todo `appUI.x` que escribe el HTML está en el puente real** compuesto, no solo en los fuentes; `rutas.test.js` exige una vista registrada por cada pestaña (ya no hay `case`), que cada una dibuje **su** pestaña y que una ruta desconocida caiga en el Dashboard; `dom.test.js` fija los tres únicos `<script>` de `index.html` |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas** (905 a 26 693 caracteres), sin `undefined`/`NaN`/errores |
+| 4. Parámetros tipados | sí: **todo el árbol** con `noImplicitAny`, una sola configuración |
+| 5. Pruebas de interacción | las existentes, sin tocar salvo una (`ayudas.test.js`: los avisos se observan en el servicio y no en `appUI.showToast`); el cargador (`cargar_interfaz.js`) se reescribió sobre `componerInterfaz` |
+| 6. Revisión manual con tus datos | **diez comprobaciones transversales** en las dos versiones: el menú lateral con clics reales (once pestañas, una sola activa), que los 47 manejadores distintos que escriben las once pestañas existan, el tema (clase, botón, almacenamiento, aviso con su clase, que aparezca y se retire, y que redibuje), el menú plegable, una ruta desconocida, el fallo de una vista (tarjeta de error y recuperación), y el motivo corto desde el servicio real: mismos resultados, 0 errores |
+
+**Pruebas nuevas (30):** `servicios_reales.test.js` (los avisos con su icono y sus tiempos, el formato, la tasa, el motivo con su mínimo de quince caracteres, y el enrutador con «Cargando», la ruta desconocida y el error), `componer.test.js` (once vistas, el puente sin lo que fue de la clase, rechazo de rutas y manejadores repetidos, y que el motivo use los avisos y diálogos de la carga) y `app.test.js` (navegar, suscripciones al arrancar, tema y menú lateral). Treinta y dos mutaciones: las treinta y dos se detectan.
+
+**En la aplicación empaquetada:** el Dashboard se dibuja al arrancar con su botón activo, el menú lateral navega con clics reales, el tema cambia y avisa, una ruta desconocida cae en el Dashboard, `window.appUI` tiene los 70 manejadores y ningún `showToast`, `navigate` es global, el diálogo de página funciona y `AppUI` ya no existe.
+
+### Balance de la división (PR 0 a 12)
+
+`ui.ts`: **4 704 líneas y una clase de 103 métodos → ninguna**. Once vistas en `src/js/vistas/` (6 108 líneas con el registro, el servicio y la composición), cada una con sus dependencias inyectadas y sus pruebas con dobles. Las pruebas pasaron de 42 (JavaScript) a 496. Por el camino aparecieron y se corrigieron defectos reales que la estructura anterior escondía: los diálogos que no esperaban ni preguntaban en el WebView (1.62.0), la carga fija sin separar divisas (1.60.0), el aviso «Cobro próximo» (1.43.0), el panel de correcciones sin envoltorio (1.45.0) y el reembolso doble de la comisión de un abono (1.40.0). Quedan **anotados sin corregir**: el panel de casos de corrección pinta el motivo sin escapar, cuatro bajas sin `try/catch` (`todo` en las pruebas), los importes que aún viajan como `Number` y los riesgos del capital (`capital_y_dinero.md`).

@@ -35,9 +35,9 @@ test('cada prueba parte de una interfaz limpia: sin llamadas, avisos ni redibujo
     assert.deepEqual([ui.llamadas, ui.avisos, ui.renders], [[], [], []]);
 });
 
-test('el aviso se registra con su tipo y además se dibuja con el código real de showToast', () => {
+test('el aviso se registra con su tipo y además se dibuja con el código real de los avisos', () => {
     const ui = cargarInterfaz({});
-    ui.appUI.showToast('Hola', 'error');
+    ui.servicios.avisos.mostrar('Hola', 'error');
     assert.deepEqual(ui.avisos, [{ tipo: 'error', mensaje: 'Hola' }]);
     const contenedor = ui.elemento('notification-container');
     assert.equal(contenedor.hijos.length, 1);

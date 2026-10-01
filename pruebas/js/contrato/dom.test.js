@@ -34,9 +34,12 @@ test('la interfaz no vuelve a llamar a document.getElementById directamente', ()
     assert.deepEqual(directos.map(f => f.replace(RAIZ, '')), [], 'usa elemento() o buscar()');
 });
 
-test('index.html carga el ayudante de DOM antes que la interfaz', () => {
+test('index.html carga los scripts clásicos que hacen falta y la composición como módulo, y nada más', () => {
+    // `api.js` (AppAPI) y `ui/dom.js` (`elemento`/`buscar`, que algunos manejadores en línea
+    // llaman) son scripts clásicos con globales; todo lo demás entra por `composicion.js`,
+    // que es un módulo y se ejecuta después de ellos aunque vaya al final. Desde la 1.65.0
+    // no hay `ui.js` ni `app.js`: un `<script>` que reapareciera cargaría código que ya no existe.
     const html = readFileSync(join(RAIZ, 'src', 'index.html'), 'utf8');
-    const dom = html.indexOf('js/ui/dom.js');
-    const ui = html.indexOf('js/ui.js');
-    assert.ok(dom !== -1 && ui !== -1 && dom < ui, 'dom.js debe ir antes de ui.js');
+    const scripts = [...html.matchAll(/<script\b([^>]*)>/g)].map(m => m[1].trim());
+    assert.deepEqual(scripts, ['src="js/api.js"', 'src="js/ui/dom.js"', 'type="module" src="js/composicion.js"']);
 });

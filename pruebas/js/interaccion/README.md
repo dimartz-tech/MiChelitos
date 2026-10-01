@@ -48,8 +48,8 @@ redibujo(ui, 'ajustes');
 `cargarInterfaz` devuelve: `appUI`, `api` (el doble), `llamadas` (`[{ metodo, args }]`),
 `avisos` (`[{ tipo, mensaje }]`), `renders` (rutas que `render()` recibió),
 `confirmaciones`/`preguntas` (textos de los diálogos), `eliminados` (ids de
-elementos a los que se llamó `remove()`: modales cerrados), `navegaciones`,
-`temporizadores`, y los atajos `elemento(id)`, `fijar(id, spec)`,
+elementos a los que se llamó `remove()`: modales cerrados),
+`temporizadores` (los de los avisos), y los atajos `elemento(id)`, `fijar(id, spec)`,
 `responder(metodo, valor)`, `rechazar(metodo, error)`, `llamadasA(metodo)`.
 
 ### Campos (DOM falso)
@@ -99,14 +99,16 @@ documenta exactamente qué lee su manejador.
    `NO_CUBIERTOS` de ese archivo.
 6. Usa solo datos inventados. El repositorio es público.
 
-## Tras la división de `ui.ts`
+## Cómo se carga la interfaz
 
-Solo hay que adaptar `cargar_interfaz.js`: la lista `SCRIPTS` (qué archivos se
-evalúan, en el orden de `index.html`) y la última línea de `evaluar`
-(`return appUI;`, que hoy es la `const` del script) para devolver el objeto
-mezclado de las vistas. Las pruebas llaman a `appUI.<método>` y no cambian.
-Si las vistas pasan a ser módulos ES, `evaluar` se sustituye por una
-`import()` con `globalThis.document/AppAPI/…` fijados antes de importar.
+`cargar_interfaz.js` compone la interfaz con **la misma función que ejecuta la aplicación**
+(`componerInterfaz`, de `ui/componer.ts`) sobre dobles: DOM falso, API falsa que registra cada
+llamada, diálogos con la respuesta que decide la prueba (una función puede devolver una promesa
+que se resuelve tarde), modales y menús que se registran, y un enrutador que solo anota la ruta.
+Del navegador solo se evalúa `ui/dom.js` (`elemento` y `buscar`) sobre el `document` falso.
+`appUI` es el puente de manejadores (`window.appUI` en la aplicación). Añadir una vista no obliga
+a tocar este archivo: la registra `vistas/registro.ts`. (Hasta la 1.65.0 había una clase `AppUI`
+en `ui.ts`; el cargador la evaluaba como script.)
 
 ## Límites
 
