@@ -14,13 +14,6 @@ export function describirRespaldo(nombre: unknown): string {
     return `${d}/${mes}/${a} ${h}:${mi}:${s} · ${motivo.replace(/-/g, ' ')}`;
 }
 
-// Los nombres salen de una carpeta del usuario: se escapan antes de ir a un
-// atributo o a un texto del HTML.
-export function escaparHtml(texto: unknown): string {
-    return String(texto)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+// `escaparHtml` vive en `nucleo/html.ts` (lo usan todas las vistas); se reexporta aquí
+// porque la lista de respaldos fue su primer uso y sus pruebas lo importan de este módulo.
+export { escaparHtml } from './html.js';

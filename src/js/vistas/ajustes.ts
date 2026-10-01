@@ -10,7 +10,8 @@
 // (`pruebas/js/vistas/ajustes.test.js`). Los cuerpos son los de `ui.ts`.
 
 import type { CuentaAhorro } from '../tipos-ipc';
-import { describirRespaldo, escaparHtml } from '../nucleo/respaldos.js';
+import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+import { describirRespaldo } from '../nucleo/respaldos.js';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Motivo, Pantalla, Vista } from '../ui/servicios';
 
 type ApiAjustes = ApiDe<
@@ -133,7 +134,7 @@ export class VistaAjustes implements Vista {
                     <div style="display:flex; flex-direction:column; gap:0.4rem; max-height:220px; overflow-y:auto; font-size:0.85rem;">
                         ${categorias.map(c => `
                             <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.5rem 0.8rem; border-radius:var(--radius-sm); display:flex; justify-content:space-between; align-items:center;">
-                                <strong>${c.nombre}</strong>
+                                <strong>${escaparHtml(c.nombre)}</strong>
                                 ${c.nombre !== 'Otros' && c.nombre !== 'Suscripciones' ? `
                                     <button onclick="appUI.handleEliminarCategoria(${c.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
                                 ` : `
@@ -159,8 +160,8 @@ export class VistaAjustes implements Vista {
                         ${clientes.length > 0 ? clientes.map(cl => `
                             <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.5rem 0.8rem; border-radius:var(--radius-sm); display:flex; justify-content:space-between; align-items:center;">
                                 <div>
-                                    <strong>${cl.nombre}</strong><br>
-                                    <span style="font-size:0.7rem; color:var(--text-muted);">RNC: ${cl.rnc}</span>
+                                    <strong>${escaparHtml(cl.nombre)}</strong><br>
+                                    <span style="font-size:0.7rem; color:var(--text-muted);">RNC: ${escaparHtml(cl.rnc)}</span>
                                 </div>
                                 <button onclick="appUI.handleEliminarCliente(${cl.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
                             </div>
@@ -195,14 +196,14 @@ export class VistaAjustes implements Vista {
                         ${cuentas.length > 0 ? cuentas.map(c => `
                             <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.5rem 0.8rem; border-radius:var(--radius-sm); display:flex; justify-content:space-between; align-items:center;">
                                 <div>
-                                    <strong>${c.nombre}</strong>
-                                    ${c.entidad ? `<span style="font-size:0.7rem; color:var(--text-muted);"> · ${c.entidad}</span>` : ''}
+                                    <strong>${escaparHtml(c.nombre)}</strong>
+                                    ${c.entidad ? `<span style="font-size:0.7rem; color:var(--text-muted);"> · ${escaparHtml(c.entidad)}</span>` : ''}
                                     <br>
-                                    <span style="font-size:0.75rem; color:var(--accent-primary); font-weight:bold;">${c.divisa} ${formato.importe(c.balance_actual)}</span>
+                                    <span style="font-size:0.75rem; color:var(--accent-primary); font-weight:bold;">${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</span>
                                     ${c.comision_pago_impuestos != null ? `<span style="font-size:0.7rem; color:var(--color-warning);" title="Tarifa fija por pagar impuestos desde esta cuenta"> · 🧾 ${formato.importe(c.comision_pago_impuestos)}</span>` : ''}
                                 </div>
                                 <div style="display:flex; gap:0.3rem;">
-                                    <button onclick='appUI.abrirEdicionCuenta(${JSON.stringify(c).replace(/'/g, "&#39;")})' class="btn" style="padding:0.2rem 0.4rem; font-size:0.75rem;">✏️</button>
+                                    <button onclick="appUI.abrirEdicionCuenta(${argumentoJs(c)})" class="btn" style="padding:0.2rem 0.4rem; font-size:0.75rem;">✏️</button>
                                     <button onclick="appUI.handleEliminarCuenta(${c.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
                                 </div>
                             </div>
@@ -332,11 +333,11 @@ export class VistaAjustes implements Vista {
                                 <tbody>
                                     ${gastos.slice(0, 15).map(g => `
                                         <tr>
-                                            <td>${g.fecha}</td>
-                                            <td><strong>${g.descripcion}</strong></td>
-                                            <td>${g.categoria_nombre}</td>
-                                            <td style="text-transform:capitalize;">${g.metodo_pago}</td>
-                                            <td class="amount expense">${g.divisa} ${formato.importe(g.monto + g.costo_adicional)}</td>
+                                            <td>${escaparHtml(g.fecha)}</td>
+                                            <td><strong>${escaparHtml(g.descripcion)}</strong></td>
+                                            <td>${escaparHtml(g.categoria_nombre)}</td>
+                                            <td style="text-transform:capitalize;">${escaparHtml(g.metodo_pago)}</td>
+                                            <td class="amount expense">${escaparHtml(g.divisa)} ${formato.importe(g.monto + g.costo_adicional)}</td>
                                             <td>
                                                 <button type="button" onclick="appUI.handleEliminarGastoCorr(${g.id})" class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Revertir</button>
                                             </td>
@@ -367,11 +368,11 @@ export class VistaAjustes implements Vista {
                                 <tbody>
                                     ${informales.slice(0, 10).map(inf => `
                                         <tr>
-                                            <td>${inf.fecha}</td>
-                                            <td><strong>${inf.descripcion}</strong></td>
+                                            <td>${escaparHtml(inf.fecha)}</td>
+                                            <td><strong>${escaparHtml(inf.descripcion)}</strong></td>
                                             <td class="amount income">DOP ${formato.importe(inf.monto)}</td>
-                                            <td><span class="badge ${inf.estatus === 'pagado' ? 'pagada' : 'emitida'}">${inf.estatus}</span></td>
-                                            <td>${inf.institucion_deposito || '-'}</td>
+                                            <td><span class="badge ${inf.estatus === 'pagado' ? 'pagada' : 'emitida'}">${escaparHtml(inf.estatus)}</span></td>
+                                            <td>${escaparHtml(inf.institucion_deposito || '-')}</td>
                                             <td>
                                                 <button type="button" onclick="appUI.handleEliminarIngresoInformalCorr(${inf.id})" class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Revertir</button>
                                             </td>
@@ -399,11 +400,11 @@ export class VistaAjustes implements Vista {
                                 <tbody>
                                     ${ingresos.slice(0, 10).map(i => `
                                         <tr>
-                                            <td><strong>${i.numero_factura}</strong></td>
-                                            <td>${i.cliente_nombre}</td>
-                                            <td>${i.fecha_emision}</td>
+                                            <td><strong>${escaparHtml(i.numero_factura)}</strong></td>
+                                            <td>${escaparHtml(i.cliente_nombre)}</td>
+                                            <td>${escaparHtml(i.fecha_emision)}</td>
                                             <td class="amount income">DOP ${formato.importe(i.monto_total)}</td>
-                                            <td><span class="badge ${i.estatus === 'pagada' ? 'pagada' : 'emitida'}">${i.estatus}</span></td>
+                                            <td><span class="badge ${i.estatus === 'pagada' ? 'pagada' : 'emitida'}">${escaparHtml(i.estatus)}</span></td>
                                             <td>
                                                 <button type="button" onclick="appUI.handleEliminarIngresoCorr(${i.id})" class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Eliminar</button>
                                             </td>
@@ -434,11 +435,11 @@ export class VistaAjustes implements Vista {
                                 <tbody>
                                     ${transacciones.slice(0, 15).map(t => `
                                         <tr>
-                                            <td>${t.fecha}</td>
-                                            <td><strong>${t.descripcion || '-'}</strong></td>
-                                            <td>${t.cuenta_origen_nombre}</td>
+                                            <td>${escaparHtml(t.fecha)}</td>
+                                            <td><strong>${escaparHtml(t.descripcion || '-')}</strong></td>
+                                            <td>${escaparHtml(t.cuenta_origen_nombre)}</td>
                                             <td class="amount expense">- ${formato.importe(t.monto_origen)}</td>
-                                            <td>${t.cuenta_destino_nombre}</td>
+                                            <td>${escaparHtml(t.cuenta_destino_nombre)}</td>
                                             <td class="amount expense">${t.cargo > 0 ? formato.importe(t.cargo) : '-'}</td>
                                             <td>
                                                 <button type="button" onclick="appUI.handleEliminarTransaccionCuentaCorr(${t.id})" class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Revertir</button>

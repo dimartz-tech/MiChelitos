@@ -15,6 +15,8 @@
 
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
+import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+
 type ApiCapital = ApiDe<'obtenerCapital' | 'guardarCapital'>;
 
 /**
@@ -123,18 +125,18 @@ export class VistaCapital implements Vista {
                         ${(capital.certificados || []).map((c: Certificado, i: number) => `
                             <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.6rem; border-radius:4px; font-size:0.75rem;">
                                 <div style="display:flex; justify-content:space-between; font-weight:bold;">
-                                    <span>${c.banco}</span>
+                                    <span>${escaparHtml(c.banco)}</span>
                                     <span>DOP ${formato.importe(c.monto)}</span>
                                 </div>
                                 <div style="display:flex; justify-content:space-between; color:var(--text-secondary); margin-top:0.2rem; align-items:center;">
-                                    <span>Tasa: ${c.tasa}% | Vence: ${c.vencimiento}</span>
-                                    <span style="font-size:0.7rem; color:var(--accent-primary); font-style:italic;">${c.tipo_pago || 'A cuenta'}</span>
+                                    <span>Tasa: ${c.tasa}% | Vence: ${escaparHtml(c.vencimiento)}</span>
+                                    <span style="font-size:0.7rem; color:var(--accent-primary); font-style:italic;">${escaparHtml(c.tipo_pago || 'A cuenta')}</span>
                                 </div>
                                 <div style="text-align:right; margin-top:0.2rem;">
                                     <button onclick="appUI.handleEliminarCertificado(${i})" style="background:none; border:none; color:var(--color-danger); cursor:pointer; font-size:0.7rem;">Eliminar</button>
                                 </div>
                                 ${c.alerta_vencimiento ? `
-                                    <div class="badge danger" style="width:100%; text-align:center; font-size:0.65rem; margin-top:0.3rem; padding:2px;">${c.alerta_msg}</div>
+                                    <div class="badge danger" style="width:100%; text-align:center; font-size:0.65rem; margin-top:0.3rem; padding:2px;">${escaparHtml(c.alerta_msg)}</div>
                                 ` : ''}
                             </div>
                         `).join('')}
@@ -179,18 +181,18 @@ export class VistaCapital implements Vista {
                         ${(capital.bolsa || []).map((b: InversionDeBolsa, i: number) => `
                             <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.6rem; border-radius:4px; font-size:0.75rem;">
                                 <div style="display:flex; justify-content:space-between; font-weight:bold;">
-                                    <span>${b.emisor}</span>
+                                    <span>${escaparHtml(b.emisor)}</span>
                                     <span>DOP ${formato.importe(b.monto)}</span>
                                 </div>
                                 <div style="display:flex; justify-content:space-between; color:var(--text-secondary); margin-top:0.2rem; align-items:center;">
-                                    <span>Tasa: ${b.tasa}% | Vence: ${b.vencimiento}</span>
-                                    <span style="font-size:0.7rem; color:#10b981; font-style:italic;">${b.tipo_pago || 'A cuenta'}</span>
+                                    <span>Tasa: ${b.tasa}% | Vence: ${escaparHtml(b.vencimiento)}</span>
+                                    <span style="font-size:0.7rem; color:#10b981; font-style:italic;">${escaparHtml(b.tipo_pago || 'A cuenta')}</span>
                                 </div>
                                 <div style="text-align:right; margin-top:0.2rem;">
                                     <button onclick="appUI.handleEliminarBolsa(${i})" style="background:none; border:none; color:var(--color-danger); cursor:pointer; font-size:0.7rem;">Eliminar</button>
                                 </div>
                                 ${b.alerta_vencimiento ? `
-                                    <div class="badge danger" style="width:100%; text-align:center; font-size:0.65rem; margin-top:0.3rem; padding:2px;">${b.alerta_msg}</div>
+                                    <div class="badge danger" style="width:100%; text-align:center; font-size:0.65rem; margin-top:0.3rem; padding:2px;">${escaparHtml(b.alerta_msg)}</div>
                                 ` : ''}
                             </div>
                         `).join('')}
@@ -233,8 +235,8 @@ export class VistaCapital implements Vista {
                             <div style="font-weight:bold; color:var(--accent-primary);">Inmuebles:</div>
                             ${inmobiliario.map((p: Bien) => `
                                 <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.4rem; border-radius:4px; margin-bottom:0.2rem;">
-                                    <span>${p.nombre}</span>
-                                    <span>DOP ${formato.importe(p.valor_estimado)} <button onclick="appUI.handleEliminarPropiedad('inmobiliario', '${p.id}')" style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
+                                    <span>${escaparHtml(p.nombre)}</span>
+                                    <span>DOP ${formato.importe(p.valor_estimado)} <button onclick="appUI.handleEliminarPropiedad('inmobiliario', ${argumentoJs(p.id)})" style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
                                 </div>
                             `).join('')}
                         ` : ''}
@@ -243,8 +245,8 @@ export class VistaCapital implements Vista {
                             <div style="font-weight:bold; color:var(--accent-primary); margin-top:0.4rem;">Vehículos:</div>
                             ${vehiculos.map((p: Bien) => `
                                 <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.4rem; border-radius:4px; margin-bottom:0.2rem;">
-                                    <span>${p.nombre}</span>
-                                    <span>DOP ${formato.importe(p.valor_estimado)} <button onclick="appUI.handleEliminarPropiedad('vehiculos', '${p.id}')" style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
+                                    <span>${escaparHtml(p.nombre)}</span>
+                                    <span>DOP ${formato.importe(p.valor_estimado)} <button onclick="appUI.handleEliminarPropiedad('vehiculos', ${argumentoJs(p.id)})" style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
                                 </div>
                             `).join('')}
                         ` : ''}
@@ -253,8 +255,8 @@ export class VistaCapital implements Vista {
                             <div style="font-weight:bold; color:var(--accent-primary); margin-top:0.4rem;">Equipos:</div>
                             ${maquinaria.map((p: Bien) => `
                                 <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.4rem; border-radius:4px; margin-bottom:0.2rem;">
-                                    <span>${p.nombre}</span>
-                                    <span>DOP ${formato.importe(p.valor_estimado)} <button onclick="appUI.handleEliminarPropiedad('maquinaria', '${p.id}')" style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
+                                    <span>${escaparHtml(p.nombre)}</span>
+                                    <span>DOP ${formato.importe(p.valor_estimado)} <button onclick="appUI.handleEliminarPropiedad('maquinaria', ${argumentoJs(p.id)})" style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
                                 </div>
                             `).join('')}
                         ` : ''}

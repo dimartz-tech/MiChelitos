@@ -8,6 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
 import { VistaSuscripciones, MANEJADORES_SUSCRIPCIONES, puenteSuscripciones } from '../../../src/js/vistas/suscripciones.js';
 
 const TARJETAS = [{ id: 7, entidad: 'Banco Alfa', nombre_tarjeta: 'Oro' }];
@@ -76,8 +77,8 @@ test('con períodos pendientes ofrece asentar o descartar el más antiguo y dice
     const html = t.pantalla.contenido.innerHTML;
     assert.match(html, /el más antiguo: <strong>15\/01\/2027<\/strong>/);
     assert.match(html, /\(y 1 más\)/);
-    assert.match(html, /appUI\.handleAsentarPendiente\(1, '15\/01\/2027'\)/);
-    assert.match(html, /appUI\.handleDescartarPendiente\(1, '15\/01\/2027'\)/);
+    assert.deepEqual(llamadasDelManejador(html, 'handleAsentarPendiente'), [[1, '15/01/2027']]);
+    assert.deepEqual(llamadasDelManejador(html, 'handleDescartarPendiente'), [[1, '15/01/2027']]);
 });
 
 test('una suscripción parada se anuncia con su impedimento y ofrece corregir la fecha', async () => {
@@ -236,4 +237,27 @@ test('baja: si Rust rechaza se muestra el error, no se propaga y no se anuncia �
     assert.deepEqual(t.llamadas, [['eliminarSuscripcion', 4]]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Error: Rust rechaza la baja', tipo: 'error' }]);
     assert.deepEqual(t.rutas, []);
+});
+
+// --- texto del titular en el HTML y en los manejadores ---
+
+test('una suscripción con plataforma hostil llega íntegra al editor (objeto) y no se interpreta', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const s = sus({ id: 5, plataforma: hostil, entidad: hostil, nombre_tarjeta: hostil, impedimento: hostil, pendientes: ['15/01/2027'] });
+    const t = montar({ suscripciones: [s] });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.deepEqual(llamadasDelManejador(html, 'abrirEdicionSuscripcion'), [[s]]);
+    assert.doesNotMatch(html, /<img/);
+});
+
+test('el editor de una suscripción escapa la plataforma, y la fecha pendiente llega íntegra al manejador', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const s = sus({ plataforma: hostil });
+    const t = montar({ suscripciones: [s] });
+    await t.vista.abrirEdicionSuscripcion(s);
+    assert.doesNotMatch(t.modales[0].html, /<img/);
+    const u = montar({ suscripciones: [sus({ pendientes: [`15/01/2027'); alert(1); ('`] })] });
+    await u.vista.render();
+    assert.deepEqual(llamadasDelManejador(u.pantalla.contenido.innerHTML, 'handleAsentarPendiente'), [[1, `15/01/2027'); alert(1); ('`]]);
 });

@@ -11,6 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VistaAjustes, MANEJADORES_AJUSTES, puenteAjustes } from '../../../src/js/vistas/ajustes.js';
+import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
 
 const CATEGORIAS = [{ id: 1, nombre: 'Otros' }, { id: 2, nombre: 'Suscripciones' }, { id: 3, nombre: 'Comida' }];
 const CLIENTES = [{ id: 4, nombre: 'Cliente Uno', rnc: '101000001' }];
@@ -137,12 +138,24 @@ test('sin movimientos, cada tabla de correcciones lo dice', async () => {
     for (const texto of ['No hay gastos registrados', 'No hay ingresos informales registrados', 'No hay ingresos formales registrados', 'No hay transferencias de cuenta registradas']) assert.match(html, new RegExp(texto));
 });
 
-test('la cuenta lleva sus datos en el botón de editar, con la comilla simple escapada', async () => {
+test('la cuenta lleva sus datos en el botón de editar: el manejador recibe el objeto exacto, aunque el nombre lleve comillas', async () => {
     const t = montar();
     await t.vista.render();
     const html = t.pantalla.contenido.innerHTML;
-    assert.match(html, /abrirEdicionCuenta\(\{"id":6,"nombre":"Cuenta O&#39;Brien"/);
+    // Se ejecuta el atributo como lo haría el navegador (deshaciendo las entidades): la cuenta
+    // llamada «Cuenta O'Brien» llega íntegra, sin cerrar ninguna cadena del manejador.
+    assert.deepEqual(llamadasDelManejador(html, 'abrirEdicionCuenta'), [[CUENTAS[0]], [CUENTAS[1]]]);
     assert.match(html, /Tarifa fija por pagar impuestos/);
+});
+
+test('un nombre de cuenta con comillas, barras y marcado llega íntegro al manejador y no se interpreta', async () => {
+    const hostil = { ...CUENTAS[0], nombre: `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;` };
+    const t = montar({ datos: { ...DATOS(), cuentas: [hostil] } });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.deepEqual(llamadasDelManejador(html, 'abrirEdicionCuenta'), [[hostil]]);
+    assert.doesNotMatch(html, /<img/);
+    assert.match(html, /&lt;img src=x onerror=&quot;alert\(2\)&quot;&gt; &amp;amp;/);
 });
 
 // --- Altas ---

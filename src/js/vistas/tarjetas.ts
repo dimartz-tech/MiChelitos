@@ -14,6 +14,8 @@
 import type { Tarjeta } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Reloj, Vista } from '../ui/servicios';
 
+import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+
 type ApiTarjetas = ApiDe<
     | 'obtenerTarjetas'
     | 'obtenerCuentas'
@@ -124,7 +126,7 @@ export class VistaTarjetas implements Vista {
                         <div style="display:flex; justify-content:space-between; align-items:center; gap: 1rem;">
                             <div>
                                 <span style="font-size:0.75rem; text-transform:uppercase; color:#10b981; font-weight:bold; letter-spacing:0.05em; display:block; margin-bottom:0.15rem;">💡 Tarjeta Recomendada Hoy</span>
-                                <strong style="font-size:1.05rem; font-family:var(--font-heading); display:block;">${mejorTarjeta.entidad} - ${mejorTarjeta.nombre_tarjeta}</strong>
+                                <strong style="font-size:1.05rem; font-family:var(--font-heading); display:block;">${escaparHtml(mejorTarjeta.entidad)} - ${escaparHtml(mejorTarjeta.nombre_tarjeta)}</strong>
                                 <p style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.2rem; line-height:1.3;">
                                     Próximo corte en <strong>${maxDiasRestantes} días</strong> (Día ${mejorTarjeta.fecha_corte}). Usarla hoy te otorga la mayor cantidad de días de financiamiento sin intereses.
                                 </p>
@@ -157,14 +159,13 @@ export class VistaTarjetas implements Vista {
                             // veces. El aviso está aquí, junto al abono, porque es el momento
                             // en que se decide qué cifra registrar.
                             const facilidades = prestamos.filter(p => p.tarjeta_id === t.id);
-                            const tEscaped = JSON.stringify(t).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
 
                             return `
                                 <div class="card" style="display:flex; flex-direction:column; gap:0.8rem;">
                                     <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem; align-items:center;">
                                         <div>
-                                            <strong>${t.entidad}</strong>
-                                            <div style="font-size:0.75rem; color:var(--text-muted);">${t.nombre_tarjeta}</div>
+                                            <strong>${escaparHtml(t.entidad)}</strong>
+                                            <div style="font-size:0.75rem; color:var(--text-muted);">${escaparHtml(t.nombre_tarjeta)}</div>
                                         </div>
                                         <div>
                                             ${tarjetaAlDia ? `
@@ -178,7 +179,7 @@ export class VistaTarjetas implements Vista {
                                     ${facilidades.length > 0 ? `
                                         <div style="background:rgba(255,193,7,0.08); border:1px solid rgba(255,193,7,0.3); border-radius:var(--radius-sm); padding:0.5rem 0.6rem; font-size:0.7rem; color:var(--text-secondary);">
                                             ⚠️ Esta tarjeta cobra
-                                            ${facilidades.map(f => `<strong>${f.institucion_financiera}</strong> (cuota DOP ${formato.importe(f.monto_cuota)})`).join(', ')}.
+                                            ${facilidades.map(f => `<strong>${escaparHtml(f.institucion_financiera)}</strong> (cuota DOP ${formato.importe(f.monto_cuota)})`).join(', ')}.
                                             Al conciliar el balance, no incluyas la cuota si ya cuenta como saldo de la facilidad:
                                             se duplicaría en el patrimonio.
                                         </div>
@@ -188,7 +189,7 @@ export class VistaTarjetas implements Vista {
                                     <div>
                                         <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.2rem;">
                                             <span>🇩🇴 DOP (Uso: ${pctDop.toFixed(1)}%)</span>
-                                            <span style="color:${balDop.color};">${balDop.texto}</span>
+                                            <span style="color:${escaparHtml(balDop.color)};">${escaparHtml(balDop.texto)}</span>
                                         </div>
                                         <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden; margin-bottom:0.3rem;">
                                             <div style="width: ${pctDop}%; height:100%; background: ${pctDop > 85 ? '#ff453a' : 'var(--accent-primary)'};"></div>
@@ -203,7 +204,7 @@ export class VistaTarjetas implements Vista {
                                     <div>
                                         <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.2rem;">
                                             <span>🇺🇸 USD (Uso: ${pctUsd.toFixed(1)}%)</span>
-                                            <span style="color:${balUsd.color};">${balUsd.texto}</span>
+                                            <span style="color:${escaparHtml(balUsd.color)};">${escaparHtml(balUsd.texto)}</span>
                                         </div>
                                         <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden; margin-bottom:0.3rem;">
                                             <div style="width: ${pctUsd}%; height:100%; background: ${pctUsd > 85 ? '#ff453a' : '#10b981'};"></div>
@@ -218,11 +219,11 @@ export class VistaTarjetas implements Vista {
                                     <div style="display:flex; flex-direction:column; gap:0.3rem;">
                                         <div class="alert-banner ${t.alerta_corte ? 'warning' : 'info'}" style="padding:0.4rem 0.6rem; font-size:0.75rem;">
                                             <span>📅</span>
-                                            <div>${t.dias_corte_msg}</div>
+                                            <div>${escaparHtml(t.dias_corte_msg)}</div>
                                         </div>
                                         <div class="alert-banner ${t.alerta_pago ? 'danger' : 'info'}" style="padding:0.4rem 0.6rem; font-size:0.75rem;">
                                             <span>🚨</span>
-                                            <div>${t.dias_pago_msg}</div>
+                                            <div>${escaparHtml(t.dias_pago_msg)}</div>
                                         </div>
                                     </div>
 
@@ -231,7 +232,7 @@ export class VistaTarjetas implements Vista {
                                         <div style="display:flex; gap:0.4rem; align-items:flex-end; width:100%;">
                                             <div style="flex:1.2;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
-                                                <input type="text" id="pag_fecha_${t.id}" value="${hoyStr}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
+                                                <input type="text" id="pag_fecha_${t.id}" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
                                             </div>
                                             <div style="flex:1;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Divisa</label>
@@ -258,7 +259,7 @@ export class VistaTarjetas implements Vista {
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Cuenta Débito (Opcional)</label>
                                                 <select id="pag_cuenta_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;">
                                                     <option value="">-- Ninguna (Efectivo/Otro) --</option>
-                                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${formato.importe(c.balance_actual)}</option>`).join('')}
+                                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                                                 </select>
                                             </div>
                                             <div style="flex:1;">
@@ -283,7 +284,7 @@ export class VistaTarjetas implements Vista {
                                             <div style="display:flex; gap:0.4rem; align-items:flex-end;">
                                                 <div style="flex:1.2;">
                                                     <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
-                                                    <input type="text" id="avc_fecha_${t.id}" value="${hoyStr}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
+                                                    <input type="text" id="avc_fecha_${t.id}" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
                                                 </div>
                                                 <div style="flex:1;">
                                                     <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Divisa</label>
@@ -301,7 +302,7 @@ export class VistaTarjetas implements Vista {
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Cuenta que recibe *</label>
                                                 <select id="avc_cuenta_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;" required>
                                                     <option value="">-- Selecciona --</option>
-                                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${formato.importe(c.balance_actual)}</option>`).join('')}
+                                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                                                 </select>
                                             </div>
                                             <div style="display:flex; gap:0.4rem; align-items:flex-end;">
@@ -329,7 +330,7 @@ export class VistaTarjetas implements Vista {
                                     <div id="avances_${t.id}" hidden style="font-size:0.75rem;"></div>
 
                                     <!-- Configurar límites -->
-                                    <button onclick="appUI.abrirEdicionLimitesTarjeta('${tEscaped}')" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">⚙️ Configurar Límites / Corte</button>
+                                    <button onclick="appUI.abrirEdicionLimitesTarjeta(${argumentoJs(JSON.stringify(t))})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">⚙️ Configurar Límites / Corte</button>
                                 </div>
                             `;
                         }).join('')}
@@ -349,12 +350,12 @@ export class VistaTarjetas implements Vista {
                     <form onsubmit="appUI.handleAgregarBonificacion(event)" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
                         <div style="flex:1; min-width:110px;">
                             <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
-                            <input type="text" id="bon_fecha" value="${hoyStr}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.78rem;" required>
+                            <input type="text" id="bon_fecha" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.78rem;" required>
                         </div>
                         <div style="flex:1.6; min-width:170px;">
                             <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Tarjeta</label>
                             <select id="bon_tarjeta" class="form-control" style="padding:0.4rem; font-size:0.78rem;" required>
-                                ${tarjetas.map(t => `<option value="${t.id}">${t.entidad} - ${t.nombre_tarjeta}</option>`).join('')}
+                                ${tarjetas.map(t => `<option value="${t.id}">${escaparHtml(t.entidad)} - ${escaparHtml(t.nombre_tarjeta)}</option>`).join('')}
                             </select>
                         </div>
                         <div style="flex:0.8; min-width:80px;">
@@ -388,10 +389,10 @@ export class VistaTarjetas implements Vista {
                             <tbody>
                                 ${bonificaciones.map(b => `
                                     <tr>
-                                        <td>${b.fecha}</td>
-                                        <td>${b.entidad} (${b.nombre_tarjeta})</td>
-                                        <td>${b.concepto}</td>
-                                        <td class="amount" style="text-align:right; color:var(--color-success);">+${b.divisa} ${formato.importe(b.monto)}</td>
+                                        <td>${escaparHtml(b.fecha)}</td>
+                                        <td>${escaparHtml(b.entidad)} (${escaparHtml(b.nombre_tarjeta)})</td>
+                                        <td>${escaparHtml(b.concepto)}</td>
+                                        <td class="amount" style="text-align:right; color:var(--color-success);">+${escaparHtml(b.divisa)} ${formato.importe(b.monto)}</td>
                                         <td><button onclick="appUI.handleEliminarBonificacion(${b.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.7rem;">🗑️</button></td>
                                     </tr>
                                 `).join('')}
@@ -401,7 +402,7 @@ export class VistaTarjetas implements Vista {
                         <p style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.6rem;">
                             Total acreditado: ${['DOP','USD'].map(d => {
                                 const suma = bonificaciones.filter(b => b.divisa === d).reduce((s,b) => s + b.monto, 0);
-                                return suma > 0 ? `<strong>${d} ${formato.importe(suma)}</strong>` : '';
+                                return suma > 0 ? `<strong>${escaparHtml(d)} ${formato.importe(suma)}</strong>` : '';
                             }).filter(Boolean).join(' · ') || '—'}
                         </p>
                     ` : `
@@ -529,14 +530,14 @@ export class VistaTarjetas implements Vista {
                 return `
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-color);">
                         <div>
-                            <strong>${a.divisa} ${formato.importe(a.monto_pagado)}</strong>
-                            <div style="font-size:0.7rem; color:var(--text-muted);">${a.fecha_pago} · ${origen}${tasa}</div>
+                            <strong>${escaparHtml(a.divisa)} ${formato.importe(a.monto_pagado)}</strong>
+                            <div style="font-size:0.7rem; color:var(--text-muted);">${escaparHtml(a.fecha_pago)} · ${escaparHtml(origen)}${escaparHtml(tasa)}</div>
                         </div>
                         <button onclick="appUI.handleRevertirAbono(${a.id}, ${id})" class="btn btn-danger" style="padding:0.2rem 0.45rem; font-size:0.7rem;" title="Deshacer este abono">↩︎</button>
                     </div>`;
             }).join('');
         } catch (err) {
-            caja.innerHTML = `<p style="color:var(--color-danger); padding:0.5rem;">${String(err)}</p>`;
+            caja.innerHTML = `<p style="color:var(--color-danger); padding:0.5rem;">${escaparHtml(String(err))}</p>`;
         }
     }
 
@@ -704,19 +705,19 @@ export class VistaTarjetas implements Vista {
                 const cargo = a.tipo_cargo === 'porcentaje' ? `cargo ${a.tasa}% = ${a.divisa} ${formato.importe(a.cargo)}`
                     : a.tipo_cargo === 'fijo' ? `cargo fijo ${a.divisa} ${formato.importe(a.cargo)}`
                     : 'exonerado';
-                const nota = a.nota ? `<div style="font-size:0.7rem; color:var(--text-muted); font-style:italic;">${a.nota}</div>` : '';
+                const nota = a.nota ? `<div style="font-size:0.7rem; color:var(--text-muted); font-style:italic;">${escaparHtml(a.nota)}</div>` : '';
                 return `
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-color);">
                         <div>
-                            <strong>${a.divisa} ${formato.importe(a.monto)}</strong>
-                            <div style="font-size:0.7rem; color:var(--text-muted);">${a.fecha} · ${a.cuenta_nombre} · ${cargo}</div>
+                            <strong>${escaparHtml(a.divisa)} ${formato.importe(a.monto)}</strong>
+                            <div style="font-size:0.7rem; color:var(--text-muted);">${escaparHtml(a.fecha)} · ${escaparHtml(a.cuenta_nombre)} · ${escaparHtml(cargo)}</div>
                             ${nota}
                         </div>
                         <button onclick="appUI.handleRevertirAvance(${a.id}, ${id})" class="btn btn-danger" style="padding:0.2rem 0.45rem; font-size:0.7rem;" title="Deshacer este avance">↩︎</button>
                     </div>`;
             }).join('');
         } catch (err) {
-            caja.innerHTML = `<p style="color:var(--color-danger); padding:0.5rem;">${String(err)}</p>`;
+            caja.innerHTML = `<p style="color:var(--color-danger); padding:0.5rem;">${escaparHtml(String(err))}</p>`;
         }
     }
 
@@ -796,11 +797,11 @@ export class VistaTarjetas implements Vista {
 
     abrirEdicionLimitesTarjeta(tJsonStr: string): void {
         const { modales } = this.dep;
-        const t = JSON.parse(tJsonStr);
+        const t: Tarjeta = JSON.parse(tJsonStr);
         const html = `
             <div class="card" style="width: 450px; background: var(--bg-surface-opaque); max-height:90vh; overflow-y:auto;">
                 <h3 style="font-family: var(--font-heading); margin-bottom: 0.6rem;">⚙️ Configurar Límites / Corte</h3>
-                <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">${t.entidad} - ${t.nombre_tarjeta}</p>
+                <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">${escaparHtml(t.entidad)} - ${escaparHtml(t.nombre_tarjeta)}</p>
                 <form onsubmit="appUI.handleEdicionLimitesTarjetaSubmit(event, ${t.id})">
                     <h4 style="font-size:0.85rem; color:var(--accent-primary); margin-bottom:0.5rem; border-bottom:1px solid var(--border-color); padding-bottom:0.2rem;">Pesos (DOP)</h4>
                     <div class="form-row">

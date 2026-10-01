@@ -11,6 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
 import { VistaCapital, MANEJADORES_CAPITAL, puenteCapital } from '../../../src/js/vistas/capital.js';
 
 const campo = value => ({ value });
@@ -237,4 +238,19 @@ test('baja: sin confirmar no se lee ni se guarda nada, aunque Rust fuera a falla
         await dar(t);
         assert.deepEqual([t.avisos, t.guardados, t.rutas], [[], [], []], que);
     }
+});
+
+// --- texto del titular en el HTML y en los manejadores ---
+
+test('un bien con nombre e identificador hostiles llega íntegro al botón de baja y no se interpreta', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const capital = documento();
+    capital.propiedades.inmobiliario = [{ id: hostil, subtipo: hostil, nombre: hostil, valor_estimado: 8000 }];
+    capital.certificados[0].banco = hostil;
+    capital.bolsa[0].emisor = hostil;
+    const t = montar({ capital });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.deepEqual(llamadasDelManejador(html, 'handleEliminarPropiedad'), [['inmobiliario', hostil], ['vehiculos', 'v1']]);
+    assert.doesNotMatch(html, /<img/);
 });

@@ -8,6 +8,8 @@
 
 import type { ApiDe, Formato, Pantalla, Referencias, Reloj, Vista } from '../ui/servicios';
 
+import { escaparHtml } from '../nucleo/html.js';
+
 type ApiResumen = ApiDe<
     | 'obtenerCapital'
     | 'obtenerIngresos'
@@ -171,7 +173,7 @@ export class VistaResumen implements Vista {
                 <div class="card">
                     <h3 style="font-family:var(--font-heading); font-size:1.15rem; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem; display:flex; justify-content:space-between; margin-bottom:1rem;">
                         <span>🔄 Carga Fija Mensual</span>
-                        <span class="amount expense">DOP ${formato.importe(cargaFija)}${suscripcionesOtrasDivisas.map(([d, m]) => ` + ${d} ${formato.importe(m)}`).join('')}</span>
+                        <span class="amount expense">DOP ${formato.importe(cargaFija)}${suscripcionesOtrasDivisas.map(([d, m]) => ` + ${escaparHtml(d)} ${formato.importe(m)}`).join('')}</span>
                     </h3>
                     <div style="display:flex; flex-direction:column; gap:0.6rem; font-size:0.85rem;">
                         <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); padding:0.5rem; border-radius:4px;">
@@ -184,8 +186,8 @@ export class VistaResumen implements Vista {
                         </div>
                         ${suscripcionesOtrasDivisas.map(([d, m]) => `
                         <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); padding:0.5rem; border-radius:4px;">
-                            <span>Suscripciones en ${d}</span>
-                            <strong>${d} ${formato.importe(m)}</strong>
+                            <span>Suscripciones en ${escaparHtml(d)}</span>
+                            <strong>${escaparHtml(d)} ${formato.importe(m)}</strong>
                         </div>`).join('')}
                     </div>
                 </div>

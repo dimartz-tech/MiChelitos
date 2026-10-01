@@ -14,6 +14,8 @@
 import type { Prestamo, Tarjeta } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, MenuFlotante, Modales, Pantalla, Referencias, Reloj, Vista } from '../ui/servicios';
 
+import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+
 type ApiPrestamos = ApiDe<
     | 'obtenerPrestamos'
     | 'obtenerTarjetas'
@@ -335,14 +337,14 @@ export class VistaPrestamos implements Vista {
 
                 <div style="display:flex; height:12px; border-radius:6px; overflow:hidden; gap:2px; margin-bottom:0.75rem;">
                     ${r.composicion.map(c => `
-                        <div title="${c.etiqueta}: DOP ${formato.importe(c.monto)}" style="width:${c.porcentaje}%; background:${c.color}; transition:filter var(--transition-fast);"></div>
+                        <div title="${escaparHtml(c.etiqueta)}: DOP ${formato.importe(c.monto)}" style="width:${c.porcentaje}%; background:${escaparHtml(c.color)}; transition:filter var(--transition-fast);"></div>
                     `).join('')}
                 </div>
                 <div style="display:flex; gap:1.5rem; flex-wrap:wrap; font-size:0.72rem; color:var(--text-secondary);">
                     ${r.composicion.map(c => `
                         <div style="display:flex; align-items:center; gap:0.4rem;">
-                            <span style="width:8px; height:8px; border-radius:2px; background:${c.color};"></span>
-                            ${c.etiqueta} · ${formato.importe(c.monto)}
+                            <span style="width:8px; height:8px; border-radius:2px; background:${escaparHtml(c.color)};"></span>
+                            ${escaparHtml(c.etiqueta)} · ${formato.importe(c.monto)}
                         </div>
                     `).join('')}
                 </div>
@@ -364,8 +366,8 @@ export class VistaPrestamos implements Vista {
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="1.7"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
                         </div>
                         <div>
-                            <div style="font-family:var(--font-heading); font-size:1rem; font-weight:700;">${t.nombre_tarjeta}</div>
-                            <div style="font-size:0.72rem; color:var(--text-muted);">${t.entidad} · Corte día ${t.fecha_corte} · Pago día ${t.fecha_limite_pago}</div>
+                            <div style="font-family:var(--font-heading); font-size:1rem; font-weight:700;">${escaparHtml(t.nombre_tarjeta)}</div>
+                            <div style="font-size:0.72rem; color:var(--text-muted);">${escaparHtml(t.entidad)} · Corte día ${t.fecha_corte} · Pago día ${t.fecha_limite_pago}</div>
                         </div>
                     </div>
                     <div style="text-align:right;">
@@ -451,11 +453,11 @@ export class VistaPrestamos implements Vista {
                 </div>
                 <div style="flex:1.5;">
                     <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-                        <span style="font-size:0.85rem; font-weight:600;">${nombre}</span>
-                        <span title="${etiqueta.titulo ?? ''}" style="font-size:0.62rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:${etiqueta.color}; background:${etiqueta.fondo}; border:1px solid ${etiqueta.borde}; border-radius:20px; padding:2px 8px;">${etiqueta.texto}</span>
-                        ${p.alerta_pago ? `<span class="badge danger" style="font-size:0.6rem; padding:1px 7px;">${p.dias_pago_msg}</span>` : ''}
+                        <span style="font-size:0.85rem; font-weight:600;">${escaparHtml(nombre)}</span>
+                        <span title="${escaparHtml(etiqueta.titulo ?? '')}" style="font-size:0.62rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:${escaparHtml(etiqueta.color)}; background:${escaparHtml(etiqueta.fondo)}; border:1px solid ${escaparHtml(etiqueta.borde)}; border-radius:20px; padding:2px 8px;">${escaparHtml(etiqueta.texto)}</span>
+                        ${p.alerta_pago ? `<span class="badge danger" style="font-size:0.6rem; padding:1px 7px;">${escaparHtml(p.dias_pago_msg)}</span>` : ''}
                     </div>
-                    <div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">${contexto}</div>
+                    <div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">${escaparHtml(contexto)}</div>
                 </div>
                 <div style="flex:1; text-align:right;">
                     <div style="font-size:0.9rem; font-weight:600;">DOP ${formato.importe(p.saldo_actual)}</div>
@@ -474,7 +476,7 @@ export class VistaPrestamos implements Vista {
                     ${anidada ? 'Hereda<br>las fechas' : `Día ${p.dia_pago}`}
                 </div>
                 <div style="width:30px; text-align:right;">
-                    <button onclick='appUI.abrirMenuPasivo(event, ${JSON.stringify(p).replace(/'/g, "&#39;")})' title="Acciones"
+                    <button onclick="appUI.abrirMenuPasivo(event, ${argumentoJs(p)})" title="Acciones"
                             style="background:none; border:none; color:var(--text-muted); font-size:1.05rem; cursor:pointer; padding:0.2rem 0.4rem; border-radius:var(--radius-sm); transition:color var(--transition-fast), background var(--transition-fast);">⋯</button>
                 </div>
             </div>
@@ -560,7 +562,7 @@ export class VistaPrestamos implements Vista {
             <div class="card" style="width: 460px; background: var(--bg-surface-opaque);">
                 <h3 style="font-family: var(--font-heading); margin-bottom:0.4rem;">✏️ Condiciones del financiamiento</h3>
                 <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
-                    ${p.institucion_financiera} — <strong style="text-transform:capitalize;">${p.tipo_prestamo}</strong><br>
+                    ${escaparHtml(p.institucion_financiera)} — <strong style="text-transform:capitalize;">${escaparHtml(p.tipo_prestamo)}</strong><br>
                     El saldo no se edita aquí: usa «Conciliar», que deja constancia de la diferencia.
                 </p>
                 <form onsubmit="appUI.handleEdicionPrestamo(event, ${p.id})">
@@ -588,7 +590,7 @@ export class VistaPrestamos implements Vista {
                             <option value="">Ninguna — se paga por su cuenta</option>
                             ${tarjetas.map(t => `
                                 <option value="${t.id}" data-pago="${t.fecha_limite_pago}" data-corte="${t.fecha_corte}" ${p.tarjeta_id === t.id ? 'selected' : ''}>
-                                    ${t.entidad} — ${t.nombre_tarjeta}
+                                    ${escaparHtml(t.entidad)} — ${escaparHtml(t.nombre_tarjeta)}
                                 </option>
                             `).join('')}
                         </select>
@@ -627,8 +629,8 @@ export class VistaPrestamos implements Vista {
         const vinculada = select.value !== '';
 
         if (vinculada) {
-            aviso.innerHTML = `Toma las fechas de la tarjeta: <strong>corte día ${opcion.dataset.corte}</strong>,
-                               <strong>pago día ${opcion.dataset.pago}</strong>. El día propio de abajo queda sin efecto.`;
+            aviso.innerHTML = `Toma las fechas de la tarjeta: <strong>corte día ${escaparHtml(opcion.dataset.corte)}</strong>,
+                               <strong>pago día ${escaparHtml(opcion.dataset.pago)}</strong>. El día propio de abajo queda sin efecto.`;
             if (dia) dia.disabled = true;
         } else {
             aviso.textContent = '';
