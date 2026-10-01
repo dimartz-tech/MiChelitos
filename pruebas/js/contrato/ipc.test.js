@@ -178,3 +178,20 @@ test('ningún wrapper envía una clave que su comando no conoce', () => {
     }
     assert.deepEqual(sobran, [], `Claves que se enviarían al vacío:\n  ${sobran.join('\n  ')}`);
 });
+
+test('toda llamada de la interfaz a AppAPI tiene su envoltorio en api.ts', () => {
+    // El panel «Casos de corrección» llamaba a `AppAPI.obtenerCorrecciones`,
+    // que nadie escribió nunca: el comando existía en Rust, pero el envoltorio
+    // no. La prueba de arriba solo mira de `api` hacia Rust; esta cierra el
+    // otro tramo, de la interfaz hacia `api`.
+    const fuentesDeLaInterfaz = ['ui.ts', 'app.ts', join('ui', 'dom.ts')]
+        .map(f => { try { return readFileSync(join(RAIZ, 'src', 'js', f), 'utf8'); } catch { return ''; } })
+        .join('\n');
+    const api = readFileSync(join(RAIZ, 'src', 'js', 'api.ts'), 'utf8');
+    const definidos = new Set([...api.matchAll(/^    async (\w+)\(/gm)].map(m => m[1]));
+    const usados = new Set([...fuentesDeLaInterfaz.matchAll(/\bAppAPI\.(\w+)/g)].map(m => m[1]));
+
+    assert.ok(usados.size > 40, `se esperaban decenas de llamadas, hay ${usados.size}`);
+    const sinEnvoltorio = [...usados].filter(n => !definidos.has(n));
+    assert.deepEqual(sinEnvoltorio, [], 'la interfaz llama a métodos de AppAPI que no existen');
+});

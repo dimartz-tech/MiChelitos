@@ -4,7 +4,20 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.44.0 (Versión Actual) - 2026-09-30
+## 🚀 Versión 1.45.0 (Versión Actual) - 2026-09-30
+**El panel «Casos de corrección» vuelve a abrir: le faltaba el envoltorio de `api`.**
+
+### 🐞 Qué fallaba
+* El botón de Ajustes que despliega los **casos de auditoría** (los que abre borrar o corregir un movimiento) llamaba a `AppAPI.obtenerCorrecciones`, un método que **nunca se escribió**: el comando `obtener_correcciones` existía y estaba registrado en Rust, pero `api` no lo envolvía. El panel mostraba en rojo «TypeError: AppAPI.obtenerCorrecciones is not a function» en lugar de los casos. Es decir, **los casos de auditoría se abrían pero no se podían consultar** desde la aplicación. Lo señaló TypeScript al quitar el `@ts-nocheck` de `ui.ts`; ninguna prueba miraba ese tramo. Está en la versión instalada.
+
+### ✅ Qué se hace
+* `api.ts` envuelve `obtener_correcciones`; la interfaz ya leía los campos correctos de la respuesta (`numero_caso`, `fecha`, `tipo`, `descripcion`, `importe`, `divisa`, `motivo`).
+* **Prueba nueva** (`ipc.test.js`): toda llamada de la interfaz a `AppAPI` tiene su envoltorio en `api.ts`. Cierra el tramo que faltaba: la prueba anterior solo miraba de `api` hacia Rust. Con la mutación (quitar el envoltorio) falla; con el arreglo, no hay ninguna otra llamada huérfana.
+* Reproducido y verificado en un navegador con datos simulados: antes «TypeError: … is not a function», ahora «C-0001 2026-09-30 · gasto Compra de prueba — DOP 10.00 Error al teclear el importe».
+
+---
+
+## 🚀 Versión 1.44.0 - 2026-09-30
 **El frontend pasa a TypeScript, con solo `tsc`: infraestructura y todos los archivos.** Sin cambios de comportamiento.
 
 ### 🔧 Qué cambia
