@@ -496,7 +496,7 @@ struct IngresoInput {
     rnc_cliente: String,
     nombre_cliente: String,
     fecha_emision: String,
-    monto_total: f64,
+    monto_total: ipc::ImporteDecimal,
     porcentaje_retencion: f64,
 }
 
@@ -535,8 +535,10 @@ fn crear_ingreso(input: IngresoInput) -> Result<i64, String> {
 
     // H16 resuelto: la retención se decide al céntimo, con el mismo núcleo
     // que el resto del sistema.
+    // El total llega como se escribió; una sola conversión sirve a la retención y a la fila.
+    let monto_total = input.monto_total.con_divisa(MONEDA_LOCAL);
     let monto_retenido = dominio::ingreso::retencion(
-        Dinero::nuevo(input.monto_total, MONEDA_LOCAL)?,
+        monto_total,
         Porcentaje::desde_porcentaje(input.porcentaje_retencion)?,
     )?
     .unidades();
@@ -548,7 +550,7 @@ fn crear_ingreso(input: IngresoInput) -> Result<i64, String> {
             &input.numero_factura,
             cliente_id,
             &input.fecha_emision,
-            input.monto_total,
+            monto_total.unidades(),
             input.porcentaje_retencion,
             monto_retenido,
         )

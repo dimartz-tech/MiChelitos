@@ -17,12 +17,12 @@ const factura = {
     mon_tot: '1234.56', ret_por: '5',
 };
 
-test('alta de factura: los importes y el porcentaje viajan como número, los textos tal cual', async () => {
+test('alta de factura: el total viaja como texto, el porcentaje como número, los textos tal cual', async () => {
     const ui = cargarInterfaz({ campos: factura });
     await ui.appUI.handleAgregarIngreso(crearEvento());
     llamoUnaVez(ui, 'crearIngreso', [{
         numero_factura: 'F-0001', rnc_cliente: '000000000', nombre_cliente: 'Cliente de Prueba',
-        fecha_emision: '10/02/2026', monto_total: 1234.56, porcentaje_retencion: 5,
+        fecha_emision: '10/02/2026', monto_total: '1234.56', porcentaje_retencion: 5,
     }]);
     avisoExito(ui, /Factura registrada/);
     redibujo(ui, 'ingresos');
