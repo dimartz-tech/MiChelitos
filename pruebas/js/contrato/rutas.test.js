@@ -46,3 +46,20 @@ test('toda vista registrada corresponde a una pestaña del menú', () => {
     const sobrantes = rutasRegistradas().filter(r => !menu.has(r));
     assert.deepEqual(sobrantes, [], 'vistas registradas con una ruta que el menú no ofrece');
 });
+
+test('una ruta que nadie reconoce cae en el Dashboard, como siempre (con el render real)', async () => {
+    // `render()` termina en un `default:`; desde que el Dashboard es una vista
+    // registrada, ese `default:` la busca en el registro. Si dejara de hacerlo,
+    // una ruta desconocida dejaría la pantalla en «Cargando módulo nativo…».
+    const interfaz = cargarInterfaz({
+        renderReal: true,
+        api: {
+            obtenerCapital: { totales: {}, certificados: [], bolsa: [] },
+            obtenerGastos: [], obtenerIngresos: [], obtenerIngresosInformales: [],
+            obtenerTarjetas: [], obtenerPrestamos: [],
+        },
+    });
+    await interfaz.appUI.render('una-ruta-que-no-existe');
+    assert.match(interfaz.elemento('app-content').innerHTML, /Dashboard General/);
+    assert.doesNotMatch(interfaz.elemento('app-content').innerHTML, /Error al renderizar/);
+});

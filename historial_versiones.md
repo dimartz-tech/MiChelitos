@@ -4,7 +4,30 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.54.0 (Versión Actual) - 2026-10-01
+## 🚀 Versión 1.55.0 (Versión Actual) - 2026-10-01
+**División de `ui.ts`, PR 4: la pestaña «Dashboard» sale de la clase.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* `src/js/vistas/dashboard.ts`: la vista como clase con dependencias inyectadas (seis consultas a la API, formato, pantalla y reloj). Solo lectura y sin manejadores de `appUI`: sus dos enlaces son `navigate()`, globales de `app.ts`. **10 % de las líneas de su cuerpo reescritas** (17 de 157). Declara solo lo que lee del capital (`ElementoConAlerta`), que Rust devuelve como JSON libre.
+* **El `default:` de `render()` era `renderDashboard()`:** una ruta que nadie reconoce cae en el Dashboard. Ahora busca la vista registrada (`this.vistas.get('dashboard')?.render()`); sin eso, quitar el método habría roto esa rama. Es el segundo acoplamiento que el `switch` esconde y que el análisis por métodos no ve.
+* `ui.ts` pierde 165 líneas y su `case` (+2 del `default:`); `registro.ts` +4. Parámetros sin tipo en `ui.ts`: 163 → 161.
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/dashboard.test.js` (10): lee solo los datos del mes del reloj inyectado, suma los cargos al gasto, usa el patrimonio del núcleo sin recalcularlo, genera los avisos de tarjetas, certificados, bolsa y préstamos **cada uno con su nivel**, limita a tres las tarjetas y los préstamos, y dibuja los mensajes vacíos.
+* `rutas.test.js` suma la prueba de la **ruta desconocida con el render real**: cae en el Dashboard.
+* 263 pruebas (259 pasan, 4 `todo` conocidos). Seis mutaciones, las seis detectadas; **una escapó a la primera versión de las pruebas** (el nivel del aviso de pago de tarjeta) y se reforzó la prueba.
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; los dos enlaces del Dashboard, ejercidos en las dos versiones, llevan al mismo título y la misma pestaña activa; y una ruta inexistente cae en el Dashboard con el mismo texto.
+* **App empaquetada**: cuatro vistas registradas, la ruta inexistente cae en el Dashboard sin error.
+* Previsto frente a medido (14-16 → 17 líneas; esfuerzo 0,6 → ≈0,9) y los seis controles del plan: `division_de_ui_limpia.md` §9.
+
+### Siguiente
+* PR 5: `capital` (7 métodos, 294 líneas; tres diálogos y las llamadas a la API que guardan el capital).
+
+---
+
+## 🚀 Versión 1.54.0 - 2026-10-01
 **División de `ui.ts`, PR 3: la pestaña «Resumen» sale de la clase.** Sin cambios visibles.
 
 ### 🧩 Qué se hace
