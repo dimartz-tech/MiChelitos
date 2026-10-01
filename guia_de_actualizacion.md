@@ -1,8 +1,15 @@
 # Actualizar la aplicación instalada: estabilidad y procedimiento
 
-Estado a 2026-10-02. **Instalada: 1.65.0** (actualizada el 2026-10-01: primero 1.36.0 → 1.62.0 y después 1.62.0 → 1.65.0; ver «Actualizaciones hechas»). Lo que sigue en esta guía es el análisis de la primera actualización (1.36.0 → 1.48.0) y el procedimiento, que se siguió tal cual y vale para la próxima.
+Estado a 2026-10-02. **Instalada: 1.68.0** (actualizada el 2026-10-01 en tres pasos: 1.36.0 → 1.62.0, 1.62.0 → 1.65.0 y 1.65.0 → 1.68.0; ver «Actualizaciones hechas»). Lo que sigue en esta guía es el análisis de la primera actualización (1.36.0 → 1.48.0) y el procedimiento, que se siguió tal cual y vale para la próxima.
 
 ## Actualizaciones hechas
+
+### 1.65.0 → 1.68.0 (2026-10-01)
+A petición expresa del titular, con el mismo procedimiento y la misma prueba previa contra una copia de los datos:
+* Respaldo `michelitos_2026-10-01T21-54-11_antes-de-actualizar-a-1.68.0` (base y capital, integridad correcta) y copia de la 1.65.0 en `~/.michelitos/aplicacion-anterior/MiChelitos-1.65.0.app`.
+* **Sin cambios en Rust** y sin migraciones (`user_version` sigue en 15): solo frontend. Trae tres correcciones: las cuatro bajas que no avisaban si Rust fallaba (1.66.0), el panel de «Casos de corrección» (1.67.0) y el **escape general de las plantillas** (1.68.0: ningún texto escrito por el titular se interpreta ya como HTML ni como código, y los botones con datos en el manejador funcionan con nombres con comillas).
+* Probada contra una copia (viva a los 16 s, esquema 15, integridad correcta, mismos conteos por tabla), instalada y abierta: esquema 15, integridad correcta, mismos conteos por tabla.
+* Volver atrás: cerrar y restituir `MiChelitos-1.65.0.app` (o una anterior) en `/Applications`; la base no se toca.
 
 ### 1.62.0 → 1.65.0 (2026-10-01)
 A petición expresa del titular, con el mismo procedimiento y la misma prueba previa contra una copia de los datos:
