@@ -1,32 +1,32 @@
 // Punto único de carga de la interfaz para las pruebas de interacción.
 //
-// Evalúa el JavaScript **compilado** de la interfaz (`npm test` compila antes)
-// como lo hace el navegador, con `document`, `window`, `AppAPI`, `confirm`,
-// `prompt`, `localStorage`, `navigate` y `setTimeout` falsos, y devuelve el
-// `appUI` resultante más los registros de lo ocurrido.
+// Compone la interfaz con **la misma función que ejecuta la aplicación**
+// (`componerInterfaz`, de `ui/componer.ts`), pero sobre dobles: un DOM falso, una API
+// falsa que registra cada llamada, diálogos que responden lo que la prueba decide,
+// ventanas modales y menús que se registran, y un enrutador que solo anota la ruta
+// (`renderReal: true` lo deja real). Del DOM real solo se evalúa `ui/dom.js`
+// (`elemento` y `buscar`), como lo carga el navegador, sobre el `document` falso.
 //
-// Las pruebas llaman siempre a `interfaz.appUI.<método>(...)`, que es lo mismo
-// que hacen los atributos `onclick="appUI.<método>()"`. Las vistas extraídas de
-// `ui.ts` (`src/js/vistas/`) se registran aquí con `registrarVistas`, la misma
-// función que usa `composicion.ts`, así que **añadir una vista no obliga a tocar
-// este archivo ni las pruebas**.
+// Las pruebas llaman siempre a `interfaz.appUI.<método>(...)`, que es lo mismo que
+// hacen los atributos `onclick="appUI.<método>()"`: el puente que cuelga de
+// `window.appUI`. **Añadir una vista no obliga a tocar este archivo ni las pruebas**:
+// la registra `vistas/registro.ts`.
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crearDomFalso, AUSENTE } from './dom_falso.js';
-// Lo mismo que ejecuta la aplicación (`composicion.ts`): los servicios reales
-// sobre dobles, y el registro de las vistas extraídas.
-import { serviciosDesdeAppUI } from '../../../src/js/ui/servicios.js';
-import { registrarVistas } from '../../../src/js/vistas/registro.js';
+// Lo mismo que ejecuta la aplicación (`composicion.ts`).
+import { componerInterfaz } from '../../../src/js/ui/componer.js';
+import { crearAvisos } from '../../../src/js/ui/servicios.js';
 
 export { AUSENTE };
 export { crearEvento, crearElemento } from './dom_falso.js';
 
 const JS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'src', 'js');
 
-/** Scripts clásicos, en el orden de `index.html`, relativos a `src/js`. */
-const SCRIPTS = ['ui/dom.js', 'ui.js'];
+/** Los scripts clásicos que sigue cargando `index.html` y las pruebas necesitan, relativos a `src/js`. */
+const SCRIPTS = ['ui/dom.js'];
 
 const leer = ruta => readFileSync(join(JS, ruta), 'utf8');
 
@@ -86,7 +86,6 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
     const llamadas = [];
     const avisos = [];
     const renders = [];
-    const navegaciones = [];
     const confirmaciones = [];
     const preguntas = [];
     const temporizadores = [];
@@ -94,62 +93,50 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
     const menusAbiertos = [];
     const respuestas = new Map(Object.entries(api));
 
-    // Los contenedores que el constructor exige; la prueba puede pisarlos.
+    // Los contenedores que la composición exige; la prueba puede pisarlos.
     const { document, registro, declarar } = crearDomFalso({
         'app-content': {}, 'notification-container': {}, ...campos,
     });
     const omisiones = registro.omisiones;
 
-    const almacen = new Map();
-    const localStorage = {
-        getItem: k => (almacen.has(k) ? almacen.get(k) : null),
-        setItem: (k, v) => { almacen.set(k, String(v)); },
-        removeItem: k => { almacen.delete(k); },
-    };
     const confirmFalso = crearDialogo('confirm', confirm, confirmaciones, omisiones);
     const promptFalso = crearDialogo('prompt', prompt, preguntas, omisiones);
-    const setTimeoutFalso = (fn, ms) => { temporizadores.push({ fn, ms }); return temporizadores.length; };
-    const window = { localStorage, confirm: confirmFalso, prompt: promptFalso, __TAURI__: undefined };
     const AppAPI = crearApiFalsa(llamadas, respuestas);
-    const navigate = ruta => { navegaciones.push(ruta); };
 
-    const fuente = SCRIPTS.map(leer).join('\n');
-    const evaluar = new Function(
-        'document', 'window', 'AppAPI', 'confirm', 'prompt', 'localStorage', 'navigate', 'setTimeout',
-        `${fuente}\nreturn { appUI, elemento, buscar };`,
-    );
-    const { appUI: objetivo, elemento: elementoReal, buscar: buscarReal } =
-        evaluar(document, window, AppAPI, confirmFalso, promptFalso, localStorage, navigate, setTimeoutFalso);
+    const evaluar = new Function('document', `${SCRIPTS.map(leer).join('\n')}\nreturn { elemento, buscar };`);
+    const { elemento: elementoReal, buscar: buscarReal } = evaluar(document);
 
-    // Cada aviso queda registrado, y además se muestra con el código real.
-    const showToastReal = objetivo.showToast;
-    objetivo.showToast = function (mensaje, tipo = 'success') {
-        avisos.push({ tipo, mensaje: String(mensaje) });
-        return showToastReal.call(this, mensaje, tipo);
+    // Cada aviso queda registrado, y además se dibuja con el código real de los avisos
+    // sobre el DOM falso (los temporizadores no corren: se guardan en `temporizadores`).
+    const avisosReales = crearAvisos({
+        contenedor: elementoReal('notification-container'),
+        crear: () => document.createElement('div'),
+        programar: (fn, ms) => { temporizadores.push({ fn, ms }); return temporizadores.length; },
+    });
+    const avisosObservados = {
+        mostrar(mensaje, tipo = 'success') {
+            avisos.push({ tipo, mensaje: String(mensaje) });
+            avisosReales.mostrar(mensaje, tipo);
+        },
     };
-    if (!renderReal) {
-        objetivo.render = async function (ruta) { renders.push(ruta); };
-    }
+    const enrutadorObservado = { mostrar: async ruta => { renders.push(ruta); } };
 
-    // Las vistas extraídas, con los servicios reales sobre los dobles de esta carga.
-    // `showToast` y `render` ya están observados, y los servicios los llaman a
-    // través de `objetivo`, así que cada aviso y cada ruta quedan registrados.
-    registrarVistas(
-        objetivo,
-        serviciosDesdeAppUI(
-            objetivo,
-            { elemento: elementoReal, buscar: buscarReal },
-            () => new Date(),
-            { confirmar: m => confirmFalso(m), preguntar: (m, d) => promptFalso(m, d) },
+    const { appUI: puente, servicios, enrutador, vistas } = componerInterfaz(
+        {
+            dom: { elemento: elementoReal, buscar: buscarReal },
+            contenido: elementoReal('app-content'),
+            avisos: { contenedor: elementoReal('notification-container') },
+            dialogos: { confirmar: m => confirmFalso(m), preguntar: (m, d) => promptFalso(m, d) },
             // Una ventana modal abierta queda registrada y existe en el DOM falso con su
             // contenido, para que la vista (o la prueba) la encuentre y la cierre por id.
-            { abrir: (id, html) => { modalesAbiertos.push({ id, html }); declarar(id, { innerHTML: html }); } },
-            // Un menú flotante abierto queda registrado: `elegir(accion)` hace lo que el clic en su renglón.
-            {
+            modales: { abrir: (id, html) => { modalesAbiertos.push({ id, html }); declarar(id, { innerHTML: html }); } },
+            // Un menú flotante abierto queda registrado: `alElegir(accion)` hace lo que el clic en su renglón.
+            menus: {
                 abrir: opciones => { menusAbiertos.push({ ...opciones, abierto: true }); },
                 cerrar: () => { for (const m of menusAbiertos) m.abierto = false; },
             },
-        ),
+            sustituir: { avisos: avisosObservados, ...(renderReal ? {} : { enrutador: enrutadorObservado }) },
+        },
         AppAPI,
     );
 
@@ -161,10 +148,10 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
             throw new Error(`Prueba mal configurada:\n  - ${[...new Set(omisiones)].join('\n  - ')}`);
         }
     };
-    const appUI = new Proxy(objetivo, {
+    const appUI = new Proxy(puente, {
         get(destino, nombre, receptor) {
             const valor = Reflect.get(destino, nombre, receptor);
-            if (typeof valor !== 'function' || nombre === 'constructor') return valor;
+            if (typeof valor !== 'function') return valor;
             return (...args) => {
                 const resultado = valor.apply(receptor, args);
                 if (resultado && typeof resultado.then === 'function') {
@@ -180,19 +167,25 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
     });
 
     return {
+        /** El puente de manejadores, como lo ve el HTML (`window.appUI`). */
         appUI,
+        /** Los servicios que ven las vistas (con los dobles de esta carga). */
+        servicios,
+        /** El enrutador **real**, aunque las vistas vean uno que solo anota la ruta. */
+        enrutador,
+        /** Las vistas registradas, por ruta. */
+        vistas,
         /** El doble de `AppAPI` que ve la interfaz (solo los métodos reales de api.ts). */
         api: AppAPI,
         llamadas,
         avisos,
         renders,
-        navegaciones,
         confirmaciones,
         preguntas,
         temporizadores,
-        /** Las ventanas modales que abrieron las vistas extraídas: `{ id, html }`. */
+        /** Las ventanas modales que abrieron las vistas: `{ id, html }`. */
         modalesAbiertos,
-        /** Los menús flotantes que abrieron las vistas extraídas: `{ id, html, ancla, alElegir, abierto }`. */
+        /** Los menús flotantes que abrieron las vistas: `{ id, html, ancla, alElegir, abierto }`. */
         menusAbiertos,
         dom: { document, registro, declarar },
         /** Los elementos que `remove()` quitó, por id (modales cerrados). */

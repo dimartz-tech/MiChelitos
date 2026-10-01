@@ -1,6 +1,6 @@
 # Migración del frontend a TypeScript
 
-Estado: **1.44.0** infraestructura y conversión de todos los archivos; **1.46.0** `ui.ts` ya se comprueba (ayudante de DOM, sin `@ts-nocheck`); **1.47.0** `api.ts` tiene todos sus parámetros tipados y se comprueba con `noImplicitAny`. Queda tipar los parámetros de `ui.ts` y dividirlo. Decisión del titular el 2026-09-30: ir a TypeScript con solo `tsc` y **empezar ya**, porque migrar es más caro cuanto más código nuevo se escribe en JavaScript.
+Estado: **migración terminada (1.65.0)**: todo `src/js` se comprueba con `strict` y `noImplicitAny`, sin archivos exentos y con una sola configuración (`tsconfig.build.json`); `ui.ts` ya no existe. Historia: **1.44.0** infraestructura y conversión de todos los archivos; **1.46.0** `ui.ts` ya se comprueba (ayudante de DOM, sin `@ts-nocheck`); **1.47.0** `api.ts` tiene todos sus parámetros tipados y se comprueba con `noImplicitAny`. Después se tiparon los parámetros de `ui.ts` y se dividió en once vistas (PR 0–11), y en la 1.65.0 se retiró. Decisión del titular el 2026-09-30: ir a TypeScript con solo `tsc` y **empezar ya**, porque migrar es más caro cuanto más código nuevo se escribe en JavaScript.
 
 Contexto y comparación con JSDoc: [fase_7_frontend.md](fase_7_frontend.md), §4.
 
@@ -74,3 +74,7 @@ Qué se comprobó: el **JavaScript compilado de `api` es idéntico byte a byte**
 * Hay un **paso de compilación** y archivos generados junto a los fuentes (ignorados). Se eligió compilar en el sitio, y no a una carpeta `dist/`, para no duplicar `index.html`, `css` y `assets` ni tocar `distDir`; el coste es que `src/js` mezcla `.ts` y `.js` generados.
 * **Olvidarse de compilar antes de empaquetar con `cargo`** deja una app sin JavaScript. Por eso el hook de `tauri build` y este aviso.
 * Node 22 o superior para el patrón de archivos de `node --test`.
+
+## Estado final (1.65.0)
+* `ui.ts` se retiró al terminar su división (`division_de_ui_limpia.md`): no quedó ningún archivo con deuda de tipos, así que **`tsconfig.estricto.json` desapareció** y `tsconfig.build.json` pasó a `noImplicitAny: true`. `npm run compilar` y `npm run tipos` usan solo esa configuración.
+* `app.ts` (el arranque) dejó de ser un script clásico: es un módulo tipado que recibe el enrutador, los avisos, el DOM y la API (`iniciarAplicacion`). Los scripts clásicos que quedan en `index.html` son `api.js` (el global `AppAPI`) y `ui/dom.js` (`elemento` y `buscar`, que algunos manejadores en línea llaman); todo lo demás entra por `composicion.js`, un módulo.

@@ -4,7 +4,32 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.64.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.65.0 (Versión Actual) - 2026-10-02
+**División de `ui.ts`, PR 12: se retira la clase `AppUI` y la división termina.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* **Lo último que quedaba en `ui.ts` pasa a su servicio**, con la misma lógica: los avisos (`crearAvisos`), el formato de importes, la petición del motivo de una corrección (`crearMotivo`), el enrutador de pestañas (`crearEnrutador`, ya sin `switch`: solo el registro de vistas, y una ruta desconocida cae en el Dashboard) y la tasa del dólar. `ui.ts` (130 líneas) se borra.
+* **`componerInterfaz` (`ui/componer.ts`) sustituye a la clase** como lo que arma la aplicación: crea los servicios, registra las vistas y compone el puente `appUI` de los manejadores. Es una función para que la aplicación y las pruebas ejecuten el **mismo** cableado, y **rechaza lo que antes se pisaba en silencio**: dos vistas con la misma ruta o con un manejador del mismo nombre.
+* `window.appUI` pasa de ser una clase a un objeto plano con los 70 manejadores de las once vistas, y nada más (los atributos `onclick` del HTML siguen llamándolo).
+* `app.ts` (el arranque) pasa a **módulo**: recibe el enrutador, los avisos, el DOM y la API en lugar de llamar al global `appUI`; sigue colgando `navigate` de `window`. `index.html` queda con tres `<script>`: `api.js`, `ui/dom.js` y `composicion.js` (módulo).
+* **TypeScript, una sola configuración estricta:** sin `ui.ts` no quedó ningún archivo con parámetros sin tipo, así que `tsconfig.estricto.json` desaparece y `tsconfig.build.json` pasa a `noImplicitAny: true`.
+
+### 🧪 Pruebas
+* 30 nuevas: `servicios_reales.test.js` (avisos con su icono y sus tiempos, formato, motivo con su mínimo, enrutador con «Cargando», ruta desconocida y tarjeta de error), `componer.test.js` (once vistas, el puente sin lo que fue de la clase, rechazo de rutas y manejadores repetidos, motivo con los avisos y diálogos de la carga) y `app.test.js` (navegar, suscripciones al arrancar, tema y menú lateral).
+* Los contratos se refuerzan: **todo `appUI.x` que escribe el HTML está en el puente real compuesto**; cada pestaña tiene su vista y la dibuja ella; `index.html` solo carga tres scripts.
+* El cargador de las pruebas de interacción se reescribió sobre `componerInterfaz`; las pruebas existentes pasan sin tocar salvo una. 496 pruebas (492 pasan, 4 `todo` conocidos). Treinta y dos mutaciones, las treinta y dos detectadas.
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas y diez comprobaciones transversales en las dos versiones (menú lateral con clics reales, manejadores de las once pestañas, tema con su aviso, menú plegable, ruta desconocida, fallo de una vista y motivo corto): mismos resultados, 0 errores.
+* **App empaquetada**: arranca con el Dashboard, navega por el menú, cambia el tema con su aviso, una ruta desconocida cae en el Dashboard, `window.appUI` tiene 70 manejadores y ninguno de la clase, y el diálogo de página funciona.
+* Balance de la división y registro de previsto frente a medido: `division_de_ui_limpia.md` §9.
+
+### Siguiente
+* La división de `ui.ts` está terminada. Pendientes aparte, anotados sin corregir: el panel de casos de corrección pinta el motivo sin escapar, cuatro bajas sin `try/catch`, los importes que aún viajan como `Number` y los riesgos del capital.
+
+---
+
+## 🚀 Versión 1.64.0 - 2026-10-02
 **División de `ui.ts`, PR 11: la pestaña «Tarjetas de Crédito» sale de la clase.** Sin cambios visibles. **Es la última de las once vistas.**
 
 ### 🧩 Qué se hace

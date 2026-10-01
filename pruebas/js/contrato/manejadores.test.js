@@ -1,18 +1,18 @@
 // Los manejadores en línea (`onclick="appUI.guardar()"`) son el hilo que une el
-// HTML que dibuja `ui.ts` con el código que lo atiende. Un manejador que apunta
+// HTML que dibujan las vistas con el código que lo atiende. Un manejador que apunta
 // a algo que no existe **falla al pulsar**, no al cargar: ninguna otra prueba
 // ni el compilador lo ven, porque el nombre vive dentro de una cadena.
 //
-// Existe para la división de `ui.ts` por pestañas (`division_de_ui.md`): mover
+// Existió para la división de `ui.ts` por pestañas (`division_de_ui.md`): mover
 // un método a otro archivo es justo la operación que deja un `onclick` colgado.
-// Esta prueba comprueba, antes de fusionar cada movimiento, que cada manejador
-// sigue teniendo destino.
+// Sigue valiendo para cualquier vista nueva: comprueba que cada manejador tiene destino.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RAIZ, fuentesDeLaInterfaz, leerHtml } from '../ayudas/fuentes_interfaz.js';
+import { cargarInterfaz } from '../ayudas/cargar_interfaz.js';
 
 const JS = join(RAIZ, 'src', 'js');
 
@@ -60,10 +60,21 @@ test('todo appUI.metodo() de un manejador existe como método de la interfaz', (
     assert.deepEqual(colgados, [], 'manejadores que llaman a un método que no existe');
 });
 
-test('navigate() existe como función global en app.ts', () => {
+test('todo appUI.metodo() de un manejador está en el puente real que cuelga de window.appUI', () => {
+    // La prueba de arriba mira los fuentes; esta mira lo que **de verdad se compone**: si una
+    // vista se queda sin registrar, o su puente no expone un manejador que su plantilla
+    // escribe, el botón falla al pulsarlo y no al cargar.
+    const puente = new Set(Object.keys(cargarInterfaz().appUI));
+    const llamados = new Set(manejadores().flatMap(c => [...c.matchAll(/\bappUI\.(\w+)/g)].map(m => m[1])));
+    const sinPuente = [...llamados].filter(n => !puente.has(n));
+    assert.deepEqual(sinPuente, [], 'manejadores escritos en el HTML que ninguna vista expone en el puente');
+});
+
+test('navigate() existe como función global, definida por app.ts', () => {
     assert.ok(manejadores().some(c => /\bnavigate\(/.test(c)), 'ya ningún manejador usa navigate');
     const app = readFileSync(join(JS, 'app.ts'), 'utf8');
-    assert.match(app, /^function navigate\(/m, 'navigate dejó de ser una función global de app.ts');
+    assert.match(app, /function navigate\(/, 'app.ts dejó de definir navigate');
+    assert.match(app, /\.navigate = navigate/, 'app.ts ya no cuelga navigate de window: los manejadores en línea no lo encontrarían');
 });
 
 test('los manejadores solo llaman a destinos globales conocidos: cualquier otro se declara aquí', () => {
