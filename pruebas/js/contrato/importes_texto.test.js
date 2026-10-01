@@ -51,6 +51,8 @@ const MIGRADOS = [
     ['transferirEntreCuentas', A => A.transferirEntreCuentas(1, 2, '10', TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, 'x'), ['montoOrigen', 'montoDestino', 'cargo']],
     ['crearTarjeta', A => A.crearTarjeta('B', 'T', TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, 15, 5),
         ['limitePesos', 'limiteDolares', 'sobregiroPesos', 'sobregiroDolares', 'balancePesos', 'balanceDolares', 'balanceCortePesos', 'balanceCorteDolares']],
+    ['actualizarLimitesTarjeta', A => A.actualizarLimitesTarjeta(1, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, 'origen'),
+        ['limitePesos', 'limiteDolares', 'sobregiroPesos', 'sobregiroDolares', 'balanceCortePesos', 'balanceCorteDolares', 'limiteAjustadoPesos', 'limiteAjustadoDolares']],
     ['crearCuenta (comisión)', A => A.crearCuenta('Cuenta', 'DOP', 10, null, TRES_DECIMALES), ['comisionPagoImpuestos']],
     ['actualizarCuenta (comisión)', A => A.actualizarCuenta(1, 'Cuenta', null, TRES_DECIMALES), ['comisionPagoImpuestos']],
     ['actualizarIngreso (total)', A => A.actualizarIngreso(1, 'F-1', 2, '01/01/2027', TRES_DECIMALES, 10, null, null), ['montoTotal']],
@@ -85,9 +87,6 @@ test('un importe de tres decimales llega intacto: es el que `Number` deja en 1.0
  * migración quita sus entradas de aquí.**
  */
 const PENDIENTES = [
-    'actualizarLimitesTarjeta.balanceCorteDolares', 'actualizarLimitesTarjeta.balanceCortePesos',
-    'actualizarLimitesTarjeta.limiteDolares', 'actualizarLimitesTarjeta.limitePesos',
-    'actualizarLimitesTarjeta.sobregiroDolares', 'actualizarLimitesTarjeta.sobregiroPesos',
 ];
 
 const ES_IMPORTE = /monto|limite|sobregiro|balance|saldo|cuota|cargo|comision|valor|importe/i;

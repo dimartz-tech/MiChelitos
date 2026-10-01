@@ -870,20 +870,23 @@ fn crear_tarjeta(
 #[tauri::command]
 fn actualizar_limites_tarjeta(
     id: i64,
-    limite_pesos: f64,
-    limite_dolares: f64,
-    sobregiro_pesos: f64,
-    sobregiro_dolares: f64,
-    balance_corte_pesos: f64,
-    balance_corte_dolares: f64,
-    limite_ajustado_pesos: Option<f64>,
-    limite_ajustado_dolares: Option<f64>,
+    limite_pesos: ipc::ImporteDecimal,
+    limite_dolares: ipc::ImporteDecimal,
+    sobregiro_pesos: ipc::ImporteDecimal,
+    sobregiro_dolares: ipc::ImporteDecimal,
+    balance_corte_pesos: ipc::ImporteDecimal,
+    balance_corte_dolares: ipc::ImporteDecimal,
+    // `None` es «sin ajuste»; cero es un tope deliberado.
+    limite_ajustado_pesos: Option<ipc::ImporteDecimal>,
+    limite_ajustado_dolares: Option<ipc::ImporteDecimal>,
     politica_liquidacion: Option<String>
 ) -> Result<(), String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE tarjetas SET limite_pesos = ?, limite_dolares = ?, limite_sobregiro_pesos = ?, limite_sobregiro_dolares = ?, balance_corte_pesos = ?, balance_corte_dolares = ?, limite_ajustado_pesos = ?, limite_ajustado_dolares = ?, politica_liquidacion = ? WHERE id = ?;",
-        (limite_pesos, limite_dolares, sobregiro_pesos, sobregiro_dolares, balance_corte_pesos, balance_corte_dolares, limite_ajustado_pesos, limite_ajustado_dolares,
+        (limite_pesos.unidades(), limite_dolares.unidades(), sobregiro_pesos.unidades(), sobregiro_dolares.unidades(),
+         balance_corte_pesos.unidades(), balance_corte_dolares.unidades(),
+         limite_ajustado_pesos.map(|i| i.unidades()), limite_ajustado_dolares.map(|i| i.unidades()),
          PoliticaLiquidacion::desde_codigo(politica_liquidacion.as_deref()).codigo(), id)
     ).map_err(|e| e.to_string())?;
     Ok(())

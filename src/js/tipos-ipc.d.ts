@@ -41,7 +41,7 @@ export type Comandos = {
     marcar_informal_pagado: { args: { id: number; cuentaAhorroId: number; fecha: string; montoRecibido: string | number }; ret: null };
     obtener_tarjetas: { args: {  }; ret: Tarjeta[] };
     crear_tarjeta: { args: { entidad: string; nombre: string; limitePesos: string | number; limiteDolares: string | number; sobregiroPesos: string | number; sobregiroDolares: string | number; balancePesos: string | number; balanceDolares: string | number; balanceCortePesos: string | number; balanceCorteDolares: string | number; corte: number; pago: number }; ret: number };
-    actualizar_limites_tarjeta: { args: { id: number; limitePesos: number; limiteDolares: number; sobregiroPesos: number; sobregiroDolares: number; balanceCortePesos: number; balanceCorteDolares: number; limiteAjustadoPesos?: number | null; limiteAjustadoDolares?: number | null; politicaLiquidacion?: string | null }; ret: null };
+    actualizar_limites_tarjeta: { args: { id: number; limitePesos: string | number; limiteDolares: string | number; sobregiroPesos: string | number; sobregiroDolares: string | number; balanceCortePesos: string | number; balanceCorteDolares: string | number; limiteAjustadoPesos?: string | number | null; limiteAjustadoDolares?: string | number | null; politicaLiquidacion?: string | null }; ret: null };
     registrar_pago_tarjeta: { args: { id: number; fecha: string; monto: string | number; divisa: string; cuentaAhorroId?: number | null; tasaCambio: number }; ret: null };
     obtener_abonos_tarjeta: { args: { tarjetaId: number }; ret: AbonoTarjeta[] };
     revertir_abono_tarjeta: { args: { id: number; motivo: string }; ret: string };

@@ -50,7 +50,7 @@ test('editar límites: orden de argumentos, ajustes vacíos = null, cierra el mo
     const ui = cargarInterfaz({ campos: limites });
     await ui.appUI.handleEdicionLimitesTarjetaSubmit(crearEvento(), 3);
     // (id, límDOP, límUSD, sobDOP, sobUSD, corteDOP, corteUSD, ajusteDOP, ajusteUSD, política)
-    llamoUnaVez(ui, 'actualizarLimitesTarjeta', [3, 1000.1, 4000.4, 200.2, 500.5, 300.3, 600.6, null, null, 'origen']);
+    llamoUnaVez(ui, 'actualizarLimitesTarjeta', [3, '1000.10', '4000.40', '200.20', '500.50', '300.30', '600.60', null, null, 'origen']);
     assert.deepEqual(ui.eliminados, ['modal-edit-tar-3']);
     redibujo(ui, 'tarjetas');
 });
@@ -59,8 +59,8 @@ test('editar límites: un ajuste «0» es un tope deliberado (0), no «sin ajust
     const ui = cargarInterfaz({ campos: { ...limites, edit_aju_dop_3: '0', edit_aju_usd_3: '250.25' } });
     await ui.appUI.handleEdicionLimitesTarjetaSubmit(crearEvento(), 3);
     const args = ui.llamadasA('actualizarLimitesTarjeta')[0].args;
-    assert.equal(args[7], 0);
-    assert.equal(args[8], 250.25);
+    assert.equal(args[7], '0');
+    assert.equal(args[8], '250.25');
 });
 
 test('editar límites: política elegida viaja; sin selector o vacía vale «origen»', async () => {

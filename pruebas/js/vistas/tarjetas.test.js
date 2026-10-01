@@ -486,11 +486,11 @@ const CAMPOS_LIMITES = (extra = {}) => ({
     edit_aju_dop_7: el({ value: '' }), edit_aju_usd_7: el({ value: '' }), edit_pol_7: el({ value: 'traduce' }), 'modal-edit-tar-7': el(), ...extra,
 });
 
-test('guardar límites: números, ajuste en blanco como «sin ajuste» y política elegida; cierra la ventana y redibuja', async () => {
+test('guardar límites: texto, ajuste en blanco como «sin ajuste» y política elegida; cierra la ventana y redibuja', async () => {
     const t = montar({ campos: CAMPOS_LIMITES() });
     await t.vista.handleEdicionLimitesTarjetaSubmit(t.evento, 7);
     // (id, límite DOP, límite USD, sobregiro DOP, sobregiro USD, corte DOP, corte USD, ajustado DOP, ajustado USD, política)
-    assert.deepEqual(t.llamadas, [['actualizarLimitesTarjeta', 7, 500, 100, 50, 10, 150, 30, null, null, 'traduce']]);
+    assert.deepEqual(t.llamadas, [['actualizarLimitesTarjeta', 7, '500', '100', '50', '10', '150', '30', null, null, 'traduce']]);
     assert.equal(t.registro['modal-edit-tar-7'].quitado, true);
     assert.deepEqual(t.rutas, ['tarjetas']);
 });
@@ -499,7 +499,19 @@ test('un límite ajustado de cero es un tope deliberado, no «sin ajuste»; la p
     const t = montar({ campos: CAMPOS_LIMITES({ edit_aju_dop_7: el({ value: '0' }), edit_pol_7: undefined }) });
     delete t.registro.edit_pol_7;
     await t.vista.handleEdicionLimitesTarjetaSubmit(t.evento, 7);
-    assert.deepEqual([t.llamadas[0][8], t.llamadas[0][9], t.llamadas[0][10]], [0, null, 'origen']);
+    assert.deepEqual([t.llamadas[0][8], t.llamadas[0][9], t.llamadas[0][10]], ['0', null, 'origen']);
+});
+
+test('guardar límites: un límite en blanco se envía como «0» y un ajustado conserva sus dígitos escritos', async () => {
+    const t = montar({ campos: CAMPOS_LIMITES({ edit_sob_dop_7: el({ value: '  ' }), edit_aju_dop_7: el({ value: '0075.250' }), edit_aju_usd_7: el({ value: ' 1.005 ' }) }) });
+    await t.vista.handleEdicionLimitesTarjetaSubmit(t.evento, 7);
+    assert.deepEqual(t.llamadas[0].slice(1, 10), [7, '500', '100', '0', '10', '150', '30', '0075.250', '1.005']);
+});
+
+test('un ajustado se compara como número con el aprobado (1000 supera a 999), no como texto', async () => {
+    const t = montar({ campos: CAMPOS_LIMITES({ edit_lim_dop_7: el({ value: '999' }), edit_aju_dop_7: el({ value: '1000' }) }) });
+    await t.vista.handleEdicionLimitesTarjetaSubmit(t.evento, 7);
+    assert.deepEqual(t.llamadas, []);
 });
 
 test('un límite ajustado mayor que el aprobado se rechaza antes de tocar la API', async () => {
