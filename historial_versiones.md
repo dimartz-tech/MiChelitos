@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.59.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.60.0 (Versión Actual) - 2026-10-02
+**Corrección: la «Carga Fija Mensual» del Resumen ya no mezcla divisas.**
+
+### 🐛 Qué estaba mal
+* La tarjeta sumaba **todas** las suscripciones sin mirar su `divisa`: 10 USD contaban como 10 DOP. Con 10 de 11 suscripciones en dólares, la carga fija salía muy por debajo de la real, rotulada «DOP». Venía de antes de la división de `ui.ts` (las dos versiones pintaban lo mismo, por eso la comparación no lo detectó) y la prueba que la fijaba usaba solo pesos.
+
+### 🔧 Qué se hace
+* Las suscripciones se suman **por divisa, sin convertir**: no hay una tasa fiable para una carga que se cobra en dólares, y una cifra convertida con una constante no corresponde con lo que se paga. El total de la cabecera es el de pesos (cuotas de préstamos —que no tienen divisa— más suscripciones en DOP) y las otras divisas se muestran aparte: «DOP 45 + USD 20», con su propio renglón «Suscripciones en USD». Una divisa que no sea DOP ni USD tampoco se pierde ni se suma a los pesos; una suscripción sin divisa cuenta como pesos.
+* Solo la carga fija. No cambia el pasivo de tarjetas (que sí convierte con la tasa de referencia) ni ninguna otra cifra.
+
+### 🧪 Pruebas
+* 4 nuevas en `pruebas/js/vistas/resumen.test.js`: los dólares no entran en la suma de pesos, otra tasa no cambia ninguna cifra de la tarjeta, sin dólares no aparece renglón de otra divisa, y una tercera divisa se muestra aparte. 318 pruebas (314 pasan, 4 `todo` conocidos). Cuatro variantes erróneas (suma sin mirar la divisa, conversión con la tasa, perder otras divisas, total con dólares sumados): las cuatro se detectan.
+
+### ✅ Comprobado a mano
+* **Con tus datos reales** (copia temporal, ya borrada): de las once pestañas, solo cambia el Resumen y solo en esa tarjeta; las otras diez, idénticas, sin errores. Las cifras de pesos y de dólares coinciden con la suma por divisa de tus suscripciones.
+
+## 🚀 Versión 1.59.0 - 2026-10-02
 **División de `ui.ts`, PR 8: la pestaña «Ingresos» sale de la clase.** Sin cambios visibles.
 
 ### 🧩 Qué se hace
