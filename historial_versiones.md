@@ -4,7 +4,27 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.70.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.71.0 (Versión Actual) - 2026-10-02
+**Importes a texto: `crear_bonificacion`, el tercero de los comandos que seguían enviándose como número** (quedan 12: ver `politica_redondeo.md`).
+
+### 🐛 Qué estaba mal
+* La bonificación (cashback, devolución promocional, recompensa) recibía el importe como `f64`, convertido en la interfaz con `Number(...)`, y lo pasaba a `Dinero::nuevo(monto, divisa)`: el núcleo decidía el céntimo, pero **sobre un número que ya no valía lo que el titular tecleó** (`1.005` llegaba como 1.00499…).
+
+### 🔧 Qué se hace
+* **Rust:** `monto` pasa a `ImporteDecimal` y se casa con la divisa declarada (`con_divisa`); el céntimo se decide con los dígitos escritos. Las reglas de la bonificación no cambian: un concepto vacío, un importe negativo o que redondea a cero se rechazan.
+* **Interfaz:** el envoltorio manda `String(monto)` y la vista el texto recortado; el tipo del parámetro pasa a `string`. La comprobación «mayor que cero» de la vista sigue usando el número, **solo para comparar**: lo que viaja son los dígitos escritos.
+
+### 🧪 Pruebas
+* **JavaScript:** 2 nuevas (la fila del contrato, con la muestra `0075.250` que no sobrevive a ninguna conversión numérica, y el envío desde la vista con espacios, tres decimales y ceros) y dos existentes pasan de comprobar un número a un texto. **554 pruebas, todas pasan.**
+* **Rust:** 2 nuevas (`c33b`: `1.005` en pesos baja la deuda 1.01 y `20.10` en dólares baja la de dólares por su cuenta, y lo guardado es el mismo céntimo; `c33c`: `-5.00`, `0.00` y `0.004` no son una bonificación y no mueven ningún saldo) y siete llamadas existentes se actualizan al nuevo tipo. **619 pasan** (más 2 ignoradas, las que vuelcan datos para comparar vistas).
+* Mutaciones (ocho): el envoltorio de vuelta a `Number` o a `parseFloat`, la vista de vuelta a `Number`, sin recortar o sin la comprobación de «mayor que cero», y en Rust ignorar la divisa, multiplicar el importe por 100 o truncarlo a pesos enteros: todas se detectan.
+
+### ✅ Comprobado a mano
+* **En la aplicación empaquetada, con el IPC de Tauri, Rust y la base reales:** `1.005` en pesos baja la deuda de la tarjeta **1.01**; `20.10` en dólares baja **solo** la de dólares; el **formulario real** de Tarjetas registra 12.50 y avisa del éxito; un texto ilegible (`cien`) y un importe que redondea a cero (`0.004`) se rechazan; un número sigue admitido durante la transición; y las cuatro bonificaciones guardadas tienen el importe esperado.
+
+---
+
+## 🚀 Versión 1.70.0 - 2026-10-02
 **Importes a texto: `crear_cobro_efectivo_informal`, el segundo de los comandos que seguían enviándose como número** (quedan 13: ver `politica_redondeo.md`).
 
 ### 🐛 Qué estaba mal

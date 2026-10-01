@@ -420,10 +420,12 @@ export class VistaTarjetas implements Vista {
         const fecha = dom.elemento<Campo>('bon_fecha').value.trim();
         const tarjeta = Number(dom.elemento<Campo>('bon_tarjeta').value);
         const divisa = dom.elemento<Campo>('bon_divisa').value;
-        const monto = Number(dom.elemento<Campo>('bon_monto').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const monto = dom.elemento<Campo>('bon_monto').value.trim();
         const concepto = dom.elemento<Campo>('bon_concepto').value.trim();
 
-        if (!(monto > 0)) { avisos.mostrar("El monto de la bonificación debe ser mayor que cero.", "error"); return; }
+        // El número solo sirve para comparar: lo que viaja son los dígitos escritos.
+        if (!(Number(monto) > 0)) { avisos.mostrar("El monto de la bonificación debe ser mayor que cero.", "error"); return; }
         if (!concepto) { avisos.mostrar("Indica el concepto: distingue un cashback de una promoción o recompensa.", "error"); return; }
 
         try {

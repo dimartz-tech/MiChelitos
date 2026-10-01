@@ -81,7 +81,7 @@ export type Comandos = {
     actualizar_ingreso: { args: { id: number; numeroFactura: string; clienteId: number; fechaEmision: string; montoTotal: number; porcentajeRetencion: number; cobroParcial?: string | number | null; motivo?: string | null }; ret: string };
     crear_cobro_efectivo_informal: { args: { fecha: string; descripcion: string; monto: string | number; divisa: string }; ret: number };
     obtener_bonificaciones: { args: {  }; ret: BonificacionDto[] };
-    crear_bonificacion: { args: { fecha: string; tarjetaId: number; monto: number; divisa: string; concepto: string; gastoId?: number | null }; ret: number };
+    crear_bonificacion: { args: { fecha: string; tarjetaId: number; monto: string | number; divisa: string; concepto: string; gastoId?: number | null }; ret: number };
     eliminar_bonificacion: { args: { id: number }; ret: null };
     liquidar_consumo_pendiente: { args: { id: number; montoLiquidado: number }; ret: number };
     obtener_correcciones: { args: {  }; ret: CasoCorreccion[] };
