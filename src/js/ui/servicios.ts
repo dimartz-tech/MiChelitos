@@ -68,6 +68,18 @@ export interface Modales {
 }
 
 /**
+ * Un menú flotante de acciones junto a un botón (antes `abrirMenuPasivo` y
+ * `cerrarMenuPasivo`, con el `AbortController` suelto en la clase). Solo hay
+ * uno abierto a la vez; se cierra con el siguiente clic o con Escape. `ancla` es
+ * el rectángulo del botón; `alElegir` recibe el `data-accion` del renglón pulsado,
+ * ya con el menú cerrado.
+ */
+export interface MenuFlotante {
+    abrir(opciones: { id: string; html: string; ancla: Pick<DOMRect, 'right' | 'top' | 'bottom'>; alElegir: (accion: string) => void }): void;
+    cerrar(): void;
+}
+
+/**
  * Valores de referencia que varias vistas comparten (antes la constante global
  * `TASA_USD_A_DOP` de `ui.ts`). Inyectados: una prueba puede darles otro valor
  * y comprobar que la vista no lo tiene escrito dentro.
@@ -88,6 +100,7 @@ export interface ServiciosComunes {
     dialogos: Dialogos;
     motivo: Motivo;
     modales: Modales;
+    menus: MenuFlotante;
     referencias: Referencias;
 }
 
@@ -131,6 +144,67 @@ export const modalesDelNavegador: Modales = {
     },
 };
 
+/**
+ * El menú flotante real. Conserva aquí el `AbortController` que retira de una
+ * vez los dos listeners de `document`: con `removeEventListener` por separado es
+ * fácil olvidar uno y dejarlos acumulándose cada vez que el menú se abre y se cierra.
+ */
+export function crearMenuFlotanteDelNavegador(): MenuFlotante {
+    let abierto: HTMLElement | null = null;
+    let control: AbortController | null = null;
+
+    const cerrar = (): void => {
+        abierto?.remove();
+        abierto = null;
+        control?.abort();
+        control = null;
+    };
+
+    return {
+        cerrar,
+        abrir({ id, html, ancla, alElegir }) {
+            cerrar();
+            const menu = document.createElement('div');
+            menu.id = id;
+            menu.style.cssText = `position:fixed; z-index:1000; background:var(--bg-surface-opaque);
+            border:1px solid rgba(255,255,255,0.1); border-radius:var(--radius-sm); padding:0.35rem;
+            width:190px; box-shadow:var(--shadow-md); font-size:0.8rem;`;
+            menu.innerHTML = html;
+
+            menu.querySelectorAll<HTMLElement>('[data-accion]').forEach(el => {
+                el.onmouseenter = () => { el.style.background = 'rgba(255,255,255,0.06)'; };
+                el.onmouseleave = () => { el.style.background = 'none'; };
+                el.onclick = () => {
+                    const accion = el.dataset.accion ?? '';
+                    cerrar();
+                    alElegir(accion);
+                };
+            });
+
+            document.body.appendChild(menu);
+            abierto = menu;
+
+            // Se coloca después de insertarlo: sin medirlo no se sabe si cabe.
+            const alto = menu.offsetHeight;
+            menu.style.left = `${Math.max(8, ancla.right - menu.offsetWidth)}px`;
+            menu.style.top = `${ancla.bottom + alto > window.innerHeight ? Math.max(8, ancla.top - alto - 4) : ancla.bottom + 4}px`;
+
+            const propio = new AbortController();
+            control = propio;
+
+            // Diferido un tick: el clic que abre el menú todavía está burbujeando
+            // hacia `document`, y sin esto lo cerraría al instante.
+            setTimeout(() => {
+                if (propio.signal.aborted) return;
+                document.addEventListener('click', () => cerrar(), { signal: propio.signal });
+                document.addEventListener('keydown', e => {
+                    if (e.key === 'Escape') cerrar();
+                }, { signal: propio.signal });
+            }, 0);
+        },
+    };
+}
+
 /** Conecta los servicios con la clase vieja. Desaparece con la última vista. */
 export function serviciosDesdeAppUI(
     app: AppUIAntigua,
@@ -138,6 +212,7 @@ export function serviciosDesdeAppUI(
     ahora: Reloj = () => new Date(),
     dialogos: Dialogos = dialogosDelNavegador,
     modales: Modales = modalesDelNavegador,
+    menus: MenuFlotante = crearMenuFlotanteDelNavegador(),
 ): ServiciosComunes {
     return {
         avisos: { mostrar: (mensaje, tipo) => app.showToast(mensaje, tipo) },
@@ -149,6 +224,7 @@ export function serviciosDesdeAppUI(
         dialogos,
         motivo: { pedir: (queOcurre, consecuencia) => app.pedirMotivoDeCorreccion(queOcurre, consecuencia) },
         modales,
+        menus,
         referencias: { tasaUsdADop: app.tasaUsdADop },
     };
 }
