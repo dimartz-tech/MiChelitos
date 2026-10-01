@@ -74,7 +74,7 @@ Son **13 PR**. Los de ajustes y tarjetas son los últimos por tamaño y por núm
 2. **`manejadores.test.js`**: cada `appUI.metodo()` de un `onclick` sigue teniendo destino. Es la red contra lo único que un movimiento puede romper en silencio.
 3. **`herramientas/comparar_vistas`**: las once pestañas, con tus datos reales, idénticas entre el commit anterior y el actual (salvo lo que el cambio deba modificar). Es la prueba de que se **pinta** igual.
 4. **Los parámetros de la vista se tipan en el mismo PR** (`noImplicitAny`) y la vista se añade a `tsconfig.estricto.json`: cada extracción reduce los 169 pendientes y nace estricta.
-5. Revisión manual en un navegador de lo que hace **al pulsar** la pestaña movida; lo que la comparación no cubre.
+5. **Pruebas de interacción** (`pruebas/js/interaccion`, 1.49.0): los 49 manejadores se ejecutan en Node y comprueban qué se envía a Rust; solo hay que adaptar `cargar_interfaz.js`. La revisión manual de la pestaña movida queda para lo que ninguna cubre: CSS, validación nativa y que los `onclick` interpolen bien.
 6. Versión e historial, como siempre.
 
 ## 5. Lo que ya está hecho en 1.48.0
@@ -82,7 +82,7 @@ Son **13 PR**. Los de ajustes y tarjetas son los últimos por tamaño y por núm
 * **`herramientas/comparar_vistas/`**: `preparar.sh`, `mock.js`, `comparar.js` y una prueba `#[ignore]` que vuelca lo que leen las vistas. Probada contra la versión instalada: diez pestañas idénticas y la de Ajustes con solo el panel nuevo de restaurar. Trabaja sobre una copia temporal, solo lee la base viva y se limpia con un comando.
 
 ## 6. Riesgos y qué queda sin cubrir
-* **Pintar ≠ pulsar.** La comparación no ejerce los formularios. Cobertura: la prueba de manejadores (que el destino existe) y la revisión manual por pestaña. No hay pruebas automáticas de interacción, y añadirlas exigiría una dependencia de pruebas de navegador que el proyecto no tiene (§7).
+* **Pintar ≠ pulsar.** La comparación no ejerce los formularios. Desde 1.49.0 lo cubren las **pruebas de interacción en Node** (sin navegador ni dependencias nuevas); queda sin cubrir lo que solo hace un navegador (CSS, `required`/`step`, interpolación de los `onclick`).
 * **Las pruebas de contrato leen el texto de `ui.ts`** (`importes`, `tipos`, `manejadores`): hay que enseñarles a leer todas las vistas; se hace una vez, en el PR 0.
 * **Orden de carga:** pasar a módulos cambia cuándo se ejecuta el código. Se comprobó para `dom`; el PR 0 lo vuelve a comprobar en la aplicación empaquetada con el `HOME` aislado.
 
