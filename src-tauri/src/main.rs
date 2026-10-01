@@ -2595,7 +2595,11 @@ fn actualizar_ingreso(
 }
 
 #[tauri::command]
-fn crear_cobro_efectivo_informal(fecha: String, descripcion: String, monto: f64, divisa: String) -> Result<i64, String> {
+fn crear_cobro_efectivo_informal(fecha: String, descripcion: String, monto: ipc::ImporteDecimal, divisa: String) -> Result<i64, String> {
+    // El importe llega como se escribió y el núcleo decide el céntimo con esos dígitos. Se usa
+    // **dos veces** (el ingreso y el saldo de la caja): una sola conversión garantiza que ambos
+    // reciben exactamente el mismo valor.
+    let monto = monto.unidades();
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     

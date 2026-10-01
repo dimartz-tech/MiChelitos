@@ -4,7 +4,30 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.69.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.70.0 (Versión Actual) - 2026-10-02
+**Importes a texto: `crear_cobro_efectivo_informal`, el segundo de los comandos que seguían enviándose como número** (quedan 13: ver `politica_redondeo.md`).
+
+### 🐛 Qué estaba mal
+* El cobro informal en efectivo recibía el importe como `f64` (la interfaz lo convertía con `Number(...)`) y **lo usaba dos veces**: lo guardaba en el ingreso (`monto` y `monto_recibido`) y lo sumaba al saldo de la caja con `ROUND(balance_actual + ?, 2)`. El núcleo no decidía el céntimo en ninguno de los dos sitios.
+
+### 🔧 Qué se hace
+* **Rust:** `monto` pasa a `ImporteDecimal` y se convierte **una sola vez** con `unidades()`: el ingreso y la caja reciben exactamente el mismo valor, decidido con los dígitos escritos (`1.005` sube a 1.01).
+* **Interfaz:** el envoltorio manda `String(monto)` y la vista el texto recortado; el tipo del parámetro pasa a `string`. Con dos decimales no cambia ningún importe (`321.10` ahora viaja como `"321.10"`, no como `321.1`).
+
+### 🛡️ Cómo se lleva la cuenta
+* `importes_texto.test.js` gana el envoltorio en su lista de migrados y lo pierde de la de pendientes. **Una mutación sobrevivió** (`String(parseFloat(monto))`) porque el importe de muestra, `1.005`, vuelve idéntico tras `parseFloat`; la muestra pasa a ser **`0075.250`**, que no sobrevive a ninguna conversión numérica (`1.005` se queda en una prueba aparte que delata el `Number`).
+
+### 🧪 Pruebas
+* **JavaScript:** 2 nuevas (la fila del contrato y el envío desde la vista con espacios, tres decimales, ceros y vacío) y dos existentes pasan de comprobar un número a un texto. **552 pruebas, todas pasan.**
+* **Rust:** 2 nuevas (`c81b`: `1.005` deja el ingreso, lo recibido **y** la caja en el mismo 1.01; `c81c`: un cobro en dólares entra en la caja de dólares y no mueve la de pesos) y una existente se actualiza al nuevo tipo. **617 pasan** (más 2 ignoradas, las que vuelcan datos para comparar vistas).
+* Mutaciones (ocho): el envoltorio de vuelta a `Number` o a `parseFloat`, la vista sin recortar o de vuelta a `Number`, y en Rust la caja con 100 veces el importe, el ingreso y la caja con valores distintos, el importe truncado y la divisa de dólares a la caja de pesos: todas se detectan.
+
+### ✅ Comprobado a mano
+* **En la aplicación empaquetada, con el IPC de Tauri, Rust y la base reales:** `1.005` por el IPC deja la caja de pesos en **+1.01** y el ingreso en 1.01 / 1.01; el **formulario real** de Efectivo, con 321.10 en dólares, suma 321.10 a la caja de dólares y guarda el ingreso como pagado; un texto ilegible (`cien`) se rechaza y no crea nada; un número sigue admitido durante la transición; y el aviso de éxito aparece.
+
+---
+
+## 🚀 Versión 1.69.0 - 2026-10-02
 **Importes a texto: `crear_ingreso_informal` es el primero de los que seguían enviándose como número.**
 
 ### 🐛 Qué estaba mal

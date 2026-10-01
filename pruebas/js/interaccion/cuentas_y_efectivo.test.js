@@ -154,7 +154,7 @@ const entrada = { efe_inf_fec: '24/03/2026', efe_inf_mon: '321.10', efe_inf_div:
 test('entrada de efectivo informal: (fecha, descripción, monto, divisa) en ese orden', async () => {
     const ui = cargarInterfaz({ campos: entrada });
     await ui.appUI.handleAgregarEfectivoInformal(crearEvento());
-    llamoUnaVez(ui, 'crearCobroEfectivoInformal', ['24/03/2026', 'Cobro de prueba', 321.1, 'USD']);
+    llamoUnaVez(ui, 'crearCobroEfectivoInformal', ['24/03/2026', 'Cobro de prueba', '321.10', 'USD']);
     avisoExito(ui, /Entrada en efectivo registrada/);
     redibujo(ui, 'efectivo');
 });
