@@ -4,7 +4,34 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.61.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.62.0 (Versión Actual) - 2026-10-02
+**Corrección: los borrados y correcciones ya preguntan de verdad.** Eliminar una transacción no hacía nada, y Cancelar no cancelaba.
+
+### 🐛 Qué estaba mal
+* **`prompt()` devuelve `null` al instante en el WebView de la aplicación** (Tauri 1.8 sobre `wry` 0.24, que no lo implementa en macOS): no muestra nada. Toda corrección que pedía un motivo —borrar un gasto, un ingreso, una factura, una transferencia, o corregir una factura cobrada— se abandonaba **en silencio**. Eso es lo que se veía al probar «Revertir» en Ajustes: no pasaba nada y no había aviso.
+* **`confirm()` no devuelve un booleano:** Tauri lo sustituye por una versión asíncrona que devuelve una **promesa**, y una promesa es siempre «verdadera» en un `if (confirm(...))`. El diálogo de Tauri aparecía, pero la acción **ya se estaba ejecutando** sin esperar la respuesta: pulsar Cancelar no la detenía. Afectaba a toda baja con una simple confirmación (cliente, cuenta de ahorro, categoría, préstamo, suscripción, certificado, bien…).
+* Comprobado en la aplicación empaquetada (`confirm` sustituido, `prompt` → `null` en 0 ms). Se escapó a todas las pruebas porque los dobles de `confirm`/`prompt` devolvían un booleano o un texto de verdad: el WebView real no.
+
+### 🔧 Qué se hace
+* **`Dialogos` y `Motivo` pasan a ser asíncronos** y la implementación real son **diálogos dentro de la página** (`crearDialogosDePagina`): no dependen de lo que haga el WebView y admiten texto, que el diálogo nativo de Tauri no ofrece. Escape cancela, Enter acepta, el mensaje se escapa (solo admite **negrita**) y en una confirmación el foco empieza en **Cancelar**, porque casi todas son borrados.
+* Los 11 usos de las vistas extraídas y los 15 que quedaban en `ui.ts` usan el servicio y lo **esperan**. `ui.ts` lo recibe de `serviciosDesdeAppUI`.
+* El comportamiento al responder no cambia: sin confirmar, con motivo cancelado o con motivo de menos de 15 caracteres no se envía nada.
+
+### 🧪 Pruebas
+* `pruebas/js/contrato/dialogos.test.js` (5): la interfaz **no usa** `confirm()`, `prompt()` ni `alert()` nativos; toda petición de diálogo o de motivo lleva `await`; y los borrados **esperan** una respuesta que llega tarde, como en el WebView real (no tocan la API hasta que se acepta, Cancelar no borra, un motivo corto no borra), en `ui.ts` y en una vista extraída.
+* `pruebas/js/servicios/dialogos_pagina.test.js` (7): el diálogo real con un DOM de juguete (aceptar, cancelar, Escape, Enter, valor por defecto, foco, escape del mensaje, retirada al responder).
+* 393 pruebas (389 pasan, 4 `todo` conocidos). Once mutaciones (confirmación sin esperar, motivo sin esperar, `await` olvidado donde el compilador no lo ve, `confirm` nativo, y siete del diálogo): las once se detectan, dos por el compilador.
+
+### ✅ Comprobado a mano
+* **En un navegador, con tus datos reales** (copia temporal, ya borrada): «Revertir» una transferencia pide la confirmación, luego el motivo (con la negrita), y al aceptar envía `eliminar_transaccion_cuenta` con el identificador y el motivo escritos; Cancelar, Escape en cualquiera de los dos diálogos y un motivo corto **no borran nada** (el corto avisa).
+* **En la aplicación empaquetada:** el diálogo se abre en `<body>`, el foco empieza en Cancelar, aceptar y cancelar devuelven `true` y `false`, la pregunta devuelve el texto y parte del valor por defecto, y no queda ningún diálogo abierto.
+
+### ⚠️ La aplicación instalada
+* **La versión instalada (1.36.0) tiene los dos defectos.** Hasta actualizarla, en ella las bajas con confirmación se ejecutan aunque se pulse Cancelar, y las correcciones con motivo no hacen nada.
+
+---
+
+## 🚀 Versión 1.61.0 - 2026-10-02
 **División de `ui.ts`, PR 9: la pestaña «Financiamientos y Deudas» sale de la clase.** Sin cambios visibles.
 
 ### 🧩 Qué se hace
