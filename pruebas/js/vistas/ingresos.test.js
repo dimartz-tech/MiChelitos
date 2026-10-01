@@ -233,7 +233,7 @@ const CAMPOS_EDICION = (extra = {}, ventana = {}) => ({
 test('editar factura sin cobrar: se envía sin parcial ni motivo y se cierra', async () => {
     const t = montar({ campos: CAMPOS_EDICION() });
     await t.vista.handleEdicionFormalSubmit(t.evento, 4);
-    assert.deepEqual(t.llamadas, [['actualizarIngreso', 4, 'FAC-0007', 2, '10/03/2027', 1000, 10, null, null]]);
+    assert.deepEqual(t.llamadas, [['actualizarIngreso', 4, 'FAC-0007', 2, '10/03/2027', '1000', 10, null, null]]);
     assert.equal(t.motivos.length + t.confirmaciones.length, 0);
     assert.deepEqual(t.avisos, [{ mensaje: 'Factura corregida (prueba).', tipo: undefined }]);
     assert.equal(t.registro['modal-edit-for-4'].quitado, true);
@@ -245,7 +245,7 @@ test('editar factura cobrada cuyo neto cambia: pide motivo con el ajuste y lo en
     await t.vista.handleEdicionFormalSubmit(t.evento, 4);
     assert.equal(t.motivos.length, 1);
     assert.match(t.motivos[0].texto, /DOP #100#/);
-    assert.deepEqual(t.llamadas, [['actualizarIngreso', 4, 'FAC-0007', 2, '10/03/2027', 1000, 10, null, 'Neto corregido']]);
+    assert.deepEqual(t.llamadas, [['actualizarIngreso', 4, 'FAC-0007', 2, '10/03/2027', '1000', 10, null, 'Neto corregido']]);
 });
 
 test('editar factura cobrada: cancelar el motivo no envía nada ni cierra la ventana', async () => {

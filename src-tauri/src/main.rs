@@ -2489,7 +2489,7 @@ fn actualizar_ingreso(
     numero_factura: String,
     cliente_id: i64,
     fecha_emision: String,
-    monto_total: f64,
+    monto_total: ipc::ImporteDecimal,
     porcentaje_retencion: f64,
     // Importe cobrado cuando no entró el neto entero. `None` es la regla: se
     // da por cobrado el neto completo.
@@ -2527,8 +2527,10 @@ fn actualizar_ingreso(
         None => dominio::ingreso::Cobro::Completo,
     };
 
+    // El total llega como se escribió; una sola conversión sirve al cálculo, a la fila y al caso.
+    let monto_total = monto_total.con_divisa(MONEDA_LOCAL);
     let correccion = dominio::ingreso::corregir(
-        Dinero::nuevo(monto_total, MONEDA_LOCAL)?,
+        monto_total,
         Porcentaje::desde_porcentaje(porcentaje_retencion)?,
         recibido_anterior,
         cobro,
@@ -2538,7 +2540,7 @@ fn actualizar_ingreso(
         "UPDATE ingresos SET numero_factura = ?, cliente_id = ?, fecha_emision = ?,
                              monto_total = ?, porcentaje_retencion = ?, monto_retenido = ?
          WHERE id = ?;",
-        (&numero_factura, cliente_id, &fecha_emision, monto_total, porcentaje_retencion,
+        (&numero_factura, cliente_id, &fecha_emision, monto_total.unidades(), porcentaje_retencion,
          correccion.retencion.unidades(), id),
     )
     .map_err(|e| e.to_string())?;
@@ -2557,7 +2559,7 @@ fn actualizar_ingreso(
                 referencia_id: id,
                 descripcion: format!(
                     "Factura {}: {:.2} → {:.2}",
-                    numero_factura, total_ant, monto_total
+                    numero_factura, total_ant, monto_total.unidades()
                 ),
                 importe: Some(correccion.ajuste.unidades()),
                 divisa: Some(MONEDA_LOCAL.codigo().to_string()),

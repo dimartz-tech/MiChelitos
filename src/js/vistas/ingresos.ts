@@ -386,7 +386,9 @@ export class VistaIngresos implements Vista {
         const fac = dom.elemento<Campo>(`edit_num_fac_${id}`).value;
         const fec = dom.elemento<Campo>(`edit_fec_em_${id}`).value;
         const cliId = Number(dom.elemento<Campo>(`edit_cli_select_${id}`).value);
-        const mon = Number(dom.elemento<Campo>(`edit_mon_tot_${id}`).value);
+        // El total viaja como texto, tal cual se escribió; el número solo sirve para el neto de la vista previa.
+        const monTxt = dom.elemento<Campo>(`edit_mon_tot_${id}`).value.trim();
+        const mon = Number(monTxt);
         const ret = Number(dom.elemento<Campo>(`edit_ret_por_${id}`).value);
 
         // Corregir una factura cobrada mueve dinero, así que se confirma con
@@ -447,7 +449,7 @@ export class VistaIngresos implements Vista {
         }
 
         try {
-            const resumen = await api.actualizarIngreso(id, fac, cliId, fec, mon, ret, parcial, motivo);
+            const resumen = await api.actualizarIngreso(id, fac, cliId, fec, monTxt, ret, parcial, motivo);
             avisos.mostrar(resumen || "Factura corregida.");
             dom.elemento(`modal-edit-for-${id}`).remove();
             await enrutador.mostrar('ingresos');
