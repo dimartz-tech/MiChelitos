@@ -1273,7 +1273,7 @@ fn s20_un_cargo_en_dolares_a_una_tarjeta_que_traduce_queda_pendiente_y_se_puede_
     assert_importe(pesos, 0.0, "y todavía no existe cifra en pesos");
 
     // El titular registra lo que el emisor cargó: 15 USD a 60.50 = 907.50.
-    crate::liquidar_consumo_pendiente(gasto, 907.5).unwrap();
+    crate::liquidar_consumo_pendiente(gasto, monto(907.5)).unwrap();
 
     assert_eq!(estado_conversion(gasto).as_deref(), Some("liquidado"));
     let (pesos, dolares) = balances_tarjeta(tarjeta);
@@ -1620,7 +1620,7 @@ fn c28_liquidar_traslada_el_saldo_entre_divisas_y_guarda_la_tasa_deducida() {
     let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
 
     // El emisor informa que cargó 6 050.00 en pesos.
-    let tasa = crate::liquidar_consumo_pendiente(id, 6050.0).unwrap();
+    let tasa = crate::liquidar_consumo_pendiente(id, monto(6050.0)).unwrap();
 
     assert_importe(tasa, 60.5, "la tasa se deduce del importe, no se pide");
     assert_eq!(estado_conversion(id).as_deref(), Some("liquidado"));
@@ -1630,14 +1630,43 @@ fn c28_liquidar_traslada_el_saldo_entre_divisas_y_guarda_la_tasa_deducida() {
 }
 
 #[test]
+fn c28b_el_importe_liquidado_lo_decide_el_nucleo_con_los_digitos_escritos() {
+    // El emisor cargó 6 050.005 en pesos: el céntimo sube a 6 050.01 como en el resto de la frontera, y
+    // la tasa se deduce de ese importe ya decidido.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    fijar_politica(tarjeta, "traduce");
+    let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
+
+    let tasa = crate::liquidar_consumo_pendiente(id, importe("6050.005")).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 6050.01, "los pesos reciben el céntimo decidido con los dígitos");
+    assert_importe(tasa, 60.5001, "la tasa sale del importe decidido, no del número binario");
+}
+
+#[test]
+fn c28c_un_importe_liquidado_que_no_es_positivo_no_liquida_nada() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    fijar_politica(tarjeta, "traduce");
+    let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
+
+    for escrito in ["0.00", "0.004", "-6050.00"] {
+        assert!(crate::liquidar_consumo_pendiente(id, importe(escrito)).is_err(), "{escrito} no liquida");
+    }
+    assert_eq!(estado_conversion(id).as_deref(), Some("pendiente"), "sigue pendiente");
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "ningún saldo se movió");
+}
+
+#[test]
 fn c29_no_se_liquida_dos_veces_ni_lo_que_no_esta_pendiente() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
     fijar_politica(tarjeta, "traduce");
     let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
 
-    crate::liquidar_consumo_pendiente(id, 6050.0).unwrap();
-    assert!(crate::liquidar_consumo_pendiente(id, 6050.0).is_err(), "no se liquida dos veces");
+    crate::liquidar_consumo_pendiente(id, monto(6050.0)).unwrap();
+    assert!(crate::liquidar_consumo_pendiente(id, monto(6050.0)).is_err(), "no se liquida dos veces");
     assert_importe(balances_tarjeta(tarjeta).0, 6050.0, "ni se duplica el traslado");
 }
 

@@ -119,7 +119,7 @@ test('gasto: si Rust rechaza se muestra el error, no se redibuja y no se rompe',
 test('liquidar consumo: envía id y el importe en pesos, cierra el modal y avisa la tasa', async () => {
     const ui = cargarInterfaz({ campos: { liq_monto_7: '777.77', 'modal-liq-7': {} }, api: { liquidarConsumoPendiente: 58.5 } });
     await ui.appUI.handleLiquidacionSubmit(crearEvento(), 7, 12.34);
-    llamoUnaVez(ui, 'liquidarConsumoPendiente', [7, 777.77]);
+    llamoUnaVez(ui, 'liquidarConsumoPendiente', [7, '777.77']);
     avisoExito(ui, /tasa de 58\.5000/);
     assert.deepEqual(ui.eliminados, ['modal-liq-7']);
     redibujo(ui, 'gastos');
