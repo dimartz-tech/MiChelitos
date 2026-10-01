@@ -1,6 +1,19 @@
 # Actualizar la aplicación instalada: estabilidad y procedimiento
 
-Estado a 2026-10-01. **Instalada: 1.36.0. En `main`: 1.48.0.** Esta guía recoge qué tan estable resulta actualizar hoy, con qué evidencia, y cómo hacerlo y deshacerlo. No se ha reinstalado nada.
+Estado a 2026-10-02. **Instalada: 1.62.0** (actualizada el 2026-10-01 desde la 1.36.0; ver «Actualización hecha»). Lo que sigue en esta guía es el análisis de la primera actualización (1.36.0 → 1.48.0) y el procedimiento, que se siguió tal cual y vale para la próxima.
+
+## Actualización hecha: 1.36.0 → 1.62.0 (2026-10-01)
+A petición expresa del titular. Se siguió el procedimiento de abajo, con una prueba previa más:
+1. App cerrada; respaldo `michelitos_2026-10-01T19-44-28_antes-de-actualizar-a-1.62.0` (base y capital, integridad correcta) y copia de la 1.36.0 en `~/.michelitos/aplicacion-anterior/MiChelitos-1.36.0.app`.
+2. Compilada desde `main` (`npx tauri build -b app`; el `.app` sale de `src-tauri/target/release/bundle/macos/`).
+3. **Antes de instalar**, el paquete nuevo se arrancó contra una **copia** de la base: viva a los 14 s, esquema 15, integridad correcta y los mismos conteos de filas por tabla.
+4. Instalada en `/Applications` y abierta: esquema 15, integridad correcta, 0 referencias rotas, mismos conteos por tabla. **Sin migraciones** desde la 1.36.0 (`user_version` sigue en 15).
+5. Lo que trae de nuevo para el titular, además de las correcciones de la 1.36.0 → 1.48.0: la corrección de las bajas y correcciones con motivo (1.62.0: `prompt()` devolvía `null` y `confirm()` no esperaba la respuesta en el WebView; ver `historial_versiones.md`), la carga fija del Resumen por divisa (1.60.0) y el panel de restaurar respaldos.
+* **Volver atrás:** cerrar y restituir `MiChelitos-1.36.0.app` en `/Applications`; la base no se toca (mismo esquema). Un estado de datos anterior se restaura desde Ajustes.
+* **Pendiente de la próxima actualización:** todo lo posterior a la 1.62.0 (la división de `ui.ts` en vistas, sin cambios visibles, y lo que venga).
+
+## Antes de la primera actualización (1.36.0 → 1.48.0)
+Esta sección es el análisis que se hizo entonces; se conserva como registro.
 
 ## Veredicto
 **Estable para actualizar**, con las precauciones de abajo. Lo que cambia entre las dos versiones es pequeño en el núcleo y grande en la forma del frontend, y los dos se comprobaron con tus datos reales (sobre copias).

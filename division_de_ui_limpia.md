@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`; PR 8 en 1.59.0: `ingresos`; PR 9 en 1.61.0: `préstamos`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`; PR 8 en 1.59.0: `ingresos`; PR 9 en 1.61.0: `préstamos`; PR 10 en 1.63.0: `ajustes`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -509,3 +509,40 @@ Fuera del plan, también: **cuatro mutaciones** (retiro siempre a efectivo en pe
 ### Entre el PR 9 y el PR 10 — los diálogos pasan a ser asíncronos (1.62.0)
 
 Al probar a mano en la aplicación, eliminar una transacción no hacía nada. La causa no era de la división: `prompt()` devuelve `null` al instante en el WebView y `confirm()` devuelve una promesa (siempre «verdadera»), de modo que las correcciones con motivo se abandonaban en silencio y **Cancelar no cancelaba** (ver `historial_versiones.md`, 1.62.0). La división ayudó a arreglarlo: el servicio `Dialogos` era ya el único punto por el que pasaban las vistas extraídas, así que el cambio de interfaz (`confirmar` y `preguntar` devuelven promesas) tocó el servicio, sus 11 usos en las vistas y los 15 que quedaban en `ui.ts`. **Para `ajustes` y `tarjetas`, que aún están en `ui.ts`:** ya usan `this.dialogos` con `await`, así que las nuevas vistas heredan los diálogos asíncronos tal cual y deben **esperarlos siempre** (lo exige `pruebas/js/contrato/dialogos.test.js`).
+
+### PR 10 — `ajustes` (1.63.0)
+
+| Qué | Previsto (medición del agente) | Medido |
+|---|---|---|
+| Métodos que se mueven | 16 | 16 (`render`, el alta de tarjeta —cuyo formulario vive en esta pestaña—, los catálogos, el editor de cuentas, el panel de correcciones con sus cuatro borrados, y los dos respaldos) |
+| Líneas de la vista | 736 | **720** quitadas de `ui.ts` (718 de métodos y comentarios, y el `case`) |
+| Líneas a reescribir | 103 (≈118 con la corrección del 15 %) | **114** de 639 (**17 %**): `render` 4 %, el panel y los respaldos 9–26 %, los manejadores entre el 42 % y el 76 % |
+| Diff de `ui.ts` | — | **−720 / +0** (1 678 → 965 líneas, tras los diálogos asíncronos) |
+| Archivos nuevos | — | `vistas/ajustes.ts` (850), `pruebas/js/vistas/ajustes.test.js` (418); `registro.ts` +4 |
+| Esfuerzo relativo (efectivo = 1) | 6 | ≈4: la dificultad prevista —once diálogos y el motivo— ya estaba resuelta por el servicio `Dialogos` asíncrono (1.62.0) y la vista solo los espera |
+| Parámetros sin tipo en `ui.ts` | 46 | **32** |
+
+**Lo que cambia respecto a lo anterior:**
+* **`nucleo/respaldos.ts` pasa a ser un módulo.** `describirRespaldo` y `escaparHtml` los usa solo esta vista y eran funciones de un script clásico (`index.html` lo cargaba antes que `ui.js`). Ahora se exportan y la vista las importa: sale la línea `<script src="js/nucleo/respaldos.js">`, el cargador de pruebas deja de evaluarlo como script y `respaldos.test.js` lo importa en lugar de evaluar su texto. Comprobado en la aplicación empaquetada con un respaldo real (la lista sale legible).
+* **Las correcciones usan el servicio `Motivo`** (no el método de la clase), con el alias local `pedidorDeMotivo` por la variable `motivo` de cada manejador. `pedirMotivoDeCorreccion` sigue en `ui.ts` porque lo usan los manejadores de tarjetas; se irá con ellos.
+* El campo `_menuPasivoAbort` de `AppUI`, huérfano desde `préstamos`, se retira.
+* Los quince manejadores los escribe la plantilla, así que el puente expone los quince y la prueba comprueba también el sentido inverso (nada en el puente que la plantilla no use).
+
+**Los seis controles del plan:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 424 pruebas (420 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `ajustes` incluida (4 120 caracteres), sin `undefined`/`NaN`/errores |
+| 4. Parámetros tipados en el mismo PR | sí |
+| 5. Pruebas de interacción | las existentes de `ajustes`, `cuentas_y_efectivo`, `ingresos` y `gastos`, a través de `appUI`, **sin tocar**, más 31 de la vista con dobles que responden **tarde** |
+| 6. Revisión manual con tus datos | **veintiséis recorridos** ejercidos en las dos versiones, con los diálogos reales de página: las cuatro altas, la edición de cuenta (tres preguntas, y cancelar en la tercera), las tres bajas con su cancelación, el panel de casos (abrir y ocultar), las cuatro correcciones con motivo y con motivo corto, respaldar y restaurar: mismos comandos y argumentos, mismos avisos, 0 errores |
+
+**Dos artefactos del simulador, iguales en las dos versiones:** el simulador contesta `null` a las escrituras, de modo que «Caso null» (borrar un gasto) y el `TypeError` al restaurar (`r.capital_restaurado` sobre `null`) no son defectos: Rust devuelve el caso y un objeto.
+
+**Más controles:** veintitrés mutaciones (argumentos de cliente y de tarjeta, comisión como número o como cadena, balance como texto, comisión negativa o mal formada sin rechazar, entidad por defecto, bajas sin confirmar, baja que llama a otra API, corrección con motivo cancelado que sigue o enviada sin motivo, aviso sin el caso, categorías del sistema, límite de filas, respaldos ilegibles que rompen la pestaña, nombre sin escapar, restaurar sin confirmar, botones sin rehabilitar, panel que no se oculta o que no muestra el fallo, vista sin registrar): las veintitrés se detectan. **En la aplicación empaquetada**: diez vistas registradas, se dibuja «Ajustes» sin error, `renderAjustes` ya no existe en `AppUI`, los quince manejadores son funciones y, con un respaldo real, la lista sale legible.
+
+**Hallazgo, sin corregir (protocolo):** el panel de casos de corrección pinta `c.descripcion` y `c.motivo` con `innerHTML` **sin escapar**, y el motivo lo escribe el titular. Un motivo con `<` se interpretaría como HTML. El riesgo es bajo (es su propia aplicación y su propio texto) pero es el único sitio de la pestaña que no escapa lo que viene de un campo libre; la plantilla de respaldos sí escapa. Queda anotado para un PR aparte.
+
+**Pendiente que sigue a la vista:** `handleAgregarCuenta` y `handleAgregarTarjeta` aún envían varios importes como `Number` (la comisión ya va como texto); pasarlos a texto (convención 1.21.0) es un PR aparte, un comando por PR.

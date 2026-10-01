@@ -1,19 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-// El script se carga en la aplicación como script clásico, no como módulo: aquí
-// se evalúa su texto para probar exactamente lo que recibe el navegador.
-// Se lee el JavaScript **compilado** (`npm test` compila antes).
-const fuente = readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'src', 'js', 'nucleo', 'respaldos.js'),
-    'utf8',
-);
-const { describirRespaldo, escaparHtml } = new Function(
-    `${fuente}; return { describirRespaldo, escaparHtml };`,
-)();
+// Se importa el JavaScript **compilado** del módulo (`npm test` compila antes).
+import { describirRespaldo, escaparHtml } from '../../../src/js/nucleo/respaldos.js';
 
 test('un respaldo con el nombre de la aplicación se muestra con fecha dd/mm/aaaa y motivo legible', () => {
     assert.equal(
