@@ -71,7 +71,7 @@ const informal = { fecha_inf: '11/02/2026', monto_inf: '777.77', desc_inf: 'Trab
 test('ingreso informal: se envía (fecha, descripción, monto) en ese orden', async () => {
     const ui = cargarInterfaz({ campos: informal });
     await ui.appUI.handleAgregarIngresoInformal(crearEvento());
-    llamoUnaVez(ui, 'crearIngresoInformal', ['11/02/2026', 'Trabajo de prueba', 777.77]);
+    llamoUnaVez(ui, 'crearIngresoInformal', ['11/02/2026', 'Trabajo de prueba', '777.77']);
     avisoExito(ui, /Ingreso informal guardado/);
     redibujo(ui, 'ingresos');
 });

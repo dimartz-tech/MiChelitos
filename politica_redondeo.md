@@ -263,3 +263,36 @@ alta de cuenta, que 1.21.0 daba por migrada y seguía enviándose como número.)
 * Cinco mutaciones (quitar un `step`, añadir `novalidate`, calcular un importe,
   pasar un envío a `onclick`, dejar un id sin declarar): las cinco hacen fallar
   la prueba.
+
+## Migración de los importes a texto (en curso)
+
+La puerta de entrada ya acepta texto (`ImporteDecimal`, tramo 4a), pero **quedan comandos cuyos importes siguen
+siendo un `f64`**: la interfaz los envía con `Number(...)` y el núcleo decide el céntimo sobre un número que ya no
+vale lo que el titular tecleó. Se migran **uno por PR** (Rust: `ImporteDecimal` y `unidades()` al guardar; envoltorio:
+`String(x)`; vista: el texto recortado, sin convertir), porque cada uno toca un comando de dinero y merece su propia
+comprobación. La lista de lo que falta es una **prueba** (`pruebas/js/contrato/importes_texto.test.js`): solo puede
+encogerse, y un importe nuevo que viajara como número rompería la prueba.
+
+| Comando | Importes | Estado |
+|---|---|---|
+| `crear_suscripcion`, `actualizar_suscripcion` | `monto` | ✅ texto (1.2x) |
+| `declarar_saldo_prestamo` | `saldo` | ✅ texto |
+| `crear_cuenta`, `actualizar_cuenta` | `comision_pago_impuestos` | ✅ texto (el saldo inicial de `crear_cuenta`, no) |
+| `actualizar_ingreso` | `cobro_parcial` | ✅ texto (el total, no) |
+| `simular_avance_efectivo`, `registrar_avance_efectivo` | `monto`, `cargo_fijo` | ✅ texto |
+| **`crear_ingreso_informal`** | `monto` | ✅ **texto (1.69.0)**: antes guardaba el número tal cual, sin que el núcleo decidiera el céntimo |
+| `marcar_ingreso_pagado`, `marcar_informal_pagado` | `monto_recibido` | pendiente |
+| `crear_cobro_efectivo_informal` | `monto` | pendiente |
+| `crear_bonificacion` | `monto` | pendiente |
+| `liquidar_consumo_pendiente` | `monto_liquidado` | pendiente |
+| `registrar_pago_tarjeta` | `monto` (la tasa de cambio es una tasa, no un importe) | pendiente |
+| `crear_cuenta` | `balance` | pendiente |
+| `transferir_entre_cuentas` | `monto_origen`, `monto_destino`, `cargo` | pendiente |
+| `actualizar_ingreso` | `monto_total` (el porcentaje de retención es una tasa) | pendiente |
+| `crear_tarjeta` | ocho límites, sobregiros, balances y cortes | pendiente |
+| `actualizar_limites_tarjeta` | seis importes y dos límites ajustados | pendiente |
+| `crear_gasto` (`GastoInput`), `crear_ingreso` (`IngresoInput`), `crear_prestamo` y `actualizar_prestamo` (estructuras de entrada) | `monto`, `monto_total`, `monto_prestamo`, `monto_cuota`, `saldo_actual`, `limite_credito` | pendiente (requieren cambiar el tipo de los campos de la estructura) |
+
+**Cuando no quede ninguno**, la rama «número» de `ImporteDecimal` se retira y la coma flotante deja de entrar por la
+frontera (así lo dice `ipc.rs`). Los porcentajes y las tasas **no se migran**: son tasas, no importes, y su
+representación se midió en el tramo 3.

@@ -275,7 +275,8 @@ export class VistaIngresos implements Vista {
         e.preventDefault();
         const { api, avisos, enrutador, dom } = this.dep;
         const fec = dom.elemento<Campo>('fecha_inf').value;
-        const mon = Number(dom.elemento<Campo>('monto_inf').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const mon = dom.elemento<Campo>('monto_inf').value.trim();
         const des = dom.elemento<Campo>('desc_inf').value;
 
         try {
