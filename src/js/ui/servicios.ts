@@ -58,6 +58,16 @@ export interface Motivo {
     pedir(queOcurre: string, consecuencia: string): string | null;
 }
 
+/**
+ * Valores de referencia que varias vistas comparten (antes la constante global
+ * `TASA_USD_A_DOP` de `ui.ts`). Inyectados: una prueba puede darles otro valor
+ * y comprobar que la vista no lo tiene escrito dentro.
+ */
+export interface Referencias {
+    /** Tasa de presentación para expresar en pesos un importe en dólares. No toca ningún saldo. */
+    readonly tasaUsdADop: number;
+}
+
 /** Lo que cualquier vista puede pedir. Cada vista toma el subconjunto que usa. */
 export interface ServiciosComunes {
     avisos: Avisos;
@@ -68,6 +78,7 @@ export interface ServiciosComunes {
     ahora: Reloj;
     dialogos: Dialogos;
     motivo: Motivo;
+    referencias: Referencias;
 }
 
 /** El acceso a la API, recortado a los comandos que usa una vista. */
@@ -85,6 +96,7 @@ export interface Vista {
  */
 export interface AppUIAntigua {
     contentContainer: HTMLElement;
+    readonly tasaUsdADop: number;
     showToast(mensaje: string, tipo?: string): void;
     formatMoney(valor: number | string): string;
     render(ruta: string): Promise<void>;
@@ -114,5 +126,6 @@ export function serviciosDesdeAppUI(
         ahora,
         dialogos,
         motivo: { pedir: (queOcurre, consecuencia) => app.pedirMotivoDeCorreccion(queOcurre, consecuencia) },
+        referencias: { tasaUsdADop: app.tasaUsdADop },
     };
 }
