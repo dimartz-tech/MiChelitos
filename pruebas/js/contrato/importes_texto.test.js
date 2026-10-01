@@ -49,6 +49,8 @@ const MIGRADOS = [
     ['actualizarSuscripcion', A => A.actualizarSuscripcion(1, 'Plataforma', TRES_DECIMALES, 7, 'mensual', 15, 'USD', null), ['monto']],
     ['declararSaldoPrestamo', A => A.declararSaldoPrestamo(1, TRES_DECIMALES), ['saldo']],
     ['transferirEntreCuentas', A => A.transferirEntreCuentas(1, 2, '10', TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, 'x'), ['montoOrigen', 'montoDestino', 'cargo']],
+    ['crearTarjeta', A => A.crearTarjeta('B', 'T', TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, 15, 5),
+        ['limitePesos', 'limiteDolares', 'sobregiroPesos', 'sobregiroDolares', 'balancePesos', 'balanceDolares', 'balanceCortePesos', 'balanceCorteDolares']],
     ['crearCuenta (comisión)', A => A.crearCuenta('Cuenta', 'DOP', 10, null, TRES_DECIMALES), ['comisionPagoImpuestos']],
     ['actualizarCuenta (comisión)', A => A.actualizarCuenta(1, 'Cuenta', null, TRES_DECIMALES), ['comisionPagoImpuestos']],
     ['actualizarIngreso (total)', A => A.actualizarIngreso(1, 'F-1', 2, '01/01/2027', TRES_DECIMALES, 10, null, null), ['montoTotal']],
@@ -86,10 +88,6 @@ const PENDIENTES = [
     'actualizarLimitesTarjeta.balanceCorteDolares', 'actualizarLimitesTarjeta.balanceCortePesos',
     'actualizarLimitesTarjeta.limiteDolares', 'actualizarLimitesTarjeta.limitePesos',
     'actualizarLimitesTarjeta.sobregiroDolares', 'actualizarLimitesTarjeta.sobregiroPesos',
-    'crearTarjeta.balanceCorteDolares', 'crearTarjeta.balanceCortePesos',
-    'crearTarjeta.balanceDolares', 'crearTarjeta.balancePesos',
-    'crearTarjeta.limiteDolares', 'crearTarjeta.limitePesos',
-    'crearTarjeta.sobregiroDolares', 'crearTarjeta.sobregiroPesos',
 ];
 
 const ES_IMPORTE = /monto|limite|sobregiro|balance|saldo|cuota|cargo|comision|valor|importe/i;

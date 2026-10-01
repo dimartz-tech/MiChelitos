@@ -191,6 +191,18 @@ test('alta de cuenta: el saldo inicial viaja como TEXTO, recortado y con los dí
     }
 });
 
+test('alta de tarjeta: los importes viajan como texto recortado y uno en blanco se envía como «0»', async () => {
+    const campos = {
+        tar_ent: el({ value: 'B' }), tar_nom: el({ value: 'T' }),
+        tar_lim_dop: el({ value: ' 1000.005 ' }), tar_sob_dop: el({ value: '' }), tar_bal_dop: el({ value: '0075.250' }), tar_cor_dop: el({ value: '4' }),
+        tar_lim_usd: el({ value: '5' }), tar_sob_usd: el({ value: '6' }), tar_bal_usd: el({ value: '7' }), tar_cor_usd: el({ value: '8' }),
+        tar_cor: el({ value: '9' }), tar_pag: el({ value: '10' }),
+    };
+    const t = montar({ campos });
+    await t.vista.handleAgregarTarjeta(t.evento);
+    assert.deepEqual(t.llamadas, [['crearTarjeta', 'B', 'T', '1000.005', '5', '0', '6', '0075.250', '7', '4', '8', 9, 10]]);
+});
+
 test('alta de tarjeta: los doce valores, en el orden que espera la API, y redibuja Tarjetas', async () => {
     const campos = {
         tar_ent: el({ value: 'Banco Beta' }), tar_nom: el({ value: 'Oro' }),
@@ -201,7 +213,7 @@ test('alta de tarjeta: los doce valores, en el orden que espera la API, y redibu
     const t = montar({ campos });
     await t.vista.handleAgregarTarjeta(t.evento);
     // (entidad, nombre, límite DOP, límite USD, sobregiro DOP, sobregiro USD, balance DOP, balance USD, corte DOP, corte USD, día de corte, día de pago)
-    assert.deepEqual(t.llamadas, [['crearTarjeta', 'Banco Beta', 'Oro', 1, 5, 2, 6, 3, 7, 4, 8, 9, 10]]);
+    assert.deepEqual(t.llamadas, [['crearTarjeta', 'Banco Beta', 'Oro', '1', '5', '2', '6', '3', '7', '4', '8', 9, 10]]);
     assert.deepEqual(t.rutas, ['tarjetas']);
 });
 

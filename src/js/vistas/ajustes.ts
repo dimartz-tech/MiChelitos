@@ -472,14 +472,16 @@ export class VistaAjustes implements Vista {
         const { api, avisos, enrutador, dom } = this.dep;
         const ent = dom.elemento<Campo>('tar_ent').value;
         const nom = dom.elemento<Campo>('tar_nom').value;
-        const limDop = Number(dom.elemento<Campo>('tar_lim_dop').value);
-        const sobDop = Number(dom.elemento<Campo>('tar_sob_dop').value);
-        const balDop = Number(dom.elemento<Campo>('tar_bal_dop').value);
-        const corDop = Number(dom.elemento<Campo>('tar_cor_dop').value);
-        const limUsd = Number(dom.elemento<Campo>('tar_lim_usd').value);
-        const sobUsd = Number(dom.elemento<Campo>('tar_sob_usd').value);
-        const balUsd = Number(dom.elemento<Campo>('tar_bal_usd').value);
-        const corUsd = Number(dom.elemento<Campo>('tar_cor_usd').value);
+        // Texto, tal cual se escribió (el céntimo lo deciden los dígitos); en blanco = 0, como antes.
+        const importe = (id: string): string => dom.elemento<Campo>(id).value.trim() || '0';
+        const limDop = importe('tar_lim_dop');
+        const sobDop = importe('tar_sob_dop');
+        const balDop = importe('tar_bal_dop');
+        const corDop = importe('tar_cor_dop');
+        const limUsd = importe('tar_lim_usd');
+        const sobUsd = importe('tar_sob_usd');
+        const balUsd = importe('tar_bal_usd');
+        const corUsd = importe('tar_cor_usd');
         const cor = Number(dom.elemento<Campo>('tar_cor').value);
         const pag = Number(dom.elemento<Campo>('tar_pag').value);
 
