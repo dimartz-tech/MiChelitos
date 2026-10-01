@@ -289,11 +289,15 @@ export class VistaCapital implements Vista {
     async handleEliminarCertificado(idx: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
         if (await dialogos.confirmar("¿Retirar este certificado financiero?")) {
-            const capital = await api.obtenerCapital();
-            capital.certificados.splice(idx, 1);
-            await api.guardarCapital(capital);
-            avisos.mostrar("Certificado retirado.");
-            await enrutador.mostrar('capital');
+            try {
+                const capital = await api.obtenerCapital();
+                capital.certificados.splice(idx, 1);
+                await api.guardarCapital(capital);
+                avisos.mostrar("Certificado retirado.");
+                await enrutador.mostrar('capital');
+            } catch (err) {
+                avisos.mostrar(String(err), 'error');
+            }
         }
     }
 
@@ -322,11 +326,15 @@ export class VistaCapital implements Vista {
     async handleEliminarBolsa(idx: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
         if (await dialogos.confirmar("¿Liquidar esta inversión de bolsa?")) {
-            const capital = await api.obtenerCapital();
-            capital.bolsa.splice(idx, 1);
-            await api.guardarCapital(capital);
-            avisos.mostrar("Inversión liquidada.");
-            await enrutador.mostrar('capital');
+            try {
+                const capital = await api.obtenerCapital();
+                capital.bolsa.splice(idx, 1);
+                await api.guardarCapital(capital);
+                avisos.mostrar("Inversión liquidada.");
+                await enrutador.mostrar('capital');
+            } catch (err) {
+                avisos.mostrar(String(err), 'error');
+            }
         }
     }
 
@@ -361,12 +369,16 @@ export class VistaCapital implements Vista {
     async handleEliminarPropiedad(tipo: string, id: string): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
         if (await dialogos.confirmar("¿Eliminar este bien del capital?")) {
-            const capital = await api.obtenerCapital();
-            if (capital.propiedades && capital.propiedades[tipo]) {
-                capital.propiedades[tipo] = capital.propiedades[tipo].filter((p: Bien) => p.id !== id);
-                await api.guardarCapital(capital);
-                avisos.mostrar("Bien eliminado.");
-                await enrutador.mostrar('capital');
+            try {
+                const capital = await api.obtenerCapital();
+                if (capital.propiedades && capital.propiedades[tipo]) {
+                    capital.propiedades[tipo] = capital.propiedades[tipo].filter((p: Bien) => p.id !== id);
+                    await api.guardarCapital(capital);
+                    avisos.mostrar("Bien eliminado.");
+                    await enrutador.mostrar('capital');
+                }
+            } catch (err) {
+                avisos.mostrar(String(err), 'error');
             }
         }
     }

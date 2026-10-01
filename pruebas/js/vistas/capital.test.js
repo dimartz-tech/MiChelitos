@@ -204,3 +204,37 @@ test('todo appUI.x( que escribe la plantilla está en el puente', async () => {
     assert.equal(llamados.size, 6);
     for (const nombre of llamados) assert.ok(MANEJADORES_CAPITAL.includes(nombre), `falta ${nombre} en el puente`);
 });
+
+// --- las bajas no pierden el error ---
+
+const BAJAS = [
+    ['certificado', t => t.vista.handleEliminarCertificado(0)],
+    ['inversión de bolsa', t => t.vista.handleEliminarBolsa(0)],
+    ['bien', t => t.vista.handleEliminarPropiedad('inmobiliario', 'a1')],
+];
+
+test('baja: si falla al guardar, se muestra el error, no se propaga, no se anuncia éxito y no se redibuja', async () => {
+    for (const [que, dar] of BAJAS) {
+        const t = montar({ fallaAlGuardar: 'Rust no pudo guardar' });
+        await assert.doesNotReject(() => dar(t), que);
+        assert.deepEqual(t.avisos, [{ mensaje: 'Error: Rust no pudo guardar', tipo: 'error' }], que);
+        assert.deepEqual([t.guardados, t.rutas], [[], []], que);
+    }
+});
+
+test('baja: si falla al leer el capital, se muestra el error y no se guarda nada', async () => {
+    for (const [que, dar] of BAJAS) {
+        const t = montar({ falla: 'Rust no pudo leer' });
+        await assert.doesNotReject(() => dar(t), que);
+        assert.deepEqual(t.avisos, [{ mensaje: 'Error: Rust no pudo leer', tipo: 'error' }], que);
+        assert.deepEqual([t.guardados, t.rutas], [[], []], que);
+    }
+});
+
+test('baja: sin confirmar no se lee ni se guarda nada, aunque Rust fuera a fallar', async () => {
+    for (const [que, dar] of BAJAS) {
+        const t = montar({ confirma: false, falla: 'no debería llamarse' });
+        await dar(t);
+        assert.deepEqual([t.avisos, t.guardados, t.rutas], [[], [], []], que);
+    }
+});
