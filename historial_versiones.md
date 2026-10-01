@@ -4,7 +4,30 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.56.0 (Versión Actual) - 2026-10-01
+## 🚀 Versión 1.57.0 (Versión Actual) - 2026-10-02
+**División de `ui.ts`, PR 6: la pestaña «Suscripciones» sale de la clase.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* `src/js/vistas/suscripciones.ts`: la vista como clase con dependencias inyectadas (API recortada a 8 comandos, avisos, formato, enrutador, pantalla, DOM, **diálogos**, **motivo** y **modales**). Diez métodos: el `render`, seis manejadores, el editor modal y dos ayudantes de fechas, ahora privados de la vista. **18 % de las líneas de sus cuerpos reescritas** (59 de 317).
+* **Nuevo servicio `Modales`:** `ui.ts` repite nueve veces el bloque que crea la capa `modal-overlay`; el editor de suscripciones es el primero en moverse y no arrastra `document` a la vista. Las ocho extracciones que quedan con modal ya tienen su servicio.
+* `ui.ts` pierde 369 líneas; `registro.ts` +4; `servicios.ts` +23. Parámetros sin tipo en `ui.ts`: 146 → 134.
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/suscripciones.test.js` (18): el aviso «Cobro próximo» muestra la fecha (lo que la 1.43.0 corrigió), períodos pendientes, suscripciones paradas, alta con el monto como **texto** y la fecha convertida de ISO a dd/mm/aaaa, el modal con su identificador y su tarjeta elegida, la edición con sus validaciones y el cierre de la ventana, baja con confirmación, corregir fecha, asentar y descartar con motivo.
+* `cargar_interfaz.js` registra cada ventana modal abierta y la declara en el DOM falso.
+* 295 pruebas (291 pasan, 4 `todo` conocidos). Ocho mutaciones, las ocho detectadas.
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; alta, **editor modal**, edición y baja ejercidos en las dos versiones: mismos comandos y argumentos, mismo modal, cerrado tras guardar, mismos avisos, 0 errores. Corregir fecha y asentar/descartar no se pudieron ejercer porque tus suscripciones no tienen ninguna parada ni períodos pendientes; las cubren las pruebas.
+* **App empaquetada**: seis vistas registradas, y el modal real se crea en `<body>` con la clase `modal-overlay`.
+* Previsto frente a medido (≈59 → 59 líneas; esfuerzo 3 → ≈3) y los seis controles del plan: `division_de_ui_limpia.md` §9. Incluye una trampa de la transformación mecánica: el `elemento(` que vive **dentro de un atributo `onclick` del HTML** no debe reescribirse.
+
+### Siguiente
+* PR 7: `gastos` (9 métodos, 480 líneas).
+
+---
+
+## 🚀 Versión 1.56.0 - 2026-10-01
 **División de `ui.ts`, PR 5: la pestaña «Capital» sale de la clase.** Sin cambios visibles.
 
 ### 🧩 Qué se hace

@@ -59,6 +59,15 @@ export interface Motivo {
 }
 
 /**
+ * Ventanas modales (antes nueve bloques idénticos en `ui.ts`: crear la capa
+ * `modal-overlay`, ponerle su identificador y su contenido, y añadirla a la
+ * página). El identificador sirve luego para cerrarla con `dom.elemento(id)`.
+ */
+export interface Modales {
+    abrir(id: string, html: string): void;
+}
+
+/**
  * Valores de referencia que varias vistas comparten (antes la constante global
  * `TASA_USD_A_DOP` de `ui.ts`). Inyectados: una prueba puede darles otro valor
  * y comprobar que la vista no lo tiene escrito dentro.
@@ -78,6 +87,7 @@ export interface ServiciosComunes {
     ahora: Reloj;
     dialogos: Dialogos;
     motivo: Motivo;
+    modales: Modales;
     referencias: Referencias;
 }
 
@@ -110,12 +120,24 @@ export const dialogosDelNavegador: Dialogos = {
     preguntar: (mensaje, porDefecto) => window.prompt(mensaje, porDefecto),
 };
 
+/** Las ventanas modales reales: una capa que se añade al final de `<body>`. */
+export const modalesDelNavegador: Modales = {
+    abrir(id, html) {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = id;
+        overlay.innerHTML = html;
+        document.body.appendChild(overlay);
+    },
+};
+
 /** Conecta los servicios con la clase vieja. Desaparece con la última vista. */
 export function serviciosDesdeAppUI(
     app: AppUIAntigua,
     dom: Dom,
     ahora: Reloj = () => new Date(),
     dialogos: Dialogos = dialogosDelNavegador,
+    modales: Modales = modalesDelNavegador,
 ): ServiciosComunes {
     return {
         avisos: { mostrar: (mensaje, tipo) => app.showToast(mensaje, tipo) },
@@ -126,6 +148,7 @@ export function serviciosDesdeAppUI(
         ahora,
         dialogos,
         motivo: { pedir: (queOcurre, consecuencia) => app.pedirMotivoDeCorreccion(queOcurre, consecuencia) },
+        modales,
         referencias: { tasaUsdADop: app.tasaUsdADop },
     };
 }
