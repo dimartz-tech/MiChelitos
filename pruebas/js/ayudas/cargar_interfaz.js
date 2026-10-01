@@ -90,6 +90,7 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
     const confirmaciones = [];
     const preguntas = [];
     const temporizadores = [];
+    const modalesAbiertos = [];
     const respuestas = new Map(Object.entries(api));
 
     // Los contenedores que el constructor exige; la prueba puede pisarlos.
@@ -139,6 +140,9 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
             { elemento: elementoReal, buscar: buscarReal },
             () => new Date(),
             { confirmar: m => confirmFalso(m), preguntar: (m, d) => promptFalso(m, d) },
+            // Una ventana modal abierta queda registrada y existe en el DOM falso con su
+            // contenido, para que la vista (o la prueba) la encuentre y la cierre por id.
+            { abrir: (id, html) => { modalesAbiertos.push({ id, html }); declarar(id, { innerHTML: html }); } },
         ),
         AppAPI,
     );
@@ -180,6 +184,8 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
         confirmaciones,
         preguntas,
         temporizadores,
+        /** Las ventanas modales que abrieron las vistas extraídas: `{ id, html }`. */
+        modalesAbiertos,
         dom: { document, registro, declarar },
         /** Los elementos que `remove()` quitó, por id (modales cerrados). */
         get eliminados() { return registro.eliminados; },
