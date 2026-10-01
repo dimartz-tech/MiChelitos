@@ -4,7 +4,32 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.60.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.61.0 (Versión Actual) - 2026-10-02
+**División de `ui.ts`, PR 9: la pestaña «Financiamientos y Deudas» sale de la clase.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* `src/js/vistas/prestamos.ts`: la vista como clase con dependencias inyectadas (API recortada a 7 comandos, avisos, formato, enrutador, pantalla, DOM, diálogos, modales, **menús**, referencias y reloj). Diecinueve métodos: el `render`, los cálculos del pasivo (`resumirPasivos`, `proximoVencimiento`, `agruparPasivosPorAcreedor`), las plantillas, el menú de acciones, el formulario con sus campos condicionales, la edición de condiciones y los manejadores de alta, conciliación, abono y baja. **21 % de las líneas de sus cuerpos reescritas** (125 de 569).
+* **Nuevo servicio `MenuFlotante`** (`abrir` y `cerrar`): el menú de acciones de cada fila usaba `document`, `window`, `setTimeout` y un `AbortController` guardado en la clase. El estado pasa al servicio, que solo mantiene un menú abierto y retira sus listeners en cada cierre.
+* La tasa del dólar entra por `Referencias` y «hoy» por el reloj: los cálculos de dinero de la pestaña se pueden probar sin dibujar.
+* `ui.ts` pierde 706 líneas (2 384 → 1 678); `servicios.ts` +76; `registro.ts` +4. Parámetros sin tipo en `ui.ts`: 106 → 46.
+* Dos guardas de contrato se adaptaron al tránsito de la división sin relajarlas: `ipc.test.js` cuenta también los comandos que las vistas declaran en `ApiDe<…>`, y el servicio guarda una referencia al menú en lugar de buscarlo con `document.getElementById` (reservado a `ui/dom.ts`).
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/prestamos.test.js` (29): total, carga mensual, cupo y composición con cifras de mano y la tasa inyectada; vencimiento por distancia en días con el reloj; agrupación de facilidades en su tarjeta; campos condicionales; alta (consumo y línea, saldo en blanco frente a cero), edición, conciliación como texto, abono y baja; el menú y sus cuatro acciones; el puente.
+* `pruebas/js/servicios/menu_flotante.test.js` (11): el servicio real con un DOM de juguete (uno a la vez, clic diferido, Escape, listeners retirados, colocación y volteo, acción tras cerrar).
+* Las 16 pruebas de interacción de `prestamos` pasan sin tocarlas. 381 pruebas (377 pasan, 4 `todo` conocidos). Veintinueve mutaciones, las veintinueve detectadas.
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; el **menú real** (apertura, posición, estilo, Escape, clic fuera, uno a la vez), las cuatro acciones, la edición y las dos altas, ejercidos en las dos versiones: mismos comandos, argumentos, modal y avisos, 0 errores. El grupo de una tarjeta con facilidades no se pudo ejercer (tus préstamos no cuelgan de ninguna); lo cubren las pruebas.
+* **App empaquetada**: nueve vistas registradas, el menú real en `<body>`, Escape lo cierra y elegir «editar» abre el modal.
+* Previsto frente a medido (≈89 → 125 líneas por el menú, que el agente no contó; esfuerzo 4 → ≈5) y los seis controles: `division_de_ui_limpia.md` §9.
+
+### Siguiente
+* PR 10: `ajustes` (16 métodos, ≈736 líneas).
+
+---
+
+## 🚀 Versión 1.60.0 - 2026-10-02
 **Corrección: la «Carga Fija Mensual» del Resumen ya no mezcla divisas.**
 
 ### 🐛 Qué estaba mal
@@ -19,6 +44,8 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ### ✅ Comprobado a mano
 * **Con tus datos reales** (copia temporal, ya borrada): de las once pestañas, solo cambia el Resumen y solo en esa tarjeta; las otras diez, idénticas, sin errores. Las cifras de pesos y de dólares coinciden con la suma por divisa de tus suscripciones.
+
+---
 
 ## 🚀 Versión 1.59.0 - 2026-10-02
 **División de `ui.ts`, PR 8: la pestaña «Ingresos» sale de la clase.** Sin cambios visibles.

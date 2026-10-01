@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`; PR 8 en 1.59.0: `ingresos`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`; PR 8 en 1.59.0: `ingresos`; PR 9 en 1.61.0: `préstamos`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -468,3 +468,40 @@ Fuera del plan, también: **cuatro mutaciones** (retiro siempre a efectivo en pe
 **Más controles:** dieciséis mutaciones (monto como texto, parcial como número, motivo siempre, ajuste con el signo invertido, vista sin registrar, factura siguiente +2, ventana siempre «no cobrada», cobro sin cerrar la ventana, cobro informal que llama al de factura, fecha del sistema en lugar del reloj, error sin nivel, seguir tras rechazar la confirmación, cliente con campos cruzados, parcial sin su tope, motivo cancelado que sigue, caja parcial invertida): las dieciséis se detectan, una por el compilador. **En la aplicación empaquetada**: ocho vistas registradas, se dibuja «Ingresos» sin error, `renderIngresos` ya no existe en `AppUI`, las ventanas de cobro y de edición se crean en `<body>` (la de edición con `cobrada=si` y `recibido=10`) y los diez manejadores son funciones.
 
 **Pendiente que sigue a la vista:** `handleAgregarIngreso`, la edición y los cobros aún envían el monto como `Number`; pasarlos a texto (convención 1.21.0) es un PR aparte, un comando por PR.
+
+### PR 9 — `préstamos` (1.61.0)
+
+| Qué | Previsto (medición del agente) | Medido |
+|---|---|---|
+| Métodos que se mueven | 20 | 20 (`render`, cinco ayudantes de cálculo y agrupación, cuatro plantillas, el menú, el formulario con sus campos condicionales, la edición con su aviso y cuatro manejadores); `cerrarMenuPasivo` pasa al servicio nuevo, así que la vista tiene 19 |
+| Líneas de la vista | 705 | **706** quitadas de `ui.ts` (703 de métodos y comentarios, y el `case`) |
+| Líneas a reescribir | 77 (≈89 con la corrección del 15 %) | **125** de 569 (**21 %**): `render` 4 %, las plantillas 7–12 %, los manejadores entre el 31 % y el 57 %, y **`abrirMenuPasivo` 74 %** |
+| Diff de `ui.ts` | — | **−706 / +0** (2 384 → 1 678 líneas) |
+| Archivos nuevos | — | `vistas/prestamos.ts` (785), `pruebas/js/vistas/prestamos.test.js` (406), `pruebas/js/servicios/menu_flotante.test.js` (154); `servicios.ts` +76, `registro.ts` +4, `cargar_interfaz.js` +8 |
+| Esfuerzo relativo (efectivo = 1) | 4 | ≈5: un servicio con lógica propia, sus pruebas y dos guardas de contrato que ajustar |
+| Parámetros sin tipo en `ui.ts` | 106 | **46** |
+
+**Dónde falló la predicción.** El agente contaba las líneas que tocan los servicios inyectados (`this.formatMoney`, `AppAPI.`, `elemento()`…) y **no** las que tocan `document`/`window`: el menú de acciones usa `document.createElement`, `document.body`, `document.addEventListener`, `window.innerHeight`, `setTimeout` y un `AbortController` guardado en la clase, y se reescribió casi entero (40 de 54 líneas). Sin ese método el medido sería ≈85 (15 %), dentro de lo previsto. Para las vistas que quedan (ajustes y tarjetas) conviene contar también los accesos directos a `document`/`window`.
+
+**Lo que estrena esta vista:**
+* **El servicio `MenuFlotante`** (`abrir({ id, html, ancla, alElegir })` y `cerrar()`), con su implementación real en `servicios.ts`. El estado que era un campo de la clase (`_menuPasivoAbort`) vive ahora en el servicio. Solo hay un menú abierto, el clic que lo abre no lo cierra, se cierra con el siguiente clic o con Escape, y cada cierre retira los dos listeners. Guarda una **referencia** al elemento abierto en lugar de buscarlo por identificador, porque la guarda de `dom.test.js` reserva `document.getElementById` para `ui/dom.ts`. El doble de pruebas (`cargar_interfaz.js`) registra cada menú abierto.
+* **Cálculos de dinero probables por primera vez sin dibujar.** `resumirPasivos`, `proximoVencimiento` y `agruparPasivosPorAcreedor` ahora se prueban directamente con cifras de mano. La tasa del dólar entra por `Referencias` (el último de los tres usos de `TASA_USD_A_DOP` que quedaban fuera de `ui.ts`) y el día de hoy por el reloj.
+* **Dos guardas de contrato que ajustar, ambas del tránsito de la división.** `ipc.test.js` contaba las llamadas `AppAPI.x` de la interfaz (había 37 y exige más de 40, porque las vistas usan `api.` y declaran sus comandos en `ApiDe<…>`): ahora cuenta también los nombres de `ApiDe<…>`, que el compilador comprueba contra `typeof AppAPI`. `dom.test.js` detectó el `getElementById` del servicio y obligó a la referencia. Ninguna se relajó: las dos se adaptaron para seguir comprobando lo mismo.
+* **Tipos reales que el compilador hizo visibles.** `cuotas_pendientes` y `limite_credito` pueden ser `null` en el tipo generado desde Rust, y la vista los comparaba con `> 0`. Se resolvió sin cambiar el comportamiento (`?? 0` y `!== null`; `null > 0` ya era falso).
+
+**Los puentes.** El puente expone, además de los cinco manejadores que escribe la plantilla, los tres que llama el menú (`handlePagarCuota`, `handleDeclararSaldo`, `handleEliminarPrestamo`): las pruebas de interacción y `cobertura.test.js` los llaman como `appUI.<método>`. `abrirEdicionPrestamo` y los ayudantes quedan privados de la vista.
+
+**Los seis controles del plan:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 381 pruebas (377 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa; lo que la plantilla y la ventana escriben está en el puente |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `prestamos` incluida (990 caracteres), sin `undefined`/`NaN`/errores |
+| 4. Parámetros tipados en el mismo PR | sí |
+| 5. Pruebas de interacción | las 16 existentes de `prestamos`, a través de `appUI`, **sin tocar**, más 29 de la vista y 11 del servicio |
+| 6. Revisión manual con tus datos | **el menú real en las dos versiones**: se abre en `<body>`, ofrece las mismas acciones, mismo estilo y misma posición, el clic que lo abre no lo cierra, abrir otro deja uno solo, Escape y el clic fuera lo cierran y otra tecla no; las cuatro acciones (abonar, conciliar, editar, eliminar), la edición, las dos altas (consumo y línea) y el alternar de campos: mismos comandos y argumentos, mismo modal, mismos avisos, 0 errores. **No se pudo ejercer** el grupo de una tarjeta con facilidades colgando ni el aviso de «toma las fechas de la tarjeta»: tus préstamos no cuelgan de ninguna; los cubren las pruebas |
+
+**Más controles:** veintinueve mutaciones (tasa fija en la vista, carga sin las líneas, cupo sin las líneas, vencimiento por número de día, hoy del sistema, grupo sin facilidades, «Vehiculo» sin tilde, límite y cuotas condicionales, saldo y límite en blanco como cero, conciliar sin validar o con número, eliminar sin confirmar, el menú con «abonar» siempre / sin detener el clic / con la acción equivocada, vista sin registrar, campos sin ajustar al dibujar, ventana sin cerrar, y seis del servicio: no cerrar el anterior, tick sin comprobar el cierre, cualquier tecla, acción antes de cerrar, clic sin `signal`, nunca se voltea): las veintinueve se detectan. **En la aplicación empaquetada**: nueve vistas registradas, se dibuja «Financiamientos y Deudas» sin error, `renderPrestamos` y `cerrarMenuPasivo` ya no existen en `AppUI`, el menú real se crea en `<body>`, Escape lo cierra, elegir «editar» lo cierra y abre el modal, y los ocho manejadores son funciones.
+
+**Pendiente que sigue a la vista:** `handleAgregarPrestamo` y `handleEdicionPrestamo` aún envían los importes como `Number` (la conciliación del saldo ya va como texto); pasarlos es un PR aparte, un comando por PR. Y `resumirPasivos` suma los saldos de las facilidades y el balance de su tarjeta sin descontar el solape posible, documentado en su comentario y **sin corregir**: depende de una observación del estado de cuenta que sigue sin confirmarse.

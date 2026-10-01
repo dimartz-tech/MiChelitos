@@ -91,6 +91,7 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
     const preguntas = [];
     const temporizadores = [];
     const modalesAbiertos = [];
+    const menusAbiertos = [];
     const respuestas = new Map(Object.entries(api));
 
     // Los contenedores que el constructor exige; la prueba puede pisarlos.
@@ -143,6 +144,11 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
             // Una ventana modal abierta queda registrada y existe en el DOM falso con su
             // contenido, para que la vista (o la prueba) la encuentre y la cierre por id.
             { abrir: (id, html) => { modalesAbiertos.push({ id, html }); declarar(id, { innerHTML: html }); } },
+            // Un menú flotante abierto queda registrado: `elegir(accion)` hace lo que el clic en su renglón.
+            {
+                abrir: opciones => { menusAbiertos.push({ ...opciones, abierto: true }); },
+                cerrar: () => { for (const m of menusAbiertos) m.abierto = false; },
+            },
         ),
         AppAPI,
     );
@@ -186,6 +192,8 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
         temporizadores,
         /** Las ventanas modales que abrieron las vistas extraídas: `{ id, html }`. */
         modalesAbiertos,
+        /** Los menús flotantes que abrieron las vistas extraídas: `{ id, html, ancla, alElegir, abierto }`. */
+        menusAbiertos,
         dom: { document, registro, declarar },
         /** Los elementos que `remove()` quitó, por id (modales cerrados). */
         get eliminados() { return registro.eliminados; },
