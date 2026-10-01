@@ -155,12 +155,11 @@ y los reactores `aplicarTipoAbono`, `previsualizarTasa`,
 `abrirCobroInformal`, `abrirEdicionSuscripcion`, `abrirEdicionPrestamo`,
 `abrirLiquidacionConsumo`): su producto es HTML, que es de `comparar_vistas`.
 
-## Defectos reales encontrados (no corregidos)
+## Defectos reales encontrados
 
-Pruebas marcadas `todo` (describen el comportamiento deseable; su fallo no rompe
-`npm test` y pasarán solas al corregir):
+Ninguno pendiente en las pruebas de interacción: ya no queda ninguna prueba marcada `todo`.
 
-* `handleEliminarSuscripcion`, `handleEliminarCertificado`, `handleEliminarBolsa`
-  y `handleEliminarPropiedad` **no tienen `try/catch`**: si Rust rechaza, la
-  promesa del `onclick` rechaza sin que nadie la atrape y el usuario no ve ningún
-  aviso (y la pantalla queda sin redibujar).
+* **Corregido en 1.66.0:** `handleEliminarSuscripcion`, `handleEliminarCertificado`, `handleEliminarBolsa`
+  y `handleEliminarPropiedad` no tenían `try/catch`: si Rust rechazaba, la promesa del `onclick`
+  rechazaba sin que nadie la atrapase y el usuario no veía ningún aviso. Sus pruebas `todo` (que
+  describían el comportamiento deseable) pasaron a pruebas normales, con el fallo al leer y al guardar.

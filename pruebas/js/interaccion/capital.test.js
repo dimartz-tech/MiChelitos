@@ -148,20 +148,20 @@ test('eliminar propiedad: sin confirmación no se guarda nada', async () => {
     noLlamoANada(ui);
 });
 
-// DEFECTO REAL, sin corregir (ver el informe): los tres manejadores de
-// retirada del capital no tienen try/catch. Si `obtenerCapital` o
-// `guardarCapital` rechazan, el error se pierde sin aviso. Se marcan `todo`:
-// describen el comportamiento deseable y pasarán solas cuando se corrija.
+// Las tres bajas del capital (certificado, bolsa y bien) leen el documento entero, lo
+// modifican y lo guardan. Hasta la 1.66.0 no tenían `try/catch`: si `obtenerCapital`
+// o `guardarCapital` rechazaban, el error se perdía sin aviso. Ahora lo muestran y no
+// anuncian éxito ni redibujan.
 for (const [nombre, llamar] of [
     ['handleEliminarCertificado', ui => ui.appUI.handleEliminarCertificado(0)],
     ['handleEliminarBolsa', ui => ui.appUI.handleEliminarBolsa(0)],
     ['handleEliminarPropiedad', ui => ui.appUI.handleEliminarPropiedad('inmobiliario', 'p1')],
 ]) {
-    test(`${nombre}: si Rust rechaza al guardar se muestra el error y no se propaga`, {
-        todo: `defecto: ${nombre} no tiene try/catch; el rechazo se pierde sin aviso`,
-    }, async () => {
-        const ui = cargarInterfaz({ confirm: true, api: api() });
-        ui.rechazar('guardarCapital', 'Error simulado de Rust');
-        await rechazoSeMuestra(ui, () => llamar(ui));
-    });
+    for (const metodo of ['guardarCapital', 'obtenerCapital']) {
+        test(`${nombre}: si Rust rechaza al ${metodo === 'guardarCapital' ? 'guardar' : 'leer'} se muestra el error y no se propaga`, async () => {
+            const ui = cargarInterfaz({ confirm: true, api: api() });
+            ui.rechazar(metodo, 'Error simulado de Rust');
+            await rechazoSeMuestra(ui, () => llamar(ui));
+        });
+    }
 }
