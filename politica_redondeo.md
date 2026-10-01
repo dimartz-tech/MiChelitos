@@ -282,7 +282,7 @@ encogerse, y un importe nuevo que viajara como número rompería la prueba.
 | `simular_avance_efectivo`, `registrar_avance_efectivo` | `monto`, `cargo_fijo` | ✅ texto |
 | **`crear_ingreso_informal`** | `monto` | ✅ **texto (1.69.0)**: antes guardaba el número tal cual, sin que el núcleo decidiera el céntimo |
 | `marcar_ingreso_pagado`, `marcar_informal_pagado` | `monto_recibido` | pendiente |
-| `crear_cobro_efectivo_informal` | `monto` | pendiente |
+| **`crear_cobro_efectivo_informal`** | `monto` | ✅ **texto (1.70.0)**: el importe se usa **dos veces** (el ingreso y el saldo de la caja) y ahora una sola conversión exacta garantiza que reciben lo mismo |
 | `crear_bonificacion` | `monto` | pendiente |
 | `liquidar_consumo_pendiente` | `monto_liquidado` | pendiente |
 | `registrar_pago_tarjeta` | `monto` (la tasa de cambio es una tasa, no un importe) | pendiente |

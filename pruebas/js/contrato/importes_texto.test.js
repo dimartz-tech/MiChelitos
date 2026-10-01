@@ -31,11 +31,14 @@ function cargarApi() {
     return { AppAPI, recibidos };
 }
 
-const TRES_DECIMALES = '1.005';
+// Un importe que **no sobrevive a ninguna conversión numérica**: `Number` y `parseFloat` lo dejarían en
+// `75.25`. Si llega idéntico, nadie lo tocó. (`1.005` solo delataría un `Number`, no un `parseFloat`.)
+const TRES_DECIMALES = '0075.250';
 
 /** Cada fila: el método, cómo llamarlo con `1.005` en el importe, y los campos que deben llegar tal cual. */
 const MIGRADOS = [
     ['crearIngresoInformal', A => A.crearIngresoInformal('06/03/2027', 'Clase', TRES_DECIMALES), ['monto']],
+    ['crearCobroEfectivoInformal', A => A.crearCobroEfectivoInformal('06/03/2027', 'Cobro', TRES_DECIMALES, 'USD'), ['monto']],
     ['crearSuscripcion', A => A.crearSuscripcion('Plataforma', TRES_DECIMALES, 7, 'mensual', 15, 'USD', null), ['monto']],
     ['actualizarSuscripcion', A => A.actualizarSuscripcion(1, 'Plataforma', TRES_DECIMALES, 7, 'mensual', 15, 'USD', null), ['monto']],
     ['declararSaldoPrestamo', A => A.declararSaldoPrestamo(1, TRES_DECIMALES), ['saldo']],
@@ -47,7 +50,7 @@ const MIGRADOS = [
 ];
 
 for (const [nombre, llamar, campos] of MIGRADOS) {
-    test(`${nombre}: el importe llega a Rust como texto, con sus tres decimales intactos`, async () => {
+    test(`${nombre}: el importe llega a Rust como texto, con sus dígitos intactos (ceros incluidos)`, async () => {
         const { AppAPI, recibidos } = cargarApi();
         await llamar(AppAPI);
         assert.equal(recibidos.length, 1);
@@ -57,10 +60,10 @@ for (const [nombre, llamar, campos] of MIGRADOS) {
     });
 }
 
-test('un importe en texto no se convierte aunque lleve espacios o ceros: los dígitos son del titular', async () => {
+test('un importe de tres decimales llega intacto: es el que `Number` deja en 1.00499… y el núcleo decide con sus dígitos', async () => {
     const { AppAPI, recibidos } = cargarApi();
-    await AppAPI.crearIngresoInformal('06/03/2027', 'Clase', '0075.250');
-    assert.strictEqual(recibidos[0].argumentos.monto, '0075.250');
+    await AppAPI.crearIngresoInformal('06/03/2027', 'Clase', '1.005');
+    assert.strictEqual(recibidos[0].argumentos.monto, '1.005');
 });
 
 // --- los que faltan --------------------------------------------------------------------------
@@ -76,7 +79,7 @@ const PENDIENTES = [
     'actualizarLimitesTarjeta.balanceCorteDolares', 'actualizarLimitesTarjeta.balanceCortePesos',
     'actualizarLimitesTarjeta.limiteDolares', 'actualizarLimitesTarjeta.limitePesos',
     'actualizarLimitesTarjeta.sobregiroDolares', 'actualizarLimitesTarjeta.sobregiroPesos',
-    'crearBonificacion.monto', 'crearCobroEfectivoInformal.monto', 'crearCuenta.balance',
+    'crearBonificacion.monto', 'crearCuenta.balance',
     'crearTarjeta.balanceCorteDolares', 'crearTarjeta.balanceCortePesos',
     'crearTarjeta.balanceDolares', 'crearTarjeta.balancePesos',
     'crearTarjeta.limiteDolares', 'crearTarjeta.limitePesos',

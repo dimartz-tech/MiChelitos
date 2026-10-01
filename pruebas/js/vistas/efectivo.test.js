@@ -59,9 +59,18 @@ test('entrada informal: envía los campos a la API, avisa y vuelve a dibujar la 
     const t = montar({ campos: { efe_inf_fec: '05/03/2027', efe_inf_mon: '250.5', efe_inf_div: 'USD', efe_inf_des: 'Cobro de prueba' } });
     await t.vista.handleAgregarEfectivoInformal(t.evento);
     assert.equal(t.evitado(), 1, 'debe cancelar el envío nativo del formulario');
-    assert.deepEqual(t.llamadas, [['crearCobroEfectivoInformal', '05/03/2027', 'Cobro de prueba', 250.5, 'USD']]);
+    assert.deepEqual(t.llamadas, [['crearCobroEfectivoInformal', '05/03/2027', 'Cobro de prueba', '250.5', 'USD']]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Entrada en efectivo registrada correctamente.', tipo: undefined }]);
     assert.deepEqual(t.rutas, ['efectivo']);
+});
+
+test('entrada informal: el importe viaja como TEXTO, con los espacios recortados y los dígitos intactos', async () => {
+    for (const [escrito, esperado] of [['  250.5 ', '250.5'], ['1.005', '1.005'], ['0075.250', '0075.250'], ['', '']]) {
+        const t = montar({ campos: { efe_inf_fec: '05/03/2027', efe_inf_mon: escrito, efe_inf_div: 'DOP', efe_inf_des: 'x' } });
+        await t.vista.handleAgregarEfectivoInformal(t.evento);
+        assert.strictEqual(t.llamadas[0][3], esperado, JSON.stringify(escrito));
+        assert.equal(typeof t.llamadas[0][3], 'string');
+    }
 });
 
 test('entrada informal: si la API falla, avisa del error y no vuelve a dibujar', async () => {
