@@ -503,7 +503,8 @@ export class VistaIngresos implements Vista {
         const { api, avisos, enrutador, dom } = this.dep;
         const ban = dom.elemento<Campo>(`cob_ban_${id}`).value;
         const fec = dom.elemento<Campo>(`cob_fec_${id}`).value;
-        const mon = Number(dom.elemento<Campo>(`cob_mon_${id}`).value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const mon = dom.elemento<Campo>(`cob_mon_${id}`).value.trim();
 
         try {
             await api.marcarIngresoPagado(id, ban, fec, mon);
@@ -561,7 +562,7 @@ export class VistaIngresos implements Vista {
         const { api, avisos, enrutador, dom } = this.dep;
         const ban = dom.elemento<Campo>(`cob_ban_inf_${id}`).value;
         const fec = dom.elemento<Campo>(`cob_fec_inf_${id}`).value;
-        const mon = Number(dom.elemento<Campo>(`cob_mon_inf_${id}`).value);
+        const mon = dom.elemento<Campo>(`cob_mon_inf_${id}`).value.trim();
 
         try {
             await api.marcarInformalPagado(id, ban, fec, mon);

@@ -188,12 +188,13 @@ const AppAPI = {
         });
     },
 
-    async marcarIngresoPagado(id: number | string, cuentaAhorroId: number | string, fecha: string, montoRecibido: number | string) {
+    async marcarIngresoPagado(id: number | string, cuentaAhorroId: number | string, fecha: string, montoRecibido: string) {
         return await invoke('marcar_ingreso_pagado', {
             id: Number(id),
             cuentaAhorroId: Number(cuentaAhorroId),
             fecha,
-            montoRecibido: Number(montoRecibido)
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            montoRecibido: String(montoRecibido)
         });
     },
 
@@ -211,12 +212,13 @@ const AppAPI = {
         });
     },
 
-    async marcarInformalPagado(id: number | string, cuentaAhorroId: number | string, fecha: string, montoRecibido: number | string) {
+    async marcarInformalPagado(id: number | string, cuentaAhorroId: number | string, fecha: string, montoRecibido: string) {
         return await invoke('marcar_informal_pagado', {
             id: Number(id),
             cuentaAhorroId: Number(cuentaAhorroId),
             fecha,
-            montoRecibido: Number(montoRecibido)
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            montoRecibido: String(montoRecibido)
         });
     },
 

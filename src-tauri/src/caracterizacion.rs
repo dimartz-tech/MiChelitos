@@ -2700,10 +2700,38 @@ fn c75_cobrar_una_factura_acredita_la_cuenta_indicada() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("A-007", 10_000.0, 15.0)).unwrap();
 
-    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), monto(8_500.0)).unwrap();
 
     assert_eq!(estatus_de(id), "pagada");
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "entra el neto recibido");
+}
+
+#[test]
+fn c75b_el_cobro_decide_el_centimo_con_los_digitos_escritos_y_la_fila_guarda_lo_que_se_acredita() {
+    // El importe se usa dos veces —se acredita a la cuenta y se guarda en la fila—; ambos salen de la misma
+    // decisión, así que no pueden divergir. `8500.005` sube a 8500.01.
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso(factura("A-007", 10_000.0, 15.0)).unwrap();
+
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), importe("8500.005")).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0 + 8_500.01, "la cuenta recibe el céntimo decidido");
+    let fila = crate::obtener_ingresos().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    assert_importe(fila.monto_recibido.unwrap(), 8_500.01, "la fila guarda exactamente lo que se acreditó");
+}
+
+#[test]
+fn c75c_un_cobro_que_no_es_positivo_o_redondea_a_cero_no_acredita_nada() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso(factura("A-007", 10_000.0, 15.0)).unwrap();
+
+    for escrito in ["-100.00", "0.004"] {
+        let r = marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), importe(escrito));
+        assert!(r.is_err() || (saldo_cuenta_id(cuenta) - 1_000.0).abs() < 1e-9, "{escrito}: no debe acreditar");
+    }
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "ningún saldo se movió");
 }
 
 #[test]
@@ -2716,7 +2744,7 @@ fn c76_h17_resuelto_cobrar_a_una_cuenta_inexistente_falla() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("A-008", 10_000.0, 15.0)).unwrap();
 
-    let r = marcar_ingreso_pagado(id, 9_999, "16/09/2026".into(), 8_500.0);
+    let r = marcar_ingreso_pagado(id, 9_999, "16/09/2026".into(), monto(8_500.0));
 
     assert!(r.is_err(), "no se cobra contra una cuenta que no existe");
     assert_eq!(estatus_de(id), "emitida", "la factura sigue pendiente");
@@ -2731,7 +2759,7 @@ fn c77_h18_resuelto_cobrar_una_factura_inexistente_falla() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
 
-    let r = marcar_ingreso_pagado(404, cuenta, "16/09/2026".into(), 100.0);
+    let r = marcar_ingreso_pagado(404, cuenta, "16/09/2026".into(), monto(100.0));
 
     assert!(r.is_err(), "ahora lo dice");
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "y no acredita nada");
@@ -2751,7 +2779,7 @@ fn c78_h19_resuelto_cobrar_en_otra_divisa_se_rechaza() {
     let cuenta_usd = crear_cuenta("Cuenta Ahorros USD", "USD", 100.0);
     let id = crear_ingreso(factura("A-009", 10_000.0, 15.0)).unwrap();
 
-    let r = marcar_ingreso_pagado(id, cuenta_usd, "16/09/2026".into(), 8_500.0);
+    let r = marcar_ingreso_pagado(id, cuenta_usd, "16/09/2026".into(), monto(8_500.0));
 
     assert!(r.is_err(), "no se reinterpretan pesos como dólares");
     assert_eq!(estatus_de(id), "emitida", "la factura sigue pendiente");
@@ -2766,7 +2794,7 @@ fn c78b_cobrar_en_una_cuenta_de_la_misma_divisa_funciona() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("A-010b", 10_000.0, 15.0)).unwrap();
 
-    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), monto(8_500.0)).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "entra el neto, sin estorbos");
 }
@@ -2778,7 +2806,7 @@ fn c79_borrar_una_factura_cobrada_revierte_el_abono() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("A-010", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), monto(8_500.0)).unwrap();
 
     eliminar_ingreso(id, motivo_de_prueba()).unwrap();
 
@@ -2794,7 +2822,7 @@ fn c80_h20_resuelto_borrar_una_factura_no_recorta_el_saldo() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
     let id = crear_ingreso(factura("A-011", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), monto(8_500.0)).unwrap();
     // El titular gasta lo cobrado antes de advertir el error de registro.
     conexion()
         .execute("UPDATE cuentas_ahorro SET balance_actual = 500.0 WHERE id = ?;", params![cuenta])
@@ -2855,10 +2883,23 @@ fn c82_h17_el_informal_comparte_el_arreglo() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), monto(2_000.0)).unwrap();
 
-    let r = marcar_informal_pagado(id, 9_999, "16/09/2026".into(), 2_000.0);
+    let r = marcar_informal_pagado(id, 9_999, "16/09/2026".into(), monto(2_000.0));
 
     assert!(r.is_err(), "el informal falla igual que la factura");
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "ningún saldo se movió");
+}
+
+#[test]
+fn c82b_el_cobro_de_un_informal_decide_el_centimo_con_los_digitos_escritos() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), monto(2_000.0)).unwrap();
+
+    marcar_informal_pagado(id, cuenta, "16/09/2026".into(), importe("2000.005")).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0 + 2_000.01, "la cuenta recibe el céntimo decidido");
+    let fila = crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    assert_importe(fila.monto_recibido.unwrap(), 2_000.01, "la fila guarda exactamente lo que se acreditó");
 }
 
 #[test]
@@ -2866,7 +2907,7 @@ fn c83_borrar_un_informal_cobrado_revierte_su_abono() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), monto(2_000.0)).unwrap();
-    marcar_informal_pagado(id, cuenta, "16/09/2026".into(), 2_000.0).unwrap();
+    marcar_informal_pagado(id, cuenta, "16/09/2026".into(), monto(2_000.0)).unwrap();
 
     eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
 
@@ -2931,7 +2972,7 @@ fn c85_corregir_al_alza_una_factura_cobrada_acredita_la_diferencia() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-001", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "entró el neto");
 
     // Eran 12 000, no 10 000. El neto sube de 8 500 a 10 200.
@@ -2947,7 +2988,7 @@ fn c86_corregir_a_la_baja_retira_de_la_cuenta_lo_que_sobraba() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-002", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     actualizar_ingreso(id, "B-002".into(), 1, "20/09/2026".into(), 8_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
 
@@ -2964,7 +3005,7 @@ fn c87_corregir_da_por_cobrado_el_neto_entero_aunque_faltara_algo() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-003", 10_000.0, 15.0)).unwrap();
     // Neto de 8 500, pero solo entraron 8 000.
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_000.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_000.0)).unwrap();
 
     actualizar_ingreso(id, "B-003".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
 
@@ -2980,7 +3021,7 @@ fn c87b_un_cobro_parcial_declarado_conserva_lo_que_falta() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-006", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     actualizar_ingreso(id, "B-006".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, Some(importe("9137.25")), Some(motivo_de_prueba()))
         .unwrap();
@@ -2995,7 +3036,7 @@ fn c87c_un_cobro_parcial_mayor_que_el_neto_se_rechaza() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-007", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     let r = actualizar_ingreso(
         id, "B-007".into(), 1, "20/09/2026".into(), 10_000.0, 15.0, Some(importe("9137.25")),
@@ -3010,7 +3051,7 @@ fn c88_corregir_sin_cambiar_importes_no_mueve_ningun_saldo() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-004", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     // Solo cambia la fecha.
     actualizar_ingreso(id, "B-004".into(), 1, "21/09/2026".into(), 10_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
@@ -3068,7 +3109,7 @@ fn c91_corregir_una_factura_cobrada_abre_caso_con_el_ajuste() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("C-001", 14_400.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 12_240.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(12_240.0)).unwrap();
     assert_eq!(casos_abiertos(), 0);
 
     // Eran 16 000: el neto sube de 12 240 a 13 600.
@@ -3094,7 +3135,7 @@ fn c92_corregir_sin_mover_dinero_no_abre_caso() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("C-002", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     actualizar_ingreso(
         id, "C-002".into(), 1, "21/09/2026".into(), 10_000.0, 15.0, None, None,
@@ -3125,7 +3166,7 @@ fn c94_mover_dinero_sin_motivo_se_rechaza_y_no_corrige_nada() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("C-004", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     let r = actualizar_ingreso(
         id, "C-004".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, None,
@@ -3897,7 +3938,7 @@ fn c130_una_cuenta_con_una_factura_cobrada_en_ella_no_se_puede_eliminar() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
     let id = crear_ingreso(factura("Z-001", 5_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 4_250.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(4_250.0)).unwrap();
 
     let error = crate::eliminar_cuenta(cuenta).unwrap_err();
 
@@ -3914,7 +3955,7 @@ fn c131_revertida_la_factura_la_cuenta_vuelve_a_poder_eliminarse() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
     let id = crear_ingreso(factura("Z-002", 5_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 4_250.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(4_250.0)).unwrap();
     assert!(crate::eliminar_cuenta(cuenta).is_err());
 
     eliminar_ingreso(id, motivo_de_prueba()).unwrap();
@@ -3927,7 +3968,7 @@ fn c132_una_cuenta_con_un_ingreso_informal_cobrado_en_ella_no_se_puede_eliminar(
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
     let id = crear_ingreso_informal("20/09/2026".into(), "Trabajo puntual".into(), monto(3_000.0)).unwrap();
-    marcar_informal_pagado(id, cuenta, "20/09/2026".into(), 3_000.0).unwrap();
+    marcar_informal_pagado(id, cuenta, "20/09/2026".into(), monto(3_000.0)).unwrap();
 
     let error = crate::eliminar_cuenta(cuenta).unwrap_err();
 

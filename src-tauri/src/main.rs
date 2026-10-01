@@ -581,7 +581,7 @@ fn resolver_deposito(
     tx: &rusqlite::Transaction,
     cuenta_id: i64,
     divisa_cobrada: Divisa,
-    importe: f64,
+    importe: ipc::ImporteDecimal,
 ) -> Result<dominio::ingreso::Deposito, String> {
     let divisa_cuenta: String = tx
         .query_row("SELECT divisa FROM cuentas_ahorro WHERE id = ?;", [cuenta_id], |r| r.get(0))
@@ -590,7 +590,8 @@ fn resolver_deposito(
     let deposito = dominio::ingreso::Deposito::nuevo(
         cuenta_id,
         Divisa::desde_codigo(&divisa_cuenta)?,
-        Dinero::nuevo(importe, divisa_cobrada)?,
+        // El céntimo lo deciden los dígitos escritos, y es el mismo que se guarda en la fila.
+        importe.con_divisa(divisa_cobrada),
     )?;
     Ok(deposito)
 }
@@ -622,13 +623,15 @@ fn marcar_ingreso_pagado(
     id: i64,
     cuenta_ahorro_id: i64,
     fecha: String,
-    monto_recibido: f64,
+    monto_recibido: ipc::ImporteDecimal,
 ) -> Result<(), String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     // Una factura se emite en moneda local, de modo que su cobro también.
     let deposito = resolver_deposito(&tx, cuenta_ahorro_id, MONEDA_LOCAL, monto_recibido)?;
+    // La fila guarda exactamente el mismo importe que se acredita a la cuenta.
+    let monto_recibido = monto_recibido.unidades();
     let nombre: String = tx
         .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -703,13 +706,15 @@ fn marcar_informal_pagado(
     id: i64,
     cuenta_ahorro_id: i64,
     fecha: String,
-    monto_recibido: f64,
+    monto_recibido: ipc::ImporteDecimal,
 ) -> Result<(), String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     // Una factura se emite en moneda local, de modo que su cobro también.
     let deposito = resolver_deposito(&tx, cuenta_ahorro_id, MONEDA_LOCAL, monto_recibido)?;
+    // La fila guarda exactamente el mismo importe que se acredita a la cuenta.
+    let monto_recibido = monto_recibido.unidades();
     let nombre: String = tx
         .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
