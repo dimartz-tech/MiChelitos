@@ -11,6 +11,7 @@
 
 import type { AppUIAntigua, ServiciosComunes } from '../ui/servicios';
 import { VistaCuentas, puenteCuentas } from './cuentas.js';
+import { VistaDashboard, puenteDashboard } from './dashboard.js';
 import { VistaEfectivo, puenteEfectivo } from './efectivo.js';
 import { VistaResumen, puenteResumen } from './resumen.js';
 
@@ -23,4 +24,7 @@ export function registrarVistas(app: AppUIAntigua, servicios: ServiciosComunes, 
 
     const resumen = new VistaResumen({ ...servicios, api });
     app.registrarVista('resumen', resumen, puenteResumen(resumen));
+
+    const dashboard = new VistaDashboard({ ...servicios, api });
+    app.registrarVista('dashboard', dashboard, puenteDashboard(dashboard));
 }
