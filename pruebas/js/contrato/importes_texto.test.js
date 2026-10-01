@@ -38,6 +38,7 @@ const TRES_DECIMALES = '0075.250';
 /** Cada fila: el método, cómo llamarlo con `1.005` en el importe, y los campos que deben llegar tal cual. */
 const MIGRADOS = [
     ['crearIngresoInformal', A => A.crearIngresoInformal('06/03/2027', 'Clase', TRES_DECIMALES), ['monto']],
+    ['crearBonificacion', A => A.crearBonificacion('06/03/2027', 7, TRES_DECIMALES, 'DOP', 'Cashback'), ['monto']],
     ['crearCobroEfectivoInformal', A => A.crearCobroEfectivoInformal('06/03/2027', 'Cobro', TRES_DECIMALES, 'USD'), ['monto']],
     ['crearSuscripcion', A => A.crearSuscripcion('Plataforma', TRES_DECIMALES, 7, 'mensual', 15, 'USD', null), ['monto']],
     ['actualizarSuscripcion', A => A.actualizarSuscripcion(1, 'Plataforma', TRES_DECIMALES, 7, 'mensual', 15, 'USD', null), ['monto']],
@@ -79,7 +80,7 @@ const PENDIENTES = [
     'actualizarLimitesTarjeta.balanceCorteDolares', 'actualizarLimitesTarjeta.balanceCortePesos',
     'actualizarLimitesTarjeta.limiteDolares', 'actualizarLimitesTarjeta.limitePesos',
     'actualizarLimitesTarjeta.sobregiroDolares', 'actualizarLimitesTarjeta.sobregiroPesos',
-    'crearBonificacion.monto', 'crearCuenta.balance',
+    'crearCuenta.balance',
     'crearTarjeta.balanceCorteDolares', 'crearTarjeta.balanceCortePesos',
     'crearTarjeta.balanceDolares', 'crearTarjeta.balancePesos',
     'crearTarjeta.limiteDolares', 'crearTarjeta.limitePesos',
