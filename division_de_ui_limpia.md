@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **El prototipo de `efectivo` descrito en §3 no está en este PR**: se integra como PR 1, con sus pruebas de Node. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -221,3 +221,37 @@ Orden y esfuerzo (efectivo = 1):
 5. Retirar la clase `AppUI` y `serviciosDesdeAppUI`. Opcional: `data-accion`.
 
 Total ≈ 34 unidades frente a ≈ 13 PR del plan. En cada PR: `npm test`, `npm run tipos`, `comparar_vistas` con datos reales, y revisión manual de lo que se hace al pulsar; con B, además, **la prueba de Node de los manejadores de esa vista** como parte del PR.
+
+## 9. Registro de extracciones: lo previsto frente a lo medido
+
+Se actualiza con cada PR. «Previsto» es lo que decían `division_de_ui.md` (diseño mecánico) y la medición de §4; «medido» sale del PR.
+
+### PR 1 — `efectivo` (1.52.0)
+
+| Qué | Previsto | Medido |
+|---|---|---|
+| Métodos que se mueven | 3 (`renderEfectivo` y dos manejadores) | 3 |
+| Líneas de la vista | 151 (plan) · 144 (medición del agente) | 140 de métodos + 2 comentarios y espacios |
+| Cuerpos reescritos | 19 % (prototipo del agente); 0 % con el diseño mecánico | **17 %**: 24 de 134 líneas (el `render` solo un 6 %; los manejadores, 66 % y 45 %, porque son cortos y casi todo lo que tocan es compartido) |
+| Diff de `ui.ts` | −148 / +22 (prototipo) | **−147 / +0** (el +22 del registro ya estaba en el PR 0) |
+| Archivos nuevos | `vistas/efectivo.ts`, `ui/servicios.ts`, `composicion.ts` | `vistas/efectivo.ts` (193), `vistas/registro.ts` (18) y pruebas (127); servicios y composición ya existían |
+| Adaptar `cargar_interfaz.js` a módulos con `import()` | «hay que adaptar el helper; si las vistas son módulos, `import()`» | **No hizo falta `import()`**: el helper importa estáticamente `registro.js` y `servicios.js` (sin estado) y sigue siendo síncrono; **25 líneas** y ninguna prueba cambió. Mejor de lo previsto |
+| Adaptar pruebas de contrato | «`importes.test.js` +9/−4» | **+4/−2**: las llamadas de la API en una vista son `api.x(`, no `AppAPI.x(` |
+| Parámetros sin tipo (`noImplicitAny`) | 169 en `ui.ts` | **167**; la vista nace estricta (`tsconfig.estricto.json`) |
+
+**Lo que se comprobó, y cómo se compara con los seis controles del plan (§4 de `division_de_ui.md`):**
+
+| Control del plan | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 231 pruebas (227 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa; los dos manejadores siguen existiendo (ahora en la vista) |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `efectivo` incluida (929 caracteres), sin `undefined`/`NaN`/errores |
+| 4. Parámetros tipados en el mismo PR | sí; la vista entra en `tsconfig.estricto.json` |
+| 5. Pruebas de interacción | las 8 de la vista (inyectando dobles) y las de `cuentas_y_efectivo` (a través de `appUI`, sin tocarlas) |
+| 6. Revisión manual | **ejercí los dos formularios en la versión anterior y en la nueva con tus datos** (copia temporal) y comparé lo que envían: mismos comandos, mismos argumentos, mismos avisos, 0 errores |
+
+Fuera del plan, también: **cuatro mutaciones** (retiro siempre a efectivo en pesos, vista sin registrar, puente sin un manejador, monto sin convertir): las cuatro se detectan (por las pruebas de la vista, por las de interacción o por el compilador). Y **en la aplicación empaquetada** (`tauri build`, `HOME` aislado): la vista queda registrada, se dibuja («Caja y Efectivo»), tiene su formulario y el manejador existe.
+
+**Lo que dijo la medición y se confirmó:** casi todo lo reescrito es sustitución textual (`this.showToast` → `avisos.mostrar`, `this.formatMoney` → `formato.importe`, `this.contentContainer` → `pantalla.contenido`, `elemento()` → `dom.elemento()`) y el compilador la verifica.
+
+**Lo que no estaba en el plan:** `AppAPI` global ya no se usa dentro de la vista, que recibe `api` recortada a tres comandos: una prueba puede darle una API falsa sin tocar globales.

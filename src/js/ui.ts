@@ -78,9 +78,6 @@ class AppUI {
                 case 'cuentas':
                     await this.renderCuentas();
                     break;
-                case 'efectivo':
-                    await this.renderEfectivo();
-                    break;
                 case 'suscripciones':
                     await this.renderSuscripciones();
                     break;
@@ -1440,110 +1437,6 @@ class AppUI {
                         ` : `
                             <p style="color:var(--text-muted); text-align:center; padding:1rem;">No hay transferencias entre cuentas registradas.</p>
                         `}
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    // --- RENDER: EFECTIVO ---
-    async renderEfectivo() {
-        const cuentas = await AppAPI.obtenerCuentas();
-        const cuentasAhorro = cuentas.filter(c => c.nombre !== 'Efectivo DOP' && c.nombre !== 'Efectivo USD');
-        const efectivoDop = cuentas.find(c => c.nombre === 'Efectivo DOP') || { balance_actual: 0 };
-        const efectivoUsd = cuentas.find(c => c.nombre === 'Efectivo USD') || { balance_actual: 0 };
-
-        const hoy = new Date();
-        const hoyStr = hoy.getDate().toString().padStart(2, '0') + '/' + (hoy.getMonth() + 1).toString().padStart(2, '0') + '/' + hoy.getFullYear();
-
-        this.contentContainer.innerHTML = `
-            <div class="section-title">
-                <h1>Caja y Efectivo</h1>
-                <span class="subtitle">Gestión de dinero físico y flujo de caja</span>
-            </div>
-
-            <div class="responsive-split-grid">
-                <!-- PANEL IZQUIERDO: BALANCES Y AGREGAR SALDO -->
-                <div style="display:flex; flex-direction:column; gap:1.5rem;">
-                    <!-- TARJETAS DE SALDOS EFECTIVO -->
-                    <div class="card" style="height: fit-content;">
-                        <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 1rem;">💵 Balance en Efectivo</h3>
-                        <div style="display:flex; flex-direction:column; gap:0.6rem;">
-                            <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.8rem; border-radius:var(--radius-md); display:flex; justify-content:space-between; align-items:center;">
-                                <span style="font-size:0.85rem; color:var(--text-secondary);">Efectivo DOP</span>
-                                <strong style="font-size:1.3rem; color:var(--accent-primary);">DOP ${this.formatMoney(efectivoDop.balance_actual)}</strong>
-                            </div>
-                            <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.8rem; border-radius:var(--radius-md); display:flex; justify-content:space-between; align-items:center;">
-                                <span style="font-size:0.85rem; color:var(--text-secondary);">Efectivo USD</span>
-                                <strong style="font-size:1.3rem; color: #10b981;">USD ${this.formatMoney(efectivoUsd.balance_actual)}</strong>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- AGREGAR SALDO VIA INGRESO INFORMAL -->
-                    <div class="card" style="height: fit-content;">
-                        <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">💸 Entrada Informal a Efectivo</h3>
-                        <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Registra una entrada de dinero informal directamente en caja.</p>
-                        <form id="form-add-efectivo-informal" onsubmit="appUI.handleAgregarEfectivoInformal(event)">
-                            <div class="form-group">
-                                <label for="efe_inf_fec">Fecha *</label>
-                                <input type="text" id="efe_inf_fec" class="form-control" value="${hoyStr}" required>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="efe_inf_mon">Monto *</label>
-                                    <input type="number" id="efe_inf_mon" step="0.01" class="form-control" placeholder="0.00" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="efe_inf_div">Divisa *</label>
-                                    <select id="efe_inf_div" class="form-control">
-                                        <option value="DOP" selected>DOP</option>
-                                        <option value="USD">USD</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="efe_inf_des">Descripción *</label>
-                                <input type="text" id="efe_inf_des" class="form-control" placeholder="Cobro servicio informal..." required>
-                            </div>
-                            <button type="submit" class="btn" style="width:100%; margin-top:0.5rem; background: linear-gradient(135deg, #10b981, #059669); color:white;">💵 Registrar Entrada</button>
-                        </form>
-                    </div>
-                </div>
-
-                <!-- PANEL DERECHO: RETIRO DE CUENTA A EFECTIVO -->
-                <div style="display:flex; flex-direction:column; gap:1.5rem;">
-                    <div class="card" style="height: fit-content;">
-                        <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">🏦 Retiro desde Cuenta Bancaria</h3>
-                        <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Transfiere fondos de una cuenta bancaria a efectivo.</p>
-                        <form id="form-retirar-a-efectivo" onsubmit="appUI.handleRetirarAEfectivo(event)">
-                            <div class="form-group">
-                                <label for="efe_ret_fec">Fecha *</label>
-                                <input type="text" id="efe_ret_fec" class="form-control" value="${hoyStr}" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="efe_ret_ori">Cuenta Origen (Banco) *</label>
-                                <select id="efe_ret_ori" class="form-control" required>
-                                    <option value="" disabled selected>Seleccione cuenta...</option>
-                                    ${cuentasAhorro.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${this.formatMoney(c.balance_actual)}</option>`).join('')}
-                                </select>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="efe_ret_mon">Monto Retiro *</label>
-                                    <input type="number" id="efe_ret_mon" step="0.01" class="form-control" placeholder="0.00" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="efe_ret_car">Cargo/Comisión Retiro</label>
-                                    <input type="number" id="efe_ret_car" step="0.01" value="0.00" class="form-control">
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="efe_ret_des_txt">Descripción *</label>
-                                <input type="text" id="efe_ret_des_txt" class="form-control" value="Retiro de efectivo" required>
-                            </div>
-                            <button type="submit" class="btn" style="width:100%; margin-top:0.5rem; background: linear-gradient(135deg, var(--accent-primary), #00cdac); color:white;">🚀 Registrar Retiro</button>
-                        </form>
                     </div>
                 </div>
             </div>
@@ -3834,46 +3727,6 @@ class AppUI {
             await AppAPI.transferirEntreCuentas(fec, ori, des, monOri, monDes, car, txt);
             this.showToast("Transacción ejecutada con éxito.");
             await this.render('cuentas');
-        } catch (err) {
-            this.showToast(String(err), 'error');
-        }
-    }
-
-    async handleAgregarEfectivoInformal(e) {
-        e.preventDefault();
-        const fec = elemento<Campo>('efe_inf_fec').value;
-        const mon = Number(elemento<Campo>('efe_inf_mon').value);
-        const div = elemento<Campo>('efe_inf_div').value;
-        const des = elemento<Campo>('efe_inf_des').value;
-        try {
-            await AppAPI.crearCobroEfectivoInformal(fec, des, mon, div);
-            this.showToast("Entrada en efectivo registrada correctamente.");
-            await this.render('efectivo');
-        } catch (err) {
-            this.showToast(String(err), 'error');
-        }
-    }
-
-    async handleRetirarAEfectivo(e) {
-        e.preventDefault();
-        const fec = elemento<Campo>('efe_ret_fec').value;
-        const oriId = Number(elemento<Campo>('efe_ret_ori').value);
-        const mon = Number(elemento<Campo>('efe_ret_mon').value);
-        const car = Number(elemento<Campo>('efe_ret_car').value);
-        const desTxt = elemento<Campo>('efe_ret_des_txt').value;
-
-        try {
-            const cuentas = await AppAPI.obtenerCuentas();
-            const ori = cuentas.find(c => c.id === oriId);
-            if (!ori) throw new Error("Cuenta origen no encontrada");
-
-            const cashName = ori.divisa === 'USD' ? 'Efectivo USD' : 'Efectivo DOP';
-            const des = cuentas.find(c => c.nombre === cashName);
-            if (!des) throw new Error(`Cuenta destino ${cashName} no encontrada`);
-
-            await AppAPI.transferirEntreCuentas(fec, ori.id, des.id, mon, mon, car, desTxt);
-            this.showToast("Retiro de efectivo ejecutado exitosamente.");
-            await this.render('efectivo');
         } catch (err) {
             this.showToast(String(err), 'error');
         }

@@ -92,6 +92,8 @@ test('ningún formulario desactiva la validación del navegador', () => {
 // Los métodos de `api.js` que envían dinero a Rust. Cada uno debe llamarse
 // desde un manejador que el formulario enlaza con `onsubmit`, es decir, **tras**
 // la validación del navegador: un botón con `onclick` la saltaría.
+// Las vistas extraídas de `ui.ts` reciben la API por inyección y la llaman como
+// `api.metodo(...)`; la clase vieja, como `AppAPI.metodo(...)`.
 const ENVIAN_DINERO = [
     'crearGasto', 'crearIngreso', 'actualizarIngreso', 'marcarIngresoPagado',
     'crearIngresoInformal', 'marcarInformalPagado', 'crearCobroEfectivoInformal',
@@ -104,7 +106,7 @@ test('todo envío de dinero sale de un manejador enlazado con onsubmit', () => {
     let llamadas = 0;
     const sinSubmit = [];
     for (const metodo of ENVIAN_DINERO) {
-        const usos = [...UI.matchAll(new RegExp(`AppAPI\\.${metodo}\\(`, 'g'))];
+        const usos = [...UI.matchAll(new RegExp(`\\b(?:AppAPI|api)\\.${metodo}\\(`, 'g'))];
         assert.ok(usos.length > 0, `${metodo} ya no se usa: quítalo de ENVIAN_DINERO`);
         for (const uso of usos) {
             llamadas++;
@@ -125,7 +127,7 @@ test('ninguna llamada de dinero recibe un importe calculado en el navegador', ()
     // dentro de una llamada a la API volvería a decidir el céntimo en el lugar
     // equivocado.
     const llamadas = ENVIAN_DINERO.flatMap(m =>
-        [...UI.matchAll(new RegExp(`AppAPI\\.${m}\\(([^;]*?)\\);`, 'gs'))].map(x => [m, x[1]]),
+        [...UI.matchAll(new RegExp(`\\b(?:AppAPI|api)\\.${m}\\(([^;]*?)\\);`, 'gs'))].map(x => [m, x[1]]),
     );
     const calculadas = llamadas.filter(([, args]) => /Math\.(round|floor|ceil)|toFixed/.test(args));
     assert.deepEqual(calculadas, []);
