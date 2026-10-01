@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`; PR 8 en 1.59.0: `ingresos`; PR 9 en 1.61.0: `préstamos`; PR 10 en 1.63.0: `ajustes`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`; PR 8 en 1.59.0: `ingresos`; PR 9 en 1.61.0: `préstamos`; PR 10 en 1.63.0: `ajustes`; PR 11 en 1.64.0: `tarjetas`, la última vista** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -546,3 +546,39 @@ Al probar a mano en la aplicación, eliminar una transacción no hacía nada. La
 **Hallazgo, sin corregir (protocolo):** el panel de casos de corrección pinta `c.descripcion` y `c.motivo` con `innerHTML` **sin escapar**, y el motivo lo escribe el titular. Un motivo con `<` se interpretaría como HTML. El riesgo es bajo (es su propia aplicación y su propio texto) pero es el único sitio de la pestaña que no escapa lo que viene de un campo libre; la plantilla de respaldos sí escapa. Queda anotado para un PR aparte.
 
 **Pendiente que sigue a la vista:** `handleAgregarCuenta` y `handleAgregarTarjeta` aún envían varios importes como `Number` (la comisión ya va como texto); pasarlos a texto (convención 1.21.0) es un PR aparte, un comando por PR.
+
+### PR 11 — `tarjetas` (1.64.0), la última vista
+
+| Qué | Previsto (medición del agente) | Medido |
+|---|---|---|
+| Métodos que se mueven | 17 | 17 (`render`, el abono y su reactor, el avance con su formulario y su simulación, los dos historiales con su deshacer, las bonificaciones, la edición de límites, y los dos ayudantes de presentación) |
+| Líneas de la vista | 837 | **835** quitadas de `ui.ts` (832 de métodos y comentarios, y el `case`) |
+| Líneas a reescribir | 109 (≈125 con la corrección del 15 %) | **119** de 737 (**16 %**): `render` 5 %, los historiales y la ventana de límites 7–15 %, los manejadores entre el 26 % y el 64 % |
+| Diff de `ui.ts` | — | **−835 / +0** (965 → 130 líneas) |
+| Archivos nuevos | — | `vistas/tarjetas.ts` (952), `pruebas/js/vistas/tarjetas.test.js` (524); `registro.ts` +4 |
+| Esfuerzo relativo (efectivo = 1) | 6 | ≈4: extracción casi mecánica, con un tipo corregido y dos pruebas de interacción por reescribir |
+| Parámetros sin tipo en `ui.ts` | 32 | **5** (los de los últimos métodos de la clase) |
+
+**Lo que cambia respecto a lo anterior:**
+* **`TipoAviso` incluye `'info'`.** El compilador lo señaló: Tarjetas avisa con `'info'` (el abono no propone importe por saldo a favor o saldo cero) y el tipo del servicio solo admitía `success` y `error`. `showToast` ya lo aceptaba (icono de aviso y clase `toast-info`); era el tipo el que se había quedado corto. Sin cambio de comportamiento.
+* **Dos pruebas de interacción por reescribir**, como en `gastos`: «deshacer un abono» y «deshacer un avance» espiaban `appUI.alternarAbonos` / `alternarAvances` para ver que se reabría el historial, y el manejador ahora llama al método de la vista, no al de `appUI`. Se comprueba lo que hace: consulta los abonos o avances **de esa tarjeta** y deja el panel abierto.
+* Los trece manejadores los escribe la plantilla, así que el puente expone los trece; los ayudantes (`valoresDeAvance`, `etiquetaBalanceTarjeta`, `porcentajeUso`) son privados de la vista y se prueban directamente.
+
+**Los seis controles del plan:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 464 pruebas (460 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `tarjetas` incluida (8 055 caracteres), sin `undefined`/`NaN`/errores |
+| 4. Parámetros tipados en el mismo PR | sí |
+| 5. Pruebas de interacción | las existentes de tarjetas, a través de `appUI`, sin tocar salvo las dos citadas, más 40 de la vista con dobles que responden **tarde** |
+| 6. Revisión manual con tus datos | **veintidós recorridos** ejercidos en las dos versiones: proponer el importe del abono (seis combinaciones de tipo y divisa), el abono en efectivo y con importe inválido, el abono en dólares desde una cuenta en pesos (pide la tasa; aceptarla y cancelarla), el formulario del avance (cuentas por divisa, cargo por tipo), **el avance completo con su simulación y su confirmación** (con las cifras que daría Rust, porque el simulador contesta `null`), el historial de abonos y deshacer uno con motivo, el historial de avances, las bonificaciones, y la ventana de límites (guardar, y el ajuste mayor que el aprobado): mismos comandos, argumentos y avisos, 0 errores. **No se pudo ejercer** deshacer un avance ni revertir una bonificación: tus datos no tienen avances ni bonificaciones; las cubren las pruebas |
+
+**Más controles:** treinta y siete mutaciones (recomendación de la tarjeta con menos días, corte de hoy, hoy del sistema, cero como «a favor», uso sin acotar, bonificaciones sin separar por divisa, dólares y pesos intercambiados al proponer, campos de solo lectura, el abono con importe negativo, la tasa por defecto, la tasa preguntada cuando no toca o aunque ya esté escrita o cancelada sin parar, cuenta como texto, porcentaje como texto y cargo fijo como número, exonerado que arrastra el valor, avance sin confirmar o sin cuenta, cuentas de otra divisa visibles, cuenta incompatible conservada, historial que no se reabre o no se oculta, motivo cancelado que sigue, deshacer sin confirmar, bonificación sin tope o sin concepto, ajuste mayor que el aprobado aceptado, ajuste en blanco como cero, política por defecto, ventana sin cerrar, tasa 1 visible, facilidades de cualquier tarjeta, vista sin registrar): las treinta y siete se detectan, tres por el compilador. **En la aplicación empaquetada**: once vistas registradas, se dibuja «Tarjetas de Crédito» con su recomendación, `renderTarjetas` ya no existe en `AppUI`, la ventana de límites se crea en `<body>`, los trece manejadores son funciones y el historial de abonos se abre y se pliega (`abierto=true` en tres repeticiones con contador de redibujos). **Una cautela:** dos sondas anteriores, sin controlar la carrera con el dibujado inicial de `app.ts`, leyeron el panel como cerrado; no se reprodujo en cuatro ejecuciones posteriores (una traza detallada y tres repeticiones, con 0 redibujos) y el código, las pruebas y la comparación con datos reales coinciden con el comportamiento abierto. Lo más probable es que fuera la sonda, pero no se demostró.
+
+**Pendiente que sigue a la vista:** el abono, los límites y la bonificación aún envían importes como `Number` (el avance y la conciliación ya van como texto); pasarlos a texto (convención 1.21.0) es un PR aparte, un comando por PR.
+
+### Lo que queda tras el PR 11
+
+`ui.ts` queda en **130 líneas**: la clase `AppUI` con `showToast`, el enrutador (`render` con su `switch` y el respaldo al Dashboard), `formatMoney`, `pedirMotivoDeCorreccion`, el constructor, `registrarVista` y la constante `TASA_USD_A_DOP`. Las once vistas viven en `src/js/vistas/`. Falta el **PR 12**: pasar esos últimos métodos a sus servicios (`Avisos`, `Formato`, `Motivo`, y el enrutador del registro de vistas), retirar la clase y el puente `window.appUI`, y quitar `serviciosDesdeAppUI`.
