@@ -6,10 +6,11 @@
 // documento y antes de `DOMContentLoaded`, que es cuando `app.ts` dibuja la
 // primera pestaña, así que toda vista está registrada antes de poder pulsarse.
 //
-// Cada extracción de `ui.ts` añade aquí su vista (una línea de construcción y
-// otra de registro). Ver `division_de_ui_limpia.md`.
+// Cada extracción de `ui.ts` añade su vista en `vistas/registro.ts`. Ver
+// `division_de_ui_limpia.md`.
 
 import { serviciosDesdeAppUI, type AppUIAntigua, type Dom } from './ui/servicios.js';
+import { registrarVistas } from './vistas/registro.js';
 
 // Globales de los scripts clásicos (`ui.ts`, `ui/dom.ts`): se declaran aquí,
 // dentro de un módulo, para no chocar con sus declaraciones reales.
@@ -22,7 +23,7 @@ const dom: Dom = {
     buscar: <T extends HTMLElement = HTMLElement>(id: string) => buscar<T>(id),
 };
 
-// Todavía no hay ninguna vista extraída (la primera, `efectivo`, es el PR 1).
-// Los servicios se construyen igualmente: así este módulo ejercita ya su carga
-// en la aplicación empaquetada y el cableado con la clase vieja.
-export const servicios = serviciosDesdeAppUI(appUI, dom);
+const servicios = serviciosDesdeAppUI(appUI, dom);
+
+// Qué vistas hay y cómo se construyen vive en `vistas/registro.ts`.
+registrarVistas(appUI, servicios, AppAPI);
