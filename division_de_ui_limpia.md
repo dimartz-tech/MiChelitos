@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -373,3 +373,35 @@ Fuera del plan, también: **cuatro mutaciones** (retiro siempre a efectivo en pe
 **Dos precisiones de método, para no repetir mis tropiezos:** (1) en un campo `type="number"` un valor con espacios se **sanea a vacío**: mis primeras pruebas manuales con ` 123.455 ` no fallaron por el `step`, sino por el campo `required` vacío; se repitieron con valores limpios y se comprobó aparte que **tres decimales los detiene el `step`** (0 guardados, igual en las dos versiones). (2) El `.trim()` de la vista sobre un campo numérico no tiene efecto en el navegador; se mantiene porque era el comportamiento original.
 
 **Más controles:** siete mutaciones (monto como número, baja del elemento siguiente, identificador de la fecha real en lugar del reloj, vista sin registrar, baja de bien invertida, bolsa guardada entre los certificados, baja sin confirmación): las siete se detectan. **En la aplicación empaquetada**: cinco vistas registradas, se dibuja «Capital y Activos» sin error y los seis manejadores son funciones.
+
+### PR 6 — `suscripciones` (1.57.0)
+
+| Qué | Previsto (medición del agente) | Medido |
+|---|---|---|
+| Métodos que se mueven | 10 | 10 (`render`, seis manejadores, el editor modal y dos ayudantes de fechas) |
+| Líneas de la vista | 366 | **369** quitadas de `ui.ts` (366 de métodos y comentarios) |
+| Líneas a reescribir | 51 (≈59 con la corrección del 15 %) | **59** de 317 (**18 %**): `render` 3 %, el editor modal 13 %, los manejadores entre el 26 % y el 80 % |
+| Diff de `ui.ts` | — | **−369 / +0** |
+| Archivos nuevos | — | `vistas/suscripciones.ts` (446), `pruebas/js/vistas/suscripciones.test.js` (231); `registro.ts` +4, `servicios.ts` +23, `cargar_interfaz.js` +6 |
+| Esfuerzo relativo (efectivo = 1) | 3 | ≈3: un servicio nuevo, un modal y tres diálogos |
+| Parámetros sin tipo en `ui.ts` | 146 | **134** |
+
+**Lo que estrena esta vista:**
+* **El servicio `Modales`.** `ui.ts` repite nueve veces el mismo bloque (crear la capa `modal-overlay`, ponerle un identificador y un contenido, añadirla a `<body>`). El editor de suscripciones es el primero en moverse, y en lugar de arrastrar `document` a la vista se creó `Modales.abrir(id, html)`: las ocho extracciones que quedan con modal ya tienen su servicio. El doble de pruebas registra cada ventana abierta y la declara en el DOM falso, así que una prueba la encuentra y la cierra por identificador.
+* **`Motivo` y `Dialogos` (con `prompt`) en uso real.** `descartar un período` pide un motivo; `corregir el próximo cobro` usa `prompt`; asentar y dar de baja usan `confirm`.
+* **Un choque de nombres que el compilador atrapó:** el servicio se llamaba `motivo` y el manejador ya tenía una variable `motivo` (la respuesta). Se renombró el servicio localmente (`pedidorDeMotivo`).
+
+**Una trampa de la transformación mecánica, anotada para las siguientes:** la sustitución `elemento(` → `dom.elemento(` **no debe tocar el HTML**. El editor lleva `onclick="elemento('modal-edit-sus-…').remove()"` dentro de la plantilla: es código que corre en el navegador, no en la vista, y reescribirlo lo habría roto. El script protege ahora los atributos `on…=`. También: la plantilla llamaba a `appUI.fechaAIso(...)` (global) y en la vista pasa a `this.fechaAIso(...)`, porque el ayudante ahora es privado de la vista.
+
+**Los seis controles del plan:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 295 pruebas (291 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa, incluido el `onclick` con comillas simples que recibe el objeto en JSON |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `suscripciones` incluida (1 825 caracteres), sin `undefined`/`NaN`/errores |
+| 4. Parámetros tipados en el mismo PR | sí |
+| 5. Pruebas de interacción | las existentes, a través de `appUI`, sin tocar, más 18 de la vista con dobles (alta, edición con validaciones, modal, baja, corregir fecha, asentar, descartar con motivo, puente) |
+| 6. Revisión manual con tus datos | **alta, editor modal, edición y baja**, ejercidos en las dos versiones: mismos comandos y argumentos, **mismo modal** (identificador, clase y campos), cerrado tras guardar, mismos avisos, 0 errores. **No se pudo ejercer** corregir fecha ni asentar/descartar: tus suscripciones no tienen ninguna parada ni períodos pendientes; las cubren las pruebas de la vista |
+
+**Más controles:** ocho mutaciones (monto como número, aviso que vuelve al campo viejo `fecha_renovacion`, modal sin su identificador, edición que no cierra la ventana, descartar sin comprobar el motivo, baja sin confirmación, vista sin registrar, fecha sin convertir): las ocho se detectan, una por el compilador. **En la aplicación empaquetada**: seis vistas registradas, se dibuja sin error, **el modal real se crea en `<body>` con la clase `modal-overlay`** y los siete manejadores son funciones.
