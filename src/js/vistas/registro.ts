@@ -14,6 +14,7 @@ import { VistaCapital, puenteCapital } from './capital.js';
 import { VistaCuentas, puenteCuentas } from './cuentas.js';
 import { VistaDashboard, puenteDashboard } from './dashboard.js';
 import { VistaEfectivo, puenteEfectivo } from './efectivo.js';
+import { VistaGastos, puenteGastos } from './gastos.js';
 import { VistaResumen, puenteResumen } from './resumen.js';
 import { VistaSuscripciones, puenteSuscripciones } from './suscripciones.js';
 
@@ -35,4 +36,7 @@ export function registrarVistas(app: AppUIAntigua, servicios: ServiciosComunes, 
 
     const suscripciones = new VistaSuscripciones({ ...servicios, api });
     app.registrarVista('suscripciones', suscripciones, puenteSuscripciones(suscripciones));
+
+    const gastos = new VistaGastos({ ...servicios, api });
+    app.registrarVista('gastos', gastos, puenteGastos(gastos));
 }
