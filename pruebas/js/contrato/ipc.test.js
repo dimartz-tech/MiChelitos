@@ -188,7 +188,12 @@ test('toda llamada de la interfaz a AppAPI tiene su envoltorio en api.ts', () =>
     const fuentesDeLaInterfaz = leerInterfazTs();
     const api = readFileSync(join(RAIZ, 'src', 'js', 'api.ts'), 'utf8');
     const definidos = new Set([...api.matchAll(/^    async (\w+)\(/gm)].map(m => m[1]));
-    const usados = new Set([...fuentesDeLaInterfaz.matchAll(/\bAppAPI\.(\w+)/g)].map(m => m[1]));
+    // Las vistas extraídas no llaman a `AppAPI.x`: declaran los comandos que usan en
+    // `ApiDe<'x' | 'y'>` y los llaman como `api.x`. El compilador ya exige que cada
+    // nombre exista en `typeof AppAPI`; aquí se cuentan para que la prueba no pierda
+    // de vista llamadas a medida que `ui.ts` se divide.
+    const declarados = [...fuentesDeLaInterfaz.matchAll(/ApiDe<([^>]*)>/g)].flatMap(m => [...m[1].matchAll(/'(\w+)'/g)].map(n => n[1]));
+    const usados = new Set([...fuentesDeLaInterfaz.matchAll(/\bAppAPI\.(\w+)/g)].map(m => m[1]).concat(declarados));
 
     assert.ok(usados.size > 40, `se esperaban decenas de llamadas, hay ${usados.size}`);
     const sinEnvoltorio = [...usados].filter(n => !definidos.has(n));
