@@ -130,8 +130,17 @@ test('alta de factura: si Rust rechaza se avisa el error y no se redibuja', asyn
 test('ingreso informal: (fecha, descripción, monto) en ese orden', async () => {
     const t = montar({ campos: { fecha_inf: el({ value: '06/03/2027' }), monto_inf: el({ value: '75.25' }), desc_inf: el({ value: 'Clase suelta' }) } });
     await t.vista.handleAgregarIngresoInformal(t.evento);
-    assert.deepEqual(t.llamadas, [['crearIngresoInformal', '06/03/2027', 'Clase suelta', 75.25]]);
+    assert.deepEqual(t.llamadas, [['crearIngresoInformal', '06/03/2027', 'Clase suelta', '75.25']]);
     assert.deepEqual(t.rutas, ['ingresos']);
+});
+
+test('ingreso informal: el importe viaja como TEXTO, con los espacios recortados y los dígitos intactos', async () => {
+    for (const [escrito, esperado] of [[' 75.25 ', '75.25'], ['1.005', '1.005'], ['0075.250', '0075.250'], ['', '']]) {
+        const t = montar({ campos: { fecha_inf: el({ value: '06/03/2027' }), monto_inf: el({ value: escrito }), desc_inf: el({ value: 'Clase' }) } });
+        await t.vista.handleAgregarIngresoInformal(t.evento);
+        assert.strictEqual(t.llamadas[0][3], esperado, JSON.stringify(escrito));
+        assert.equal(typeof t.llamadas[0][3], 'string');
+    }
 });
 
 test('elegir un cliente rellena nombre y RNC; «nuevo cliente» los deja vacíos', () => {

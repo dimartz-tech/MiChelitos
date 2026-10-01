@@ -686,7 +686,10 @@ fn obtener_ingresos_informales() -> Result<Vec<IngresoInformal>, String> {
 }
 
 #[tauri::command]
-fn crear_ingreso_informal(fecha: String, descripcion: String, monto: f64) -> Result<i64, String> {
+fn crear_ingreso_informal(fecha: String, descripcion: String, monto: ipc::ImporteDecimal) -> Result<i64, String> {
+    // El importe llega como se escribió y el núcleo decide el céntimo con esos dígitos
+    // (`1.005` sube a 1.01); `unidades()` es solo la salida a la columna `REAL`.
+    let monto = monto.unidades();
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO ingresos_informales (fecha, descripcion, monto, estatus) VALUES (?, ?, ?, 'pendiente');",
