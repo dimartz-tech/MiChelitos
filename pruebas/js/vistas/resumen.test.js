@@ -121,6 +121,45 @@ test('la carga fija suma las cuotas que corren (flexibles y con cuotas pendiente
     assert.equal(importeDe(html, 'Carga Fija Mensual'), 55);
 });
 
+const MIXTAS = () => datos({
+    suscripciones: [
+        { frecuencia: 'mensual', monto: 10, divisa: 'DOP' },
+        { frecuencia: 'mensual', monto: 10, divisa: 'USD' },
+        { frecuencia: 'anual', monto: 120, divisa: 'USD' }, // 120 / 12 = 10 al mes, en dólares
+    ],
+});
+
+test('la carga fija no mezcla divisas: los dólares no entran en la suma de pesos', async () => {
+    // pesos: préstamos 35 + suscripción 10 = 45; dólares aparte: 10 + 120 / 12 = 20
+    const { html } = await dibujar({ d: MIXTAS() });
+    assert.equal(importeDe(html, 'Cuotas de Préstamos'), 35);
+    assert.equal(importeDe(html, 'Suscripciones Recurrentes'), 10);
+    assert.equal(importeDe(html, 'Carga Fija Mensual'), 45);
+    assert.match(html, /DOP #45\.00# \+ USD #20\.00#/);
+    assert.match(html, /Suscripciones en USD/);
+    assert.match(html, /<strong>USD #20\.00#<\/strong>/);
+});
+
+test('la carga fija no convierte los dólares con la tasa: otra tasa no cambia ninguna cifra', async () => {
+    const a = await dibujar({ d: MIXTAS(), tasa: 50 });
+    const b = await dibujar({ d: MIXTAS(), tasa: 61 });
+    const fija = h => h.slice(h.indexOf('Carga Fija Mensual'), h.indexOf('Balance Mensual'));
+    assert.equal(fija(a.html), fija(b.html));
+});
+
+test('la carga fija sin dólares no muestra renglón ni cifra en otra divisa; sin divisa cuenta como pesos', async () => {
+    const { html } = await dibujar();
+    assert.doesNotMatch(html, /Suscripciones en|USD #\d/);
+    assert.doesNotMatch(html, /Carga Fija Mensual[^<]*<\/span>\s*<span[^>]*>DOP #55\.00# \+/);
+});
+
+test('una divisa distinta de DOP y USD tampoco se pierde ni se suma a los pesos', async () => {
+    const d = datos({ suscripciones: [{ frecuencia: 'mensual', monto: 10, divisa: 'EUR' }] });
+    const { html } = await dibujar({ d });
+    assert.equal(importeDe(html, 'Suscripciones Recurrentes'), 0);
+    assert.match(html, /DOP #35\.00# \+ EUR #10\.00#/);
+});
+
 test('el balance del mes cuenta solo lo del mes del reloj inyectado', async () => {
     // cobrado 200 + 50; gastos 100 + 5; el resto es de febrero
     const { html } = await dibujar();

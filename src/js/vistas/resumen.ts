@@ -71,7 +71,19 @@ export class VistaResumen implements Vista {
 
         // 3. Flujos Fijos
         const cuotaPrestamos = prestamos.reduce((sum, p) => sum + (p.tipo_prestamo === 'flexible' || (p.cuotas_pendientes ?? 0) > 0 ? p.monto_cuota : 0.0), 0);
-        const cuotaSuscripciones = suscripciones.reduce((sum, s) => sum + (s.frecuencia === 'mensual' ? s.monto : (s.monto / 12.0)), 0);
+        // Las suscripciones se suman **por divisa y nunca entre divisas**: un dólar
+        // no es un peso, y convertirlo con una tasa fija daría una cifra que no
+        // corresponde con lo que se cobra de verdad. Los préstamos no tienen divisa
+        // (son en pesos). El total de la cabecera es el de pesos; las demás divisas
+        // se muestran aparte, cada una con la suya.
+        const suscripcionesPorDivisa = new Map<string, number>();
+        for (const s of suscripciones) {
+            const divisa = s.divisa || 'DOP';
+            const alMes = s.frecuencia === 'mensual' ? s.monto : (s.monto / 12.0);
+            suscripcionesPorDivisa.set(divisa, (suscripcionesPorDivisa.get(divisa) ?? 0) + alMes);
+        }
+        const cuotaSuscripciones = suscripcionesPorDivisa.get('DOP') ?? 0;
+        const suscripcionesOtrasDivisas = [...suscripcionesPorDivisa.entries()].filter(([d]) => d !== 'DOP').sort(([x], [y]) => x.localeCompare(y));
         const cargaFija = cuotaPrestamos + cuotaSuscripciones;
 
         // 4. Balance del Mes (basado en monto cobrado/recibido)
@@ -159,7 +171,7 @@ export class VistaResumen implements Vista {
                 <div class="card">
                     <h3 style="font-family:var(--font-heading); font-size:1.15rem; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem; display:flex; justify-content:space-between; margin-bottom:1rem;">
                         <span>🔄 Carga Fija Mensual</span>
-                        <span class="amount expense">DOP ${formato.importe(cargaFija)}</span>
+                        <span class="amount expense">DOP ${formato.importe(cargaFija)}${suscripcionesOtrasDivisas.map(([d, m]) => ` + ${d} ${formato.importe(m)}`).join('')}</span>
                     </h3>
                     <div style="display:flex; flex-direction:column; gap:0.6rem; font-size:0.85rem;">
                         <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); padding:0.5rem; border-radius:4px;">
@@ -170,6 +182,11 @@ export class VistaResumen implements Vista {
                             <span>Suscripciones Recurrentes</span>
                             <strong>DOP ${formato.importe(cuotaSuscripciones)}</strong>
                         </div>
+                        ${suscripcionesOtrasDivisas.map(([d, m]) => `
+                        <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); padding:0.5rem; border-radius:4px;">
+                            <span>Suscripciones en ${d}</span>
+                            <strong>${d} ${formato.importe(m)}</strong>
+                        </div>`).join('')}
                     </div>
                 </div>
 
