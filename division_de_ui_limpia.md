@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -313,3 +313,32 @@ Fuera del plan, también: **cuatro mutaciones** (retiro siempre a efectivo en pe
 **Lo que ganó la vista con la inyección:** el Resumen es una pantalla de solo lectura pero **contiene reglas de dinero** (patrimonio neto, ratio de endeudamiento con sus tres rótulos, qué cuotas cuentan, suscripciones anuales entre 12, qué entra en el mes). **Hasta ahora ninguna prueba las ejercía.** Con datos inventados y resultados comprobables a mano ahora sí: tasa inyectada, mes del reloj inyectado, préstamo flexible frente a uno sin cuotas pendientes, sin activos (sin dividir por cero), balance negativo, capital `null`.
 
 **Más controles:** seis mutaciones (ratio al revés, gastos de todos los meses, tasa escrita dentro, cuota sin cuotas pendientes que sigue sumando, anuales sin dividir entre 12, vista sin registrar): las seis se detectan, y la última solo la detecta la prueba nueva de rutas. **En la aplicación empaquetada**: tres vistas registradas, se dibuja «Resumen Ejecutivo» sin error y la tasa llega como 60. (Una sonda de texto buscó «Patrimonio Neto» y no lo halló: `innerText` aplica el `text-transform: uppercase` del CSS y devuelve «PATRIMONIO NETO»; es un defecto de la sonda, no de la vista, y las pruebas de Node comprueban las etiquetas en el HTML.)
+
+### PR 4 — `dashboard` (1.55.0)
+
+| Qué | Previsto (medición del agente) | Medido |
+|---|---|---|
+| Métodos que se mueven | 1 | 1 (`renderDashboard`, 157 líneas de cuerpo; solo lectura, sin manejadores) |
+| Líneas a reescribir | 14 (≈16 con la corrección del 15 %) | **17** de 157 (**10 %**) |
+| Diff de `ui.ts` | — | **−165 / +2** (los +2 son el `default:` de `render()`, ver abajo) |
+| Archivos nuevos | — | `vistas/dashboard.ts` (209), `pruebas/js/vistas/dashboard.test.js` (139); `registro.ts` +4 |
+| Esfuerzo relativo (efectivo = 1) | 0,6 | ≈0,9: la extracción fue la más limpia, pero hubo que tocar el enrutador y tipar el capital |
+| Parámetros sin tipo en `ui.ts` | 163 | **161** (dos lambdas sobre el capital, ahora tipadas en la vista) |
+
+**Lo que el modelo no preveía:**
+* **El `default:` de `render()` era `renderDashboard()`.** Una ruta que nadie reconoce cae en el Dashboard; al quitar el método, esa rama habría dejado de funcionar o fallado. Ahora busca la vista registrada (`this.vistas.get('dashboard')?.render()`). Una prueba con el render real lo fija; con la mutación (buscar otra clave) falla. Es la segunda vez que el `switch` esconde un acoplamiento que el análisis de métodos no ve: **cuando se extraiga la última vista habrá que revisar el enrutador entero**.
+* **El capital es `any`.** Rust lo devuelve como JSON libre, y las lambdas sobre `certificados` y `bolsa` eran parámetros sin tipo. La vista declara **solo lo que lee** (`ElementoConAlerta`), no un modelo del capital.
+* **Una laguna de mis propias pruebas.** La primera versión de la prueba de avisos comprobaba los textos pero no el **nivel** de cada uno (el nivel decide color e icono); la mutación «el aviso de pago de tarjeta sale como `info`» pasaba. Se reforzó: ahora se fija el nivel de los cinco tipos de aviso. Detectada por el mismo control de mutaciones que se está aplicando a cada vista.
+
+**Los seis controles del plan:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 263 pruebas (259 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa; el Dashboard no añade manejadores de `appUI` (sus enlaces son `navigate()`) |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `dashboard` incluido (903 caracteres), sin `undefined`/`NaN`/errores |
+| 4. Parámetros tipados en el mismo PR | sí; entra en `tsconfig.estricto.json` |
+| 5. Pruebas de interacción | sin manejadores; **10 pruebas de la vista** (mes del reloj, cargos sumados al gasto, patrimonio sin recalcular, niveles de los avisos, límite de tres tarjetas y préstamos, mensajes vacíos) + la de la ruta desconocida |
+| 6. Revisión manual con tus datos | los **dos enlaces del Dashboard** («Detalles» de tarjetas y «Deudas») ejercidos en las dos versiones: mismo título, misma pestaña activa; y **una ruta inexistente cae en el Dashboard con el mismo texto** en las dos |
+
+**Más controles:** seis mutaciones (vista sin registrar, `default:` sin buscar el Dashboard, gastos de todos los meses, cargos sin sumar, patrimonio recalculado en la vista, nivel del aviso equivocado): las seis se detectan (la sexta, tras reforzar la prueba). **En la aplicación empaquetada**: cuatro vistas registradas, una ruta inexistente cae en el Dashboard y sin error.
