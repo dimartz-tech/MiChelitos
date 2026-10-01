@@ -115,11 +115,12 @@ const AppAPI = {
         return await invoke('revertir_avance_efectivo', { id: Number(id), motivo });
     },
 
-    async crearCuenta(nombre: string, divisa: string, balance: number | string, entidad: string | null | undefined, comisionPagoImpuestos: string | number | null | undefined) {
+    async crearCuenta(nombre: string, divisa: string, balance: string, entidad: string | null | undefined, comisionPagoImpuestos: string | number | null | undefined) {
         return await invoke('crear_cuenta', {
             nombre,
             divisa,
-            balance: Number(balance),
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            balance: String(balance),
             entidad: entidad || null,
             // Texto, por el mismo motivo que el saldo del préstamo.
             comisionPagoImpuestos: comisionPagoImpuestos ?? null

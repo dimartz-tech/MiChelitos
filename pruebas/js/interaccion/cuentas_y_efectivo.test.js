@@ -14,10 +14,10 @@ const MOTIVO = 'El traspaso se hizo entre las cuentas equivocadas';
 
 const cuenta = { cue_aj_nom: 'Cuenta de Prueba', cue_aj_div: 'USD', cue_aj_bal: '1500.75', cue_aj_ent: 'Banco de Prueba', cue_aj_com: '' };
 
-test('alta de cuenta: (nombre, divisa, balance numérico, entidad, comisión); comisión en blanco = null, no 0', async () => {
+test('alta de cuenta: (nombre, divisa, balance como texto, entidad, comisión); comisión en blanco = null, no 0', async () => {
     const ui = cargarInterfaz({ campos: cuenta });
     await ui.appUI.handleAgregarCuenta(crearEvento());
-    llamoUnaVez(ui, 'crearCuenta', ['Cuenta de Prueba', 'USD', 1500.75, 'Banco de Prueba', null]);
+    llamoUnaVez(ui, 'crearCuenta', ['Cuenta de Prueba', 'USD', '1500.75', 'Banco de Prueba', null]);
     avisoExito(ui, /Cuenta de ahorro registrada/);
     redibujo(ui, 'ajustes');
 });

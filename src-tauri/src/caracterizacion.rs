@@ -3225,10 +3225,19 @@ fn comision_de(cuenta_id: i64) -> Option<f64> {
 }
 
 #[test]
+fn c94b_el_saldo_inicial_de_una_cuenta_lo_decide_el_nucleo_con_los_digitos_escritos() {
+    // `100.005` sube a 100.01: el saldo inicial entra por la misma puerta que el resto de los importes.
+    let _g = entorno_aislado();
+    crate::crear_cuenta("Cuenta Nueva DOP".into(), "DOP".into(), importe("100.005"), None, None).unwrap();
+
+    assert_importe(balance_cuenta("Cuenta Nueva DOP"), 100.01, "el saldo inicial lleva el céntimo decidido");
+}
+
+#[test]
 fn c95_una_comision_con_fraccion_de_centimo_se_decide_al_crear() {
     let _g = entorno_aislado();
     let id = crate::crear_cuenta(
-        "Cuenta Corriente DOP".into(), "DOP".into(), 0.0,
+        "Cuenta Corriente DOP".into(), "DOP".into(), monto(0.0),
         Some("Banco Ejemplo".into()), Some(importe("75.005")),
     )
     .unwrap();
@@ -3260,7 +3269,7 @@ fn c97_una_comision_sin_declarar_sigue_siendo_nula_y_no_cero() {
     // cobra». Pasar por `Dinero` no puede borrar esa distinción.
     let _g = entorno_aislado();
     let id = crate::crear_cuenta(
-        "Cuenta Ahorros DOP".into(), "DOP".into(), 0.0, None, None,
+        "Cuenta Ahorros DOP".into(), "DOP".into(), monto(0.0), None, None,
     )
     .unwrap();
 
@@ -3271,7 +3280,7 @@ fn c97_una_comision_sin_declarar_sigue_siendo_nula_y_no_cero() {
 fn c98_una_comision_negativa_se_sigue_rechazando() {
     let _g = entorno_aislado();
     let r = crate::crear_cuenta(
-        "Cuenta Ahorros DOP".into(), "DOP".into(), 0.0, None, Some(importe("-1.00")),
+        "Cuenta Ahorros DOP".into(), "DOP".into(), monto(0.0), None, Some(importe("-1.00")),
     );
 
     assert!(r.is_err());

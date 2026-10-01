@@ -524,7 +524,8 @@ export class VistaAjustes implements Vista {
         const { api, avisos, enrutador, dom } = this.dep;
         const nom = dom.elemento<Campo>('cue_aj_nom').value;
         const div = dom.elemento<Campo>('cue_aj_div').value;
-        const bal = Number(dom.elemento<Campo>('cue_aj_bal').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const bal = dom.elemento<Campo>('cue_aj_bal').value.trim();
         const ent = dom.elemento<Campo>('cue_aj_ent').value;
         // Un campo en blanco es «no declarada», no cero: se envía nulo para
         // que la ausencia siga siendo distinguible de una tarifa gratuita.

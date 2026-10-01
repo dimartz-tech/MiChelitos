@@ -2300,10 +2300,12 @@ fn obtener_cuentas() -> Result<Vec<CuentaAhorro>, String> {
 fn crear_cuenta(
     nombre: String,
     divisa: String,
-    balance: f64,
+    balance: ipc::ImporteDecimal,
     entidad: Option<String>,
     comision_pago_impuestos: Option<ipc::ImporteDecimal>,
 ) -> Result<i64, String> {
+    // El saldo inicial llega como se escribió: el céntimo lo deciden esos dígitos.
+    let balance = balance.unidades();
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let nombre_clean = nombre.trim();
     if nombre_clean.is_empty() {
