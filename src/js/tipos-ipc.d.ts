@@ -76,7 +76,7 @@ export type Comandos = {
     crear_cuenta: { args: { nombre: string; divisa: string; balance: string | number; entidad?: string | null; comisionPagoImpuestos?: string | number | null }; ret: number };
     actualizar_cuenta: { args: { id: number; nombre: string; entidad?: string | null; comisionPagoImpuestos?: string | number | null }; ret: null };
     eliminar_cuenta: { args: { id: number }; ret: null };
-    transferir_entre_cuentas: { args: { fecha: string; origenId: number; destinoId: number; montoOrigen: number; montoDestino: number; cargo: number; descripcion: string }; ret: null };
+    transferir_entre_cuentas: { args: { fecha: string; origenId: number; destinoId: number; montoOrigen: string | number; montoDestino: string | number; cargo: string | number; descripcion: string }; ret: null };
     obtener_transacciones_cuentas: { args: {  }; ret: TransaccionCuenta[] };
     actualizar_ingreso: { args: { id: number; numeroFactura: string; clienteId: number; fechaEmision: string; montoTotal: number; porcentajeRetencion: number; cobroParcial?: string | number | null; motivo?: string | null }; ret: string };
     crear_cobro_efectivo_informal: { args: { fecha: string; descripcion: string; monto: string | number; divisa: string }; ret: number };

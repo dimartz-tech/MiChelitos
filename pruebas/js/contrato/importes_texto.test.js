@@ -48,6 +48,7 @@ const MIGRADOS = [
     ['crearSuscripcion', A => A.crearSuscripcion('Plataforma', TRES_DECIMALES, 7, 'mensual', 15, 'USD', null), ['monto']],
     ['actualizarSuscripcion', A => A.actualizarSuscripcion(1, 'Plataforma', TRES_DECIMALES, 7, 'mensual', 15, 'USD', null), ['monto']],
     ['declararSaldoPrestamo', A => A.declararSaldoPrestamo(1, TRES_DECIMALES), ['saldo']],
+    ['transferirEntreCuentas', A => A.transferirEntreCuentas(1, 2, '10', TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, 'x'), ['montoOrigen', 'montoDestino', 'cargo']],
     ['crearCuenta (comisión)', A => A.crearCuenta('Cuenta', 'DOP', 10, null, TRES_DECIMALES), ['comisionPagoImpuestos']],
     ['actualizarCuenta (comisión)', A => A.actualizarCuenta(1, 'Cuenta', null, TRES_DECIMALES), ['comisionPagoImpuestos']],
     ['actualizarIngreso (cobro parcial)', A => A.actualizarIngreso(1, 'F-1', 2, '01/01/2027', 100, 10, TRES_DECIMALES, null), ['cobroParcial']],
@@ -89,7 +90,6 @@ const PENDIENTES = [
     'crearTarjeta.balanceDolares', 'crearTarjeta.balancePesos',
     'crearTarjeta.limiteDolares', 'crearTarjeta.limitePesos',
     'crearTarjeta.sobregiroDolares', 'crearTarjeta.sobregiroPesos',
-    'transferirEntreCuentas.cargo', 'transferirEntreCuentas.montoDestino', 'transferirEntreCuentas.montoOrigen',
 ];
 
 const ES_IMPORTE = /monto|limite|sobregiro|balance|saldo|cuota|cargo|comision|valor|importe/i;

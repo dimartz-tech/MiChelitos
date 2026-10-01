@@ -2410,9 +2410,9 @@ fn transferir_entre_cuentas(
     fecha: String,
     origen_id: i64,
     destino_id: i64,
-    monto_origen: f64,
-    monto_destino: f64,
-    cargo: f64,
+    monto_origen: ipc::ImporteDecimal,
+    monto_destino: ipc::ImporteDecimal,
+    cargo: ipc::ImporteDecimal,
     descripcion: String
 ) -> Result<(), String> {
     // Traducción pura: la operación y sus invariantes viven en el dominio y
@@ -2433,9 +2433,12 @@ fn transferir_entre_cuentas(
                 fecha,
                 origen_id,
                 destino_id,
-                monto_origen: Dinero::nuevo(monto_origen, divisa_origen)?,
-                monto_destino: Dinero::nuevo(monto_destino, divisa_destino)?,
-                cargo: Dinero::nuevo(cargo, divisa_origen)?,
+                // Los tres importes llegan como se escribieron: el céntimo (y con él la tasa que se
+                // deduce entre origen y destino) lo deciden esos dígitos. Cada uno se casa con la divisa
+                // de SU cuenta, que se lee, no se declara.
+                monto_origen: monto_origen.con_divisa(divisa_origen),
+                monto_destino: monto_destino.con_divisa(divisa_destino),
+                cargo: cargo.con_divisa(divisa_origen),
                 descripcion,
             },
             &mut almacen,

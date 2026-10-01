@@ -281,13 +281,13 @@ encogerse, y un importe nuevo que viajara como número rompería la prueba.
 | `actualizar_ingreso` | `cobro_parcial` | ✅ texto (el total, no) |
 | `simular_avance_efectivo`, `registrar_avance_efectivo` | `monto`, `cargo_fijo` | ✅ texto |
 | **`crear_ingreso_informal`** | `monto` | ✅ **texto (1.69.0)**: antes guardaba el número tal cual, sin que el núcleo decidiera el céntimo |
-| `marcar_ingreso_pagado`, `marcar_informal_pagado` | `monto_recibido` | pendiente |
+| `marcar_ingreso_pagado`, `marcar_informal_pagado` | `monto_recibido` | ✅ texto |
 | **`crear_cobro_efectivo_informal`** | `monto` | ✅ **texto (1.70.0)**: el importe se usa **dos veces** (el ingreso y el saldo de la caja) y ahora una sola conversión exacta garantiza que reciben lo mismo |
 | **`crear_bonificacion`** | `monto` | ✅ **texto (1.71.0)**: ya pasaba por `Dinero::nuevo(f64)`; ahora entra por los dígitos escritos y se casa con la divisa declarada |
-| `liquidar_consumo_pendiente` | `monto_liquidado` | pendiente |
-| `registrar_pago_tarjeta` | `monto` (la tasa de cambio es una tasa, no un importe) | pendiente |
-| `crear_cuenta` | `balance` | pendiente |
-| `transferir_entre_cuentas` | `monto_origen`, `monto_destino`, `cargo` | pendiente |
+| `liquidar_consumo_pendiente` | `monto_liquidado` | ✅ texto |
+| `registrar_pago_tarjeta` | `monto` (la tasa de cambio es una tasa, no un importe) | ✅ texto |
+| `crear_cuenta` | `balance` | ✅ texto |
+| `transferir_entre_cuentas` | `monto_origen`, `monto_destino`, `cargo` | ✅ texto: cada importe se casa con la divisa de su cuenta; el cargo en blanco viaja como «0» |
 | `actualizar_ingreso` | `monto_total` (el porcentaje de retención es una tasa) | pendiente |
 | `crear_tarjeta` | ocho límites, sobregiros, balances y cortes | pendiente |
 | `actualizar_limites_tarjeta` | seis importes y dos límites ajustados | pendiente |

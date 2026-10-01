@@ -80,10 +80,16 @@ test('entrada informal: si la API falla, avisa del error y no vuelve a dibujar',
     assert.deepEqual(t.rutas, []);
 });
 
-test('retiro: la cuenta en dólares va al efectivo en dólares, con monto y cargo numéricos', async () => {
+test('retiro: un cargo en blanco se envía como «0» (sin cargo), no como texto vacío', async () => {
+    const t = montar({ campos: { efe_ret_fec: '05/03/2027', efe_ret_ori: '2', efe_ret_mon: '20', efe_ret_car: '', efe_ret_des_txt: 'Retiro de efectivo' } });
+    await t.vista.handleRetirarAEfectivo(t.evento);
+    assert.deepEqual(t.llamadas, [['transferirEntreCuentas', '05/03/2027', 2, 11, '20', '20', '0', 'Retiro de efectivo']]);
+});
+
+test('retiro: la cuenta en dólares va al efectivo en dólares, con monto y cargo como texto', async () => {
     const t = montar({ campos: { efe_ret_fec: '05/03/2027', efe_ret_ori: '2', efe_ret_mon: '20', efe_ret_car: '1.5', efe_ret_des_txt: 'Retiro de efectivo' } });
     await t.vista.handleRetirarAEfectivo(t.evento);
-    assert.deepEqual(t.llamadas, [['transferirEntreCuentas', '05/03/2027', 2, 11, 20, 20, 1.5, 'Retiro de efectivo']]);
+    assert.deepEqual(t.llamadas, [['transferirEntreCuentas', '05/03/2027', 2, 11, '20', '20', '1.5', 'Retiro de efectivo']]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Retiro de efectivo ejecutado exitosamente.', tipo: undefined }]);
     assert.deepEqual(t.rutas, ['efectivo']);
 });

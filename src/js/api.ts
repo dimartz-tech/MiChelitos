@@ -140,14 +140,14 @@ const AppAPI = {
         return await invoke('eliminar_cuenta', { id: Number(id) });
     },
 
-    async transferirEntreCuentas(fecha: string, origenId: number | string, destinoId: number | string, montoOrigen: number | string, montoDestino: number | string, cargo: number | string, descripcion: string) {
+    async transferirEntreCuentas(fecha: string, origenId: number | string, destinoId: number | string, montoOrigen: string, montoDestino: string, cargo: string, descripcion: string) {
         return await invoke('transferir_entre_cuentas', {
             fecha,
             origenId: Number(origenId),
             destinoId: Number(destinoId),
-            montoOrigen: Number(montoOrigen),
-            montoDestino: Number(montoDestino),
-            cargo: Number(cargo),
+            montoOrigen: String(montoOrigen),
+            montoDestino: String(montoDestino),
+            cargo: String(cargo),
             descripcion
         });
     },

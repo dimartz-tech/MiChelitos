@@ -2129,7 +2129,7 @@ fn c45_una_transferencia_mueve_los_dos_saldos_y_cobra_el_cargo_al_origen() {
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
 
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 100.0, "Traspaso".into(),
+        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(100.0), "Traspaso".into(),
     )
     .unwrap();
 
@@ -2145,7 +2145,7 @@ fn c46_la_tasa_se_deduce_dividiendo_los_dos_importes() {
     let destino = crear_cuenta("Cuenta Ahorros USD", "USD", 0.0);
 
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 6_000.0, 100.0, 0.0, "Compra de divisa".into(),
+        "13/09/2026".into(), origen, destino, monto(6_000.0), monto(100.0), monto(0.0), "Compra de divisa".into(),
     )
     .unwrap();
 
@@ -2157,12 +2157,27 @@ fn c46_la_tasa_se_deduce_dividiendo_los_dos_importes() {
 }
 
 #[test]
+fn c46b_los_tres_importes_de_una_transferencia_deciden_el_centavo_por_su_texto() {
+    // `1000.005` por texto sube a 1000.01 (por número bajaba a 1000.00): vale para origen, destino y cargo.
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000.0);
+    let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), origen, destino, importe("1000.005"), importe("1000.005"), importe("1.005"), "Traspaso".into(),
+    )
+    .unwrap();
+
+    assert_importe(saldo_cuenta_id(origen), 5_000.0 - 1000.01 - 1.01, "origen y cargo suben el céntimo");
+    assert_importe(saldo_cuenta_id(destino), 1000.01, "destino sube el céntimo");
+}
+
+#[test]
 fn c47_revertir_una_transferencia_devuelve_el_monto_y_el_cargo_al_origen() {
     let _g = entorno_aislado();
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 100.0, "Traspaso".into(),
+        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(100.0), "Traspaso".into(),
     )
     .unwrap();
 
@@ -2186,7 +2201,7 @@ fn c48_h10_la_reversion_devuelve_los_dos_saldos_aunque_el_destino_quede_negativo
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 0.0, "Traspaso".into(),
+        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(0.0), "Traspaso".into(),
     )
     .unwrap();
 
@@ -2215,7 +2230,7 @@ fn c49_h11_una_transferencia_de_una_cuenta_a_si_misma_se_rechaza() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
 
     let error = crate::transferir_entre_cuentas(
-        "13/09/2026".into(), cuenta, cuenta, 8_000.0, 8_000.0, 100.0, "A sí misma".into(),
+        "13/09/2026".into(), cuenta, cuenta, monto(8_000.0), monto(8_000.0), monto(100.0), "A sí misma".into(),
     )
     .unwrap_err();
 
@@ -2241,7 +2256,7 @@ fn c50_h12_el_importe_de_destino_se_interpreta_en_la_divisa_de_su_cuenta() {
     let destino = crear_cuenta("Cuenta Ahorros USD", "USD", 0.0);
 
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 6_000.0, 6_000.0, 0.0, "Sin convertir".into(),
+        "13/09/2026".into(), origen, destino, monto(6_000.0), monto(6_000.0), monto(0.0), "Sin convertir".into(),
     )
     .unwrap();
 
@@ -2258,7 +2273,7 @@ fn c51_h13_una_cuenta_con_transferencias_no_se_puede_eliminar() {
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 0.0, "Traspaso".into(),
+        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(0.0), "Traspaso".into(),
     )
     .unwrap();
     assert_eq!(total_transferencias(), 1);
@@ -2288,7 +2303,7 @@ fn c53_una_transferencia_puede_dejar_el_origen_en_negativo() {
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
 
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 5_000.0, 5_000.0, 0.0, "Sobregiro".into(),
+        "13/09/2026".into(), origen, destino, monto(5_000.0), monto(5_000.0), monto(0.0), "Sobregiro".into(),
     )
     .unwrap();
 
@@ -2301,7 +2316,7 @@ fn c54_revertir_dos_veces_la_misma_transferencia_falla_la_segunda() {
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 0.0, "Traspaso".into(),
+        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(0.0), "Traspaso".into(),
     )
     .unwrap();
     let id = ultima_transferencia();
@@ -4040,7 +4055,7 @@ fn c134_las_guardas_que_ya_existian_siguen_diciendo_lo_mismo() {
     let _g = entorno_aislado();
     let origen = crear_cuenta("Origen", "DOP", 1_000.0);
     let destino = crear_cuenta("Destino", "DOP", 0.0);
-    crate::transferir_entre_cuentas("20/09/2026".into(), origen, destino, 500.0, 500.0, 0.0, "x".into()).unwrap();
+    crate::transferir_entre_cuentas("20/09/2026".into(), origen, destino, monto(500.0), monto(500.0), monto(0.0), "x".into()).unwrap();
 
     let error = crate::eliminar_cuenta(destino).unwrap_err();
 
