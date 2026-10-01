@@ -24,7 +24,7 @@ Por eso, en la interfaz, **no hay nada de `Dinero` que integrar**: el cálculo y
 
 1. **Lectura-modificación-escritura del documento entero desde la vista.** Cada alta o baja hace `obtenerCapital()`, cambia el documento y lo devuelve con `guardarCapital()`. Es una **ventana de «gana la última escritura»**: dos ventanas o dos pulsaciones muy seguidas pueden pisarse. Rust valida lo que cambia, pero no puede saber que el documento que recibe ya está viejo.
 2. **Los certificados y la bolsa se borran por posición, los bienes por identificador.** `splice(idx, 1)` con el índice con que se dibujó la lista: si el documento cambió entre dibujar y pulsar, **se puede retirar otro certificado**. Solo los bienes tienen `id`.
-3. **Las tres bajas (`certificado`, `bolsa` y `bien`) no tienen `try/catch`.** Si Rust rechaza el guardado no hay aviso y la pantalla no se redibuja. Ya figuraba como hallazgo de 1.49.0 (pruebas `todo`).
+3. ~~**Las tres bajas (`certificado`, `bolsa` y `bien`) no tienen `try/catch`.**~~ **Corregido en 1.66.0:** si Rust rechaza al leer o al guardar el capital, ahora se avisa del error y no se anuncia éxito ni se redibuja (hallazgo de 1.49.0; sus pruebas `todo` pasaron a pruebas normales). Sigue en pie que las bajas de certificados y de bolsa **borran por posición**.
 4. **El identificador de un bien es `Date.now()`.** Dos bienes creados en el mismo milisegundo colisionarían; con una persona pulsando no ocurre, pero no es una garantía. Desde esta extracción el reloj es inyectable.
 
 ## Si se quisiera integrar más

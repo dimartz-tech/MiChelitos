@@ -107,14 +107,10 @@ test('baja de suscripción: sin confirmación no se envía nada', async () => {
     noRedibujo(ui);
 });
 
-// DEFECTO REAL, sin corregir (ver el informe): a diferencia de sus hermanos,
-// este manejador no tiene try/catch. Si Rust rechaza, la promesa del `onclick`
-// rechaza sin que nadie la atrape: el usuario no ve ningún aviso. Esta prueba
-// describe el comportamiento DESEABLE y está marcada `todo`: su fallo no
-// rompe `npm test`, y cuando se corrija pasará sola.
-test('baja de suscripción: si Rust rechaza se muestra el error y no se propaga', {
-    todo: 'defecto: handleEliminarSuscripcion no tiene try/catch; el rechazo se pierde sin aviso',
-}, async () => {
+// Hasta la 1.66.0 este manejador, a diferencia de sus hermanos, no tenía `try/catch`: si
+// Rust rechazaba, la promesa del `onclick` rechazaba sin que nadie la atrapase y el
+// usuario no veía ningún aviso.
+test('baja de suscripción: si Rust rechaza se muestra el error y no se propaga', async () => {
     const ui = cargarInterfaz({ confirm: true });
     ui.rechazar('eliminarSuscripcion', 'Error simulado de Rust');
     await rechazoSeMuestra(ui, () => ui.appUI.handleEliminarSuscripcion(8));

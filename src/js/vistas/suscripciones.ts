@@ -328,9 +328,13 @@ export class VistaSuscripciones implements Vista {
     async handleEliminarSuscripcion(id: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
         if (await dialogos.confirmar("¿Deseas dar de baja esta suscripción?")) {
-            await api.eliminarSuscripcion(id);
-            avisos.mostrar("Suscripción eliminada.");
-            await enrutador.mostrar('suscripciones');
+            try {
+                await api.eliminarSuscripcion(id);
+                avisos.mostrar("Suscripción eliminada.");
+                await enrutador.mostrar('suscripciones');
+            } catch (err) {
+                avisos.mostrar(String(err), 'error');
+            }
         }
     }
 

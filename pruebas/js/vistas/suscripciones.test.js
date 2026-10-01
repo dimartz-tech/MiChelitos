@@ -229,3 +229,11 @@ test('todo appUI.x( que escribe la plantilla (y la ventana de edición) está en
     assert.ok(llamados.size >= 6);
     for (const nombre of llamados) assert.ok(MANEJADORES_SUSCRIPCIONES.includes(nombre), `falta ${nombre} en el puente`);
 });
+
+test('baja: si Rust rechaza se muestra el error, no se propaga y no se anuncia éxito ni se redibuja', async () => {
+    const t = montar({ falla: 'Rust rechaza la baja' });
+    await assert.doesNotReject(() => t.vista.handleEliminarSuscripcion(4));
+    assert.deepEqual(t.llamadas, [['eliminarSuscripcion', 4]]);
+    assert.deepEqual(t.avisos, [{ mensaje: 'Error: Rust rechaza la baja', tipo: 'error' }]);
+    assert.deepEqual(t.rutas, []);
+});

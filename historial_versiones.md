@@ -4,7 +4,26 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.65.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.66.0 (Versión Actual) - 2026-10-02
+**Corrección: las cuatro bajas que no avisaban si Rust fallaba.** Baja de una suscripción, de un certificado, de una inversión de bolsa y de un bien del capital.
+
+### 🐛 Qué estaba mal
+* Estos cuatro manejadores, a diferencia de todos sus hermanos, no tenían `try/catch`. Si Rust rechazaba la operación (al **leer** el capital o al **guardarlo**, o al dar de baja la suscripción), la promesa del `onclick` rechazaba sin que nadie la atrapase: **no aparecía ningún aviso, la pantalla no se redibujaba y no había forma de saber que la baja no se había hecho**. Figuraba como hallazgo desde la 1.49.0, con pruebas marcadas `todo` que describían el comportamiento deseable.
+
+### 🔧 Qué se hace
+* Lo que va tras la confirmación entra en un `try/catch` que muestra el error, como en el resto de manejadores: **no se anuncia éxito ni se redibuja** si algo falla. Nada más cambia: ni la confirmación, ni el borrado, ni los avisos de éxito.
+* **No se toca** que las bajas de certificados y de bolsa borren **por posición**, ni que el capital se lea y se guarde entero desde la vista: son decisiones de diseño anotadas en `capital_y_dinero.md`, no parte de esta corrección.
+
+### 🧪 Pruebas
+* Las cuatro pruebas `todo` pasan a pruebas normales y se amplían: cada baja del capital con el fallo **al guardar** y **al leer** (seis de interacción), y las de la vista (tres para el capital y una para la suscripción): se avisa el error, no se propaga, no se anuncia éxito, no se guarda ni se redibuja, y sin confirmar no se lee ni se guarda nada. **503 pruebas, todas pasan; ya no queda ningún `todo`.**
+* Doce mutaciones (el `catch` que relanza, que calla o que anuncia éxito, en cada una de las cuatro bajas): las doce se detectan.
+
+### ✅ Comprobado a mano
+* **Con tus datos reales** (copia temporal, ya borrada), provocando el fallo de Rust en cada baja, en la versión anterior y en la nueva: **antes** el rechazo se propagaba y no salía ningún aviso en las cuatro; **ahora** no se propaga y sale «Error: …» como aviso de error, en las cuatro. Sin fallo, el camino normal es **idéntico** (mismo aviso de éxito y mismas llamadas). Las once pestañas siguen idénticas.
+
+---
+
+## 🚀 Versión 1.65.0 - 2026-10-02
 **División de `ui.ts`, PR 12: se retira la clase `AppUI` y la división termina.** Sin cambios visibles.
 
 ### 🧩 Qué se hace
@@ -25,7 +44,7 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 * Balance de la división y registro de previsto frente a medido: `division_de_ui_limpia.md` §9.
 
 ### Siguiente
-* La división de `ui.ts` está terminada. Pendientes aparte, anotados sin corregir: el panel de casos de corrección pinta el motivo sin escapar, cuatro bajas sin `try/catch`, los importes que aún viajan como `Number` y los riesgos del capital.
+* La división de `ui.ts` está terminada. Pendientes aparte, anotados sin corregir: el panel de casos de corrección pinta el motivo sin escapar, los importes que aún viajan como `Number` y los riesgos del capital. (Las cuatro bajas sin `try/catch` se corrigieron en la 1.66.0.)
 
 ---
 
