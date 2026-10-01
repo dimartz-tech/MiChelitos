@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`; PR 8 en 1.59.0: `ingresos`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -436,3 +436,35 @@ Fuera del plan, también: **cuatro mutaciones** (retiro siempre a efectivo en pe
 **Más controles:** ocho mutaciones detectadas y una **equivalente** (`cuenta_ahorro_id: cue` siempre: `cue` ya es nulo salvo en transferencia, el comportamiento no cambia). Una mutación sobrevivió al principio (`tarjeta_id` siempre enviado) porque el DOM real conserva los selectores ocultos: se añadió la prueba «los selectores ocultos no cuentan». **En la aplicación empaquetada**: siete vistas registradas, se dibuja «Gastos y Egresos» sin error, el campo ya no existe en `AppUI`, el modal real se crea en `<body>` y los siete manejadores son funciones. La persistencia del mes **no** se comprobó ahí: la base temporal no tiene gastos, el selector no ofrece el mes y el resultado no demostraba nada; la cubren las pruebas y la comparación con datos reales.
 
 **Pendiente que sigue a la vista:** `handleAgregarGasto` aún envía el monto como `Number`; pasarlo a texto (convención 1.21.0) es un PR aparte, un comando por PR.
+
+### PR 8 — `ingresos` (1.59.0)
+
+| Qué | Previsto (medición del agente) | Medido |
+|---|---|---|
+| Métodos que se mueven | 11 | 11 (`render`, diez manejadores: altas, cobros, edición y su cobro parcial) |
+| Líneas de la vista | 518 | **521** quitadas de `ui.ts` (518 de métodos y comentarios, y el `case`) |
+| Líneas a reescribir | 81 (≈93 con la corrección del 15 %) | **96** de 479 (**20 %**): `render` 4 %, los modales 16–22 %, los manejadores entre el 29 % y el 61 % |
+| Diff de `ui.ts` | — | **−521 / +0** |
+| Archivos nuevos | — | `vistas/ingresos.ts` (602), `pruebas/js/vistas/ingresos.test.js` (305); `registro.ts` +4 |
+| Esfuerzo relativo (efectivo = 1) | 4 | ≈4: diez manejadores, tres modales, motivo y confirmación |
+| Parámetros sin tipo en `ui.ts` | 121 | **106** |
+
+**Lo que cambia respecto a lo anterior:**
+* **El modal de edición lleva estado en el propio elemento** (`dataset.cobrada` y `dataset.recibido`): el envío lo lee para saber si corregir mueve un saldo. `Modales.abrir(id, html)` no devuelve el elemento, así que la vista lo busca por identificador **justo después** de abrirlo y le pone el `dataset`. El orden cambia (antes se ponía antes de añadirlo a `<body>`), el resultado no, y la prueba lo fija (`cobrada` y `recibido` tras abrir). No hizo falta tocar el servicio.
+* **`Motivo` en uso real**, otra vez con el choque de nombres: el manejador tiene una variable `motivo` y el servicio se renombró localmente (`pedidorDeMotivo`). El extractor no sabe de alias y el compilador lo atrapó; se corrigió a mano.
+* Cinco manejadores llevan `elemento()` en el atributo de la plantilla (el cierre de modales y el cambio Formal/Informal): **no se reescribieron**, por la protección de `on…=` que añadió el PR 6.
+
+**Los seis controles del plan:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 337 pruebas (333 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa; los diez manejadores de la plantilla y de sus ventanas están en el puente |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `ingresos` incluida (2 818 caracteres), sin `undefined`/`NaN`/errores |
+| 4. Parámetros tipados en el mismo PR | sí |
+| 5. Pruebas de interacción | las 27 existentes del archivo de `ingresos` (21 de esta pestaña y 6 de los borrados con motivo, que son de Ajustes), a través de `appUI`, **sin tocar**, más 23 de la vista con dobles |
+| 6. Revisión manual con tus datos | alta formal, alta informal, elegir cliente y **edición de una factura cobrada** (que mueve saldo y pide motivo), ejercidas en las dos versiones: mismos comandos y argumentos, mismo modal, mismos avisos, 0 errores. **No se pudo ejercer** el cobro de una factura ni el de un informal: tus datos no tienen facturas emitidas ni informales pendientes; las cubren las pruebas de la vista |
+
+**Más controles:** dieciséis mutaciones (monto como texto, parcial como número, motivo siempre, ajuste con el signo invertido, vista sin registrar, factura siguiente +2, ventana siempre «no cobrada», cobro sin cerrar la ventana, cobro informal que llama al de factura, fecha del sistema en lugar del reloj, error sin nivel, seguir tras rechazar la confirmación, cliente con campos cruzados, parcial sin su tope, motivo cancelado que sigue, caja parcial invertida): las dieciséis se detectan, una por el compilador. **En la aplicación empaquetada**: ocho vistas registradas, se dibuja «Ingresos» sin error, `renderIngresos` ya no existe en `AppUI`, las ventanas de cobro y de edición se crean en `<body>` (la de edición con `cobrada=si` y `recibido=10`) y los diez manejadores son funciones.
+
+**Pendiente que sigue a la vista:** `handleAgregarIngreso`, la edición y los cobros aún envían el monto como `Number`; pasarlos a texto (convención 1.21.0) es un PR aparte, un comando por PR.
