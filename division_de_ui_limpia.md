@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`; PR 6 en 1.57.0: `suscripciones`; PR 7 en 1.58.0: `gastos`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -405,3 +405,34 @@ Fuera del plan, también: **cuatro mutaciones** (retiro siempre a efectivo en pe
 | 6. Revisión manual con tus datos | **alta, editor modal, edición y baja**, ejercidos en las dos versiones: mismos comandos y argumentos, **mismo modal** (identificador, clase y campos), cerrado tras guardar, mismos avisos, 0 errores. **No se pudo ejercer** corregir fecha ni asentar/descartar: tus suscripciones no tienen ninguna parada ni períodos pendientes; las cubren las pruebas de la vista |
 
 **Más controles:** ocho mutaciones (monto como número, aviso que vuelve al campo viejo `fecha_renovacion`, modal sin su identificador, edición que no cierra la ventana, descartar sin comprobar el motivo, baja sin confirmación, vista sin registrar, fecha sin convertir): las ocho se detectan, una por el compilador. **En la aplicación empaquetada**: seis vistas registradas, se dibuja sin error, **el modal real se crea en `<body>` con la clase `modal-overlay`** y los siete manejadores son funciones.
+
+### PR 7 — `gastos` (1.58.0)
+
+| Qué | Previsto (medición del agente) | Medido |
+|---|---|---|
+| Métodos que se mueven | 9 | 9 (`render`, seis manejadores, `formatMonthYearStr` y la previsualización de la tasa) |
+| Líneas de la vista | 480 | **484** quitadas de `ui.ts` (479 de métodos, el `case` y el campo `selectedGastosMonth`) |
+| Líneas a reescribir | ≈66 | **67** de 439 (**15 %**): `render` 6 %, los manejadores entre el 28 % y el 58 % |
+| Diff de `ui.ts` | — | **−484 / +0** |
+| Archivos nuevos | — | `vistas/gastos.ts` (556), `pruebas/js/vistas/gastos.test.js` (265); `registro.ts` +4 |
+| Esfuerzo relativo (efectivo = 1) | 4 | ≈4: tres vías de alta, un modal y estado propio |
+| Parámetros sin tipo en `ui.ts` | 134 | **121** |
+
+**Lo que estrena esta vista:**
+* **Estado propio.** `selectedGastosMonth` deja de ser un campo de `AppUI` y pasa a ser privado de la vista. La prueba de interacción que lo leía desde fuera fijaba la implementación: se reescribió para comprobar el comportamiento (la opción elegida sale `selected`, el resumen cambia de mes y solo se hacen lecturas).
+* **Reloj inyectado** para el mes por defecto, y el modal de liquidación por `Modales.abrir`.
+
+**Los seis controles del plan:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 314 pruebas (310 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa; los siete manejadores de la plantilla están en el puente |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `gastos` incluida (26 435 caracteres) |
+| 4. Parámetros tipados en el mismo PR | sí |
+| 5. Pruebas de interacción | la de elegir mes, reescrita; más 19 de la vista con dobles |
+| 6. Revisión manual con tus datos | selector de mes (4 meses), visibilidad del método de pago, previsualización de la conversión y **las tres altas** (efectivo, tarjeta y transferencia con divisa cruzada): mismos argumentos y avisos en las dos versiones, 0 errores. **No se pudo ejercer** la liquidación de un consumo (modal y envío): tus datos no tienen consumos pendientes de conversión; la cubren las pruebas |
+
+**Más controles:** ocho mutaciones detectadas y una **equivalente** (`cuenta_ahorro_id: cue` siempre: `cue` ya es nulo salvo en transferencia, el comportamiento no cambia). Una mutación sobrevivió al principio (`tarjeta_id` siempre enviado) porque el DOM real conserva los selectores ocultos: se añadió la prueba «los selectores ocultos no cuentan». **En la aplicación empaquetada**: siete vistas registradas, se dibuja «Gastos y Egresos» sin error, el campo ya no existe en `AppUI`, el modal real se crea en `<body>` y los siete manejadores son funciones. La persistencia del mes **no** se comprobó ahí: la base temporal no tiene gastos, el selector no ofrece el mes y el resultado no demostraba nada; la cubren las pruebas y la comparación con datos reales.
+
+**Pendiente que sigue a la vista:** `handleAgregarGasto` aún envía el monto como `Number`; pasarlo a texto (convención 1.21.0) es un PR aparte, un comando por PR.

@@ -4,7 +4,30 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.57.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.58.0 (Versión Actual) - 2026-10-02
+**División de `ui.ts`, PR 7: la pestaña «Gastos» sale de la clase.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* `src/js/vistas/gastos.ts`: la vista como clase con dependencias inyectadas (API recortada a 6 comandos, avisos, formato, enrutador, pantalla, DOM, **modales** y reloj). Nueve métodos: el `render`, seis manejadores (selector de mes, método de pago, conversión, alta, liquidación y su previsualización) y un ayudante de fechas. **15 % de las líneas de sus cuerpos reescritas** (67 de 439).
+* **Estado propio:** el mes elegido (`selectedGastosMonth`) deja de ser un campo de `AppUI` y es privado de la vista. El mes por defecto sale del reloj inyectado.
+* `ui.ts` pierde 484 líneas; `registro.ts` +4. Parámetros sin tipo en `ui.ts`: 134 → 121.
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/gastos.test.js` (19): mes por defecto y elegido, totales por divisa sin mezclar, visibilidad del método de pago, previsualización de la conversión, las tres altas con su carga exacta (los selectores ocultos no viajan), fallo de la API, liquidación (modal, envío y tasa) y el puente.
+* La prueba de interacción de elegir mes se reescribió para comprobar el comportamiento y no el campo privado.
+* 314 pruebas (310 pasan, 4 `todo` conocidos). Ocho mutaciones detectadas más una equivalente.
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; selector de mes, visibilidad del método, conversión y **las tres altas** ejercidos en las dos versiones: mismos argumentos y avisos, 0 errores. La liquidación de un consumo no se pudo ejercer (no tienes consumos pendientes de conversión); la cubren las pruebas.
+* **App empaquetada**: siete vistas registradas, se dibuja sin error y el modal real se crea en `<body>`.
+* Previsto frente a medido (≈66 → 67 líneas; esfuerzo 4 → ≈4) y los seis controles: `division_de_ui_limpia.md` §9.
+
+### Siguiente
+* PR 8: `ingresos` (11 métodos, ≈519 líneas).
+
+---
+
+## 🚀 Versión 1.57.0 - 2026-10-02
 **División de `ui.ts`, PR 6: la pestaña «Suscripciones» sale de la clase.** Sin cambios visibles.
 
 ### 🧩 Qué se hace
