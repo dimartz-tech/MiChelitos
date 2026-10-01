@@ -3696,7 +3696,8 @@ class AppUI {
         // Un campo en blanco es «no declarada», no cero: se envía nulo para
         // que la ausencia siga siendo distinguible de una tarifa gratuita.
         const comTexto = elemento<Campo>('cue_aj_com').value;
-        const com = comTexto.trim() === '' ? null : Number(comTexto);
+        // Como texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const com = comTexto.trim() === '' ? null : comTexto.trim();
         try {
             await AppAPI.crearCuenta(nom, div, bal, ent, com);
             this.showToast("Cuenta de ahorro registrada.");
