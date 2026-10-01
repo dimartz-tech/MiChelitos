@@ -187,14 +187,19 @@ test('abono: si Rust rechaza el pago se muestra el error', async () => {
 // --- revertir un abono / un avance ---
 
 test('revertir abono: confirma, pide motivo, envía (abono, motivo), redibuja y reabre los abonos de ESA tarjeta', async () => {
-    const ui = cargarInterfaz({ confirm: true, prompt: MOTIVO, api: { revertirAbonoTarjeta: 'Abono revertido (prueba).' } });
-    const reabiertos = [];
-    ui.appUI.alternarAbonos = async id => { reabiertos.push(id); };
+    // El desplegable de ESA tarjeta se reabre y consulta SUS abonos (el estado de la vista
+    // ya no se espía desde fuera: se observa lo que hace).
+    const ui = cargarInterfaz({
+        confirm: true, prompt: MOTIVO,
+        campos: { abonos_3: { hidden: true, innerHTML: '' } },
+        api: { revertirAbonoTarjeta: 'Abono revertido (prueba).', obtenerAbonosTarjeta: [] },
+    });
     await ui.appUI.handleRevertirAbono(41, 3);
     llamoUnaVez(ui, 'revertirAbonoTarjeta', [41, MOTIVO]);
     avisoExito(ui, /Abono revertido/);
     redibujo(ui, 'tarjetas');
-    assert.deepEqual(reabiertos, [3]);
+    assert.deepEqual(ui.llamadasA('obtenerAbonosTarjeta').map(l => l.args), [[3]]);
+    assert.equal(ui.elemento('abonos_3').hidden, false);
 });
 
 test('revertir abono: sin confirmar, motivo cancelado o motivo corto no envía nada', async () => {
@@ -213,14 +218,17 @@ test('revertir abono: si Rust rechaza se muestra el error', async () => {
 });
 
 test('revertir avance: confirma, pide motivo, envía (avance, motivo) y reabre los avances de ESA tarjeta', async () => {
-    const ui = cargarInterfaz({ confirm: true, prompt: MOTIVO, api: { revertirAvanceEfectivo: 'Avance revertido (prueba).' } });
-    const reabiertos = [];
-    ui.appUI.alternarAvances = async id => { reabiertos.push(id); };
+    const ui = cargarInterfaz({
+        confirm: true, prompt: MOTIVO,
+        campos: { avances_3: { hidden: true, innerHTML: '' } },
+        api: { revertirAvanceEfectivo: 'Avance revertido (prueba).', obtenerAvancesTarjeta: [] },
+    });
     await ui.appUI.handleRevertirAvance(52, 3);
     llamoUnaVez(ui, 'revertirAvanceEfectivo', [52, MOTIVO]);
     avisoExito(ui, /Avance revertido/);
     redibujo(ui, 'tarjetas');
-    assert.deepEqual(reabiertos, [3]);
+    assert.deepEqual(ui.llamadasA('obtenerAvancesTarjeta').map(l => l.args), [[3]]);
+    assert.equal(ui.elemento('avances_3').hidden, false);
 });
 
 test('revertir avance: sin confirmar, motivo cancelado o corto no envía nada; si Rust rechaza, error', async () => {
