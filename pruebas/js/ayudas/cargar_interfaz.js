@@ -6,15 +6,19 @@
 // `appUI` resultante más los registros de lo ocurrido.
 //
 // Las pruebas llaman siempre a `interfaz.appUI.<método>(...)`, que es lo mismo
-// que hacen los atributos `onclick="appUI.<método>()"`. **Cuando `ui.ts` se
-// divida en vistas, lo único que hay que tocar es `SCRIPTS` (la lista de
-// archivos que se evalúan, en el orden de index.html) y, si `appUI` deja de
-// ser una `const` de script, la última línea de `evaluar`.** Las pruebas no.
+// que hacen los atributos `onclick="appUI.<método>()"`. Las vistas extraídas de
+// `ui.ts` (`src/js/vistas/`) se registran aquí con `registrarVistas`, la misma
+// función que usa `composicion.ts`, así que **añadir una vista no obliga a tocar
+// este archivo ni las pruebas**.
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crearDomFalso, AUSENTE } from './dom_falso.js';
+// Lo mismo que ejecuta la aplicación (`composicion.ts`): los servicios reales
+// sobre dobles, y el registro de las vistas extraídas.
+import { serviciosDesdeAppUI } from '../../../src/js/ui/servicios.js';
+import { registrarVistas } from '../../../src/js/vistas/registro.js';
 
 export { AUSENTE };
 export { crearEvento, crearElemento } from './dom_falso.js';
@@ -110,9 +114,10 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
     const fuente = SCRIPTS.map(leer).join('\n');
     const evaluar = new Function(
         'document', 'window', 'AppAPI', 'confirm', 'prompt', 'localStorage', 'navigate', 'setTimeout',
-        `${fuente}\nreturn appUI;`,
+        `${fuente}\nreturn { appUI, elemento, buscar };`,
     );
-    const objetivo = evaluar(document, window, AppAPI, confirmFalso, promptFalso, localStorage, navigate, setTimeoutFalso);
+    const { appUI: objetivo, elemento: elementoReal, buscar: buscarReal } =
+        evaluar(document, window, AppAPI, confirmFalso, promptFalso, localStorage, navigate, setTimeoutFalso);
 
     // Cada aviso queda registrado, y además se muestra con el código real.
     const showToastReal = objetivo.showToast;
@@ -123,6 +128,20 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
     if (!renderReal) {
         objetivo.render = async function (ruta) { renders.push(ruta); };
     }
+
+    // Las vistas extraídas, con los servicios reales sobre los dobles de esta carga.
+    // `showToast` y `render` ya están observados, y los servicios los llaman a
+    // través de `objetivo`, así que cada aviso y cada ruta quedan registrados.
+    registrarVistas(
+        objetivo,
+        serviciosDesdeAppUI(
+            objetivo,
+            { elemento: elementoReal, buscar: buscarReal },
+            () => new Date(),
+            { confirmar: m => confirmFalso(m), preguntar: (m, d) => promptFalso(m, d) },
+        ),
+        AppAPI,
+    );
 
     // Un id leído sin declarar lo atraparía el `try/catch` del manejador y lo
     // convertiría en un aviso de error: el proxy lo convierte en fallo de la

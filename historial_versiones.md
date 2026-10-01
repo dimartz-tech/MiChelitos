@@ -4,7 +4,34 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.51.0 (Versión Actual) - 2026-10-01
+## 🚀 Versión 1.52.0 (Versión Actual) - 2026-10-01
+**División de `ui.ts`, PR 1: la pestaña «Caja y Efectivo» sale de la clase.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* `src/js/vistas/efectivo.ts`: la vista como **clase con sus dependencias inyectadas** (API recortada a 3 comandos, avisos, formato, enrutador, pantalla, DOM y reloj). Sin `this` compartido, sin `AppAPI`, `elemento()` ni `appUI` globales. Los cuerpos son los de `ui.ts`; **17 % de sus líneas se reescribieron** (24 de 134), casi todo sustitución textual que el compilador verifica.
+* `src/js/vistas/registro.ts`: construye y registra cada vista. **Lo ejecutan tanto la aplicación (`composicion.ts`) como las pruebas**, así que no hay una copia del cableado que pueda desviarse.
+* `ui.ts` pierde `renderEfectivo` y los dos manejadores (−147 líneas) y su `case` del `switch`. Los `onsubmit="appUI.…"` no cambian: el puente cuelga los manejadores de `appUI`.
+* La vista entra en `tsconfig.estricto.json`: nace con `noImplicitAny`. Parámetros sin tipo en `ui.ts`: 169 → 167.
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/efectivo.test.js` (8): la vista con API, avisos, DOM y reloj falsos, algo que el diseño mecánico no permitía sin navegador.
+* `cargar_interfaz.js` registra las vistas con la misma `registrarVistas` de la aplicación: **no hizo falta `import()`** y ninguna prueba de interacción cambió. `importes.test.js` acepta `api.x(` además de `AppAPI.x(`.
+* 231 pruebas (227 pasan, 4 `todo` conocidos). Cuatro mutaciones (retiro siempre a efectivo en pesos, vista sin registrar, puente sin un manejador, monto sin convertir): detectadas por las pruebas o por el compilador.
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): las **once pestañas idénticas** a `main`, y **los dos formularios ejercidos en las dos versiones envían los mismos comandos con los mismos argumentos y muestran los mismos avisos**, sin errores.
+* **En la aplicación empaquetada**: la vista queda registrada, se dibuja y su manejador existe.
+* Tabla completa de lo previsto frente a lo medido, y de los seis controles del plan: `division_de_ui_limpia.md` §9.
+
+### 🛠️ Herramienta
+* `herramientas/comparar_vistas/mock.js` registra ahora cada llamada a un comando (`window.__llamadas`), para comparar **lo que dos versiones envían a Rust**, no solo lo que pintan.
+
+### Siguiente
+* PR 2: `cuentas` (183 líneas).
+
+---
+
+## 🚀 Versión 1.51.0 - 2026-10-01
 **División de `ui.ts`, PR 0: la infraestructura del diseño limpio.** Sin mover ninguna vista; sin cambios visibles.
 
 ### 🏗️ Qué se añade
