@@ -252,7 +252,8 @@ export class VistaIngresos implements Vista {
         const fec = dom.elemento<Campo>('fec_em').value;
         const cli = dom.elemento<Campo>('cli_nom').value;
         const rnc = dom.elemento<Campo>('cli_rnc').value;
-        const mon = Number(dom.elemento<Campo>('mon_tot').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const mon = dom.elemento<Campo>('mon_tot').value.trim();
         const ret = Number(dom.elemento<Campo>('ret_por').value);
 
         try {

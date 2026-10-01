@@ -2663,13 +2663,13 @@ fn c68_revertir_dos_veces_falla_la_segunda_sin_duplicar_la_devolucion() {
 //  nada compartido que impidiera repetirlo.
 // ===========================================================================
 
-fn factura(numero: &str, monto: f64, retencion: f64) -> IngresoInput {
+fn factura(numero: &str, importe_factura: f64, retencion: f64) -> IngresoInput {
     IngresoInput {
         numero_factura: numero.to_string(),
         rnc_cliente: "000000000".to_string(),
         nombre_cliente: "Cliente Ejemplo".to_string(),
         fecha_emision: "16/09/2026".to_string(),
-        monto_total: monto,
+        monto_total: monto(importe_factura),
         porcentaje_retencion: retencion,
     }
 }
@@ -4325,5 +4325,26 @@ fn c97_el_gasto_decide_el_centavo_por_su_texto_y_la_divisa_la_declara_el_gasto()
     let (pesos, dolares) = balances_tarjeta(tarjeta);
     assert_importe(dolares, 175.01, "la deuda en USD sube el céntimo");
     assert_importe(pesos, 0.0, "la de DOP no se toca");
+}
+
+#[test]
+fn c98_la_factura_decide_el_centavo_y_la_retencion_por_el_texto_del_total() {
+    // 1000.005 por texto sube a 1000.01 (por número bajaba a 1000.00); la retención del 50 % se decide sobre ese total.
+    let _g = entorno_aislado();
+    let id = crear_ingreso(IngresoInput {
+        numero_factura: "T-001".to_string(),
+        rnc_cliente: "000000000".to_string(),
+        nombre_cliente: "Cliente Ejemplo".to_string(),
+        fecha_emision: "16/09/2026".to_string(),
+        monto_total: importe("1000.005"),
+        porcentaje_retencion: 50.0,
+    })
+    .unwrap();
+
+    let total: f64 = conexion()
+        .query_row("SELECT monto_total FROM ingresos WHERE id = ?;", params![id], |r| r.get(0))
+        .unwrap();
+    assert_importe(total, 1000.01, "el total sube el céntimo");
+    assert_importe(retencion_de(id), 500.01, "50 % de 1000.01 = 500.005 → 500.01 (sobre 1000.00 habría sido 500.00)");
 }
 

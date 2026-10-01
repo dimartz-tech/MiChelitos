@@ -64,7 +64,7 @@ function montar({ ingresos = [factura()], informales = [informal()], campos = {}
 
 const CAMPOS_FORMAL = () => ({
     num_fac: el({ value: 'FAC-0008' }), fec_em: el({ value: '05/03/2027' }), cli_nom: el({ value: 'Cliente Uno' }),
-    cli_rnc: el({ value: '101000001' }), mon_tot: el({ value: '1000.50' }), ret_por: el({ value: '10' }),
+    cli_rnc: el({ value: '101000001' }), mon_tot: el({ value: ' 0075.250 ' }), ret_por: el({ value: '10' }),
 });
 
 test('dibuja facturas e informales, y propone la factura siguiente a la última', async () => {
@@ -107,13 +107,13 @@ test('solo la factura emitida ofrece «cobrar»; la cobrada muestra su depósito
     assert.match(html, /En Banco Beta el 13\/03\/2027/);
 });
 
-test('alta de factura: importes y porcentaje como número, textos tal cual, y redibuja', async () => {
+test('alta de factura: el total como texto recortado, el porcentaje como número, textos tal cual, y redibuja', async () => {
     const t = montar({ campos: CAMPOS_FORMAL() });
     await t.vista.handleAgregarIngreso(t.evento);
     assert.equal(t.evento.evitado, 1);
     assert.deepEqual(t.llamadas, [['crearIngreso', {
         numero_factura: 'FAC-0008', rnc_cliente: '101000001', nombre_cliente: 'Cliente Uno',
-        fecha_emision: '05/03/2027', monto_total: 1000.5, porcentaje_retencion: 10,
+        fecha_emision: '05/03/2027', monto_total: '0075.250', porcentaje_retencion: 10,
     }]]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Factura registrada exitosamente.', tipo: undefined }]);
     assert.deepEqual(t.rutas, ['ingresos']);
