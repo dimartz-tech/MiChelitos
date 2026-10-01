@@ -291,7 +291,8 @@ encogerse, y un importe nuevo que viajara como número rompería la prueba.
 | `actualizar_ingreso` | `monto_total` (el porcentaje de retención es una tasa) | ✅ texto: una sola conversión sirve al cálculo, a la fila y al caso de auditoría |
 | `crear_tarjeta` | ocho límites, sobregiros, balances y cortes | ✅ texto (en blanco = 0, como antes) |
 | `actualizar_limites_tarjeta` | seis importes y dos límites ajustados | ✅ texto (el ajustado vacío sigue siendo «sin ajuste» y «0» un tope deliberado) |
-| `crear_gasto` (`GastoInput`), `crear_ingreso` (`IngresoInput`), `crear_prestamo` y `actualizar_prestamo` (estructuras de entrada) | `monto`, `monto_total`, `monto_prestamo`, `monto_cuota`, `saldo_actual`, `limite_credito` | pendiente (requieren cambiar el tipo de los campos de la estructura) |
+| `crear_gasto` (`GastoInput`) | `monto` | ✅ texto: se casa con la divisa declarada del gasto |
+| `crear_ingreso` (`IngresoInput`), `crear_prestamo` y `actualizar_prestamo` (estructuras de entrada) | `monto_total`, `monto_prestamo`, `monto_cuota`, `saldo_actual`, `limite_credito` | pendiente (requieren cambiar el tipo de los campos de la estructura) |
 
 **Cuando no quede ninguno**, la rama «número» de `ImporteDecimal` se retira y la coma flotante deja de entrar por la
 frontera (así lo dice `ipc.rs`). Los porcentajes y las tasas **no se migran**: son tasas, no importes, y su

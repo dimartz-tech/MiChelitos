@@ -13,12 +13,12 @@ const base = {
     gas_cat: '3', gas_met: 'efectivo', gas_lbtr: false, gas_tar: AUSENTE, gas_cue: AUSENTE,
 };
 const gastoEsperado = {
-    fecha: '15/03/2026', monto: 123.45, divisa: 'DOP', descripcion: 'Compra de prueba', categoria_id: 3,
+    fecha: '15/03/2026', monto: '123.45', divisa: 'DOP', descripcion: 'Compra de prueba', categoria_id: 3,
     metodo_pago: 'efectivo', es_lbtr: false, tarjeta_id: null, cuenta_ahorro_id: null, tasa_cambio: null,
 };
 const cuentaDop = { value: '9', text: 'Cuenta A', dataset: { divisa: 'DOP' } };
 
-test('gasto en efectivo: sin tarjeta, sin cuenta, sin tasa; el importe viaja como número', async () => {
+test('gasto en efectivo: sin tarjeta, sin cuenta, sin tasa; el importe viaja como texto', async () => {
     const ui = cargarInterfaz({ campos: base });
     await ui.appUI.handleAgregarGasto(crearEvento());
     llamoUnaVez(ui, 'crearGasto', [gastoEsperado]);

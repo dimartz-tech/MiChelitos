@@ -57,7 +57,7 @@ function montar({ gastos = [gasto()], campos = {}, tarjetas = TARJETAS, cuentas 
 }
 
 const CAMPOS_EFECTIVO = () => ({
-    gas_fec: el({ value: '05/03/2027' }), gas_mon: el({ value: '250.5' }), gas_div: el({ value: 'DOP' }), gas_des: el({ value: 'Compra de prueba' }),
+    gas_fec: el({ value: '05/03/2027' }), gas_mon: el({ value: ' 0075.250 ' }), gas_div: el({ value: 'DOP' }), gas_des: el({ value: 'Compra de prueba' }),
     gas_cat: el({ value: '2' }), gas_met: el({ value: 'efectivo' }),
 });
 
@@ -144,7 +144,7 @@ test('alta en efectivo: envía el gasto completo, con la tarjeta, la cuenta y la
     await t.vista.handleAgregarGasto(t.evento);
     assert.equal(t.evento.evitado, 1);
     assert.deepEqual(t.llamadas, [['crearGasto', {
-        fecha: '05/03/2027', monto: 250.5, divisa: 'DOP', descripcion: 'Compra de prueba', categoria_id: 2, metodo_pago: 'efectivo',
+        fecha: '05/03/2027', monto: '0075.250', divisa: 'DOP', descripcion: 'Compra de prueba', categoria_id: 2, metodo_pago: 'efectivo',
         es_lbtr: false, tarjeta_id: null, cuenta_ahorro_id: null, tasa_cambio: null,
     }]]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Gasto registrado con éxito.', tipo: undefined }]);
