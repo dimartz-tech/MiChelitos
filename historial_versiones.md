@@ -4,7 +4,29 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.63.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.64.0 (Versión Actual) - 2026-10-02
+**División de `ui.ts`, PR 11: la pestaña «Tarjetas de Crédito» sale de la clase.** Sin cambios visibles. **Es la última de las once vistas.**
+
+### 🧩 Qué se hace
+* `src/js/vistas/tarjetas.ts`: la vista como clase con dependencias inyectadas (API recortada a 14 comandos, avisos, formato, enrutador, pantalla, DOM, diálogos, motivo, modales y reloj). Diecisiete métodos: el `render` con la recomendación de qué tarjeta usar hoy, el abono con su reactor y la tasa de cambio, el avance de efectivo (que se simula en el núcleo antes de confirmar), los dos historiales con su deshacer con motivo, las bonificaciones y la edición de límites y de la política de liquidación. **16 % de las líneas de sus cuerpos reescritas** (119 de 737).
+* `TipoAviso` incluye `'info'`: Tarjetas avisa con él (el abono no propone importe) y el compilador señaló que el tipo se había quedado corto. Sin cambio de comportamiento.
+* `ui.ts` pierde 835 líneas (965 → **130**); `registro.ts` +4. Parámetros sin tipo en `ui.ts`: 32 → 5.
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/tarjetas.test.js` (40): la recomendación desde el reloj, el saldo a favor y el porcentaje de uso, las facilidades y las bonificaciones, proponer el importe del abono, el abono en efectivo y en dólares con la tasa preguntada (aceptar, cancelar, inválida), el avance (formulario por divisa y tipo, simulación, confirmación con **sus** cifras, monto y cargo fijo como **texto**), los historiales y deshacer con motivo, las bonificaciones, los límites y el puente en los dos sentidos. Los diálogos responden **tarde**, como el WebView real.
+* Dos pruebas de interacción se reescribieron para comprobar el comportamiento (consulta y reabre el historial de esa tarjeta) en lugar de espiar `appUI`. 464 pruebas (460 pasan, 4 `todo` conocidos). Treinta y siete mutaciones, las treinta y siete detectadas.
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; **veintidós recorridos** ejercidos en las dos versiones (proponer el abono, abonos en efectivo y cruzados con la tasa, el avance completo con su simulación y su confirmación, los historiales, deshacer un abono con motivo, bonificaciones y límites): mismos comandos, argumentos y avisos, 0 errores. No se pudo ejercer deshacer un avance ni revertir una bonificación (no tienes de ninguno); las cubren las pruebas.
+* **App empaquetada**: once vistas registradas, la ventana de límites en `<body>` y el historial de abonos que se abre y se pliega.
+* Previsto frente a medido (≈125 → 119 líneas; esfuerzo 6 → ≈4) y los seis controles: `division_de_ui_limpia.md` §9.
+
+### Siguiente
+* PR 12, el último de la división: pasar a sus servicios lo que queda en `ui.ts` (130 líneas: `showToast`, el enrutador, `formatMoney` y `pedirMotivoDeCorreccion`), retirar la clase `AppUI` y el puente `window.appUI`.
+
+---
+
+## 🚀 Versión 1.63.0 - 2026-10-02
 **División de `ui.ts`, PR 10: la pestaña «Ajustes» sale de la clase.** Sin cambios visibles.
 
 ### 🧩 Qué se hace

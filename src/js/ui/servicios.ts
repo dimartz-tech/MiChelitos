@@ -9,8 +9,12 @@
 // Es un módulo ES (`composicion.ts` lo importa); las vistas lo importan con
 // `import type`, que no deja rastro en el JavaScript compilado.
 
-/** Tipo de aviso: lo único que hoy distingue un toast. */
-export type TipoAviso = 'success' | 'error';
+/**
+ * Tipo de aviso. Se distingue por el icono (✅ el éxito, ⚠️ el resto) y por la clase
+ * `toast-<tipo>`. `'info'` lo usa Tarjetas para explicar por qué un abono no
+ * propone importe (saldo a favor o saldo cero): no es un error ni un éxito.
+ */
+export type TipoAviso = 'success' | 'error' | 'info';
 
 /** Avisos emergentes (antes `appUI.showToast`). */
 export interface Avisos {
