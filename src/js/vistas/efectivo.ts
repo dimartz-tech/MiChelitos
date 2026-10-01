@@ -162,8 +162,8 @@ export class VistaEfectivo implements Vista {
         const { api, avisos, enrutador, dom } = this.dep;
         const fec = dom.elemento<Campo>('efe_ret_fec').value;
         const oriId = Number(dom.elemento<Campo>('efe_ret_ori').value);
-        const mon = Number(dom.elemento<Campo>('efe_ret_mon').value);
-        const car = Number(dom.elemento<Campo>('efe_ret_car').value);
+        const mon = dom.elemento<Campo>('efe_ret_mon').value.trim();
+        const car = dom.elemento<Campo>('efe_ret_car').value.trim() || '0';
         const desTxt = dom.elemento<Campo>('efe_ret_des_txt').value;
 
         try {

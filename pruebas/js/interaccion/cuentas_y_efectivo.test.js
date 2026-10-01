@@ -115,7 +115,7 @@ test('transferir: origen, destino, importes (débito ≠ crédito) y cargo cada 
     const ui = cargarInterfaz({ campos: transferencia });
     await ui.appUI.handleTransferirCuentas(crearEvento());
     // (fecha, origen, destino, montoOrigen, montoDestino, cargo, descripción)
-    llamoUnaVez(ui, 'transferirEntreCuentas', ['23/03/2026', 4, 5, 1000.1, 999.9, 15.15, 'Traspaso de prueba']);
+    llamoUnaVez(ui, 'transferirEntreCuentas', ['23/03/2026', 4, 5, '1000.10', '999.90', '15.15', 'Traspaso de prueba']);
     avisoExito(ui, /Transacción ejecutada/);
     redibujo(ui, 'cuentas');
 });
@@ -178,7 +178,7 @@ const cuentas = [
 test('retirar a efectivo desde una cuenta en DOP: destino «Efectivo DOP», mismo monto en ambos lados', async () => {
     const ui = cargarInterfaz({ campos: retiro, api: { obtenerCuentas: cuentas } });
     await ui.appUI.handleRetirarAEfectivo(crearEvento());
-    llamoUnaVez(ui, 'transferirEntreCuentas', ['25/03/2026', 4, 11, 200.2, 200.2, 3.3, 'Retiro de prueba']);
+    llamoUnaVez(ui, 'transferirEntreCuentas', ['25/03/2026', 4, 11, '200.20', '200.20', '3.30', 'Retiro de prueba']);
     avisoExito(ui, /Retiro de efectivo ejecutado/);
     redibujo(ui, 'efectivo');
 });
@@ -186,7 +186,7 @@ test('retirar a efectivo desde una cuenta en DOP: destino «Efectivo DOP», mism
 test('retirar a efectivo desde una cuenta en USD: destino «Efectivo USD»', async () => {
     const ui = cargarInterfaz({ campos: { ...retiro, efe_ret_ori: '5' }, api: { obtenerCuentas: cuentas } });
     await ui.appUI.handleRetirarAEfectivo(crearEvento());
-    llamoUnaVez(ui, 'transferirEntreCuentas', ['25/03/2026', 5, 12, 200.2, 200.2, 3.3, 'Retiro de prueba']);
+    llamoUnaVez(ui, 'transferirEntreCuentas', ['25/03/2026', 5, 12, '200.20', '200.20', '3.30', 'Retiro de prueba']);
 });
 
 test('retirar a efectivo: cuenta origen inexistente o sin cuenta de efectivo destino no envía nada', async () => {
