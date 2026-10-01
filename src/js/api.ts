@@ -394,11 +394,12 @@ const AppAPI = {
     },
 
     // --- EFECTIVO ---
-    async crearCobroEfectivoInformal(fecha: string, descripcion: string, monto: number | string, divisa: string) {
+    async crearCobroEfectivoInformal(fecha: string, descripcion: string, monto: string, divisa: string) {
         return await invoke('crear_cobro_efectivo_informal', {
             fecha,
             descripcion,
-            monto: Number(monto),
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            monto: String(monto),
             divisa
         });
     },
