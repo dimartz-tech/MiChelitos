@@ -26,7 +26,7 @@ export { crearEvento, crearElemento } from './dom_falso.js';
 const JS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'src', 'js');
 
 /** Scripts clásicos, en el orden de `index.html`, relativos a `src/js`. */
-const SCRIPTS = ['nucleo/respaldos.js', 'ui/dom.js', 'ui.js'];
+const SCRIPTS = ['ui/dom.js', 'ui.js'];
 
 const leer = ruta => readFileSync(join(JS, ruta), 'utf8');
 
