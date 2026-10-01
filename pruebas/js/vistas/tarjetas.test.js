@@ -11,6 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
 import { VistaTarjetas, MANEJADORES_TARJETAS, puenteTarjetas } from '../../../src/js/vistas/tarjetas.js';
 
 const tarjeta = (extra = {}) => ({
@@ -521,4 +522,38 @@ test('todo appUI.x( que escribe la plantilla y su ventana está en el puente, y 
     const llamados = new Set([...html.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
     for (const nombre of llamados) assert.ok(MANEJADORES_TARJETAS.includes(nombre), `falta ${nombre} en el puente`);
     for (const nombre of MANEJADORES_TARJETAS) assert.ok(llamados.has(nombre), `${nombre} está en el puente pero ninguna plantilla lo usa`);
+});
+
+// --- texto del titular en el HTML y en los manejadores ---
+
+test('una tarjeta con nombre hostil llega íntegra al editor de límites (JSON en texto) y no se interpreta', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const tj = tarjeta({ entidad: hostil, nombre_tarjeta: hostil });
+    const t = montar({ tarjetas: [tj], bonificaciones: [BONIFICACION({ concepto: hostil, entidad: hostil, nombre_tarjeta: hostil })] });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    const [[texto]] = llamadasDelManejador(html, 'abrirEdicionLimitesTarjeta');
+    assert.equal(JSON.parse(texto).nombre_tarjeta, hostil);
+    assert.doesNotMatch(html, /<img/);
+});
+
+test('los historiales y su ventana escapan los nombres y las notas del titular', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const t = montar({
+        campos: { abonos_7: el({ hidden: true }), avances_7: el({ hidden: true }) },
+        abonos: [{ id: 1, fecha_pago: '10/03/2027', monto_pagado: 8, divisa: 'DOP', cuenta_nombre: hostil, tasa_cambio: 1 }],
+        avances: [{ id: 2, fecha: '10/03/2027', monto: 9, divisa: 'DOP', tipo_cargo: 'fijo', tasa: null, cargo: 1, cuenta_nombre: hostil, nota: hostil }],
+    });
+    await t.vista.alternarAbonos(7);
+    await t.vista.alternarAvances(7);
+    t.vista.abrirEdicionLimitesTarjeta(JSON.stringify(tarjeta({ entidad: hostil })));
+    for (const html of [t.registro.abonos_7.innerHTML, t.registro.avances_7.innerHTML, t.modales[0].html]) assert.doesNotMatch(html, /<img/);
+});
+
+test('el error de un historial se escapa', async () => {
+    const caja = el({ hidden: true });
+    const t = montar({ campos: { abonos_7: caja }, falla: { obtenerAbonosTarjeta: 'No se pudo <img src=x onerror=alert(1)>' } });
+    await t.vista.alternarAbonos(7);
+    assert.doesNotMatch(caja.innerHTML, /<img/);
+    assert.match(caja.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
 });

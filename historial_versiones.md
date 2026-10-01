@@ -4,7 +4,39 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.67.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.68.0 (Versión Actual) - 2026-10-02
+**Corrección: ningún texto escrito por el titular se interpreta ya como HTML ni como código en ninguna pestaña.** Escape general de las plantillas.
+
+### 🐛 Qué estaba mal
+* La 1.67.0 corrigió el panel de «Casos de corrección» y reconoció que el problema era general. Lo era: las plantillas de las once vistas interpolaban en `innerHTML` **222 puntos de texto libre sin escapar** (nombres de cuentas, clientes y categorías; descripciones; conceptos; notas; plataformas; entidades; instituciones; motivos; mensajes de error), más los avisos emergentes y la tarjeta de error del enrutador, que pintaban cualquier mensaje tal cual. Un `<` en un nombre rompía la pantalla, y un `<img src=x onerror=…>` ejecutaba código en el WebView, cuyo puente con Rust admite todos los comandos.
+* **Había una variante más grave, en los atributos.** Doce botones, en siete vistas, llevaban un dato de la fila dentro de su `onclick` (editar cuenta, suscripción, factura o tarjeta; el menú de un préstamo; liquidar un consumo; asentar o descartar un período; borrar un bien del capital), escrito a mano como `'${JSON}'` con un escape de comillas. El navegador **deshace el escape del atributo antes de ejecutar el manejador**, así que un `'` en el nombre cerraba la cadena y **lo que viniera detrás se ejecutaba como código al pulsar el botón** (y con una `\` o una comilla el botón simplemente dejaba de funcionar: «Cuenta O'Brien» no se podía editar).
+* Quien escribe esos textos es el propio titular, en su propia aplicación: el riesgo real es bajo. Pero un texto guardado o importado no debe poder ejecutar nada, y un nombre con una comilla debe poder editarse.
+
+### 🔧 Qué se hace
+* **Dos ayudantes** en `nucleo/html.ts`: `escaparHtml(texto)` para el texto de un elemento o el valor de un atributo, y `argumentoJs(valor)` para el **argumento de un manejador** (genera el literal de JavaScript ya escapado para el atributo, sirve para cadenas, números y objetos y lo que recibe el método es exactamente el valor original).
+* **222 interpolaciones** pasan por `escaparHtml` y **12 argumentos de manejadores** por `argumentoJs`; se eliminan los cinco escapes a mano. Los avisos, la tarjeta de error del enrutador y los diálogos escapan en su origen, así que **todo mensaje** queda cubierto aunque un caller nuevo no lo piense.
+* **Lo que se ve no cambia:** el texto corriente (tildes, comas, `&`, comillas) se muestra igual.
+* Las dos ventanas que reciben el objeto como JSON en texto (`abrirEdicionFormal` y `abrirEdicionLimitesTarjeta`) ahora tipan lo que leen con su tipo real en lugar de `any`: así los números dejan de contar como texto y el compilador comprueba los campos.
+
+### 🛡️ Cómo se impide que vuelva
+* **`pruebas/js/contrato/escape_html.test.js`:** el compilador de TypeScript analiza las 667 interpolaciones de las plantillas HTML (vistas y servicios): mira el **tipo** de cada una (texto libre, no un número ni un literal; **un `any` cuenta como texto**, que es justo lo que escondía el `JSON.parse`) y **dónde cae** (texto de un elemento, atributo, cadena JS dentro de un manejador, JSON en un atributo). Encuentra también las variables intermedias que una búsqueda por nombre de campo no vería. **Cero hallazgos o la prueba falla.** Una autoprueba del analizador con código de ejemplo fija que sigue viendo cada caso (y que no se queja de lo seguro).
+* **`pruebas/js/ayudas/manejadores_html.js`:** ejecuta los manejadores de un HTML **como el navegador** (deshaciendo las entidades y evaluando el atributo) y devuelve los argumentos con que se llamaría al método. Las pruebas fijan el **efecto** y no la cadena: «Cuenta O'Brien» llega íntegra; uno `x'); alert(1); //` no ejecuta nada.
+
+### 🧪 Pruebas
+* 31 nuevas (netas): los ayudantes (10; el valor llega íntegro al manejador con cualquier carácter, y no puede salirse del argumento), el contrato y su autoprueba (6), los avisos y el enrutador (2) y casos hostiles en las vistas con datos en manejadores: ajustes (2), gastos (2), ingresos (2), tarjetas (3), préstamos (2), suscripciones (2) y capital (1); más dos pruebas existentes que fijaban el formato antiguo del atributo y ahora comprueban el efecto. **537 pruebas, todas pasan.**
+* Mutaciones: desenvolver 40 puntos de escape al azar (39 las detecta el contrato; la que sobrevivió es el ayudante de los diálogos, que detecta su propia prueba), quitar cada carácter del escape, el escape de `argumentoJs` y el de los tres servicios: todas se detectan.
+
+### ✅ Comprobado a mano
+* **Con tus datos reales** (copia temporal, ya borrada): las once pestañas siguen **idénticas** (lo visible no cambia).
+* **Con textos hostiles** puestos en todos los campos libres de las respuestas, navegando por las once pestañas y pulsando los botones que llevan datos en el manejador, antes y ahora: **antes**, todas las pestañas creaban imágenes inyectadas (de 1 a 738 por pestaña) y se ejecutó código 2 599 veces, y pulsar «editar» en suscripciones lo ejecutó; **ahora**, 0 imágenes inyectadas y 0 ejecuciones, y el nombre hostil llega íntegro al editor de la cuenta.
+* **En la aplicación empaquetada, con Rust y la base reales:** una categoría y un cliente con nombre hostil guardados de verdad: 0 imágenes inyectadas, 0 ejecuciones, el texto se ve literal y el diálogo de baja abre sin ejecutar nada.
+
+### ⚠️ Una limitación que conviene saber
+* El analizador solo ve **plantillas HTML con interpolaciones**. Si alguien construye HTML concatenando cadenas (`'<td>' + x + '</td>'`) o llama a un ayudante propio que devuelve HTML sin escapar, no lo vería; hoy no hay ningún caso, y el único ayudante así (`mensajeAHtml`, en los diálogos) escapa y tiene su prueba. Una regla de revisión sigue siendo necesaria para HTML que no pase por plantillas.
+
+---
+
+## 🚀 Versión 1.67.0 - 2026-10-02
 **Corrección: el panel de «Casos de corrección» ya no interpreta como HTML lo que escribe el titular.**
 
 ### 🐛 Qué estaba mal
@@ -65,7 +97,7 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 * Balance de la división y registro de previsto frente a medido: `division_de_ui_limpia.md` §9.
 
 ### Siguiente
-* La división de `ui.ts` está terminada. Pendientes aparte, anotados sin corregir: el panel de casos de corrección pinta el motivo sin escapar (corregido en la 1.67.0; ver ahí que el problema era más general), los importes que aún viajan como `Number` y los riesgos del capital. (Las cuatro bajas sin `try/catch` se corrigieron en la 1.66.0.)
+* La división de `ui.ts` está terminada. Pendientes aparte, anotados sin corregir: el panel de casos de corrección pinta el motivo sin escapar (corregido en la 1.67.0, y el problema general en la 1.68.0), los importes que aún viajan como `Number` y los riesgos del capital. (Las cuatro bajas sin `try/catch` se corrigieron en la 1.66.0.)
 
 ---
 
