@@ -202,11 +202,12 @@ const AppAPI = {
         return await invoke('obtener_ingresos_informales');
     },
 
-    async crearIngresoInformal(fecha: string, descripcion: string, monto: number | string) {
+    async crearIngresoInformal(fecha: string, descripcion: string, monto: string) {
         return await invoke('crear_ingreso_informal', {
             fecha,
             descripcion,
-            monto: Number(monto)
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            monto: String(monto)
         });
     },
 

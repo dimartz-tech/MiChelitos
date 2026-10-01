@@ -37,7 +37,7 @@ export type Comandos = {
     crear_ingreso: { args: { input: IngresoInput }; ret: number };
     marcar_ingreso_pagado: { args: { id: number; cuentaAhorroId: number; fecha: string; montoRecibido: number }; ret: null };
     obtener_ingresos_informales: { args: {  }; ret: IngresoInformal[] };
-    crear_ingreso_informal: { args: { fecha: string; descripcion: string; monto: number }; ret: number };
+    crear_ingreso_informal: { args: { fecha: string; descripcion: string; monto: string | number }; ret: number };
     marcar_informal_pagado: { args: { id: number; cuentaAhorroId: number; fecha: string; montoRecibido: number }; ret: null };
     obtener_tarjetas: { args: {  }; ret: Tarjeta[] };
     crear_tarjeta: { args: { entidad: string; nombre: string; limitePesos: number; limiteDolares: number; sobregiroPesos: number; sobregiroDolares: number; balancePesos: number; balanceDolares: number; balanceCortePesos: number; balanceCorteDolares: number; corte: number; pago: number }; ret: number };
