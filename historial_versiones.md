@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.47.0 (Versión Actual) - 2026-10-01
+## 🚀 Versión 1.48.0 (Versión Actual) - 2026-10-01
+**Preparación de la división de `ui.ts` y revisión de la estabilidad de actualizar.** Sin cambios en la aplicación.
+
+### 🧭 División de `ui.ts` (plan en `division_de_ui.md`)
+* Medido con el grafo de llamadas: **98 de los 103 métodos pertenecen a una sola pestaña**; solo 4 son compartidos (89 líneas). No hay métodos pasados como valor ni `bind`/`call`/`apply`: ningún `this` se puede perder al mover un método.
+* Diseño propuesto: cada vista es un módulo con un objeto de métodos, mezclado en `appUI` (el mismo `this`), de modo que se mueven sin cambiar una línea de su cuerpo y los 99 manejadores en línea siguen funcionando. 13 PR, de la vista más pequeña a la más grande. **Espera tu visto bueno.**
+* `pruebas/js/contrato/manejadores.test.js`: todo `appUI.x()` de un `onclick` existe como método, `navigate` es global y los manejadores solo llaman a destinos globales declarados. Tres mutaciones, las tres detectadas.
+* `herramientas/comparar_vistas/`: pinta las once pestañas con **tus datos reales** (sobre una copia temporal, solo lee la base viva) con dos versiones del frontend y compara el texto, devolviendo solo un resumen con los dígitos enmascarados. Incluye una prueba `#[ignore]` que vuelca lo que leen las vistas.
+
+### 🔍 Estabilidad de actualizar (detalle en `guia_de_actualizacion.md`)
+* Veredicto: **estable para actualizar**. De 1.36.0 a hoy, 13 PR y solo 221 líneas de Rust (sin pruebas); **sin migraciones**: el esquema sigue en 15, así que se puede volver a la 1.36.0 sin tocar la base.
+* Con datos reales: el arranque no cambia ninguna fila, los 16 comandos de lectura funcionan, el cobro automático es idempotente, respaldar y restaurar funcionan, la aplicación empaquetada arranca contra la copia y las once pestañas se pintan **idénticas** a la versión instalada (salvo el panel nuevo de restaurar), sin `undefined`, `NaN` ni errores.
+* Riesgo residual declarado: se comprobó lo que se **pinta**, no cada formulario con la aplicación empaquetada.
+
+---
+
+## 🚀 Versión 1.47.0 - 2026-10-01
 **Los 61 envoltorios de `api.ts` tienen todos sus parámetros tipados, y `noImplicitAny` los vigila.** Sin cambios de comportamiento.
 
 ### 🧩 Qué se hace
