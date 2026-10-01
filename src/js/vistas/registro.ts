@@ -10,6 +10,7 @@
 // otra de registro. Ver `division_de_ui_limpia.md`.
 
 import type { AppUIAntigua, ServiciosComunes } from '../ui/servicios';
+import { VistaCapital, puenteCapital } from './capital.js';
 import { VistaCuentas, puenteCuentas } from './cuentas.js';
 import { VistaDashboard, puenteDashboard } from './dashboard.js';
 import { VistaEfectivo, puenteEfectivo } from './efectivo.js';
@@ -27,4 +28,7 @@ export function registrarVistas(app: AppUIAntigua, servicios: ServiciosComunes, 
 
     const dashboard = new VistaDashboard({ ...servicios, api });
     app.registrarVista('dashboard', dashboard, puenteDashboard(dashboard));
+
+    const capital = new VistaCapital({ ...servicios, api });
+    app.registrarVista('capital', capital, puenteCapital(capital));
 }

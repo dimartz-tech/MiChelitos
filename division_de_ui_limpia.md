@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`; PR 3 en 1.54.0: `resumen`; PR 4 en 1.55.0: `dashboard`; PR 5 en 1.56.0: `capital`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -342,3 +342,34 @@ Fuera del plan, también: **cuatro mutaciones** (retiro siempre a efectivo en pe
 | 6. Revisión manual con tus datos | los **dos enlaces del Dashboard** («Detalles» de tarjetas y «Deudas») ejercidos en las dos versiones: mismo título, misma pestaña activa; y **una ruta inexistente cae en el Dashboard con el mismo texto** en las dos |
 
 **Más controles:** seis mutaciones (vista sin registrar, `default:` sin buscar el Dashboard, gastos de todos los meses, cargos sin sumar, patrimonio recalculado en la vista, nivel del aviso equivocado): las seis se detectan (la sexta, tras reforzar la prueba). **En la aplicación empaquetada**: cuatro vistas registradas, una ruta inexistente cae en el Dashboard y sin error.
+
+### PR 5 — `capital` (1.56.0)
+
+| Qué | Previsto (medición del agente) | Medido |
+|---|---|---|
+| Métodos que se mueven | 7 | 7 (`render` y seis manejadores) |
+| Líneas de la vista | 294 | **297** quitadas de `ui.ts` (294 de métodos y comentarios) |
+| Líneas a reescribir | 48 (≈55 con la corrección del 15 %) | **58** de 272 (**21 %**): `render` 6 %; las altas y bajas, entre el 41 % y el 71 % |
+| Diff de `ui.ts` | — | **−297 / +0** |
+| Archivos nuevos | — | `vistas/capital.ts` (395), `pruebas/js/vistas/capital.test.js` (206); `registro.ts` +4 |
+| Esfuerzo relativo (efectivo = 1) | 2 | ≈2 |
+| Parámetros sin tipo en `ui.ts` | 161 | **146** (−15: los manejadores de esta vista) |
+
+**Lo previsto y lo que ocurrió:** el modelo anticipaba «3 diálogos, 13 llamadas a la API» y **acertó**: tres diálogos (las confirmaciones de las bajas, ahora el servicio `Dialogos`, que ya existía desde el PR 0 y se usa por primera vez) y trece llamadas a la API (siete lecturas y seis escrituras). Lo que no mencionaba: **un `Date.now()`** que el modelo no mencionaba (el identificador de un bien nuevo): se inyectó el reloj en vez de dejar una fuente de tiempo global dentro de la vista. El capital es JSON libre: la vista declara solo lo que lee (`Certificado`, `InversionDeBolsa`, `Bien`).
+
+**Una corrección a mi propio texto:** la primera versión del comentario de cabecera de la vista decía que mostraba los totales del capital. **No los muestra**: los ven el Dashboard y el Resumen. Se corrigió antes de publicar; el hecho de que la pantalla de capital no calcule ni muestre ninguna suma es justo lo que una de las pruebas de la vista fija. La relación del capital con `Dinero` y los huecos de esta pantalla están explicados en `capital_y_dinero.md`.
+
+**Los seis controles del plan:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 277 pruebas (273 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa; los seis manejadores siguen existiendo (ahora en la vista) |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `capital` incluida (655 caracteres), sin `undefined`/`NaN`/errores |
+| 4. Parámetros tipados en el mismo PR | sí; entra en `tsconfig.estricto.json` |
+| 5. Pruebas de interacción | las del capital (a través de `appUI`) **sin tocar**, más 14 de la vista con dobles |
+| 6. Revisión manual con tus datos | **cinco de los seis formularios**, ejercidos en las dos versiones sobre tu documento real: mismos documentos guardados (comparados sin imprimirlos), mismo texto de los avisos, 0 errores. La baja de certificado no se pudo ejercer: **tu capital no tiene certificados**; la cubren las pruebas de la vista |
+
+**Dos precisiones de método, para no repetir mis tropiezos:** (1) en un campo `type="number"` un valor con espacios se **sanea a vacío**: mis primeras pruebas manuales con ` 123.455 ` no fallaron por el `step`, sino por el campo `required` vacío; se repitieron con valores limpios y se comprobó aparte que **tres decimales los detiene el `step`** (0 guardados, igual en las dos versiones). (2) El `.trim()` de la vista sobre un campo numérico no tiene efecto en el navegador; se mantiene porque era el comportamiento original.
+
+**Más controles:** siete mutaciones (monto como número, baja del elemento siguiente, identificador de la fecha real en lugar del reloj, vista sin registrar, baja de bien invertida, bolsa guardada entre los certificados, baja sin confirmación): las siete se detectan. **En la aplicación empaquetada**: cinco vistas registradas, se dibuja «Capital y Activos» sin error y los seis manejadores son funciones.

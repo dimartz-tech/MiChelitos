@@ -4,7 +4,33 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.55.0 (Versión Actual) - 2026-10-01
+## 🚀 Versión 1.56.0 (Versión Actual) - 2026-10-01
+**División de `ui.ts`, PR 5: la pestaña «Capital» sale de la clase.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* `src/js/vistas/capital.ts`: la vista como clase con dependencias inyectadas (API recortada a `obtenerCapital` y `guardarCapital`, avisos, formato, enrutador, pantalla, DOM, **diálogos** y reloj). Siete métodos: el `render` y seis manejadores (alta y baja de certificados, de inversiones en bolsa y de bienes). **21 % de las líneas de sus cuerpos reescritas** (58 de 272).
+* Usa por primera vez el servicio **`Dialogos`** (las confirmaciones de las bajas) y un **reloj inyectado** para el identificador de un bien nuevo, que antes salía de `Date.now()`. El capital es JSON libre: la vista declara solo lo que lee (`Certificado`, `InversionDeBolsa`, `Bien`).
+* `ui.ts` pierde 297 líneas; `registro.ts` +4. Parámetros sin tipo en `ui.ts`: 161 → 146.
+
+### 💶 `capital_y_dinero.md`: la relación del capital con el dinero
+* Rust es el único sitio que decide dinero (valida con `Dinero`, suma en centavos y devuelve los `totales`); la vista solo transporta texto y formatea. **No hay nada de `Dinero` que integrar en la interfaz**, y `nucleo/dinero.ts` no lo usa ninguna vista. El capital no mueve saldos ni es transaccional con las cuentas: es un inventario en un archivo JSON.
+* Hallazgos, **sin corregir**: lectura-modificación-escritura del documento entero desde la vista («gana la última escritura»); certificados y bolsa se borran **por posición** y los bienes por identificador; las tres bajas no tienen `try/catch` (ya figuraba en 1.49.0). El documento explica la salida de fondo (comandos propios en Rust con identificadores) y por qué conviene **después** de dividir `ui.ts`.
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/capital.test.js` (14): fija **qué documento se guarda**: el importe sale como **texto** tal cual se escribió y la tasa como número, el resto del documento viaja intacto, la baja quita el elemento de ese índice (o el bien de ese identificador), el identificador sale del reloj inyectado, y la pantalla no suma ni muestra totales.
+* 277 pruebas (273 pasan, 4 `todo` conocidos). Siete mutaciones, las siete detectadas.
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; **cinco de los seis formularios, ejercidos en las dos versiones sobre tu documento, guardan lo mismo** (comparado sin imprimirlo), con los mismos avisos y sin errores. La baja de certificado no se pudo ejercer porque tu capital no tiene certificados.
+* **App empaquetada**: cinco vistas registradas, se dibuja sin error y los seis manejadores existen.
+* Previsto frente a medido (≈55 → 58 líneas; esfuerzo 2 → ≈2) y los seis controles del plan: `division_de_ui_limpia.md` §9.
+
+### Siguiente
+* PR 6: `suscripciones` (10 métodos, 361 líneas).
+
+---
+
+## 🚀 Versión 1.55.0 - 2026-10-01
 **División de `ui.ts`, PR 4: la pestaña «Dashboard» sale de la clase.** Sin cambios visibles.
 
 ### 🧩 Qué se hace
