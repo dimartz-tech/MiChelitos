@@ -4,12 +4,15 @@
 // Se inserta ANTES de `js/api.js` en el `index.html` de la copia que se compara.
 window.__errores = [];
 window.__desconocidos = new Set();
+// Cada llamada a un comando queda aquí, para comparar lo que dos versiones envían a Rust.
+window.__llamadas = [];
 window.confirm = () => true;
 window.prompt = () => null;
 window.addEventListener('error', e => window.__errores.push(String(e.message)));
 const __volcado = fetch('/volcado.json').then(r => r.json());
 window.__TAURI__ = {
     invoke: async (cmd, args) => {
+        window.__llamadas.push({ cmd, args: JSON.parse(JSON.stringify(args ?? null)) });
         const d = await __volcado;
         const id = args && (args.tarjetaId ?? args.id);
         if (cmd === 'obtener_abonos_tarjeta') return (d.por_tarjeta[id] || {}).abonos || [];

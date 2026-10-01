@@ -13,6 +13,7 @@
     "src/js/ui/dom.ts",
     "src/js/ui/servicios.ts",
     "src/js/composicion.ts",
+    "src/js/vistas/*.ts",
     "src/js/nucleo/*.ts"
   ]
 }
