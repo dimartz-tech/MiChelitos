@@ -4,8 +4,10 @@
   // en .gitignore porque son generados. Sin empaquetador ni dependencias de
   // producción: la salida son módulos ES y scripts clásicos normales.
   //
-  // `noImplicitAny` sigue apagado mientras se tipan los parámetros de los
-  // envoltorios de `api.ts`; `ui.ts` lleva `@ts-nocheck` (ver
+  // Estricto en todo: `strict` y `noImplicitAny`, sin archivos exentos. Hasta la
+  // 1.65.0 había una segunda configuración (`tsconfig.estricto.json`) para los
+  // archivos que ya no tenían deuda de tipos, mientras `ui.ts` llevaba la suya; al
+  // retirarse `ui.ts` no quedó nada que exentar y se unificaron (ver
   // migracion_a_typescript.md).
   "compilerOptions": {
     "target": "es2022",
@@ -13,7 +15,7 @@
     "moduleResolution": "bundler",
     "lib": ["es2022", "dom", "dom.iterable"],
     "strict": true,
-    "noImplicitAny": false,
+    "noImplicitAny": true,
     "skipLibCheck": true,
     "rootDir": "src",
     "outDir": "src"

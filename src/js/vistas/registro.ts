@@ -1,15 +1,11 @@
-// Registro de las vistas extraídas de `ui.ts`: el único sitio donde se
-// construye cada una con sus dependencias y se cuelga de `appUI`.
+// Registro de las vistas: el único sitio donde se construye cada una con sus
+// dependencias y se registra su ruta y su puente de manejadores.
 //
-// Es una función y no el cuerpo de `composicion.ts` para que **lo mismo que
-// ejecuta la aplicación lo ejecuten las pruebas de interacción** con servicios
-// y API falsos (`pruebas/js/ayudas/cargar_interfaz.js`): así no hay una copia
-// del cableado que pueda desviarse de la real.
-//
-// Cada extracción de `ui.ts` añade aquí su vista: una línea de construcción y
-// otra de registro. Ver `division_de_ui_limpia.md`.
+// Lo llama `ui/componer.ts`, que es lo mismo que ejecutan la aplicación y las
+// pruebas de interacción. Una pestaña nueva añade aquí una línea de construcción
+// y otra de registro. Ver `division_de_ui_limpia.md`.
 
-import type { AppUIAntigua, ServiciosComunes } from '../ui/servicios';
+import type { ServiciosComunes, Vista } from '../ui/servicios';
 import { VistaCapital, puenteCapital } from './capital.js';
 import { VistaCuentas, puenteCuentas } from './cuentas.js';
 import { VistaDashboard, puenteDashboard } from './dashboard.js';
@@ -22,37 +18,42 @@ import { VistaTarjetas, puenteTarjetas } from './tarjetas.js';
 import { VistaResumen, puenteResumen } from './resumen.js';
 import { VistaSuscripciones, puenteSuscripciones } from './suscripciones.js';
 
-export function registrarVistas(app: AppUIAntigua, servicios: ServiciosComunes, api: typeof AppAPI): void {
+/** Dónde se registra una vista: su ruta, y los manejadores que el HTML llama como `appUI.<método>`. */
+export interface RegistroDeVistas {
+    registrar(ruta: string, vista: Vista, puente: object): void;
+}
+
+export function registrarVistas(registro: RegistroDeVistas, servicios: ServiciosComunes, api: typeof AppAPI): void {
     const efectivo = new VistaEfectivo({ ...servicios, api });
-    app.registrarVista('efectivo', efectivo, puenteEfectivo(efectivo));
+    registro.registrar('efectivo', efectivo, puenteEfectivo(efectivo));
 
     const cuentas = new VistaCuentas({ ...servicios, api });
-    app.registrarVista('cuentas', cuentas, puenteCuentas(cuentas));
+    registro.registrar('cuentas', cuentas, puenteCuentas(cuentas));
 
     const resumen = new VistaResumen({ ...servicios, api });
-    app.registrarVista('resumen', resumen, puenteResumen(resumen));
+    registro.registrar('resumen', resumen, puenteResumen(resumen));
 
     const dashboard = new VistaDashboard({ ...servicios, api });
-    app.registrarVista('dashboard', dashboard, puenteDashboard(dashboard));
+    registro.registrar('dashboard', dashboard, puenteDashboard(dashboard));
 
     const capital = new VistaCapital({ ...servicios, api });
-    app.registrarVista('capital', capital, puenteCapital(capital));
+    registro.registrar('capital', capital, puenteCapital(capital));
 
     const suscripciones = new VistaSuscripciones({ ...servicios, api });
-    app.registrarVista('suscripciones', suscripciones, puenteSuscripciones(suscripciones));
+    registro.registrar('suscripciones', suscripciones, puenteSuscripciones(suscripciones));
 
     const gastos = new VistaGastos({ ...servicios, api });
-    app.registrarVista('gastos', gastos, puenteGastos(gastos));
+    registro.registrar('gastos', gastos, puenteGastos(gastos));
 
     const ingresos = new VistaIngresos({ ...servicios, api });
-    app.registrarVista('ingresos', ingresos, puenteIngresos(ingresos));
+    registro.registrar('ingresos', ingresos, puenteIngresos(ingresos));
 
     const prestamos = new VistaPrestamos({ ...servicios, api });
-    app.registrarVista('prestamos', prestamos, puentePrestamos(prestamos));
+    registro.registrar('prestamos', prestamos, puentePrestamos(prestamos));
 
     const ajustes = new VistaAjustes({ ...servicios, api });
-    app.registrarVista('ajustes', ajustes, puenteAjustes(ajustes));
+    registro.registrar('ajustes', ajustes, puenteAjustes(ajustes));
 
     const tarjetas = new VistaTarjetas({ ...servicios, api });
-    app.registrarVista('tarjetas', tarjetas, puenteTarjetas(tarjetas));
+    registro.registrar('tarjetas', tarjetas, puenteTarjetas(tarjetas));
 }
