@@ -10,6 +10,8 @@
 // Es un módulo ES (`composicion.ts` lo importa); las vistas lo importan con
 // `import type`, que no deja rastro en el JavaScript compilado.
 
+import { escaparHtml } from '../nucleo/html.js';
+
 /**
  * Tipo de aviso. Se distingue por el icono (✅ el éxito, ⚠️ el resto) y por la clase
  * `toast-<tipo>`. `'info'` lo usa Tarjetas para explicar por qué un abono no
@@ -123,8 +125,7 @@ export interface Vista {
 
 /** Escapa el texto de un mensaje y deja en negrita lo marcado con `**…**`. */
 function mensajeAHtml(mensaje: string): string {
-    const seguro = mensaje.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    return seguro.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    return escaparHtml(mensaje).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 }
 
 /**
@@ -289,7 +290,7 @@ export function crearAvisos({ contenedor, crear = () => document.createElement('
             aviso.className = `toast toast-${tipo}`;
             aviso.innerHTML = `
             <span style="font-weight: bold;">${tipo === 'success' ? '✅' : '⚠️'}</span>
-            <span>${mensaje}</span>
+            <span>${escaparHtml(mensaje)}</span>
         `;
             contenedor.appendChild(aviso);
 
@@ -352,7 +353,7 @@ export function crearEnrutador(pantalla: Pantalla, vistas: ReadonlyMap<string, V
                 pantalla.contenido.innerHTML = `
                 <div class="card" style="border-left: 4px solid var(--color-danger);">
                     <h3 style="color: var(--color-danger); margin-bottom: 0.5rem;">Error al renderizar el módulo</h3>
-                    <p style="font-size: 0.9rem;">${String(err)}</p>
+                    <p style="font-size: 0.9rem;">${escaparHtml(String(err))}</p>
                 </div>
             `;
             }

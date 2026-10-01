@@ -10,6 +10,8 @@
 
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Modales, Pantalla, Reloj, Vista } from '../ui/servicios';
 
+import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+
 type ApiGastos = ApiDe<
     | 'obtenerGastos'
     | 'obtenerCategorias'
@@ -116,7 +118,7 @@ export class VistaGastos implements Vista {
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gas_fec">Fecha *</label>
-                                <input type="text" id="gas_fec" class="form-control" value="${hoyStr}" placeholder="dd/mm/aaaa" required>
+                                <input type="text" id="gas_fec" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" required>
                             </div>
                             <div class="form-group">
                                 <label for="gas_div">Divisa</label>
@@ -135,7 +137,7 @@ export class VistaGastos implements Vista {
                                 <label for="gas_cat">Categoría *</label>
                                 <select id="gas_cat" class="form-control" required>
                                     <option value="" disabled selected>Seleccione...</option>
-                                    ${categorias.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
+                                    ${categorias.map(c => `<option value="${c.id}">${escaparHtml(c.nombre)}</option>`).join('')}
                                 </select>
                             </div>
                         </div>
@@ -153,7 +155,7 @@ export class VistaGastos implements Vista {
                             <label for="gas_tar">Tarjeta de Crédito *</label>
                             <select id="gas_tar" class="form-control">
                                 <option value="" disabled selected>Seleccione tarjeta...</option>
-                                ${tarjetas.map(t => `<option value="${t.id}">${t.entidad} - ${t.nombre_tarjeta}</option>`).join('')}
+                                ${tarjetas.map(t => `<option value="${t.id}">${escaparHtml(t.entidad)} - ${escaparHtml(t.nombre_tarjeta)}</option>`).join('')}
                             </select>
                         </div>
 
@@ -162,7 +164,7 @@ export class VistaGastos implements Vista {
                             <label for="gas_cue">Cuenta de Ahorro *</label>
                             <select id="gas_cue" class="form-control" onchange="appUI.actualizarConversionGasto()">
                                 <option value="" disabled selected>Seleccione cuenta...</option>
-                                ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${formato.importe(c.balance_actual)}</option>`).join('')}
+                                ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                             </select>
                         </div>
 
@@ -196,7 +198,7 @@ export class VistaGastos implements Vista {
                             <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin:0;">📊 Resumen de ${this.formatMonthYearStr(mSelected)}</h3>
                             <select onchange="appUI.handleSelectGastosMonth(this.value)" class="form-control" style="width:auto; padding:0.3rem 0.6rem; font-size:0.8rem; margin:0;">
                                 ${mesesDisponibles.map(m => `
-                                    <option value="${m}" ${m === mSelected ? 'selected' : ''}>${this.formatMonthYearStr(m)}</option>
+                                    <option value="${escaparHtml(m)}" ${m === mSelected ? 'selected' : ''}>${this.formatMonthYearStr(m)}</option>
                                 `).join('')}
                             </select>
                         </div>
@@ -270,14 +272,14 @@ export class VistaGastos implements Vista {
                                             return `
                                                 <div>
                                                     <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:0.25rem;">
-                                                        <span style="font-weight:600;">${cat} <span style="font-size:0.7rem; color:var(--text-muted);">(${divisa})</span></span>
+                                                        <span style="font-weight:600;">${escaparHtml(cat)} <span style="font-size:0.7rem; color:var(--text-muted);">(${escaparHtml(divisa)})</span></span>
                                                         <span style="font-family:var(--font-heading); font-weight:700;">
-                                                            ${divisa} ${formato.importe(total)} 
+                                                            ${escaparHtml(divisa)} ${formato.importe(total)} 
                                                             <span style="font-size:0.7rem; color:var(--text-secondary); font-weight:normal; margin-left:0.25rem;">(${pct.toFixed(1)}%)</span>
                                                         </span>
                                                     </div>
                                                     <div style="background:rgba(255,255,255,0.03); height:6px; border-radius:3px; overflow:hidden; border:1px solid var(--border-color);">
-                                                        <div style="background:${barColor}; width:${pct}%; height:100%; border-radius:3px;"></div>
+                                                        <div style="background:${escaparHtml(barColor)}; width:${pct}%; height:100%; border-radius:3px;"></div>
                                                     </div>
                                                 </div>
                                             `;
@@ -319,16 +321,16 @@ export class VistaGastos implements Vista {
                                             return `
                                             <tr>
                                                 <td>
-                                                    <strong>${g.descripcion}</strong>
-                                                    ${pendiente ? `<button onclick="appUI.abrirLiquidacionConsumo(${g.id}, ${g.monto}, '${g.divisa}', '${String(g.descripcion).replace(/'/g, "&apos;")}')" class="btn" style="margin-left:0.4rem; padding:0.1rem 0.4rem; font-size:0.65rem; background:rgba(255,193,7,0.15); border:1px solid rgba(255,193,7,0.4); color:#ffc107;" title="El emisor aún no ha fijado el importe en pesos">⏳ Liquidar</button>` : ''}
+                                                    <strong>${escaparHtml(g.descripcion)}</strong>
+                                                    ${pendiente ? `<button onclick="appUI.abrirLiquidacionConsumo(${g.id}, ${g.monto}, ${argumentoJs(g.divisa)}, ${argumentoJs(g.descripcion)})" class="btn" style="margin-left:0.4rem; padding:0.1rem 0.4rem; font-size:0.65rem; background:rgba(255,193,7,0.15); border:1px solid rgba(255,193,7,0.4); color:#ffc107;" title="El emisor aún no ha fijado el importe en pesos">⏳ Liquidar</button>` : ''}
                                                     ${liquidado ? `<span style="margin-left:0.4rem; font-size:0.65rem; color:var(--text-muted);" title="Tasa aplicada por el emisor">@ ${Number(g.tasa_conversion).toFixed(4)}</span>` : ''}
                                                 </td>
-                                                <td>${g.categoria_nombre}</td>
-                                                <td>${g.fecha}</td>
-                                                <td style="text-transform:capitalize;">${g.metodo_pago}</td>
-                                                <td class="amount">${g.divisa} ${formato.importe(g.monto)}</td>
-                                                <td class="amount expense">${divisaFinal} ${formato.importe(g.costo_adicional)}</td>
-                                                <td class="amount" style="font-weight:bold;">${divisaFinal} ${formato.importe((montoFinal ?? 0) + g.costo_adicional)}</td>
+                                                <td>${escaparHtml(g.categoria_nombre)}</td>
+                                                <td>${escaparHtml(g.fecha)}</td>
+                                                <td style="text-transform:capitalize;">${escaparHtml(g.metodo_pago)}</td>
+                                                <td class="amount">${escaparHtml(g.divisa)} ${formato.importe(g.monto)}</td>
+                                                <td class="amount expense">${escaparHtml(divisaFinal)} ${formato.importe(g.costo_adicional)}</td>
+                                                <td class="amount" style="font-weight:bold;">${escaparHtml(divisaFinal)} ${formato.importe((montoFinal ?? 0) + g.costo_adicional)}</td>
                                             </tr>
                                         `;}).join('')}
                                     </tbody>
@@ -408,7 +410,7 @@ export class VistaGastos implements Vista {
         const lbtr = dom.buscar<HTMLInputElement>('gas_lbtr')?.checked ? 100 : 0;
         const total = convertidoRedondeado + retencion + lbtr;
 
-        previa!.innerHTML = `Saldrán <strong>${divisaCuenta} ${formato.importe(total)}</strong> `
+        previa!.innerHTML = `Saldrán <strong>${escaparHtml(divisaCuenta)} ${formato.importe(total)}</strong> `
             + `— ${formato.importe(convertidoRedondeado)} convertidos`
             + (retencion ? ` + ${formato.importe(retencion)} de retención` : '')
             + (lbtr ? ` + ${formato.importe(lbtr)} de LBTR` : '');
@@ -487,7 +489,7 @@ export class VistaGastos implements Vista {
             <div class="card" style="width: 420px; background: var(--bg-surface-opaque);">
                 <h3 style="font-family: var(--font-heading); margin-bottom:0.4rem;">⏳ Liquidar consumo</h3>
                 <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
-                    ${descripcion} — <strong>${divisaOrigen} ${formato.importe(montoOrigen)}</strong><br>
+                    ${escaparHtml(descripcion)} — <strong>${escaparHtml(divisaOrigen)} ${formato.importe(montoOrigen)}</strong><br>
                     Indica el importe en pesos que aparece en tu estado de cuenta. La tasa se deduce sola.
                 </p>
                 <form onsubmit="appUI.handleLiquidacionSubmit(event, ${id}, ${montoOrigen})">

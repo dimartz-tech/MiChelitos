@@ -62,6 +62,15 @@ test('el aviso aparece a los 100 ms, se quita de la vista a los 4 s y se retira 
     assert.equal(t.hijos[0].quitado, true);
 });
 
+test('el mensaje del aviso es texto: el marcado no se interpreta (un error de Rust puede traer texto del titular)', () => {
+    const t = montarAvisos();
+    t.avisos.mostrar('No se encontró <img src=x onerror="alert(1)"> & "Cliente X"', 'error');
+    assert.doesNotMatch(t.hijos[0].innerHTML, /<img/);
+    assert.match(t.hijos[0].innerHTML, /<span>No se encontró &lt;img src=x onerror=&quot;alert\(1\)&quot;&gt; &amp; &quot;Cliente X&quot;<\/span>/);
+    t.avisos.mostrar('Tom & Jerry, año nuevo: «listo»');
+    assert.match(t.hijos[1].innerHTML, /<span>Tom &amp; Jerry, año nuevo: «listo»<\/span>/);
+});
+
 test('varios avisos se apilan, cada uno con sus propios temporizadores', () => {
     const t = montarAvisos();
     t.avisos.mostrar('Uno');
@@ -153,6 +162,13 @@ test('si la vista falla, se pinta el error en lugar de dejar la pantalla a media
     assert.match(t.pantalla.contenido.innerHTML, /Error al renderizar el módulo/);
     assert.match(t.pantalla.contenido.innerHTML, /Rust no responde/);
     assert.doesNotMatch(t.pantalla.contenido.innerHTML, /Cargando/);
+});
+
+test('el error de una vista se pinta como texto: el marcado del mensaje no se interpreta', async () => {
+    const t = montarEnrutador({ vistas: { gastos: () => { throw new Error('Falló <img src=x onerror=alert(1)> en "Cuenta X"'); } } });
+    await t.enrutador.mostrar('gastos');
+    assert.doesNotMatch(t.pantalla.contenido.innerHTML, /<img/);
+    assert.match(t.pantalla.contenido.innerHTML, /Falló &lt;img src=x onerror=alert\(1\)&gt; en &quot;Cuenta X&quot;/);
 });
 
 test('un fallo de una pestaña no impide dibujar la siguiente', async () => {

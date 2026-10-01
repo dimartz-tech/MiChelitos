@@ -6,7 +6,10 @@
 // `confirm` ni `Date` globales: todo entra por el constructor
 // (`pruebas/js/vistas/ingresos.test.js`). Los cuerpos son los de `ui.ts`.
 
+import type { Ingreso } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Reloj, Vista } from '../ui/servicios';
+
+import { argumentoJs, escaparHtml } from '../nucleo/html.js';
 
 type ApiIngresos = ApiDe<
     | 'obtenerIngresos'
@@ -90,17 +93,17 @@ export class VistaIngresos implements Vista {
                         <form id="form-add-formal" onsubmit="appUI.handleAgregarIngreso(event)">
                             <div class="form-group">
                                 <label for="num_fac">Número de Factura *</label>
-                                <input type="text" id="num_fac" class="form-control" value="${nextInvoice}" required>
+                                <input type="text" id="num_fac" class="form-control" value="${escaparHtml(nextInvoice)}" required>
                             </div>
                             <div class="form-group">
                                 <label for="fec_em">Fecha de Emisión *</label>
-                                <input type="text" id="fec_em" class="form-control" value="${hoyStr}" placeholder="dd/mm/aaaa" required>
+                                <input type="text" id="fec_em" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" required>
                             </div>
                             <div class="form-group">
                                 <label for="cli_select">Cliente *</label>
                                 <select id="cli_select" class="form-control" onchange="appUI.handleSelectCliente(this.value)" required>
                                     <option value="" disabled selected>Seleccione cliente...</option>
-                                    ${clientes.map(c => `<option value="${c.id}" data-rnc="${c.rnc}" data-nombre="${c.nombre}">${c.nombre} (RNC: ${c.rnc})</option>`).join('')}
+                                    ${clientes.map(c => `<option value="${c.id}" data-rnc="${escaparHtml(c.rnc)}" data-nombre="${escaparHtml(c.nombre)}">${escaparHtml(c.nombre)} (RNC: ${escaparHtml(c.rnc)})</option>`).join('')}
                                 </select>
                                 <input type="hidden" id="cli_nom">
                                 <input type="hidden" id="cli_rnc">
@@ -127,7 +130,7 @@ export class VistaIngresos implements Vista {
                         <form id="form-add-informal" onsubmit="appUI.handleAgregarIngresoInformal(event)">
                             <div class="form-group">
                                 <label for="fecha_inf">Fecha *</label>
-                                <input type="text" id="fecha_inf" class="form-control" value="${hoyStr}" placeholder="dd/mm/aaaa" required>
+                                <input type="text" id="fecha_inf" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" required>
                             </div>
                             <div class="form-group">
                                 <label for="monto_inf">Monto DOP *</label>
@@ -163,25 +166,24 @@ export class VistaIngresos implements Vista {
                                     </thead>
                                     <tbody>
                                         ${ingresos.map(i => {
-                                            const iEscaped = JSON.stringify(i).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
                                             return `
                                                 <tr>
-                                                    <td><strong>${i.numero_factura}</strong></td>
-                                                    <td>${i.cliente_nombre}<br><span style="font-size:0.75rem; color:var(--text-muted);">RNC: ${i.cliente_rnc}</span></td>
-                                                    <td>${i.fecha_emision}</td>
+                                                    <td><strong>${escaparHtml(i.numero_factura)}</strong></td>
+                                                    <td>${escaparHtml(i.cliente_nombre)}<br><span style="font-size:0.75rem; color:var(--text-muted);">RNC: ${escaparHtml(i.cliente_rnc)}</span></td>
+                                                    <td>${escaparHtml(i.fecha_emision)}</td>
                                                     <td class="amount">DOP ${formato.importe(i.monto_total)}</td>
                                                     <td class="amount expense">DOP ${formato.importe(i.monto_retenido)}</td>
-                                                    <td><span class="badge ${i.estatus}">${i.estatus}</span></td>
+                                                    <td><span class="badge ${escaparHtml(i.estatus)}">${escaparHtml(i.estatus)}</span></td>
                                                     <td>
                                                         <div style="display:flex; gap:0.3rem;">
                                                             <!-- Corregir se ofrece también cobrada: un error de importe no
                                                                  debería quedar congelado porque el dinero ya entró. El ajuste
                                                                  de la cuenta lo resuelve el comando. -->
-                                                            <button onclick="appUI.abrirEdicionFormal('${iEscaped}')" class="btn btn-secondary" style="padding: 0.3rem 0.5rem; font-size:0.75rem; border:none; background:rgba(255,255,255,0.05);" title="${i.estatus === 'pagada' ? 'Corregir factura cobrada: ajustará la cuenta por la diferencia' : 'Corregir factura'}">✏️</button>
+                                                            <button onclick="appUI.abrirEdicionFormal(${argumentoJs(JSON.stringify(i))})" class="btn btn-secondary" style="padding: 0.3rem 0.5rem; font-size:0.75rem; border:none; background:rgba(255,255,255,0.05);" title="${i.estatus === 'pagada' ? 'Corregir factura cobrada: ajustará la cuenta por la diferencia' : 'Corregir factura'}">✏️</button>
                                                             ${i.estatus === 'emitida' ? `
                                                                 <button onclick="appUI.abrirCobroFormal(${i.id}, ${i.monto_total - i.monto_retenido})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.75rem;">💵 Cobrar</button>
                                                             ` : `
-                                                                <span style="font-size:0.75rem; color:var(--text-muted); font-style:italic;">Dep: ${i.institucion_deposito}</span>
+                                                                <span style="font-size:0.75rem; color:var(--text-muted); font-style:italic;">Dep: ${escaparHtml(i.institucion_deposito)}</span>
                                                             `}
                                                         </div>
                                                     </td>
@@ -215,13 +217,13 @@ export class VistaIngresos implements Vista {
                                     <tbody>
                                         ${informales.map(inf => `
                                             <tr>
-                                                <td><strong>${inf.descripcion}</strong></td>
-                                                <td>${inf.fecha}</td>
+                                                <td><strong>${escaparHtml(inf.descripcion)}</strong></td>
+                                                <td>${escaparHtml(inf.fecha)}</td>
                                                 <td class="amount income">DOP ${formato.importe(inf.monto)}</td>
-                                                <td><span class="badge ${inf.estatus === 'pagado' ? 'pagada' : 'emitida'}">${inf.estatus}</span></td>
+                                                <td><span class="badge ${inf.estatus === 'pagado' ? 'pagada' : 'emitida'}">${escaparHtml(inf.estatus)}</span></td>
                                                 <td>
                                                     ${inf.estatus === 'pagado' ? `
-                                                        <span style="font-size:0.75rem; color:var(--text-muted);">En ${inf.institucion_deposito} el ${inf.fecha_pago}</span>
+                                                        <span style="font-size:0.75rem; color:var(--text-muted);">En ${escaparHtml(inf.institucion_deposito)} el ${escaparHtml(inf.fecha_pago)}</span>
                                                     ` : '-'}
                                                 </td>
                                                 <td>
@@ -297,14 +299,14 @@ export class VistaIngresos implements Vista {
 
     abrirEdicionFormal(iJsonStr: string): void {
         const { api, avisos, dom, modales } = this.dep;
-        const i = JSON.parse(iJsonStr);
+        const i: Ingreso = JSON.parse(iJsonStr);
         api.obtenerClientes().then(clientes => {
             const html = `
                 <div class="card" style="width: 450px; background: var(--bg-surface-opaque);">
                     <h3 style="font-family: var(--font-heading); margin-bottom: 0.6rem;">✏️ Corregir / Editar Factura</h3>
                     ${i.estatus === 'pagada' ? `
                         <p style="font-size:0.75rem; color:var(--color-warning); margin-bottom:0.8rem; line-height:1.4;">
-                            Esta factura ya está cobrada en <strong>${i.institucion_deposito || 'ninguna cuenta'}</strong>.
+                            Esta factura ya está cobrada en <strong>${escaparHtml(i.institucion_deposito || 'ninguna cuenta')}</strong>.
                             Al corregirla se dará por cobrada <strong>por su neto completo</strong>,
                             y esa cuenta se ajustará por la diferencia.
                         </p>
@@ -325,16 +327,16 @@ export class VistaIngresos implements Vista {
                     <form onsubmit="appUI.handleEdicionFormalSubmit(event, ${i.id})">
                         <div class="form-group">
                             <label>Número de Factura *</label>
-                            <input type="text" id="edit_num_fac_${i.id}" class="form-control" value="${i.numero_factura}" required>
+                            <input type="text" id="edit_num_fac_${i.id}" class="form-control" value="${escaparHtml(i.numero_factura)}" required>
                         </div>
                         <div class="form-group">
                             <label>Fecha de Emisión *</label>
-                            <input type="text" id="edit_fec_em_${i.id}" class="form-control" value="${i.fecha_emision}" required>
+                            <input type="text" id="edit_fec_em_${i.id}" class="form-control" value="${escaparHtml(i.fecha_emision)}" required>
                         </div>
                         <div class="form-group">
                             <label>Cliente *</label>
                             <select id="edit_cli_select_${i.id}" class="form-control" required>
-                                ${clientes.map(c => `<option value="${c.id}" ${c.id === i.cliente_id ? 'selected' : ''}>${c.nombre} (RNC: ${c.rnc})</option>`).join('')}
+                                ${clientes.map(c => `<option value="${c.id}" ${c.id === i.cliente_id ? 'selected' : ''}>${escaparHtml(c.nombre)} (RNC: ${escaparHtml(c.rnc)})</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-row">
@@ -469,7 +471,7 @@ export class VistaIngresos implements Vista {
                             <label>Cuenta de Depósito *</label>
                             <select id="cob_ban_${id}" class="form-control" required>
                                 <option value="" disabled selected>Seleccione cuenta...</option>
-                                ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${formato.importe(c.balance_actual)}</option>`).join('')}
+                                ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-row">
@@ -527,7 +529,7 @@ export class VistaIngresos implements Vista {
                             <label>Cuenta de Depósito *</label>
                             <select id="cob_ban_inf_${id}" class="form-control" required>
                                 <option value="" disabled selected>Seleccione cuenta...</option>
-                                ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${formato.importe(c.balance_actual)}</option>`).join('')}
+                                ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-row">

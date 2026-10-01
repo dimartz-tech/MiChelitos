@@ -9,6 +9,8 @@
 import type { CuentaAhorro } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
+import { escaparHtml } from '../nucleo/html.js';
+
 type ApiEfectivo = ApiDe<'obtenerCuentas' | 'crearCobroEfectivoInformal' | 'transferirEntreCuentas'>;
 
 export interface DependenciasEfectivo {
@@ -75,7 +77,7 @@ export class VistaEfectivo implements Vista {
                         <form id="form-add-efectivo-informal" onsubmit="appUI.handleAgregarEfectivoInformal(event)">
                             <div class="form-group">
                                 <label for="efe_inf_fec">Fecha *</label>
-                                <input type="text" id="efe_inf_fec" class="form-control" value="${hoyStr}" required>
+                                <input type="text" id="efe_inf_fec" class="form-control" value="${escaparHtml(hoyStr)}" required>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
@@ -107,13 +109,13 @@ export class VistaEfectivo implements Vista {
                         <form id="form-retirar-a-efectivo" onsubmit="appUI.handleRetirarAEfectivo(event)">
                             <div class="form-group">
                                 <label for="efe_ret_fec">Fecha *</label>
-                                <input type="text" id="efe_ret_fec" class="form-control" value="${hoyStr}" required>
+                                <input type="text" id="efe_ret_fec" class="form-control" value="${escaparHtml(hoyStr)}" required>
                             </div>
                             <div class="form-group">
                                 <label for="efe_ret_ori">Cuenta Origen (Banco) *</label>
                                 <select id="efe_ret_ori" class="form-control" required>
                                     <option value="" disabled selected>Seleccione cuenta...</option>
-                                    ${cuentasAhorro.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${formato.importe(c.balance_actual)}</option>`).join('')}
+                                    ${cuentasAhorro.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                                 </select>
                             </div>
                             <div class="form-row">

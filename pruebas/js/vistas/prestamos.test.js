@@ -10,6 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
 import { VistaPrestamos, MANEJADORES_PRESTAMOS, puentePrestamos } from '../../../src/js/vistas/prestamos.js';
 
 const prestamo = (extra = {}) => ({
@@ -403,4 +404,24 @@ test('todo appUI.x( que escribe la plantilla y su ventana está en el puente', a
     const llamados = new Set([...html.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
     assert.ok(llamados.size >= 4, [...llamados].join());
     for (const nombre of llamados) assert.ok(MANEJADORES_PRESTAMOS.includes(nombre), `falta ${nombre} en el puente`);
+});
+
+// --- texto del titular en el HTML y en los manejadores ---
+
+test('un préstamo con institución hostil llega íntegro al menú (objeto) y no se interpreta', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const p = prestamo({ id: 21, institucion_financiera: hostil });
+    const t = montar({ datos: { prestamos: [p], tarjetas: [tarjeta({ entidad: hostil, nombre_tarjeta: hostil })] } });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    const [[, recibido]] = llamadasDelManejador(html, 'abrirMenuPasivo');
+    assert.deepEqual(recibido, p);
+    assert.doesNotMatch(html, /<img/);
+});
+
+test('la ventana de edición de un préstamo escapa la institución y las tarjetas', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const t = montar({ datos: { prestamos: [], tarjetas: [tarjeta({ entidad: hostil, nombre_tarjeta: hostil })] } });
+    await t.vista.abrirEdicionPrestamo(prestamo({ institucion_financiera: hostil }));
+    assert.doesNotMatch(t.modales[0].html, /<img/);
 });

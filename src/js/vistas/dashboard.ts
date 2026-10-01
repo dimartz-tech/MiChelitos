@@ -9,6 +9,8 @@
 
 import type { ApiDe, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
+import { escaparHtml } from '../nucleo/html.js';
+
 type ApiDashboard = ApiDe<
     | 'obtenerCapital'
     | 'obtenerGastos'
@@ -107,9 +109,9 @@ export class VistaDashboard implements Vista {
                     </h3>
                     <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem;">
                         ${alertas.map(a => `
-                            <div class="alert-banner ${a.nivel}">
+                            <div class="alert-banner ${escaparHtml(a.nivel)}">
                                 <span>${a.nivel === 'danger' ? '🚨' : a.nivel === 'warning' ? '⚠️' : 'ℹ️'}</span>
-                                <div><strong>[${a.tipo}]</strong> ${a.mensaje}</div>
+                                <div><strong>[${escaparHtml(a.tipo)}]</strong> ${escaparHtml(a.mensaje)}</div>
                             </div>
                         `).join('')}
                     </div>
@@ -167,7 +169,7 @@ export class VistaDashboard implements Vista {
                         <div style="display:flex; flex-direction:column; gap:0.6rem;">
                             ${tarjetas.slice(0, 3).map(t => `
                                 <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border-color); padding: 0.75rem; border-radius: var(--radius-sm); display:flex; justify-content:space-between; font-size:0.85rem; align-items: center;">
-                                    <div><strong>${t.entidad}</strong> - ${t.nombre_tarjeta}</div>
+                                    <div><strong>${escaparHtml(t.entidad)}</strong> - ${escaparHtml(t.nombre_tarjeta)}</div>
                                     <div style="display:flex; flex-direction:column; align-items:flex-end;">
                                         <span style="font-weight:bold; color:var(--accent-primary);">DOP ${formato.importe(t.balance_pesos)}</span>
                                         <span style="font-size:0.75rem; color:#10b981; font-weight:bold;">USD ${formato.importe(t.balance_dolares)}</span>
@@ -189,7 +191,7 @@ export class VistaDashboard implements Vista {
                         <div style="display:flex; flex-direction:column; gap:0.6rem;">
                             ${prestamos.slice(0, 3).map(p => `
                                 <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border-color); padding: 0.75rem; border-radius: var(--radius-sm); display:flex; justify-content:space-between; font-size:0.85rem;">
-                                    <div><strong style="text-transform:capitalize;">${p.tipo_prestamo}</strong> (${p.institucion_financiera})</div>
+                                    <div><strong style="text-transform:capitalize;">${escaparHtml(p.tipo_prestamo)}</strong> (${escaparHtml(p.institucion_financiera)})</div>
                                     <span class="amount expense">DOP ${formato.importe(p.monto_cuota)} / mes</span>
                                 </div>
                             `).join('')}
