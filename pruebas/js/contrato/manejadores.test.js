@@ -10,34 +10,37 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { RAIZ, fuentesDeLaInterfaz, leerHtml } from '../ayudas/fuentes_interfaz.js';
 
-const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const JS = join(RAIZ, 'src', 'js');
 
-function fuentes(dir) {
-    return readdirSync(dir).flatMap(n => {
-        const ruta = join(dir, n);
-        if (statSync(ruta).isDirectory()) return fuentes(ruta);
-        return n.endsWith('.ts') && !n.endsWith('.d.ts') ? [ruta] : [];
-    });
-}
-
-const TS = fuentes(JS);
-const HTML = readFileSync(join(RAIZ, 'src', 'index.html'), 'utf8');
-// Todo el HTML que se escribe: las plantillas de las vistas y el index.html.
-const MARCADO = [...TS.map(f => readFileSync(f, 'utf8')), HTML].join('\n');
+const TS = fuentesDeLaInterfaz();
+const HTML = leerHtml();
 
 /**
- * Cuerpos de todos los atributos `on...="..."`, sin las interpolaciones `${...}`:
- * esas se evalúan al **dibujar** la vista (`${String(id)}`), no al pulsar, y no
- * son destinos del manejador.
+ * Las interpolaciones `${...}` se evalúan al **dibujar** la vista
+ * (`${String(id)}`, `${JSON.stringify(s)}`), no al pulsar: no son destinos del
+ * manejador y, con comillas dentro, impedirían ver dónde acaba el atributo.
+ * Admite un nivel de llaves anidadas.
  */
-const manejadores = () =>
-    [...MARCADO.matchAll(/\bon(?:click|submit|input|change|keyup|keydown|blur|focus|mouseenter|mouseleave)\s*=\s*"([^"]*)"/g)]
-        .map(m => m[1].replace(/\$\{[^}]*\}/g, '0'));
+const sinInterpolaciones = texto => texto.replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g, '0');
+
+// Todo el HTML que se escribe: las plantillas de las vistas y el index.html.
+const MARCADO = sinInterpolaciones([...TS.map(f => readFileSync(f, 'utf8')), HTML].join('\n'));
+
+/**
+ * Cuerpos de todos los atributos `on...="..."` **y** `on...='...'`. Con comillas
+ * simples hay tres (`abrirEdicionSuscripcion`, `abrirMenuPasivo`,
+ * `abrirEdicionCuenta`: reciben un objeto en JSON) que una versión anterior de
+ * esta prueba no veía.
+ */
+const EVENTOS = '(?:click|submit|input|change|keyup|keydown|blur|focus|mouseenter|mouseleave)';
+const manejadores = () => [
+    ...MARCADO.matchAll(new RegExp(`\\bon${EVENTOS}\\s*=\\s*"([^"]*)"`, 'g')),
+    ...MARCADO.matchAll(new RegExp(`\\bon${EVENTOS}\\s*=\\s*'([^']*)'`, 'g')),
+].map(m => m[1]);
 
 /** Métodos definidos en las vistas (clase u objeto de métodos); `api.ts` no cuenta. */
 const metodosDeLaInterfaz = () => new Set(

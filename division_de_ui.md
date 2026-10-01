@@ -1,6 +1,6 @@
 # División de `ui.ts` por pestañas
 
-Estado: **plan, sin mover código.** Preparación hecha en 1.48.0: la prueba de contrato de los manejadores (`manejadores.test.js`) y la herramienta de comparación con datos reales (`herramientas/comparar_vistas/`). La primera extracción espera tu visto bueno al diseño (§7).
+Estado: **decidido el diseño B (limpio, con dependencias inyectadas y puente `window.appUI`)**, que sustituye al diseño mecánico de §2: ver [division_de_ui_limpia.md](division_de_ui_limpia.md), donde está modelado y medido (93 de 102 cuerpos a reescribir, unas 710 líneas). **PR 0 hecho en 1.51.0**; el siguiente es `efectivo`. Las medidas de §1 y el orden de §3 siguen valiendo; las decisiones de §7 están respondidas: diseño B, de menor a mayor, y pruebas de interacción en Node (1.49.0).
 
 Contexto: [fase_7_frontend.md](fase_7_frontend.md) (por qué dividir), [migracion_a_typescript.md](migracion_a_typescript.md) (cómo está el tipado).
 
