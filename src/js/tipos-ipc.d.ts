@@ -73,7 +73,7 @@ export type Comandos = {
     listar_respaldos: { args: {  }; ret: string[] };
     restaurar_respaldo: { args: { nombre: string }; ret: any };
     obtener_cuentas: { args: {  }; ret: CuentaAhorro[] };
-    crear_cuenta: { args: { nombre: string; divisa: string; balance: number; entidad?: string | null; comisionPagoImpuestos?: string | number | null }; ret: number };
+    crear_cuenta: { args: { nombre: string; divisa: string; balance: string | number; entidad?: string | null; comisionPagoImpuestos?: string | number | null }; ret: number };
     actualizar_cuenta: { args: { id: number; nombre: string; entidad?: string | null; comisionPagoImpuestos?: string | number | null }; ret: null };
     eliminar_cuenta: { args: { id: number }; ret: null };
     transferir_entre_cuentas: { args: { fecha: string; origenId: number; destinoId: number; montoOrigen: number; montoDestino: number; cargo: number; descripcion: string }; ret: null };

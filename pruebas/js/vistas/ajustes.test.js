@@ -175,11 +175,20 @@ const CAMPOS_CUENTA = (extra = {}) => ({ cue_aj_nom: el({ value: 'Cuenta Nueva' 
 test('alta de cuenta: el balance como número, la comisión como texto y en blanco como «no declarada»', async () => {
     const t = montar({ campos: CAMPOS_CUENTA() });
     await t.vista.handleAgregarCuenta(t.evento);
-    assert.deepEqual(t.llamadas, [['crearCuenta', 'Cuenta Nueva', 'USD', 25.5, 'Banco Beta', null]]);
+    assert.deepEqual(t.llamadas, [['crearCuenta', 'Cuenta Nueva', 'USD', '25.5', 'Banco Beta', null]]);
     const u = montar({ campos: CAMPOS_CUENTA({ cue_aj_com: el({ value: ' 3.456 ' }) }) });
     await u.vista.handleAgregarCuenta(u.evento);
     assert.equal(u.llamadas[0][5], '3.456');          // tal cual, recortada: el céntimo lo decide el núcleo
     assert.equal(typeof u.llamadas[0][5], 'string');
+});
+
+test('alta de cuenta: el saldo inicial viaja como TEXTO, recortado y con los dígitos intactos', async () => {
+    for (const [escrito, esperado] of [[' 25.5 ', '25.5'], ['100.005', '100.005'], ['0025.500', '0025.500'], ['0', '0']]) {
+        const t = montar({ campos: CAMPOS_CUENTA({ cue_aj_bal: el({ value: escrito }) }) });
+        await t.vista.handleAgregarCuenta(t.evento);
+        assert.strictEqual(t.llamadas[0][3], esperado, JSON.stringify(escrito));
+        assert.equal(typeof t.llamadas[0][3], 'string');
+    }
 });
 
 test('alta de tarjeta: los doce valores, en el orden que espera la API, y redibuja Tarjetas', async () => {
