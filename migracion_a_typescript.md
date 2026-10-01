@@ -1,6 +1,6 @@
 # Migración del frontend a TypeScript
 
-Estado: **1.44.0** infraestructura y conversión de todos los archivos; **1.46.0** `ui.ts` ya se comprueba (ayudante de DOM, sin `@ts-nocheck`). Queda tipar los parámetros (`noImplicitAny`) y dividir `ui.ts`. Decisión del titular el 2026-09-30: ir a TypeScript con solo `tsc` y **empezar ya**, porque migrar es más caro cuanto más código nuevo se escribe en JavaScript.
+Estado: **1.44.0** infraestructura y conversión de todos los archivos; **1.46.0** `ui.ts` ya se comprueba (ayudante de DOM, sin `@ts-nocheck`); **1.47.0** `api.ts` tiene todos sus parámetros tipados y se comprueba con `noImplicitAny`. Queda tipar los parámetros de `ui.ts` y dividirlo. Decisión del titular el 2026-09-30: ir a TypeScript con solo `tsc` y **empezar ya**, porque migrar es más caro cuanto más código nuevo se escribe en JavaScript.
 
 Contexto y comparación con JSDoc: [fase_7_frontend.md](fase_7_frontend.md), §4.
 
@@ -48,10 +48,27 @@ Al quitar el `@ts-nocheck` apareció además **un defecto real** (el panel «Cas
 
 Reglas que lo conservan (`pruebas/js/contrato/dom.test.js`): ningún fuente del frontend usa `@ts-nocheck`, `@ts-ignore` ni `@ts-expect-error`; nadie llama a `document.getElementById` salvo `ui/dom.ts`; `index.html` carga el ayudante antes que la interfaz.
 
+### Paso 2, hecho (1.47.0): los parámetros de `api.ts`
+Los **61 envoltorios** de `api.ts` tienen todos sus parámetros tipados (134 errores de `noImplicitAny` → 0). Los tipos **no se escribieron a mano**: se derivaron del mapa `Comandos` generado desde Rust según cómo cada envoltorio pasa el parámetro al comando:
+
+| Cómo viaja | Tipo del parámetro |
+|---|---|
+| `Number(x)`: acepta lo que escribió el titular | `number \| string` |
+| `x === null \|\| x === '' ? null : Number(x)` | `number \| string \| null` |
+| `String(x)` y los importes que Rust lee como texto | `string` / `string \| number` |
+| Sin conversión (`x`, `x ?? y`, `x \|\| y`) | el tipo exacto de Rust, más `null \| undefined` si es opcional |
+| Estructuras de entrada (`GastoInput`…) | el tipo generado |
+
+Cuatro no se dedujeron solos y se resolvieron a mano; uno es `any` **explícito**: `guardarCapital`, porque Rust recibe el documento de capital como JSON libre (`Value`).
+
+Qué se comprobó: el **JavaScript compilado de `api` es idéntico byte a byte** al de antes (los tipos no cambian nada); ninguna llamada de `ui.ts` incumplía los tipos nuevos; y tres mutaciones se detectan: un parámetro sin tipo, un tipo que la interfaz no cumple (el error aparece **en `ui.ts`**, en la llamada) y un envoltorio nuevo sin tipos.
+
+`tsconfig.estricto.json` aplica `noImplicitAny` a lo que ya no tiene deuda (`api.ts`, `ui/dom.ts`, `nucleo/`, `tipos-ipc.d.ts`) y forma parte de `npm run compilar` y de `npm run tipos`: **una violación detiene también `tauri build`**.
+
 ### Lo que sigue
-1. **Tipar los parámetros y activar `noImplicitAny`.** Con la opción encendida hay **303 errores**: 134 en `api.ts` (los parámetros de los envoltorios) y 169 en `ui.ts` (parámetros de los métodos). Son casi todos TS7006, «parámetro sin tipo». Los de `api.ts` se pueden derivar del mapa `Comandos`; los de `ui.ts` son trabajo a mano y conviene hacerlo **a la vez que se divide**, pestaña a pestaña.
-2. **Dividir `ui.ts` por pestañas** (Fase 7). Con el archivo ya comprobado, cada vista extraída nace tipada y cada PR comprueba que no rompe nada.
-3. **Opcional**: pasar las pruebas de `pruebas/js/` a TypeScript (hoy son JavaScript escrito a mano que lee lo compilado).
+1. **Tipar los parámetros de `ui.ts`**: con `noImplicitAny` hay **169 errores**, todos de «parámetro sin tipo» en los métodos de la clase. Es trabajo a mano y conviene hacerlo **a la vez que se divide**, pestaña a pestaña: cada vista extraída nace estricta y se incorpora a `tsconfig.estricto.json`.
+2. **Dividir `ui.ts` por pestañas** (Fase 7). Con el archivo comprobado y la API tipada, cada PR comprueba que no rompe nada.
+3. **Opcional**: pasar las pruebas de `pruebas/js/` a TypeScript.
 
 ## Costes y riesgos asumidos
 * Hay un **paso de compilación** y archivos generados junto a los fuentes (ignorados). Se eligió compilar en el sitio, y no a una carpeta `dist/`, para no duplicar `index.html`, `css` y `assets` ni tocar `distDir`; el coste es que `src/js` mezcla `.ts` y `.js` generados.
