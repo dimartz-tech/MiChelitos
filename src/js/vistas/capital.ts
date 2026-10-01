@@ -288,7 +288,7 @@ export class VistaCapital implements Vista {
 
     async handleEliminarCertificado(idx: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
-        if (dialogos.confirmar("¿Retirar este certificado financiero?")) {
+        if (await dialogos.confirmar("¿Retirar este certificado financiero?")) {
             const capital = await api.obtenerCapital();
             capital.certificados.splice(idx, 1);
             await api.guardarCapital(capital);
@@ -321,7 +321,7 @@ export class VistaCapital implements Vista {
 
     async handleEliminarBolsa(idx: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
-        if (dialogos.confirmar("¿Liquidar esta inversión de bolsa?")) {
+        if (await dialogos.confirmar("¿Liquidar esta inversión de bolsa?")) {
             const capital = await api.obtenerCapital();
             capital.bolsa.splice(idx, 1);
             await api.guardarCapital(capital);
@@ -360,7 +360,7 @@ export class VistaCapital implements Vista {
 
     async handleEliminarPropiedad(tipo: string, id: string): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
-        if (dialogos.confirmar("¿Eliminar este bien del capital?")) {
+        if (await dialogos.confirmar("¿Eliminar este bien del capital?")) {
             const capital = await api.obtenerCapital();
             if (capital.propiedades && capital.propiedades[tipo]) {
                 capital.propiedades[tipo] = capital.propiedades[tipo].filter((p: Bien) => p.id !== id);

@@ -36,6 +36,8 @@ const ui = cargarInterfaz({
     api: { crearCategoria: 7 },                    // respuestas de AppAPI (valor o función)
     confirm: true,                                 // confirm(): true | false | función | cola []
     prompt: 'texto',                               // prompt():  texto | null (cancelar) | función | cola []
+                                                   // (una función puede devolver una **promesa** que se resuelve tarde:
+                                                   //  así responde el WebView real, y es lo que prueba `contrato/dialogos.test.js`)
 });
 await ui.appUI.handleAgregarCategoria(crearEvento());   // SIEMPRE por appUI.<método>
 llamoUnaVez(ui, 'crearCategoria', ['Categoría de Prueba']);

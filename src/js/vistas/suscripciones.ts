@@ -327,7 +327,7 @@ export class VistaSuscripciones implements Vista {
 
     async handleEliminarSuscripcion(id: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
-        if (dialogos.confirmar("¿Deseas dar de baja esta suscripción?")) {
+        if (await dialogos.confirmar("¿Deseas dar de baja esta suscripción?")) {
             await api.eliminarSuscripcion(id);
             avisos.mostrar("Suscripción eliminada.");
             await enrutador.mostrar('suscripciones');
@@ -361,7 +361,7 @@ export class VistaSuscripciones implements Vista {
     /// defectos de esta fase.
     async handleCorregirProximoCobro(id: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
-        const fecha = dialogos.preguntar(
+        const fecha = await dialogos.preguntar(
             `Esta suscripción no tiene fecha de próximo cobro, así que no se cobrará.\n\n` +
             `Escríbela en formato dd/mm/aaaa.`,
             ''
@@ -389,7 +389,7 @@ export class VistaSuscripciones implements Vista {
     /// Confirma que el período más antiguo sí lo cobró el proveedor.
     async handleAsentarPendiente(id: number, fecha: string): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
-        if (!dialogos.confirmar(`Se asentará el cargo con fecha ${fecha}, y la deuda de la tarjeta subirá.\n\n¿El proveedor cobró ese período?`)) return;
+        if (!await dialogos.confirmar(`Se asentará el cargo con fecha ${fecha}, y la deuda de la tarjeta subirá.\n\n¿El proveedor cobró ese período?`)) return;
         try {
             avisos.mostrar(await api.asentarPeriodoPendiente(id));
             await enrutador.mostrar('suscripciones');
@@ -406,7 +406,7 @@ export class VistaSuscripciones implements Vista {
     /// esto dirá por qué.
     async handleDescartarPendiente(id: number, fecha: string): Promise<void> {
         const { api, avisos, enrutador, motivo: pedidorDeMotivo } = this.dep;
-        const motivo = pedidorDeMotivo.pedir(
+        const motivo = await pedidorDeMotivo.pedir(
             `Dar por no cobrado el período del ${fecha}`,
             `No se asentará ningún cargo y la suscripción pasará al período siguiente. ` +
             `Quedará un caso de auditoría con lo que escribas.`
