@@ -2730,7 +2730,7 @@ fn c74_corregir_una_factura_usa_la_misma_regla_que_al_crearla() {
     let _g = entorno_aislado();
     let id = crear_ingreso(factura("A-006", 1_000.0, 15.0)).unwrap();
 
-    actualizar_ingreso(id, "A-006".into(), 1, "16/09/2026".into(), 1_234.56, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "A-006".into(), 1, "16/09/2026".into(), monto(1_234.56), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(retencion_de(id), 185.18, "crear y corregir no divergen");
 }
@@ -3019,7 +3019,7 @@ fn c85_corregir_al_alza_una_factura_cobrada_acredita_la_diferencia() {
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "entró el neto");
 
     // Eran 12 000, no 10 000. El neto sube de 8 500 a 10 200.
-    actualizar_ingreso(id, "B-001".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "B-001".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(retencion_de(id), 1_800.0, "la retención se recalcula");
     assert_importe(recibido_de(id), 10_200.0, "y lo recibido también");
@@ -3033,7 +3033,7 @@ fn c86_corregir_a_la_baja_retira_de_la_cuenta_lo_que_sobraba() {
     let id = crear_ingreso(factura("B-002", 10_000.0, 15.0)).unwrap();
     marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
-    actualizar_ingreso(id, "B-002".into(), 1, "20/09/2026".into(), 8_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "B-002".into(), 1, "20/09/2026".into(), monto(8_000.0), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 7_800.0, "se retiran los 1 700 de más");
     assert_importe(recibido_de(id), 6_800.0, "lo recibido baja con el neto");
@@ -3050,10 +3050,24 @@ fn c87_corregir_da_por_cobrado_el_neto_entero_aunque_faltara_algo() {
     // Neto de 8 500, pero solo entraron 8 000.
     marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_000.0)).unwrap();
 
-    actualizar_ingreso(id, "B-003".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "B-003".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(recibido_de(id), 10_200.0, "el neto nuevo, entero");
     assert_importe(saldo_cuenta_id(cuenta), 11_200.0, "la cuenta sube los 2 200 que faltaban");
+}
+
+#[test]
+fn c87a_el_total_corregido_decide_el_centavo_por_su_texto() {
+    // `1000.005` por texto sube a 1000.01 (por número bajaba a 1000.00); la fila guarda ese total.
+    let _g = entorno_aislado();
+    let id = crear_ingreso(factura("B-000", 5_000.0, 15.0)).unwrap();
+
+    actualizar_ingreso(id, "B-000".into(), 1, "20/09/2026".into(), importe("1000.005"), 15.0, None, None).unwrap();
+
+    let total: f64 = conexion()
+        .query_row("SELECT monto_total FROM ingresos WHERE id = ?;", params![id], |r| r.get(0))
+        .unwrap();
+    assert_importe(total, 1000.01, "el total sube el céntimo");
 }
 
 #[test]
@@ -3066,7 +3080,7 @@ fn c87b_un_cobro_parcial_declarado_conserva_lo_que_falta() {
     let id = crear_ingreso(factura("B-006", 10_000.0, 15.0)).unwrap();
     marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
-    actualizar_ingreso(id, "B-006".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, Some(importe("9137.25")), Some(motivo_de_prueba()))
+    actualizar_ingreso(id, "B-006".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, Some(importe("9137.25")), Some(motivo_de_prueba()))
         .unwrap();
 
     assert_importe(recibido_de(id), 9_137.25, "lo que de verdad entró");
@@ -3082,7 +3096,7 @@ fn c87c_un_cobro_parcial_mayor_que_el_neto_se_rechaza() {
     marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     let r = actualizar_ingreso(
-        id, "B-007".into(), 1, "20/09/2026".into(), 10_000.0, 15.0, Some(importe("9137.25")),
+        id, "B-007".into(), 1, "20/09/2026".into(), monto(10_000.0), 15.0, Some(importe("9137.25")),
         Some(motivo_de_prueba()),
     );
 
@@ -3097,7 +3111,7 @@ fn c88_corregir_sin_cambiar_importes_no_mueve_ningun_saldo() {
     marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     // Solo cambia la fecha.
-    actualizar_ingreso(id, "B-004".into(), 1, "21/09/2026".into(), 10_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "B-004".into(), 1, "21/09/2026".into(), monto(10_000.0), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "corregir la fecha no toca la cuenta");
 }
@@ -3108,7 +3122,7 @@ fn c89_corregir_una_factura_sin_cobrar_no_toca_ninguna_cuenta() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-005", 10_000.0, 15.0)).unwrap();
 
-    actualizar_ingreso(id, "B-005".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "B-005".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(retencion_de(id), 1_800.0, "las cifras sí cambian");
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "pero no hay dinero que ajustar");
@@ -3117,7 +3131,7 @@ fn c89_corregir_una_factura_sin_cobrar_no_toca_ninguna_cuenta() {
 #[test]
 fn c90_corregir_una_factura_inexistente_falla_en_vez_de_callar() {
     let _g = entorno_aislado();
-    let r = actualizar_ingreso(404, "X".into(), 1, "20/09/2026".into(), 100.0, 15.0, None, Some(motivo_de_prueba()));
+    let r = actualizar_ingreso(404, "X".into(), 1, "20/09/2026".into(), monto(100.0), 15.0, None, Some(motivo_de_prueba()));
 
     assert!(r.is_err(), "no se corrige lo que no existe");
 }
@@ -3157,7 +3171,7 @@ fn c91_corregir_una_factura_cobrada_abre_caso_con_el_ajuste() {
 
     // Eran 16 000: el neto sube de 12 240 a 13 600.
     actualizar_ingreso(
-        id, "C-001".into(), 1, "20/09/2026".into(), 16_000.0, 15.0, None,
+        id, "C-001".into(), 1, "20/09/2026".into(), monto(16_000.0), 15.0, None,
         Some(motivo_de_prueba()),
     )
     .unwrap();
@@ -3181,7 +3195,7 @@ fn c92_corregir_sin_mover_dinero_no_abre_caso() {
     marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     actualizar_ingreso(
-        id, "C-002".into(), 1, "21/09/2026".into(), 10_000.0, 15.0, None, None,
+        id, "C-002".into(), 1, "21/09/2026".into(), monto(10_000.0), 15.0, None, None,
     )
     .unwrap();
 
@@ -3195,7 +3209,7 @@ fn c93_corregir_una_factura_sin_cobrar_tampoco_abre_caso() {
     let id = crear_ingreso(factura("C-003", 10_000.0, 15.0)).unwrap();
 
     actualizar_ingreso(
-        id, "C-003".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, None,
+        id, "C-003".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, None, None,
     )
     .unwrap();
 
@@ -3212,7 +3226,7 @@ fn c94_mover_dinero_sin_motivo_se_rechaza_y_no_corrige_nada() {
     marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     let r = actualizar_ingreso(
-        id, "C-004".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, None,
+        id, "C-004".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, None, None,
     );
 
     assert!(r.is_err(), "mover un saldo exige explicarlo");

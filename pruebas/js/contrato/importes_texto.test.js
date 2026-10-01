@@ -51,6 +51,7 @@ const MIGRADOS = [
     ['transferirEntreCuentas', A => A.transferirEntreCuentas(1, 2, '10', TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, 'x'), ['montoOrigen', 'montoDestino', 'cargo']],
     ['crearCuenta (comisión)', A => A.crearCuenta('Cuenta', 'DOP', 10, null, TRES_DECIMALES), ['comisionPagoImpuestos']],
     ['actualizarCuenta (comisión)', A => A.actualizarCuenta(1, 'Cuenta', null, TRES_DECIMALES), ['comisionPagoImpuestos']],
+    ['actualizarIngreso (total)', A => A.actualizarIngreso(1, 'F-1', 2, '01/01/2027', TRES_DECIMALES, 10, null, null), ['montoTotal']],
     ['actualizarIngreso (cobro parcial)', A => A.actualizarIngreso(1, 'F-1', 2, '01/01/2027', 100, 10, TRES_DECIMALES, null), ['cobroParcial']],
     ['simularAvanceEfectivo', A => A.simularAvanceEfectivo(TRES_DECIMALES, 'DOP', 'fijo', null, TRES_DECIMALES), ['monto', 'cargoFijo']],
     ['registrarAvanceEfectivo', A => A.registrarAvanceEfectivo(1, 2, '01/01/2027', TRES_DECIMALES, 'DOP', 'fijo', null, TRES_DECIMALES, null), ['monto', 'cargoFijo']],
@@ -82,7 +83,6 @@ test('un importe de tres decimales llega intacto: es el que `Number` deja en 1.0
  * migración quita sus entradas de aquí.**
  */
 const PENDIENTES = [
-    'actualizarIngreso.montoTotal',
     'actualizarLimitesTarjeta.balanceCorteDolares', 'actualizarLimitesTarjeta.balanceCortePesos',
     'actualizarLimitesTarjeta.limiteDolares', 'actualizarLimitesTarjeta.limitePesos',
     'actualizarLimitesTarjeta.sobregiroDolares', 'actualizarLimitesTarjeta.sobregiroPesos',

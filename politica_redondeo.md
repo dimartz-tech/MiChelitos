@@ -288,7 +288,7 @@ encogerse, y un importe nuevo que viajara como número rompería la prueba.
 | `registrar_pago_tarjeta` | `monto` (la tasa de cambio es una tasa, no un importe) | ✅ texto |
 | `crear_cuenta` | `balance` | ✅ texto |
 | `transferir_entre_cuentas` | `monto_origen`, `monto_destino`, `cargo` | ✅ texto: cada importe se casa con la divisa de su cuenta; el cargo en blanco viaja como «0» |
-| `actualizar_ingreso` | `monto_total` (el porcentaje de retención es una tasa) | pendiente |
+| `actualizar_ingreso` | `monto_total` (el porcentaje de retención es una tasa) | ✅ texto: una sola conversión sirve al cálculo, a la fila y al caso de auditoría |
 | `crear_tarjeta` | ocho límites, sobregiros, balances y cortes | pendiente |
 | `actualizar_limites_tarjeta` | seis importes y dos límites ajustados | pendiente |
 | `crear_gasto` (`GastoInput`), `crear_ingreso` (`IngresoInput`), `crear_prestamo` y `actualizar_prestamo` (estructuras de entrada) | `monto`, `monto_total`, `monto_prestamo`, `monto_cuota`, `saldo_actual`, `limite_credito` | pendiente (requieren cambiar el tipo de los campos de la estructura) |
