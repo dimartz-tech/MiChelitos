@@ -10,9 +10,13 @@
 // otra de registro. Ver `division_de_ui_limpia.md`.
 
 import type { AppUIAntigua, ServiciosComunes } from '../ui/servicios';
+import { VistaCuentas, puenteCuentas } from './cuentas.js';
 import { VistaEfectivo, puenteEfectivo } from './efectivo.js';
 
 export function registrarVistas(app: AppUIAntigua, servicios: ServiciosComunes, api: typeof AppAPI): void {
     const efectivo = new VistaEfectivo({ ...servicios, api });
     app.registrarVista('efectivo', efectivo, puenteEfectivo(efectivo));
+
+    const cuentas = new VistaCuentas({ ...servicios, api });
+    app.registrarVista('cuentas', cuentas, puenteCuentas(cuentas));
 }

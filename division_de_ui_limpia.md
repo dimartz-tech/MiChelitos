@@ -1,6 +1,6 @@
 # División de `ui.ts`, diseño «B» (limpio): vistas con dependencias inyectadas
 
-> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
+> **Estado (2026-10-01): diseño B con puente `window.appUI`, elegido por el titular**, que prefiere el método limpio aunque exija reescribir cuerpos. **PR 0 hecho en 1.51.0** (servicios, composición, registro de vistas, `index.html`, y las pruebas de contrato leen toda la interfaz). **PR 1 hecho en 1.52.0: `efectivo` extraída; PR 2 en 1.53.0: `cuentas`** con el prototipo de §3 y sus pruebas de Node; el registro de extracciones, con lo previsto frente a lo medido, está en §9. La medición y el análisis de abajo los produjo un agente independiente y se verificaron antes de adoptarlos.
 
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
@@ -255,3 +255,31 @@ Fuera del plan, también: **cuatro mutaciones** (retiro siempre a efectivo en pe
 **Lo que dijo la medición y se confirmó:** casi todo lo reescrito es sustitución textual (`this.showToast` → `avisos.mostrar`, `this.formatMoney` → `formato.importe`, `this.contentContainer` → `pantalla.contenido`, `elemento()` → `dom.elemento()`) y el compilador la verifica.
 
 **Lo que no estaba en el plan:** `AppAPI` global ya no se usa dentro de la vista, que recibe `api` recortada a tres comandos: una prueba puede darle una API falsa sin tocar globales.
+
+### PR 2 — `cuentas` (1.53.0)
+
+| Qué | Previsto (medición del agente) | Medido |
+|---|---|---|
+| Métodos que se mueven | 3 | 3 (`renderCuentas`, `rotularDivisasTransferencia` y `handleTransferirCuentas`) |
+| Líneas de la vista | 193 | 196 quitadas de `ui.ts`, con sus comentarios |
+| Líneas a reescribir | 22 (el script subestima ≈15 %, así que ≈25) | **24** de 173 (**13 %**): `render` 6 %, el reactor de divisas 19 %, el manejador del formulario 73 % |
+| Diff de `ui.ts` | — | **−196 / +0** |
+| Archivos nuevos | — | `vistas/cuentas.ts` (243), `pruebas/js/vistas/cuentas.test.js` (164); `registro.ts` +4 |
+| Pruebas que hubo que tocar | ninguna prevista | **ninguna**: `cargar_interfaz.js` y las pruebas de contrato ya valían |
+| Esfuerzo relativo (efectivo = 1) | 1 | ≈1: la extracción fue casi mecánica con la receta de `efectivo` |
+| Parámetros sin tipo en `ui.ts` | 167 | **163** |
+
+**Discrepancia con el modelo:** la nota de esfuerzo de `cuentas` decía «un manejador abre el editor con el objeto serializado»; ese manejador (`abrirEdicionCuenta`) **pertenece a Ajustes** según el grafo de llamadas (se dibuja en esa pestaña), no a `cuentas`. Esa dificultad llegará con `ajustes`. La medición por alcanzabilidad acertó el reparto; la nota era un error de atribución.
+
+**Los seis controles del plan:**
+
+| Control | Resultado |
+|---|---|
+| 1. `npm test` y `npm run tipos` | 241 pruebas (237 pasan, 4 `todo` conocidos, 0 fallan); 0 errores de tipos |
+| 2. `manejadores.test.js` | pasa |
+| 3. `comparar_vistas` con datos reales | **las once pestañas idénticas**, `cuentas` incluida (5 004 caracteres), 0 `undefined`/`NaN`/errores |
+| 4. Parámetros tipados en el mismo PR | sí; `vistas/*.ts` ya está en `tsconfig.estricto.json` |
+| 5. Pruebas de interacción | las de transferencia y reactores, a través de `appUI`, **sin tocarlas**, más 10 de la vista con dobles |
+| 6. Revisión manual con tus datos | **el reactor de divisas** (con cuentas de divisas distintas muestra el aviso de cruce y los rótulos «en DOP»/«en USD»; con la misma, lo oculta) **y la transferencia**, en las dos versiones: mismo estado del DOM, mismos comandos, mismos argumentos y mismo aviso, 0 errores |
+
+**Más controles:** cinco mutaciones (importes de origen y destino intercambiados, aviso de cruce siempre visible, vista sin registrar, puente sin un manejador, fecha real en vez del reloj inyectado): las cinco se detectan, dos de ellas por el compilador. **En la aplicación empaquetada**: dos vistas registradas, se dibuja «Cuentas de Ahorro», el formulario existe y los dos manejadores son funciones.

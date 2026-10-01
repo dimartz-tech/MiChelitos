@@ -4,7 +4,29 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.52.0 (Versión Actual) - 2026-10-01
+## 🚀 Versión 1.53.0 (Versión Actual) - 2026-10-01
+**División de `ui.ts`, PR 2: la pestaña «Cuentas de Ahorro» sale de la clase.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* `src/js/vistas/cuentas.ts`: la vista como clase con dependencias inyectadas (API recortada a 3 comandos, avisos, formato, enrutador, pantalla, DOM y reloj). Son tres métodos: el `render`, el reactor que rotula las divisas y avisa cuando una transferencia cruza divisas, y el manejador del formulario. **13 % de las líneas de sus cuerpos reescritas** (24 de 173), casi todo sustitución textual que el compilador verifica.
+* `registro.ts` suma la vista (+4); `ui.ts` pierde 196 líneas y su `case`. Los `onsubmit`/`onchange` no cambian: el puente cuelga los manejadores de `appUI`.
+* **Ninguna prueba existente hubo que tocar**: el helper de las pruebas de interacción y las de contrato ya valían tras el PR 1. Parámetros sin tipo en `ui.ts`: 167 → 163.
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/cuentas.test.js` (10): dibuja con el formato y el reloj inyectados, historial y mensaje vacío, transferir (argumentos y orden de los tres importes; error de la API sin redibujar), el reactor de divisas (cruce, misma divisa, sin selección, sin recuadro de aviso) y el puente.
+* 241 pruebas (237 pasan, 4 `todo` conocidos). Cinco mutaciones: detectadas (dos por el compilador).
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; **el reactor de divisas y la transferencia, ejercidos en las dos versiones, dejan el mismo estado del DOM y envían los mismos comandos con los mismos argumentos y el mismo aviso**, 0 errores.
+* **App empaquetada**: dos vistas registradas, se dibuja, formulario y manejadores presentes.
+* Lo previsto frente a lo medido (24 frente a ≈25 líneas, esfuerzo ≈1) y los seis controles del plan: `division_de_ui_limpia.md` §9. Una discrepancia anotada: el modelo atribuía a `cuentas` un manejador que en realidad es de Ajustes (`abrirEdicionCuenta`).
+
+### Siguiente
+* PR 3: `resumen` (168 líneas, solo lectura).
+
+---
+
+## 🚀 Versión 1.52.0 - 2026-10-01
 **División de `ui.ts`, PR 1: la pestaña «Caja y Efectivo» sale de la clase.** Sin cambios visibles.
 
 ### 🧩 Qué se hace
