@@ -4,7 +4,31 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.62.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.63.0 (Versión Actual) - 2026-10-02
+**División de `ui.ts`, PR 10: la pestaña «Ajustes» sale de la clase.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* `src/js/vistas/ajustes.ts`: la vista como clase con dependencias inyectadas (API recortada a 23 comandos, avisos, formato, enrutador, pantalla, DOM, diálogos y motivo). Dieciséis métodos: el `render`, los catálogos (categorías, clientes, cuentas y el alta de tarjetas), el editor de cuentas, el panel de correcciones con sus cuatro borrados con motivo, y los respaldos. **17 % de las líneas de sus cuerpos reescritas** (114 de 639).
+* Es la vista con más diálogos y la que más se benefició de que `Dialogos` y `Motivo` sean asíncronos desde la 1.62.0: todo lo que pregunta lo **espera**.
+* `nucleo/respaldos.ts` pasa a ser un módulo (`describirRespaldo` y `escaparHtml` los usa solo esta vista): sale su `<script>` de `index.html`.
+* `ui.ts` pierde 720 líneas (1 678 → 965); `registro.ts` +4. Parámetros sin tipo en `ui.ts`: 46 → 32. Se retira el campo `_menuPasivoAbort`, huérfano desde `préstamos`.
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/ajustes.test.js` (31): categorías del sistema, respaldos legibles y escapados, límites de filas del panel, las cuatro altas con su carga exacta (la comisión como **texto**), las bajas y las correcciones **esperando** las respuestas (que aquí llegan tarde), la edición de cuenta con sus validaciones, el panel de casos, respaldar y restaurar con su botón, y el puente en los dos sentidos.
+* Las pruebas de interacción existentes pasan sin tocarlas. 424 pruebas (420 pasan, 4 `todo` conocidos). Veintitrés mutaciones, las veintitrés detectadas.
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; **veintiséis recorridos** ejercidos en las dos versiones con los diálogos reales (altas, edición de cuenta, bajas con y sin cancelar, panel de casos, las cuatro correcciones con motivo y con motivo corto, respaldar y restaurar): mismos comandos, argumentos y avisos, 0 errores.
+* **App empaquetada**: diez vistas registradas y, con un respaldo real, la lista de respaldos sale legible.
+* Previsto frente a medido (≈118 → 114 líneas; esfuerzo 6 → ≈4) y los seis controles: `division_de_ui_limpia.md` §9.
+* Hallazgo sin corregir: el panel de casos de corrección pinta el motivo con `innerHTML` sin escapar (ver §9).
+
+### Siguiente
+* PR 11, el último: `tarjetas` (17 métodos, ≈837 líneas). Después se retira la clase `AppUI`.
+
+---
+
+## 🚀 Versión 1.62.0 - 2026-10-02
 **Corrección: los borrados y correcciones ya preguntan de verdad.** Eliminar una transacción no hacía nada, y Cancelar no cancelaba.
 
 ### 🐛 Qué estaba mal
