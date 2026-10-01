@@ -4,7 +4,30 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.53.0 (Versión Actual) - 2026-10-01
+## 🚀 Versión 1.54.0 (Versión Actual) - 2026-10-01
+**División de `ui.ts`, PR 3: la pestaña «Resumen» sale de la clase.** Sin cambios visibles.
+
+### 🧩 Qué se hace
+* `src/js/vistas/resumen.ts`: la vista como clase con dependencias inyectadas (siete consultas a la API, formato, pantalla, reloj y la nueva `Referencias`). Es de solo lectura y sin manejadores, así que su puente es vacío. **15 % de las líneas de su cuerpo reescritas** (25 de 164).
+* **Nuevo servicio `Referencias`** para la tasa de presentación `TASA_USD_A_DOP`: otros dos métodos de `ui.ts` aún la leen, y moverla a `nucleo/` habría obligado a duplicarla o a que un script clásico importase un módulo. La constante sigue en `ui.ts` y la clase la expone (`appUI.tasaUsdADop`); la vista la recibe inyectada. Una prueba verifica que usa la inyectada y no una escrita dentro.
+* `ui.ts` pierde 171 líneas y su `case` (+7 por la tasa); `registro.ts` +4; `servicios.ts` +13.
+
+### 🧪 Pruebas
+* `pruebas/js/vistas/resumen.test.js` (10): el Resumen es de solo lectura pero **contiene reglas de dinero que ninguna prueba ejercía**: patrimonio neto, ratio de endeudamiento con sus tres rótulos (Saludable / Moderado / Alto Riesgo), qué cuotas de préstamo cuentan (flexibles y con cuotas pendientes), suscripciones anuales entre 12, y el balance del mes con un reloj inyectado. También: sin activos no divide por cero, balance negativo, capital `null`.
+* **`pruebas/js/contrato/rutas.test.js`, nueva y general:** `render()` termina en `default: renderDashboard()`, así que una vista extraída que **deja de registrarse no da error, pinta el Dashboard**. La prueba exige que cada pestaña del menú se dibuje desde un solo sitio (vista registrada o `case`) y que ninguna vista registrada tenga una ruta que el menú no ofrezca. Protege también todas las extracciones siguientes.
+* 254 pruebas (250 pasan, 4 `todo` conocidos). Seis mutaciones, las seis detectadas (la de «vista sin registrar», solo por la prueba nueva).
+
+### ✅ Comprobado a mano, contra lo planificado
+* **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; y como el Resumen **calcula**, se comparó además **cada cifra que muestra**: 17 cifras, las mismas en el mismo orden en las dos versiones, y el mismo texto tras repintar y volver de otra pestaña.
+* **App empaquetada**: tres vistas registradas, se dibuja sin error y la tasa llega como 60.
+* Previsto frente a medido (23-26 → 25 líneas; esfuerzo ≈1 → ≈1,3) y los seis controles del plan: `division_de_ui_limpia.md` §9.
+
+### Siguiente
+* PR 4: `dashboard` (161 líneas, solo lectura).
+
+---
+
+## 🚀 Versión 1.53.0 - 2026-10-01
 **División de `ui.ts`, PR 2: la pestaña «Cuentas de Ahorro» sale de la clase.** Sin cambios visibles.
 
 ### 🧩 Qué se hace
