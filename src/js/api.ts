@@ -228,18 +228,18 @@ const AppAPI = {
         return await invoke('obtener_tarjetas');
     },
 
-    async crearTarjeta(entidad: string, nombre: string, limitePesos: number | string, limiteDolares: number | string, sobregiroPesos: number | string, sobregiroDolares: number | string, balancePesos: number | string, balanceDolares: number | string, balanceCortePesos: number | string, balanceCorteDolares: number | string, corte: number | string, pago: number | string) {
+    async crearTarjeta(entidad: string, nombre: string, limitePesos: string, limiteDolares: string, sobregiroPesos: string, sobregiroDolares: string, balancePesos: string, balanceDolares: string, balanceCortePesos: string, balanceCorteDolares: string, corte: number | string, pago: number | string) {
         return await invoke('crear_tarjeta', {
             entidad,
             nombre,
-            limitePesos: Number(limitePesos),
-            limiteDolares: Number(limiteDolares),
-            sobregiroPesos: Number(sobregiroPesos),
-            sobregiroDolares: Number(sobregiroDolares),
-            balancePesos: Number(balancePesos),
-            balanceDolares: Number(balanceDolares),
-            balanceCortePesos: Number(balanceCortePesos),
-            balanceCorteDolares: Number(balanceCorteDolares),
+            limitePesos: String(limitePesos),
+            limiteDolares: String(limiteDolares),
+            sobregiroPesos: String(sobregiroPesos),
+            sobregiroDolares: String(sobregiroDolares),
+            balancePesos: String(balancePesos),
+            balanceDolares: String(balanceDolares),
+            balanceCortePesos: String(balanceCortePesos),
+            balanceCorteDolares: String(balanceCorteDolares),
             corte: Number(corte),
             pago: Number(pago)
         });

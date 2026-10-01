@@ -845,14 +845,14 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
 fn crear_tarjeta(
     entidad: String,
     nombre: String,
-    limite_pesos: f64,
-    limite_dolares: f64,
-    sobregiro_pesos: f64,
-    sobregiro_dolares: f64,
-    balance_pesos: f64,
-    balance_dolares: f64,
-    balance_corte_pesos: f64,
-    balance_corte_dolares: f64,
+    limite_pesos: ipc::ImporteDecimal,
+    limite_dolares: ipc::ImporteDecimal,
+    sobregiro_pesos: ipc::ImporteDecimal,
+    sobregiro_dolares: ipc::ImporteDecimal,
+    balance_pesos: ipc::ImporteDecimal,
+    balance_dolares: ipc::ImporteDecimal,
+    balance_corte_pesos: ipc::ImporteDecimal,
+    balance_corte_dolares: ipc::ImporteDecimal,
     corte: i32,
     pago: i32
 ) -> Result<i64, String> {
@@ -860,7 +860,9 @@ fn crear_tarjeta(
     conn.execute(
         "INSERT INTO tarjetas (entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
-        (entidad, nombre, limite_pesos, limite_dolares, sobregiro_pesos, sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, corte, pago)
+        // Cada importe llega como se escribió: el céntimo lo deciden esos dígitos, no un número ya redondeado.
+        (entidad, nombre, limite_pesos.unidades(), limite_dolares.unidades(), sobregiro_pesos.unidades(), sobregiro_dolares.unidades(),
+         balance_pesos.unidades(), balance_dolares.unidades(), balance_corte_pesos.unidades(), balance_corte_dolares.unidades(), corte, pago)
     ).map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
 }

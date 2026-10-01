@@ -26,7 +26,7 @@ test('alta de tarjeta: cada importe llega en su posición (el orden de AppAPI.cr
     // (entidad, nombre, límDOP, límUSD, sobDOP, sobUSD, balDOP, balUSD, corteDOP, corteUSD, díaCorte, díaPago)
     llamoUnaVez(ui, 'crearTarjeta', [
         'Banco de Prueba', 'Tarjeta Uno',
-        1001.01, 5005.05, 2002.02, 6006.06, 3003.03, 7007.07, 4004.04, 8008.08, 15, 5,
+        '1001.01', '5005.05', '2002.02', '6006.06', '3003.03', '7007.07', '4004.04', '8008.08', 15, 5,
     ]);
     avisoExito(ui, /Tarjeta registrada/);
     redibujo(ui, 'tarjetas');

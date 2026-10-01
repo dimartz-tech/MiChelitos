@@ -149,6 +149,13 @@ fn crear_tarjeta(balance_pesos: f64, balance_dolares: f64) -> i64 {
     c.last_insert_rowid()
 }
 
+/// Lee de una tarjeta la columna REAL indicada.
+fn columna_tarjeta(id: i64, columna: &str) -> f64 {
+    conexion()
+        .query_row(&format!("SELECT {columna} FROM tarjetas WHERE id = ?;"), params![id], |r| r.get(0))
+        .unwrap()
+}
+
 fn fijar_balance_tarjeta(id: i64, pesos: f64, dolares: f64) {
     conexion()
         .execute(
@@ -4232,4 +4239,26 @@ fn volcado_de_datos_para_comparar_vistas() {
 
     std::fs::write(&salida, serde_json::to_string(&Value::Object(v)).unwrap()).unwrap();
     let _ = std::fs::remove_dir_all(&raiz);
+}
+
+#[test]
+fn c95_crear_tarjeta_guarda_cada_importe_por_su_texto_y_en_su_columna() {
+    // Ocho importes distintos, para que un cruce de columnas se note; `.005` sube por texto.
+    let _g = entorno_aislado();
+    let id = crate::crear_tarjeta(
+        "Banco".into(), "Visa".into(),
+        importe("1000.005"), importe("2000.005"), importe("3000.005"), importe("4000.005"),
+        importe("5000.005"), importe("6000.005"), importe("7000.005"), importe("8000.005"),
+        15, 5,
+    )
+    .unwrap();
+
+    assert_importe(columna_tarjeta(id, "limite_pesos"), 1000.01, "límite DOP");
+    assert_importe(columna_tarjeta(id, "limite_dolares"), 2000.01, "límite USD");
+    assert_importe(columna_tarjeta(id, "limite_sobregiro_pesos"), 3000.01, "sobregiro DOP");
+    assert_importe(columna_tarjeta(id, "limite_sobregiro_dolares"), 4000.01, "sobregiro USD");
+    assert_importe(columna_tarjeta(id, "balance_pesos"), 5000.01, "balance DOP");
+    assert_importe(columna_tarjeta(id, "balance_dolares"), 6000.01, "balance USD");
+    assert_importe(columna_tarjeta(id, "balance_corte_pesos"), 7000.01, "corte DOP");
+    assert_importe(columna_tarjeta(id, "balance_corte_dolares"), 8000.01, "corte USD");
 }
