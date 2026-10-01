@@ -22,14 +22,18 @@ test('alta de cuenta: (nombre, divisa, balance numérico, entidad, comisión); c
     redibujo(ui, 'ajustes');
 });
 
-test('alta de cuenta: una comisión escrita viaja como número, y «0» es una tarifa gratuita (0), no null', async () => {
+test('alta de cuenta: la comisión viaja como TEXTO tal cual se escribió, y «0» es una tarifa gratuita, no null', async () => {
     let ui = cargarInterfaz({ campos: { ...cuenta, cue_aj_com: '12.34' } });
     await ui.appUI.handleAgregarCuenta(crearEvento());
-    assert.equal(ui.llamadasA('crearCuenta')[0].args[4], 12.34);
+    assert.equal(ui.llamadasA('crearCuenta')[0].args[4], '12.34', 'la comisión viaja como TEXTO, no como número');
 
     ui = cargarInterfaz({ campos: { ...cuenta, cue_aj_com: '0' } });
     await ui.appUI.handleAgregarCuenta(crearEvento());
-    assert.equal(ui.llamadasA('crearCuenta')[0].args[4], 0);
+    assert.equal(ui.llamadasA('crearCuenta')[0].args[4], '0', 'un cero escrito es un cero, no «sin comisión»');
+
+    ui = cargarInterfaz({ campos: { ...cuenta, cue_aj_com: '  7.5  ' } });
+    await ui.appUI.handleAgregarCuenta(crearEvento());
+    assert.equal(ui.llamadasA('crearCuenta')[0].args[4], '7.5', 'sin los espacios, pero sin convertir');
 });
 
 test('alta de cuenta: si Rust rechaza se muestra el error', async () => {

@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.49.0 (Versión Actual) - 2026-10-01
+## 🚀 Versión 1.50.0 (Versión Actual) - 2026-10-01
+**El alta de cuenta envía la comisión como texto, como acordó la convención de 1.21.0.**
+
+### 🐞 Qué faltaba
+* 1.21.0 acordó que los importes viajan como **texto**, tal cual se escribieron, y dio por migrada «la comisión por pago de impuestos». Era cierto para **editar** una cuenta, pero el **alta** seguía convirtiéndola con `Number(...)`: la inconsistencia la señaló una de las pruebas de interacción de 1.49.0 (`crearCuenta` la mandaba como número y `abrirEdicionCuenta` como texto).
+* Con dos decimales no cambia ningún importe (la medida de 1.21.0 y el `step="0.01"` lo garantizan); es coherencia con la convención y una excepción menos que retirar el día que se elimine el número de `ImporteDecimal`.
+
+### ✅ Qué se hace
+* `handleAgregarCuenta` envía la comisión recortada de espacios y **sin convertir**; `«0»` sigue siendo una tarifa gratuita, no «sin comisión». La prueba de interacción fija el texto (`'12.34'`, `'0'`, `'7.5'` desde `'  7.5  '`) y falla si se vuelve a enviar un número.
+* **Corrección a `politica_redondeo.md`:** la decisión del tramo 4c (1.41.0) decía que la conversión a texto solo se retomaría ante una vía nueva sin formulario. Eso **contradecía la convención vigente**: la conversión de los parámetros que aún viajan como número sigue pendiente, un comando por PR; la opción 1 es solo la salvaguarda mientras tanto.
+
+### 📌 Pendiente de la convención
+* Siguen enviándose como número los parámetros de los demás flujos de dinero (gastos, ingresos, tarjetas, abonos, transferencias, préstamos…). Es trabajo mecánico y acotado por `ipc.test.js` y las pruebas de interacción, que ahora detectarían cada cambio.
+
+---
+
+## 🚀 Versión 1.49.0 - 2026-10-01
 **Pruebas de interacción en Node: por fin hay una red de seguridad de lo que ocurre al pulsar.** Sin cambios en la aplicación.
 
 ### 🧪 Qué se añade (`pruebas/js/interaccion/`, `pruebas/js/ayudas/`)

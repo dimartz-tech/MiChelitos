@@ -240,9 +240,16 @@ nada.** La premisa se cumple donde importa, no solo en el código.
    opción 2.
 
 ### Decisión
-**Opción 1.** La opción 2 solo se retoma si aparece una vía nueva que envíe
-importes sin pasar por un formulario (una importación, un atajo de teclado) o
-si un cambio de navegador dejara de aplicar el `step`.
+**Opción 1**, como salvaguarda mientras dure la transición. **No sustituye a la
+convención vigente**, acordada en 1.21.0: los importes viajan como **texto**, tal
+cual se escribieron, y el número que `ImporteDecimal` admite hoy es transitorio;
+cuando no quede ninguna llamada que lo envíe, esa rama se retira. La conversión
+de los parámetros que aún viajan como número **sigue pendiente**, un comando por
+PR; la opción 1 solo garantiza que, hasta entonces, ninguno trae fracción de
+céntimo. (Una versión anterior de este párrafo decía que la conversión solo se
+retomaría ante una vía nueva sin formulario: contradecía la convención y se
+corrigió en 1.50.0. La primera excepción que se encontró fue la comisión del
+alta de cuenta, que 1.21.0 daba por migrada y seguía enviándose como número.)
 
 ### Qué fija la prueba (`src/js/contrato/importes.test.js`)
 * Todo campo numérico de la interfaz lleva `step="0.01"` o está **declarado por
