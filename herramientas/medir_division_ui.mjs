@@ -1,4 +1,6 @@
-// Mide `src/js/ui.ts` para la división por pestañas (ver division_de_ui_limpia.md).
+// HISTÓRICA: mide `src/js/ui.ts` para la división por pestañas (ver division_de_ui_limpia.md).
+// `ui.ts` se retiró en la 1.65.0, al terminar la división; para medir una versión anterior:
+//   git show <commit>:src/js/ui.ts > /tmp/ui.ts && node herramientas/medir_division_ui.mjs /tmp/ui.ts
 //
 // Uso:  node herramientas/medir_division_ui.mjs [ruta/ui.ts] [--json]
 //

@@ -3,8 +3,9 @@
 //
 // Una vista no importa globales ni toca `window`: declara en su constructor lo
 // que necesita, con estas interfaces. En la aplicación se le pasan los reales;
-// en una prueba de Node, dobles. Este archivo tiene los **tipos** y el cableado
-// con la clase vieja `AppUI` mientras dure la migración.
+// en una prueba de Node, dobles. Este archivo tiene los **tipos** y las
+// implementaciones reales de cada servicio (la clase `AppUI`, de la que salieron,
+// se retiró en la 1.65.0).
 //
 // Es un módulo ES (`composicion.ts` lo importa); las vistas lo importan con
 // `import type`, que no deja rastro en el JavaScript compilado.
@@ -118,23 +119,6 @@ export type ApiDe<K extends keyof typeof AppAPI> = Pick<typeof AppAPI, K>;
 /** Forma de una vista: dibuja su pestaña. Los manejadores son propios de cada una. */
 export interface Vista {
     render(): Promise<void>;
-}
-
-/**
- * Lo que `AppUI` (la clase vieja) ofrece mientras queden vistas sin extraer.
- * Es una interfaz estructural, no el tipo `AppUI`: así `servicios.ts` no
- * depende de `ui.ts`.
- */
-export interface AppUIAntigua {
-    contentContainer: HTMLElement;
-    readonly tasaUsdADop: number;
-    showToast(mensaje: string, tipo?: string): void;
-    formatMoney(valor: number | string): string;
-    render(ruta: string): Promise<void>;
-    pedirMotivoDeCorreccion(queOcurre: string, consecuencia: string): Promise<string | null>;
-    /** Los diálogos que usan los métodos que aún no se han extraído; los fija `serviciosDesdeAppUI`. */
-    dialogos: Dialogos;
-    registrarVista(ruta: string, vista: Vista, puente: object): void;
 }
 
 /** Escapa el texto de un mensaje y deja en negrita lo marcado con `**…**`. */
@@ -271,28 +255,107 @@ export function crearMenuFlotanteDelNavegador(): MenuFlotante {
     };
 }
 
-/** Conecta los servicios con la clase vieja. Desaparece con la última vista. */
-export function serviciosDesdeAppUI(
-    app: AppUIAntigua,
-    dom: Dom,
-    ahora: Reloj = () => new Date(),
-    dialogos: Dialogos = crearDialogosDePagina(),
-    modales: Modales = modalesDelNavegador,
-    menus: MenuFlotante = crearMenuFlotanteDelNavegador(),
-): ServiciosComunes {
-    // Los métodos que `ui.ts` aún no ha entregado a una vista piden aquí sus diálogos.
-    app.dialogos = dialogos;
+/**
+ * Tasa de referencia para expresar en pesos un importe en dólares (antes la
+ * constante de `ui.ts`). Es una aproximación de presentación: no toca ningún saldo
+ * almacenado, solo permite sumar dos divisas en un total. Vive en un solo sitio
+ * porque dos copias de una tasa se desincronizan.
+ */
+export const TASA_USD_A_DOP = 60.0;
+
+export const referenciasDelNavegador: Referencias = { tasaUsdADop: TASA_USD_A_DOP };
+
+/** Los importes se muestran como el resto de la aplicación: `1,234.50`. */
+export const formatoDelNavegador: Formato = {
+    importe: valor => parseFloat(String(valor)).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+};
+
+/** Lo que `crearAvisos` necesita del navegador, inyectable para probarlo con un DOM de juguete. */
+export interface EntornoDeAvisos {
+    /** El contenedor donde se apilan los avisos. */
+    contenedor: { appendChild(hijo: HTMLElement): unknown };
+    crear?: () => HTMLElement;
+    programar?: (accion: () => void, ms: number) => unknown;
+}
+
+/**
+ * Los avisos emergentes reales (antes `appUI.showToast`): un `div` con el icono y
+ * el mensaje que aparece, se queda cuatro segundos y se retira.
+ */
+export function crearAvisos({ contenedor, crear = () => document.createElement('div'), programar = (accion, ms) => setTimeout(accion, ms) }: EntornoDeAvisos): Avisos {
     return {
-        avisos: { mostrar: (mensaje, tipo) => app.showToast(mensaje, tipo) },
-        formato: { importe: valor => app.formatMoney(valor) },
-        enrutador: { mostrar: ruta => app.render(ruta) },
-        pantalla: { get contenido() { return app.contentContainer; } },
-        dom,
-        ahora,
-        dialogos,
-        motivo: { pedir: (queOcurre, consecuencia) => app.pedirMotivoDeCorreccion(queOcurre, consecuencia) },
-        modales,
-        menus,
-        referencias: { tasaUsdADop: app.tasaUsdADop },
+        mostrar(mensaje, tipo = 'success') {
+            const aviso = crear();
+            aviso.className = `toast toast-${tipo}`;
+            aviso.innerHTML = `
+            <span style="font-weight: bold;">${tipo === 'success' ? '✅' : '⚠️'}</span>
+            <span>${mensaje}</span>
+        `;
+            contenedor.appendChild(aviso);
+
+            programar(() => aviso.classList.add('show'), 100);
+
+            programar(() => {
+                aviso.classList.remove('show');
+                programar(() => aviso.remove(), 400);
+            }, 4000);
+        },
+    };
+}
+
+/**
+ * La petición del motivo de una corrección que mueve dinero (antes
+ * `appUI.pedirMotivoDeCorreccion`).
+ *
+ * Es fricción deliberada, no un trámite: el punto no es facilitar la operación sino
+ * **reducir cuántas veces hace falta**. Por eso el diálogo dice qué se pierde y exige
+ * una frase, no una palabra.
+ *
+ * `consecuencia` la pone quien llama, porque borrar y corregir no hacen lo mismo: uno
+ * destruye el movimiento y el otro mueve un saldo. Un texto único para ambos mentiría
+ * en uno de los dos casos.
+ *
+ * Devuelve `null` si el titular se echa atrás, o si el motivo es demasiado corto.
+ */
+export function crearMotivo(dialogos: Dialogos, avisos: Avisos): Motivo {
+    return {
+        async pedir(queOcurre, consecuencia) {
+            const motivo = await dialogos.preguntar(
+                `${queOcurre}.\n\n${consecuencia}\n\n` +
+                "Explica qué pasó, con una frase que siga teniendo sentido dentro de seis meses:",
+            );
+            if (motivo === null) return null;
+            if (motivo.trim().length < 15) {
+                avisos.mostrar("El motivo es demasiado corto: explica qué pasó, no solo que pasó.", "error");
+                return null;
+            }
+            return motivo;
+        },
+    };
+}
+
+/**
+ * El enrutador de pestañas (antes `appUI.render`): muestra «Cargando…», le pide a la
+ * vista registrada que dibuje, y si algo falla pinta el error en lugar de dejar la
+ * pantalla a medias. **Una ruta que nadie reconoce cae en el Dashboard**, como
+ * siempre: por eso una vista que deja de registrarse no da error sino que pinta el
+ * Dashboard (lo vigila `pruebas/js/contrato/rutas.test.js`).
+ */
+export function crearEnrutador(pantalla: Pantalla, vistas: ReadonlyMap<string, Vista>): Enrutador {
+    return {
+        async mostrar(ruta) {
+            pantalla.contenido.innerHTML = '<p style="color: var(--text-muted); text-align:center; padding: 2rem;">Cargando módulo nativo...</p>';
+
+            try {
+                await (vistas.get(ruta) ?? vistas.get('dashboard'))?.render();
+            } catch (err) {
+                pantalla.contenido.innerHTML = `
+                <div class="card" style="border-left: 4px solid var(--color-danger);">
+                    <h3 style="color: var(--color-danger); margin-bottom: 0.5rem;">Error al renderizar el módulo</h3>
+                    <p style="font-size: 0.9rem;">${String(err)}</p>
+                </div>
+            `;
+            }
+        },
     };
 }
