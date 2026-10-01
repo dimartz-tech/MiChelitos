@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { leerInterfazTs } from '../ayudas/fuentes_interfaz.js';
 import { analizar, generar, tipoJs } from '../../../herramientas/generar_tipos_ipc.mjs';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -44,7 +45,7 @@ test('la interfaz no lee campos de suscripción que Rust ya no envía', () => {
     // `fecha_renovacion` fue el puntero de cobro antes de la Fase 5; hoy Rust
     // envía `fecha_proximo_cobro`. El aviso «Cobro próximo» siguió leyendo el
     // viejo y mostraba «undefined» sin que nada lo señalara.
-    const UI = readFileSync(join(RAIZ, 'src', 'js', 'ui.ts'), 'utf8');
+    const UI = leerInterfazTs();
     const enviado = /export type Suscripcion = \{ ([^}]*) \}/.exec(TIPOS)?.[1] ?? '';
     assert.ok(enviado.includes('fecha_proximo_cobro'), 'Rust ya no envía fecha_proximo_cobro');
     assert.ok(!enviado.includes('fecha_renovacion'));

@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { leerInterfazTs } from '../ayudas/fuentes_interfaz.js';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const rust = readFileSync(join(RAIZ, 'src-tauri', 'src', 'main.rs'), 'utf8');
@@ -184,9 +185,7 @@ test('toda llamada de la interfaz a AppAPI tiene su envoltorio en api.ts', () =>
     // que nadie escribió nunca: el comando existía en Rust, pero el envoltorio
     // no. La prueba de arriba solo mira de `api` hacia Rust; esta cierra el
     // otro tramo, de la interfaz hacia `api`.
-    const fuentesDeLaInterfaz = ['ui.ts', 'app.ts', join('ui', 'dom.ts')]
-        .map(f => { try { return readFileSync(join(RAIZ, 'src', 'js', f), 'utf8'); } catch { return ''; } })
-        .join('\n');
+    const fuentesDeLaInterfaz = leerInterfazTs();
     const api = readFileSync(join(RAIZ, 'src', 'js', 'api.ts'), 'utf8');
     const definidos = new Set([...api.matchAll(/^    async (\w+)\(/gm)].map(m => m[1]));
     const usados = new Set([...fuentesDeLaInterfaz.matchAll(/\bAppAPI\.(\w+)/g)].map(m => m[1]));
