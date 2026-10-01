@@ -166,12 +166,24 @@ test('cobro de factura: abre su ventana con el neto sugerido y la cuenta elegibl
     assert.match(t.modales[0].html, /Cuenta Pesos/);
 });
 
-test('cobro de factura: envía id, cuenta tal cual, fecha y monto numérico; cierra la ventana', async () => {
+test('cobro de factura: envía id, cuenta tal cual, fecha y monto como texto; cierra la ventana', async () => {
     const t = montar({ campos: { cob_ban_4: el({ value: '1' }), cob_fec_4: el({ value: '07/03/2027' }), cob_mon_4: el({ value: '900.00' }), 'modal-cobro-for-4': el() } });
     await t.vista.handleCobroFormalSubmit(t.evento, 4);
-    assert.deepEqual(t.llamadas, [['marcarIngresoPagado', 4, '1', '07/03/2027', 900]]);
+    assert.deepEqual(t.llamadas, [['marcarIngresoPagado', 4, '1', '07/03/2027', '900.00']]);
     assert.equal(t.registro['modal-cobro-for-4'].quitado, true);
     assert.deepEqual(t.rutas, ['ingresos']);
+});
+
+test('los cobros (de factura y de informal): el importe viaja como TEXTO, recortado y con los dígitos intactos', async () => {
+    for (const [escrito, esperado] of [[' 900.5 ', '900.5'], ['8500.005', '8500.005'], ['0900.500', '0900.500']]) {
+        const f = montar({ campos: { cob_ban_4: el({ value: '1' }), cob_fec_4: el({ value: '07/03/2027' }), cob_mon_4: el({ value: escrito }), 'modal-cobro-for-4': el() } });
+        await f.vista.handleCobroFormalSubmit(f.evento, 4);
+        assert.strictEqual(f.llamadas[0][4], esperado, `factura ${JSON.stringify(escrito)}`);
+        const i = montar({ campos: { cob_ban_inf_8: el({ value: '1' }), cob_fec_inf_8: el({ value: '14/03/2027' }), cob_mon_inf_8: el({ value: escrito }), 'modal-cobro-inf-8': el() } });
+        await i.vista.handleCobroInformalSubmit(i.evento, 8);
+        assert.strictEqual(i.llamadas[0][4], esperado, `informal ${JSON.stringify(escrito)}`);
+        assert.equal(typeof i.llamadas[0][4], 'string');
+    }
 });
 
 test('cobro de factura: si Rust rechaza, la ventana sigue abierta', async () => {
@@ -191,7 +203,7 @@ test('cobro informal: su ventana, el envío y el cierre', async () => {
     t.registro.cob_fec_inf_8 = el({ value: '14/03/2027' });
     t.registro.cob_mon_inf_8 = el({ value: '300' });
     await t.vista.handleCobroInformalSubmit(t.evento, 8);
-    assert.deepEqual(t.llamadas, [['marcarInformalPagado', 8, '1', '14/03/2027', 300]]);
+    assert.deepEqual(t.llamadas, [['marcarInformalPagado', 8, '1', '14/03/2027', '300']]);
     assert.equal(t.registro['modal-cobro-inf-8'].quitado, true);
 });
 

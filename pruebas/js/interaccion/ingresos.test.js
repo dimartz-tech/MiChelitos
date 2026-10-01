@@ -191,7 +191,7 @@ test('cobro de factura: id de factura, cuenta (tal cual sale del selector), fech
         campos: { cob_ban_5: '2', cob_fec_5: '13/02/2026', cob_mon_5: '888.88', 'modal-cobro-for-5': {} },
     });
     await ui.appUI.handleCobroFormalSubmit(crearEvento(), 5);
-    llamoUnaVez(ui, 'marcarIngresoPagado', [5, '2', '13/02/2026', 888.88]);
+    llamoUnaVez(ui, 'marcarIngresoPagado', [5, '2', '13/02/2026', '888.88']);
     avisoExito(ui, /marcada como pagada/);
     assert.deepEqual(ui.eliminados, ['modal-cobro-for-5']);
     redibujo(ui, 'ingresos');
@@ -211,7 +211,7 @@ test('cobro informal: id, cuenta, fecha y monto numérico; cierra su modal', asy
         campos: { cob_ban_inf_6: '2', cob_fec_inf_6: '14/02/2026', cob_mon_inf_6: '555.55', 'modal-cobro-inf-6': {} },
     });
     await ui.appUI.handleCobroInformalSubmit(crearEvento(), 6);
-    llamoUnaVez(ui, 'marcarInformalPagado', [6, '2', '14/02/2026', 555.55]);
+    llamoUnaVez(ui, 'marcarInformalPagado', [6, '2', '14/02/2026', '555.55']);
     avisoExito(ui, /registrado como pagado/);
     assert.deepEqual(ui.eliminados, ['modal-cobro-inf-6']);
     redibujo(ui, 'ingresos');
