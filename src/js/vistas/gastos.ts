@@ -420,7 +420,8 @@ export class VistaGastos implements Vista {
         e.preventDefault();
         const { api, avisos, enrutador, dom } = this.dep;
         const fec = dom.elemento<Campo>('gas_fec').value;
-        const mon = Number(dom.elemento<Campo>('gas_mon').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const mon = dom.elemento<Campo>('gas_mon').value.trim();
         const div = dom.elemento<Campo>('gas_div').value;
         const des = dom.elemento<Campo>('gas_des').value;
         const cat = Number(dom.elemento<Campo>('gas_cat').value);

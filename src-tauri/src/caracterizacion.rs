@@ -227,10 +227,10 @@ fn declarar_comision_de_impuestos(cuenta_id: i64, tarifa: f64) {
         .expect("declarar comisión de impuestos");
 }
 
-fn transferencia(monto: f64, categoria: &str, descripcion: &str, cuenta_id: i64) -> GastoInput {
+fn transferencia(importe_gasto: f64, categoria: &str, descripcion: &str, cuenta_id: i64) -> GastoInput {
     GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto,
+        monto: monto(importe_gasto),
         divisa: "DOP".to_string(),
         descripcion: descripcion.to_string(),
         categoria_id: id_categoria(categoria),
@@ -344,7 +344,7 @@ fn c8_el_gasto_con_tarjeta_en_dolares_solo_mueve_el_balance_en_dolares() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 75.0,
+        monto: monto(75.0),
         divisa: "USD".to_string(),
         descripcion: "Suscripción anual".to_string(),
         categoria_id: id_categoria("Suscripciones"),
@@ -369,7 +369,7 @@ fn c9_el_gasto_en_efectivo_descuenta_de_la_caja_de_su_divisa() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 1200.0,
+        monto: monto(1200.0),
         divisa: "DOP".to_string(),
         descripcion: "Almuerzo".to_string(),
         categoria_id: id_categoria("Alimentación"),
@@ -403,7 +403,7 @@ fn c10_renombrar_la_caja_ya_no_impide_que_el_gasto_se_asiente() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 1200.0,
+        monto: monto(1200.0),
         divisa: "DOP".to_string(),
         descripcion: "Almuerzo".to_string(),
         categoria_id: id_categoria("Alimentación"),
@@ -458,7 +458,7 @@ fn c10c_los_gastos_en_efectivo_quedan_vinculados_a_la_caja_por_identificador() {
     let _g = entorno_aislado();
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 1200.0,
+        monto: monto(1200.0),
         divisa: "DOP".to_string(),
         descripcion: "Almuerzo".to_string(),
         categoria_id: id_categoria("Alimentación"),
@@ -491,7 +491,7 @@ fn c11_un_gasto_con_tarjeta_sin_identificador_se_rechaza() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 900.0,
+        monto: monto(900.0),
         divisa: "DOP".to_string(),
         descripcion: "Compra sin tarjeta indicada".to_string(),
         categoria_id: id_categoria("Otros"),
@@ -521,7 +521,7 @@ fn c12_la_reversion_de_tarjeta_deja_saldo_a_favor_en_vez_de_recortar() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 150.0,
+        monto: monto(150.0),
         divisa: "DOP".to_string(),
         descripcion: "Compra".to_string(),
         categoria_id: id_categoria("Otros"),
@@ -609,7 +609,7 @@ fn c16_una_divisa_distinta_de_usd_se_trata_como_pesos() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 300.0,
+        monto: monto(300.0),
         divisa: "EUR".to_string(),
         descripcion: "Compra en euros".to_string(),
         categoria_id: id_categoria("Otros"),
@@ -1513,7 +1513,7 @@ fn c22_una_divisa_no_admitida_se_normaliza_al_persistir() {
 
     let entrada = GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: 300.0,
+        monto: monto(300.0),
         divisa: "EUR".to_string(),
         descripcion: "Compra en euros".to_string(),
         categoria_id: id_categoria("Otros"),
@@ -1610,7 +1610,7 @@ fn estado_conversion(gasto_id: i64) -> Option<String> {
 fn compra_en_dolares(tarjeta: i64) -> GastoInput {
     GastoInput {
         fecha: "10/09/2026".to_string(),
-        monto: 100.0,
+        monto: monto(100.0),
         divisa: "USD".to_string(),
         descripcion: "Compra en el exterior".to_string(),
         categoria_id: id_categoria("Otros"),
@@ -1720,7 +1720,7 @@ fn c30_una_bonificacion_reduce_la_deuda_sin_tocar_el_gasto() {
 
     let entrada = GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: 1234.56,
+        monto: monto(1234.56),
         divisa: "DOP".to_string(),
         descripcion: "Suscripción".to_string(),
         categoria_id: id_categoria("Suscripciones"),
@@ -1752,7 +1752,7 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
     // El consumo que las genera, con un 3 % repartido en dos créditos.
     let gasto = crear_gasto(GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: 5000.00,
+        monto: monto(5000.00),
         divisa: "DOP".to_string(),
         descripcion: "Consumo bonificado".to_string(),
         categoria_id: id_categoria("Alimentación"),
@@ -4152,7 +4152,7 @@ fn c138_un_gasto_con_bonificacion_se_puede_borrar_porque_el_vinculo_solo_informa
         .unwrap();
     let gasto = crear_gasto(GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: 1_234.56,
+        monto: monto(1_234.56),
         divisa: "DOP".to_string(),
         descripcion: "Compra".to_string(),
         categoria_id: categoria,
@@ -4302,3 +4302,28 @@ fn c96b_el_limite_ajustado_tambien_decide_el_centavo_por_su_texto() {
     assert_importe(columna_tarjeta(id, "limite_ajustado_pesos"), 1000.01, "ajustado DOP");
     assert_importe(columna_tarjeta(id, "limite_ajustado_dolares"), 2000.01, "ajustado USD");
 }
+
+#[test]
+fn c97_el_gasto_decide_el_centavo_por_su_texto_y_la_divisa_la_declara_el_gasto() {
+    // `75.005` por texto sube a 75.01 (por número bajaba a 75.00); en USD cae en la deuda en dólares.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 100.0);
+    let entrada = GastoInput {
+        fecha: "08/09/2026".to_string(),
+        monto: importe("75.005"),
+        divisa: "USD".to_string(),
+        descripcion: "Suscripción".to_string(),
+        categoria_id: id_categoria("Suscripciones"),
+        metodo_pago: "tarjeta".to_string(),
+        es_lbtr: false,
+        tarjeta_id: Some(tarjeta),
+        cuenta_ahorro_id: None,
+        tasa_cambio: None,
+    };
+    crear_gasto(entrada).unwrap();
+
+    let (pesos, dolares) = balances_tarjeta(tarjeta);
+    assert_importe(dolares, 175.01, "la deuda en USD sube el céntimo");
+    assert_importe(pesos, 0.0, "la de DOP no se toca");
+}
+

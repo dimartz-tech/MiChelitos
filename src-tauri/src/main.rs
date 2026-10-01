@@ -401,7 +401,7 @@ fn obtener_gastos() -> Result<Vec<Gasto>, String> {
 #[derive(Deserialize)]
 struct GastoInput {
     fecha: String,
-    monto: f64,
+    monto: ipc::ImporteDecimal,
     divisa: String,
     descripcion: String,
     categoria_id: i64,
@@ -427,7 +427,8 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
 
     let datos = DatosGasto {
         fecha: input.fecha,
-        monto: Dinero::nuevo(input.monto, divisa)?,
+        // El importe llega como se escribió; se casa con la divisa declarada del gasto.
+        monto: input.monto.con_divisa(divisa),
         descripcion: input.descripcion,
         categoria_id: input.categoria_id,
         metodo,
