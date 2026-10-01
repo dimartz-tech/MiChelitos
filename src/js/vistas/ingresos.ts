@@ -426,14 +426,14 @@ export class VistaIngresos implements Vista {
             // corregir una fecha sería fricción sin riesgo, y la fricción que
             // no protege enseña a escribir motivos de trámite.
             if (ajuste !== 0) {
-                motivo = pedidorDeMotivo.pedir(
+                motivo = await pedidorDeMotivo.pedir(
                     `Vas a corregir una factura ya cobrada`,
                     `Esto **mueve un saldo real**: la cuenta de depósito se ajustará en ` +
                     `DOP ${formato.importe(ajuste)}, y solo quedará el caso de auditoría que abras.`
                 );
                 if (motivo === null) return;
             } else {
-                const sigue = dialogos.confirmar(
+                const sigue = await dialogos.confirmar(
                     "Esta factura ya está cobrada.\n\n" +
                     `Pasará a constar cobrada por DOP ${formato.importe(cobrado)}` +
                     (parcial !== null ? ` de un neto de ${formato.importe(neto)}.` : " (neto completo).") +
