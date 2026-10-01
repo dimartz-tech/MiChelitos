@@ -870,21 +870,24 @@ export class VistaTarjetas implements Vista {
     async handleEdicionLimitesTarjetaSubmit(e: EventoDeFormulario, id: number): Promise<void> {
         e.preventDefault();
         const { api, avisos, enrutador, dom } = this.dep;
-        const limDop = Number(dom.elemento<Campo>(`edit_lim_dop_${id}`).value);
-        const sobDop = Number(dom.elemento<Campo>(`edit_sob_dop_${id}`).value);
-        const corDop = Number(dom.elemento<Campo>(`edit_cor_dop_${id}`).value);
-        const limUsd = Number(dom.elemento<Campo>(`edit_lim_usd_${id}`).value);
-        const sobUsd = Number(dom.elemento<Campo>(`edit_sob_usd_${id}`).value);
-        const corUsd = Number(dom.elemento<Campo>(`edit_cor_usd_${id}`).value);
+        // Texto, tal cual se escribió (el céntimo lo deciden los dígitos); en blanco = 0, como antes.
+        const importe = (campo: string): string => dom.elemento<Campo>(campo).value.trim() || '0';
+        const limDop = importe(`edit_lim_dop_${id}`);
+        const sobDop = importe(`edit_sob_dop_${id}`);
+        const corDop = importe(`edit_cor_dop_${id}`);
+        const limUsd = importe(`edit_lim_usd_${id}`);
+        const sobUsd = importe(`edit_sob_usd_${id}`);
+        const corUsd = importe(`edit_cor_usd_${id}`);
 
         // Vacío es "sin ajuste"; cero es un tope deliberado. Se leen como texto
         // para no confundir ambos casos.
         const ajuDopTexto = dom.elemento<Campo>(`edit_aju_dop_${id}`).value.trim();
         const ajuUsdTexto = dom.elemento<Campo>(`edit_aju_usd_${id}`).value.trim();
-        const ajuDop = ajuDopTexto === '' ? null : Number(ajuDopTexto);
-        const ajuUsd = ajuUsdTexto === '' ? null : Number(ajuUsdTexto);
+        const ajuDop = ajuDopTexto === '' ? null : ajuDopTexto;
+        const ajuUsd = ajuUsdTexto === '' ? null : ajuUsdTexto;
 
-        if ((ajuDop !== null && ajuDop > limDop) || (ajuUsd !== null && ajuUsd > limUsd)) {
+        // La cota es una comparación, no una decisión de céntimo: convertir aquí no compromete lo que se envía.
+        if ((ajuDop !== null && Number(ajuDop) > Number(limDop)) || (ajuUsd !== null && Number(ajuUsd) > Number(limUsd))) {
             avisos.mostrar("El límite ajustado no puede superar al aprobado.", "error");
             return;
         }

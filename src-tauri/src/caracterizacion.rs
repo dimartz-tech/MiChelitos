@@ -4262,3 +4262,43 @@ fn c95_crear_tarjeta_guarda_cada_importe_por_su_texto_y_en_su_columna() {
     assert_importe(columna_tarjeta(id, "balance_corte_pesos"), 7000.01, "corte DOP");
     assert_importe(columna_tarjeta(id, "balance_corte_dolares"), 8000.01, "corte USD");
 }
+
+#[test]
+fn c96_actualizar_limites_guarda_cada_importe_por_su_texto_y_distingue_sin_ajuste_de_cero() {
+    let _g = entorno_aislado();
+    let id = crear_tarjeta(0.0, 0.0);
+
+    crate::actualizar_limites_tarjeta(
+        id,
+        importe("1000.005"), importe("2000.005"), importe("3000.005"), importe("4000.005"),
+        importe("5000.005"), importe("6000.005"),
+        Some(importe("0.00")), None, None,
+    )
+    .unwrap();
+
+    assert_importe(columna_tarjeta(id, "limite_pesos"), 1000.01, "límite DOP");
+    assert_importe(columna_tarjeta(id, "limite_dolares"), 2000.01, "límite USD");
+    assert_importe(columna_tarjeta(id, "limite_sobregiro_pesos"), 3000.01, "sobregiro DOP");
+    assert_importe(columna_tarjeta(id, "limite_sobregiro_dolares"), 4000.01, "sobregiro USD");
+    assert_importe(columna_tarjeta(id, "balance_corte_pesos"), 5000.01, "corte DOP");
+    assert_importe(columna_tarjeta(id, "balance_corte_dolares"), 6000.01, "corte USD");
+    assert_importe(columna_tarjeta(id, "limite_ajustado_pesos"), 0.0, "cero es un tope deliberado");
+    let sin: Option<f64> = conexion()
+        .query_row("SELECT limite_ajustado_dolares FROM tarjetas WHERE id = ?;", params![id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(sin, None, "None es «sin ajuste»");
+}
+
+#[test]
+fn c96b_el_limite_ajustado_tambien_decide_el_centavo_por_su_texto() {
+    let _g = entorno_aislado();
+    let id = crear_tarjeta(0.0, 0.0);
+    crate::actualizar_limites_tarjeta(
+        id,
+        importe("9000"), importe("9000"), importe("0"), importe("0"), importe("0"), importe("0"),
+        Some(importe("1000.005")), Some(importe("2000.005")), None,
+    )
+    .unwrap();
+    assert_importe(columna_tarjeta(id, "limite_ajustado_pesos"), 1000.01, "ajustado DOP");
+    assert_importe(columna_tarjeta(id, "limite_ajustado_dolares"), 2000.01, "ajustado USD");
+}

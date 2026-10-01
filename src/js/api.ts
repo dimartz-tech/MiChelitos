@@ -247,17 +247,17 @@ const AppAPI = {
 
     // Los límites ajustados son opcionales: null significa "sin ajuste", y se
     // distingue de 0, que es un tope deliberado que congela la tarjeta.
-    async actualizarLimitesTarjeta(id: number | string, limitePesos: number | string, limiteDolares: number | string, sobregiroPesos: number | string, sobregiroDolares: number | string, balanceCortePesos: number | string, balanceCorteDolares: number | string, ajustadoPesos: number | string | null = null, ajustadoDolares: number | string | null = null, politicaLiquidacion: string | null | undefined = 'origen') {
+    async actualizarLimitesTarjeta(id: number | string, limitePesos: string, limiteDolares: string, sobregiroPesos: string, sobregiroDolares: string, balanceCortePesos: string, balanceCorteDolares: string, ajustadoPesos: string | null = null, ajustadoDolares: string | null = null, politicaLiquidacion: string | null | undefined = 'origen') {
         return await invoke('actualizar_limites_tarjeta', {
             id: Number(id),
-            limitePesos: Number(limitePesos),
-            limiteDolares: Number(limiteDolares),
-            sobregiroPesos: Number(sobregiroPesos),
-            sobregiroDolares: Number(sobregiroDolares),
-            balanceCortePesos: Number(balanceCortePesos),
-            balanceCorteDolares: Number(balanceCorteDolares),
-            limiteAjustadoPesos: ajustadoPesos === null || ajustadoPesos === '' ? null : Number(ajustadoPesos),
-            limiteAjustadoDolares: ajustadoDolares === null || ajustadoDolares === '' ? null : Number(ajustadoDolares),
+            limitePesos: String(limitePesos),
+            limiteDolares: String(limiteDolares),
+            sobregiroPesos: String(sobregiroPesos),
+            sobregiroDolares: String(sobregiroDolares),
+            balanceCortePesos: String(balanceCortePesos),
+            balanceCorteDolares: String(balanceCorteDolares),
+            limiteAjustadoPesos: ajustadoPesos === null || ajustadoPesos === '' ? null : String(ajustadoPesos),
+            limiteAjustadoDolares: ajustadoDolares === null || ajustadoDolares === '' ? null : String(ajustadoDolares),
             politicaLiquidacion
         });
     },
