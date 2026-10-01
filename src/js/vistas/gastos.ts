@@ -519,8 +519,9 @@ export class VistaGastos implements Vista {
     async handleLiquidacionSubmit(e: EventoDeFormulario, id: number, montoOrigen: number): Promise<void> {
         e.preventDefault();
         const { api, avisos, enrutador, dom } = this.dep;
-        const monto = Number(dom.elemento<Campo>(`liq_monto_${id}`).value);
-        if (!(monto > 0)) { avisos.mostrar("El importe en pesos debe ser mayor que cero.", "error"); return; }
+        // Texto, tal cual se escribió (convención de 1.21.0); el número solo sirve para comparar.
+        const monto = dom.elemento<Campo>(`liq_monto_${id}`).value.trim();
+        if (!(Number(monto) > 0)) { avisos.mostrar("El importe en pesos debe ser mayor que cero.", "error"); return; }
 
         try {
             const tasa = await api.liquidarConsumoPendiente(id, monto);

@@ -2698,12 +2698,13 @@ fn eliminar_bonificacion(id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn liquidar_consumo_pendiente(id: i64, monto_liquidado: f64) -> Result<f64, String> {
+fn liquidar_consumo_pendiente(id: i64, monto_liquidado: ipc::ImporteDecimal) -> Result<f64, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let tasa = {
         let mut almacen = AlmacenSqlite::nuevo(&tx);
-        let importe = Dinero::nuevo(monto_liquidado, MONEDA_LOCAL)?;
+        // El importe llega como se escribió: el céntimo (y con él la tasa que se deduce) sale de esos dígitos.
+        let importe = monto_liquidado.con_divisa(MONEDA_LOCAL);
         liquidar_gasto(id, importe, &mut almacen)?.tasa().valor()
     };
     tx.commit().map_err(|e| e.to_string())?;

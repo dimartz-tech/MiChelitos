@@ -408,10 +408,11 @@ const AppAPI = {
     // --- CORRECCIONES ---
     // El emisor comunica cuánto cargó en moneda local; la tasa la deduce el
     // backend y la devuelve para poder mostrarla.
-    async liquidarConsumoPendiente(id: number | string, montoLiquidado: number | string) {
+    async liquidarConsumoPendiente(id: number | string, montoLiquidado: string) {
         return await invoke('liquidar_consumo_pendiente', {
             id: Number(id),
-            montoLiquidado: Number(montoLiquidado)
+            // Texto, tal como se escribió: el céntimo (y con él la tasa) lo deciden los dígitos.
+            montoLiquidado: String(montoLiquidado)
         });
     },
 
