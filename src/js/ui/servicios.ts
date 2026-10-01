@@ -42,12 +42,16 @@ export interface Dom {
 export type Reloj = () => Date;
 
 /**
- * Los diálogos nativos del navegador (antes `confirm()` y `prompt()` sueltos:
- * hay 25 usos). Inyectados para poder probar un borrado sin navegador.
+ * Los diálogos de confirmación y de entrada de texto (antes `confirm()` y
+ * `prompt()` sueltos: hay 25 usos). **Asíncronos**: en el WebView de Tauri 1.x
+ * `confirm()` devuelve una promesa —siempre «verdadera» en un `if`, así que
+ * Cancelar no cancelaba— y `prompt()` devuelve `null` al instante sin mostrar
+ * nada, de modo que toda corrección que pedía un motivo se abandonaba en
+ * silencio. Quien llama los espera con `await`.
  */
 export interface Dialogos {
-    confirmar(mensaje: string): boolean;
-    preguntar(mensaje: string, porDefecto?: string): string | null;
+    confirmar(mensaje: string): Promise<boolean>;
+    preguntar(mensaje: string, porDefecto?: string): Promise<string | null>;
 }
 
 /**
@@ -55,7 +59,7 @@ export interface Dialogos {
  * `appUI.pedirMotivoDeCorreccion`). Devuelve `null` si el titular se echa atrás.
  */
 export interface Motivo {
-    pedir(queOcurre: string, consecuencia: string): string | null;
+    pedir(queOcurre: string, consecuencia: string): Promise<string | null>;
 }
 
 /**
@@ -123,15 +127,73 @@ export interface AppUIAntigua {
     showToast(mensaje: string, tipo?: string): void;
     formatMoney(valor: number | string): string;
     render(ruta: string): Promise<void>;
-    pedirMotivoDeCorreccion(queOcurre: string, consecuencia: string): string | null;
+    pedirMotivoDeCorreccion(queOcurre: string, consecuencia: string): Promise<string | null>;
+    /** Los diálogos que usan los métodos que aún no se han extraído; los fija `serviciosDesdeAppUI`. */
+    dialogos: Dialogos;
     registrarVista(ruta: string, vista: Vista, puente: object): void;
 }
 
-/** Los diálogos reales del navegador. */
-export const dialogosDelNavegador: Dialogos = {
-    confirmar: mensaje => window.confirm(mensaje),
-    preguntar: (mensaje, porDefecto) => window.prompt(mensaje, porDefecto),
-};
+/** Escapa el texto de un mensaje y deja en negrita lo marcado con `**…**`. */
+function mensajeAHtml(mensaje: string): string {
+    const seguro = mensaje.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return seguro.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
+/**
+ * Los diálogos reales: una ventana dentro de la página. No dependen de lo que
+ * el WebView haga con `confirm()`/`prompt()` (ver `Dialogos`), y admiten texto,
+ * que el diálogo nativo de Tauri no ofrece. Escape cancela; Enter acepta; en una
+ * confirmación el foco empieza en **Cancelar**, porque casi todas son borrados.
+ */
+export function crearDialogosDePagina(): Dialogos {
+    function abrir<T>(
+        mensaje: string,
+        { conTexto, porDefecto, alResolver }: { conTexto: boolean; porDefecto?: string; alResolver: (aceptado: boolean, texto: string) => T },
+    ): Promise<T> {
+        return new Promise<T>(resolver => {
+            const capa = document.createElement('div');
+            capa.className = 'modal-overlay';
+            capa.style.zIndex = '2000';
+            capa.setAttribute('role', 'dialog');
+            capa.setAttribute('aria-modal', 'true');
+            capa.innerHTML = `
+                <div class="card" style="width: 440px; max-width: 92vw; background: var(--bg-surface-opaque);">
+                    <p data-dialogo="mensaje" style="white-space: pre-line; font-size: 0.9rem; line-height: 1.5; margin-bottom: 1rem;">${mensajeAHtml(mensaje)}</p>
+                    ${conTexto ? '<input type="text" data-dialogo="texto" class="form-control" style="margin-bottom: 1rem;">' : ''}
+                    <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                        <button type="button" data-dialogo="cancelar" class="btn btn-secondary">Cancelar</button>
+                        <button type="button" data-dialogo="aceptar" class="btn">Aceptar</button>
+                    </div>
+                </div>
+            `;
+            const campo = capa.querySelector<HTMLInputElement>('[data-dialogo="texto"]');
+            const aceptar = capa.querySelector<HTMLElement>('[data-dialogo="aceptar"]');
+            const cancelar = capa.querySelector<HTMLElement>('[data-dialogo="cancelar"]');
+            if (campo) campo.value = porDefecto ?? '';
+
+            const cerrar = (aceptado: boolean): void => {
+                const texto = campo?.value ?? '';
+                capa.remove();
+                resolver(alResolver(aceptado, texto));
+            };
+            if (aceptar) aceptar.onclick = () => cerrar(true);
+            if (cancelar) cancelar.onclick = () => cerrar(false);
+            capa.onkeydown = (e: KeyboardEvent) => {
+                if (e.key === 'Escape') { e.preventDefault(); cerrar(false); }
+                else if (e.key === 'Enter' && campo && e.target === campo) { e.preventDefault(); cerrar(true); }
+            };
+
+            document.body.appendChild(capa);
+            if (campo) { campo.focus(); campo.select(); } else cancelar?.focus();
+        });
+    }
+
+    return {
+        confirmar: mensaje => abrir(mensaje, { conTexto: false, alResolver: aceptado => aceptado }),
+        preguntar: (mensaje, porDefecto) =>
+            abrir(mensaje, { conTexto: true, porDefecto, alResolver: (aceptado, texto) => (aceptado ? texto : null) }),
+    };
+}
 
 /** Las ventanas modales reales: una capa que se añade al final de `<body>`. */
 export const modalesDelNavegador: Modales = {
@@ -210,10 +272,12 @@ export function serviciosDesdeAppUI(
     app: AppUIAntigua,
     dom: Dom,
     ahora: Reloj = () => new Date(),
-    dialogos: Dialogos = dialogosDelNavegador,
+    dialogos: Dialogos = crearDialogosDePagina(),
     modales: Modales = modalesDelNavegador,
     menus: MenuFlotante = crearMenuFlotanteDelNavegador(),
 ): ServiciosComunes {
+    // Los métodos que `ui.ts` aún no ha entregado a una vista piden aquí sus diálogos.
+    app.dialogos = dialogos;
     return {
         avisos: { mostrar: (mensaje, tipo) => app.showToast(mensaje, tipo) },
         formato: { importe: valor => app.formatMoney(valor) },

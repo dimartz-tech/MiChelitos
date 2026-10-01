@@ -19,6 +19,13 @@ class AppUI {
      */
     readonly tasaUsdADop = TASA_USD_A_DOP;
 
+    /**
+     * Diálogos de confirmación y de texto (asíncronos: en el WebView de Tauri 1.x
+     * `confirm()` devuelve una promesa y `prompt()` devuelve `null`). Los asigna
+     * `serviciosDesdeAppUI` antes de que se dibuje nada.
+     */
+    dialogos!: import('./ui/servicios').Dialogos;
+
     /** Vistas extraídas a `src/js/vistas/`, por ruta (las registra `composicion.ts`). */
     vistas = new Map<string, { render(): Promise<void> }>();
 
@@ -979,7 +986,7 @@ class AppUI {
      * fila: revertirlo repone deuda, devuelve dinero y borra la comisión.
      */
     async handleRevertirAbono(abonoId, tarjetaId) {
-        const confirmado = confirm(
+        const confirmado = await this.dialogos.confirmar(
             "¿Deshacer este abono?\n\n" +
             "Se repondrá la deuda de la tarjeta, volverá a la cuenta el importe con su comisión, " +
             "y se eliminará el gasto que la recogía.\n\n" +
@@ -988,7 +995,7 @@ class AppUI {
         if (!confirmado) return;
 
         try {
-            const motivo = this.pedirMotivoDeCorreccion(
+            const motivo = await this.pedirMotivoDeCorreccion(
                     `Vas a borrar este abono a tarjeta`,
                     'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
                 );
@@ -1089,7 +1096,7 @@ class AppUI {
             const cargoTxt = tipo === 'porcentaje' ? `Cargo (${porcentaje}%)`
                 : tipo === 'fijo' ? 'Cargo fijo'
                 : 'Cargo (exonerado)';
-            const ok = confirm(
+            const ok = await this.dialogos.confirmar(
                 `Avance de efectivo\n\n` +
                 `Monto: ${divisa} ${this.formatMoney(sim.monto)} → ${cuentaSel.selectedOptions[0].text.split(' - ')[0]}\n` +
                 `${cargoTxt}: ${divisa} ${this.formatMoney(sim.cargo)}\n` +
@@ -1150,7 +1157,7 @@ class AppUI {
 
     /// Deshace un avance, avisando de todo lo que va a mover.
     async handleRevertirAvance(avanceId, tarjetaId) {
-        const confirmado = confirm(
+        const confirmado = await this.dialogos.confirmar(
             "¿Deshacer este avance de efectivo?\n\n" +
             "La deuda de la tarjeta bajará por el monto y su cargo, la cuenta devolverá el monto, " +
             "y se eliminará el gasto que recogía el cargo.\n\n" +
@@ -1159,7 +1166,7 @@ class AppUI {
         if (!confirmado) return;
 
         try {
-            const motivo = this.pedirMotivoDeCorreccion(
+            const motivo = await this.pedirMotivoDeCorreccion(
                 `Vas a borrar este avance de efectivo`,
                 'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
             );
@@ -1193,7 +1200,7 @@ class AppUI {
                 const cuenta = cuentas.find(c => c.id === Number(cueId));
                 if (cuenta && cuenta.divisa === "DOP" && div === "USD") {
                     if (tasaCambio <= 0) {
-                        const promptVal = prompt(`Estás realizando un abono de USD ${mon} desde la cuenta en Pesos "${cuenta.nombre}".\nPor favor, ingresa la tasa de cambio (DOP por 1 USD):`, "60.0");
+                        const promptVal = await this.dialogos.preguntar(`Estás realizando un abono de USD ${mon} desde la cuenta en Pesos "${cuenta.nombre}".\nPor favor, ingresa la tasa de cambio (DOP por 1 USD):`, "60.0");
                         if (promptVal === null) {
                             this.showToast("Operación cancelada.", "info");
                             return;
@@ -1234,7 +1241,7 @@ class AppUI {
     }
 
     async handleEliminarCliente(id) {
-        if (confirm("¿Deseas eliminar este cliente?")) {
+        if (await this.dialogos.confirmar("¿Deseas eliminar este cliente?")) {
             try {
                 await AppAPI.eliminarCliente(id);
                 this.showToast("Cliente eliminado.");
@@ -1272,10 +1279,10 @@ class AppUI {
      * única forma de que un saldo cambiara sin un asiento detrás.
      */
     async abrirEdicionCuenta(cuenta) {
-        const nombre = prompt(`Nombre de la cuenta:`, cuenta.nombre);
+        const nombre = await this.dialogos.preguntar(`Nombre de la cuenta:`, cuenta.nombre);
         if (nombre === null) return;
 
-        const entidad = prompt(
+        const entidad = await this.dialogos.preguntar(
             `Entidad con la que se mantiene «${nombre.trim()}»:`,
             cuenta.entidad || ''
         );
@@ -1284,7 +1291,7 @@ class AppUI {
         const comisionActual = cuenta.comision_pago_impuestos != null
             ? String(cuenta.comision_pago_impuestos)
             : '';
-        const comision = prompt(
+        const comision = await this.dialogos.preguntar(
             `Comisión fija por pago de impuestos desde esta cuenta.\n\nDéjalo vacío si la entidad no tiene una tarifa pactada; eso no es lo mismo que declarar cero.`,
             comisionActual
         );
@@ -1314,7 +1321,7 @@ class AppUI {
     }
 
     async handleEliminarCuenta(id) {
-        if (confirm("¿Deseas eliminar esta cuenta de ahorro?")) {
+        if (await this.dialogos.confirmar("¿Deseas eliminar esta cuenta de ahorro?")) {
             try {
                 await AppAPI.eliminarCuenta(id);
                 this.showToast("Cuenta eliminada.");
@@ -1379,8 +1386,8 @@ class AppUI {
      *
      * Devuelve `null` si el titular se echa atrás.
      */
-    pedirMotivoDeCorreccion(queOcurre, consecuencia) {
-        const motivo = prompt(
+    async pedirMotivoDeCorreccion(queOcurre, consecuencia) {
+        const motivo = await this.dialogos.preguntar(
             `${queOcurre}.\n\n${consecuencia}\n\n` +
             "Explica qué pasó, con una frase que siga teniendo sentido dentro de seis meses:"
         );
@@ -1393,9 +1400,9 @@ class AppUI {
     }
 
     async handleEliminarGastoCorr(id) {
-        if (confirm("¿Estás seguro de que deseas revertir y eliminar este gasto? Los balances asociados serán restaurados.")) {
+        if (await this.dialogos.confirmar("¿Estás seguro de que deseas revertir y eliminar este gasto? Los balances asociados serán restaurados.")) {
             try {
-                const motivo = this.pedirMotivoDeCorreccion(
+                const motivo = await this.pedirMotivoDeCorreccion(
                     `Vas a borrar este gasto`,
                     'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
                 );
@@ -1410,9 +1417,9 @@ class AppUI {
     }
 
     async handleEliminarIngresoInformalCorr(id) {
-        if (confirm("¿Estás seguro de que deseas revertir y eliminar este ingreso informal? El balance asociado (si ya fue cobrado en efectivo) será descontado.")) {
+        if (await this.dialogos.confirmar("¿Estás seguro de que deseas revertir y eliminar este ingreso informal? El balance asociado (si ya fue cobrado en efectivo) será descontado.")) {
             try {
-                const motivo = this.pedirMotivoDeCorreccion(
+                const motivo = await this.pedirMotivoDeCorreccion(
                     `Vas a borrar este ingreso informal`,
                     'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
                 );
@@ -1427,9 +1434,9 @@ class AppUI {
     }
 
     async handleEliminarIngresoCorr(id) {
-        if (confirm("¿Estás seguro de que deseas revertir y eliminar esta factura/ingreso formal?")) {
+        if (await this.dialogos.confirmar("¿Estás seguro de que deseas revertir y eliminar esta factura/ingreso formal?")) {
             try {
-                const motivo = this.pedirMotivoDeCorreccion(
+                const motivo = await this.pedirMotivoDeCorreccion(
                     `Vas a borrar esta factura`,
                     'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
                 );
@@ -1444,9 +1451,9 @@ class AppUI {
     }
 
     async handleEliminarTransaccionCuentaCorr(id) {
-        if (confirm("¿Estás seguro de que deseas revertir y eliminar esta transferencia? Los saldos de las cuentas origen y destino serán restaurados.")) {
+        if (await this.dialogos.confirmar("¿Estás seguro de que deseas revertir y eliminar esta transferencia? Los saldos de las cuentas origen y destino serán restaurados.")) {
             try {
-                const motivo = this.pedirMotivoDeCorreccion(
+                const motivo = await this.pedirMotivoDeCorreccion(
                     `Vas a borrar este traspaso entre cuentas`,
                     'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
                 );
@@ -1498,7 +1505,7 @@ class AppUI {
         const etiqueta = elegido.options[elegido.selectedIndex].textContent;
         const nombre = elegido.value;
 
-        if (!confirm(
+        if (!await this.dialogos.confirmar(
             `Se restaurará el respaldo:\n${etiqueta}\n\n` +
             `Todo lo registrado después de esa fecha se perderá de la vista (base y capital). ` +
             `Antes se guardará una copia del estado actual para poder deshacerlo.\n\n¿Restaurar?`
@@ -1538,7 +1545,7 @@ class AppUI {
     }
 
     async handleEliminarCategoria(id) {
-        if (confirm("¿Eliminar esta categoría?")) {
+        if (await this.dialogos.confirmar("¿Eliminar esta categoría?")) {
             try {
                 await AppAPI.eliminarCategoria(id);
                 this.showToast("Categoría eliminada.");

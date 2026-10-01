@@ -709,7 +709,7 @@ export class VistaPrestamos implements Vista {
      */
     async handleDeclararSaldo(id: number, saldoActual: number): Promise<void> {
         const { api, avisos, formato, enrutador, dialogos } = this.dep;
-        const respuesta = dialogos.preguntar(
+        const respuesta = await dialogos.preguntar(
             `Saldo que muestra el estado de cuenta (la aplicación estima DOP ${formato.importe(saldoActual)}):`,
             Number(saldoActual).toFixed(2)
         );
@@ -746,7 +746,7 @@ export class VistaPrestamos implements Vista {
 
     async handleEliminarPrestamo(id: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
-        if (dialogos.confirmar("¿Deseas eliminar este registro de deuda?")) {
+        if (await dialogos.confirmar("¿Deseas eliminar este registro de deuda?")) {
             try {
                 await api.eliminarPrestamo(id);
                 avisos.mostrar("Registro eliminado.");
