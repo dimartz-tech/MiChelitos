@@ -7,6 +7,8 @@
 
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
+import { escaparHtml } from '../nucleo/html.js';
+
 type ApiCuentas = ApiDe<'obtenerCuentas' | 'obtenerTransaccionesCuentas' | 'transferirEntreCuentas'>;
 
 export interface DependenciasCuentas {
@@ -71,20 +73,20 @@ export class VistaCuentas implements Vista {
                         <form id="form-transfer-cuentas" onsubmit="appUI.handleTransferirCuentas(event)">
                             <div class="form-group">
                                 <label for="tra_fec">Fecha *</label>
-                                <input type="text" id="tra_fec" class="form-control" value="${hoyStr}" required>
+                                <input type="text" id="tra_fec" class="form-control" value="${escaparHtml(hoyStr)}" required>
                             </div>
                             <div class="form-group">
                                 <label for="tra_ori">Cuenta Origen *</label>
                                 <select id="tra_ori" class="form-control" onchange="appUI.rotularDivisasTransferencia()" required>
                                     <option value="" disabled selected>Seleccione...</option>
-                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${formato.importe(c.balance_actual)}</option>`).join('')}
+                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                                 </select>
                             </div>
                             <div class="form-group">
                                 <label for="tra_des">Cuenta Destino *</label>
                                 <select id="tra_des" class="form-control" onchange="appUI.rotularDivisasTransferencia()" required>
                                     <option value="" disabled selected>Seleccione...</option>
-                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${c.divisa}">${c.nombre} (${c.divisa}) - Bal: ${c.divisa} ${formato.importe(c.balance_actual)}</option>`).join('')}
+                                    ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                                 </select>
                             </div>
                             <div id="tra_aviso_divisas" style="display:none; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:var(--radius-sm); padding:0.6rem 0.75rem; font-size:0.72rem; color:var(--text-secondary); margin-bottom:1rem; line-height:1.5;"></div>
@@ -120,9 +122,9 @@ export class VistaCuentas implements Vista {
                         <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:1rem;">
                             ${cuentas.length > 0 ? cuentas.map(c => `
                                 <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:1rem; border-radius:var(--radius-md); position:relative;">
-                                    <div style="font-size:0.75rem; color:var(--text-muted); font-weight:bold; letter-spacing:1px; margin-bottom:0.3rem;">AHORRO - ${c.divisa}</div>
-                                    <div style="font-family: var(--font-heading); font-size:1.1rem; font-weight:bold; margin-bottom:0.5rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${c.nombre}">${c.nombre}</div>
-                                    <div style="font-size:1.25rem; font-weight:bold; color: ${c.divisa === 'USD' ? '#10b981' : 'var(--accent-primary)'};">${c.divisa} ${formato.importe(c.balance_actual)}</div>
+                                    <div style="font-size:0.75rem; color:var(--text-muted); font-weight:bold; letter-spacing:1px; margin-bottom:0.3rem;">AHORRO - ${escaparHtml(c.divisa)}</div>
+                                    <div style="font-family: var(--font-heading); font-size:1.1rem; font-weight:bold; margin-bottom:0.5rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escaparHtml(c.nombre)}">${escaparHtml(c.nombre)}</div>
+                                    <div style="font-size:1.25rem; font-weight:bold; color: ${c.divisa === 'USD' ? '#10b981' : 'var(--accent-primary)'};">${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</div>
                                 </div>
                             `).join('') : `
                                 <p style="color:var(--text-muted); grid-column: 1/-1; text-align:center; padding:1rem;">No hay cuentas de ahorro registradas. Ve a Ajustes para agregarlas.</p>
@@ -151,11 +153,11 @@ export class VistaCuentas implements Vista {
                                     <tbody>
                                         ${transacciones.map(t => `
                                             <tr>
-                                                <td>${t.fecha}</td>
-                                                <td><strong>${t.descripcion || '-'}</strong></td>
-                                                <td>${t.cuenta_origen_nombre}</td>
+                                                <td>${escaparHtml(t.fecha)}</td>
+                                                <td><strong>${escaparHtml(t.descripcion || '-')}</strong></td>
+                                                <td>${escaparHtml(t.cuenta_origen_nombre)}</td>
                                                 <td class="amount expense">${t.monto_origen > 0 ? `- ${t.monto_origen.toLocaleString('es-DO', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '-'}</td>
-                                                <td>${t.cuenta_destino_nombre}</td>
+                                                <td>${escaparHtml(t.cuenta_destino_nombre)}</td>
                                                 <td class="amount income">${t.monto_destino > 0 ? `+ ${t.monto_destino.toLocaleString('es-DO', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '-'}</td>
                                                 <td class="amount expense">${t.cargo > 0 ? `${t.cargo.toLocaleString('es-DO', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '-'}</td>
                                                 <td style="font-family:monospace; font-size:0.8rem;">${t.tasa_cambio.toFixed(4)}</td>
@@ -201,7 +203,7 @@ export class VistaCuentas implements Vista {
 
         if (origen && destino && origen !== destino) {
             aviso.style.display = 'block';
-            aviso.innerHTML = `⚠️ Esta transferencia cruza divisas: el débito va en <strong>${origen}</strong> y el crédito en <strong>${destino}</strong>. Comprueba que cada importe esté en su divisa — la tasa se deduce de los dos.`;
+            aviso.innerHTML = `⚠️ Esta transferencia cruza divisas: el débito va en <strong>${escaparHtml(origen)}</strong> y el crédito en <strong>${escaparHtml(destino)}</strong>. Comprueba que cada importe esté en su divisa — la tasa se deduce de los dos.`;
         } else {
             aviso.style.display = 'none';
             aviso.innerHTML = '';

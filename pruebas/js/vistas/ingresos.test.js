@@ -9,6 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
 import { VistaIngresos, MANEJADORES_INGRESOS, puenteIngresos } from '../../../src/js/vistas/ingresos.js';
 
 const factura = (extra = {}) => ({
@@ -302,4 +303,24 @@ test('todo appUI.x( que escribe la plantilla y sus ventanas está en el puente',
     const llamados = new Set([...html.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
     assert.ok(llamados.size >= 8, [...llamados].join());
     for (const nombre of llamados) assert.ok(MANEJADORES_INGRESOS.includes(nombre), `falta ${nombre} en el puente`);
+});
+
+// --- texto del titular en el HTML y en los manejadores ---
+
+test('una factura con nombre de cliente hostil llega íntegra al editor (JSON en texto) y no se interpreta', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const f = factura({ id: 11, cliente_nombre: hostil, numero_factura: hostil, institucion_deposito: hostil });
+    const t = montar({ ingresos: [f] });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    const [[texto]] = llamadasDelManejador(html, 'abrirEdicionFormal');
+    assert.deepEqual(JSON.parse(texto), f);
+    assert.doesNotMatch(html, /<img/);
+});
+
+test('el informal y el número de factura siguiente escapan lo que llevan', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const t = montar({ ingresos: [factura({ numero_factura: `FAC-"><img src=x>7` })], informales: [informal({ descripcion: hostil, estatus: 'pagado', institucion_deposito: hostil })] });
+    await t.vista.render();
+    assert.doesNotMatch(t.pantalla.contenido.innerHTML, /<img/);
 });

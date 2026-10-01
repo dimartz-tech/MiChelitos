@@ -11,6 +11,8 @@
 import type { Suscripcion } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Vista } from '../ui/servicios';
 
+import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+
 type ApiSuscripciones = ApiDe<
     | 'obtenerSuscripciones'
     | 'obtenerTarjetas'
@@ -69,11 +71,11 @@ export class VistaSuscripciones implements Vista {
                         </p>
                         ${conHuecos.map(s => `
                             <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem; font-size:0.85rem;">
-                                <span style="flex:1;"><strong>${s.plataforma}</strong> — ${s.divisa} ${formato.importe(s.monto)},
-                                    el más antiguo: <strong>${s.pendientes[0]}</strong>
+                                <span style="flex:1;"><strong>${escaparHtml(s.plataforma)}</strong> — ${escaparHtml(s.divisa)} ${formato.importe(s.monto)},
+                                    el más antiguo: <strong>${escaparHtml(s.pendientes[0])}</strong>
                                     ${s.pendientes.length > 1 ? `<span style="color:var(--text-muted);">(y ${s.pendientes.length - 1} más)</span>` : ''}</span>
-                                <button onclick="appUI.handleAsentarPendiente(${s.id}, '${s.pendientes[0]}')" class="btn" style="padding:0.25rem 0.5rem; font-size:0.78rem;">Sí se cobró</button>
-                                <button onclick="appUI.handleDescartarPendiente(${s.id}, '${s.pendientes[0]}')" class="btn" style="padding:0.25rem 0.5rem; font-size:0.78rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);">No se cobró</button>
+                                <button onclick="appUI.handleAsentarPendiente(${s.id}, ${argumentoJs(s.pendientes[0])})" class="btn" style="padding:0.25rem 0.5rem; font-size:0.78rem;">Sí se cobró</button>
+                                <button onclick="appUI.handleDescartarPendiente(${s.id}, ${argumentoJs(s.pendientes[0])})" class="btn" style="padding:0.25rem 0.5rem; font-size:0.78rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);">No se cobró</button>
                             </div>`).join('')}
                     </div>`;
                 })()}
@@ -83,7 +85,7 @@ export class VistaSuscripciones implements Vista {
                     return `<div class="card" style="border-left:3px solid var(--danger, #e05260); margin-bottom:1rem;">
                         <strong>⛔ No se cobrarán</strong>
                         <ul style="margin:0.5rem 0 0 1rem; font-size:0.85rem;">
-                            ${paradas.map(s => `<li><strong>${s.plataforma}</strong> — ${s.impedimento}</li>`).join('')}
+                            ${paradas.map(s => `<li><strong>${escaparHtml(s.plataforma)}</strong> — ${escaparHtml(s.impedimento)}</li>`).join('')}
                         </ul>
                     </div>`;
                 })()}
@@ -93,7 +95,7 @@ export class VistaSuscripciones implements Vista {
                     return `<div class="card" style="border-left:3px solid var(--warning, #e0a020); margin-bottom:1rem;">
                         <strong>🔔 Cobro próximo</strong>
                         <ul style="margin:0.5rem 0 0 1rem; font-size:0.85rem;">
-                            ${avisan.map(s => `<li><strong>${s.plataforma}</strong> — ${s.divisa} ${formato.importe(s.monto)} el ${s.fecha_proximo_cobro}</li>`).join('')}
+                            ${avisan.map(s => `<li><strong>${escaparHtml(s.plataforma)}</strong> — ${escaparHtml(s.divisa)} ${formato.importe(s.monto)} el ${escaparHtml(s.fecha_proximo_cobro)}</li>`).join('')}
                         </ul>
                     </div>`;
                 })()}
@@ -147,7 +149,7 @@ export class VistaSuscripciones implements Vista {
                                 <label for="sus_tar">Tarjeta de Cargo *</label>
                                 <select id="sus_tar" class="form-control" required>
                                     <option value="" disabled selected>Seleccione...</option>
-                                    ${tarjetas.map(t => `<option value="${t.id}">${t.entidad} - ${t.nombre_tarjeta}</option>`).join('')}
+                                    ${tarjetas.map(t => `<option value="${t.id}">${escaparHtml(t.entidad)} - ${escaparHtml(t.nombre_tarjeta)}</option>`).join('')}
                                 </select>
                             </div>
                             <button type="submit" class="btn" style="width:100%; margin-top:0.5rem;">🚀 Registrar Cargo</button>
@@ -179,25 +181,25 @@ export class VistaSuscripciones implements Vista {
                                 <tbody>
                                     ${suscripciones.map(s => `
                                         <tr>
-                                            <td><strong>${s.plataforma}</strong></td>
-                                            <td style="text-transform:capitalize;">${s.frecuencia}</td>
+                                            <td><strong>${escaparHtml(s.plataforma)}</strong></td>
+                                            <td style="text-transform:capitalize;">${escaparHtml(s.frecuencia)}</td>
                                             <td>Día ${s.dia_facturacion}</td>
                                             <td>${
                                                 s.fecha_proximo_cobro
-                                                    ? `${s.avisa ? '🔔 ' : ''}${s.fecha_proximo_cobro}` +
+                                                    ? `${s.avisa ? '🔔 ' : ''}${escaparHtml(s.fecha_proximo_cobro)}` +
                                                       (s.pendientes.length > 1 ? ` <span style="color:var(--danger, #e05260);">+${s.pendientes.length - 1}</span>` : '')
                                                     : '<span style="color:var(--danger, #e05260);">Sin fecha: no se cobrará</span>'
                                             }</td>
                                             <td>${
                                                 s.impedimento
-                                                    ? `<span style="color:var(--danger, #e05260);" title="${s.impedimento}">⛔ ${s.fecha_ultimo_pago || 'sin fecha'}</span>`
-                                                    : (s.fecha_ultimo_pago || '<span style="font-style:italic;color:var(--text-muted);">Pendiente</span>')
+                                                    ? `<span style="color:var(--danger, #e05260);" title="${escaparHtml(s.impedimento)}">⛔ ${escaparHtml(s.fecha_ultimo_pago || 'sin fecha')}</span>`
+                                                    : (s.fecha_ultimo_pago ? escaparHtml(s.fecha_ultimo_pago) : '<span style="font-style:italic;color:var(--text-muted);">Pendiente</span>')
                                             }</td>
-                                            <td>${s.entidad} (${s.nombre_tarjeta})</td>
-                                            <td class="amount expense">${s.divisa} ${formato.importe(s.monto)}</td>
+                                            <td>${escaparHtml(s.entidad)} (${escaparHtml(s.nombre_tarjeta)})</td>
+                                            <td class="amount expense">${escaparHtml(s.divisa)} ${formato.importe(s.monto)}</td>
                                             <td>
                                                 ${s.impedimento ? `<button onclick="appUI.handleCorregirProximoCobro(${s.id})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(224,82,96,0.15); border:1px solid var(--danger, #e05260);" title="Corregir la fecha del último cobro">🔧</button>` : ''}
-                                                <button onclick='appUI.abrirEdicionSuscripcion(${JSON.stringify(s).replace(/'/g, "&apos;")})' class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Editar">✏️</button>
+                                                <button onclick="appUI.abrirEdicionSuscripcion(${argumentoJs(s)})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Editar">✏️</button>
                                                 <button onclick="appUI.handleEliminarSuscripcion(${s.id})" class="btn btn-danger" style="padding: 0.3rem 0.5rem; font-size:0.8rem;">🗑️</button>
                                             </td>
                                         </tr>
@@ -244,12 +246,12 @@ export class VistaSuscripciones implements Vista {
             <div class="card" style="width: 420px; background: var(--bg-surface-opaque); max-height:90vh; overflow-y:auto;">
                 <h3 style="font-family: var(--font-heading); margin-bottom: 0.4rem;">✏️ Editar Suscripción</h3>
                 <p style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:1rem;">
-                    Se conserva el último pago registrado (${s.fecha_ultimo_pago || 'ninguno'}), de modo que editar no provoca un cobro repetido este período.
+                    Se conserva el último pago registrado (${escaparHtml(s.fecha_ultimo_pago || 'ninguno')}), de modo que editar no provoca un cobro repetido este período.
                 </p>
                 <form onsubmit="appUI.handleEdicionSuscripcionSubmit(event, ${s.id})">
                     <div class="form-group">
                         <label>Servicio / Plataforma</label>
-                        <input type="text" id="es_pla_${s.id}" class="form-control" value="${s.plataforma}" required>
+                        <input type="text" id="es_pla_${s.id}" class="form-control" value="${escaparHtml(s.plataforma)}" required>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
@@ -284,7 +286,7 @@ export class VistaSuscripciones implements Vista {
                             <input type="date" id="es_ren_${s.id}" class="form-control" value="${this.fechaAIso(s.fecha_proximo_cobro)}">
                         </div>
                         <select id="es_tar_${s.id}" class="form-control" required>
-                            ${tarjetas.map(t => `<option value="${t.id}" ${t.id === s.tarjeta_id ? 'selected' : ''}>${t.entidad} - ${t.nombre_tarjeta}</option>`).join('')}
+                            ${tarjetas.map(t => `<option value="${t.id}" ${t.id === s.tarjeta_id ? 'selected' : ''}>${escaparHtml(t.entidad)} - ${escaparHtml(t.nombre_tarjeta)}</option>`).join('')}
                         </select>
                     </div>
                     <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">

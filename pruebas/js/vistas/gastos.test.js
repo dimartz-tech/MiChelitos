@@ -10,6 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
 import { VistaGastos, MANEJADORES_GASTOS, puenteGastos } from '../../../src/js/vistas/gastos.js';
 
 const gasto = (extra = {}) => ({
@@ -262,4 +263,22 @@ test('todo appUI.x( que escribe la plantilla (y la ventana de liquidación) est�
     const llamados = new Set([...html.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
     assert.ok(llamados.size >= 6);
     for (const nombre of llamados) assert.ok(MANEJADORES_GASTOS.includes(nombre), `falta ${nombre} en el puente`);
+});
+
+// --- texto del titular en el HTML y en los manejadores ---
+
+test('una descripción con comillas y marcado llega íntegra al botón de liquidar y no se interpreta', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const t = montar({ gastos: [gasto({ id: 9, estado_conversion: 'pendiente', divisa: 'USD', monto: 50, descripcion: hostil })] });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.deepEqual(llamadasDelManejador(html, 'abrirLiquidacionConsumo'), [[9, 50, 'USD', hostil]]);
+    assert.doesNotMatch(html, /<img/);
+    assert.match(html, /&lt;img src=x onerror=&quot;alert\(2\)&quot; ?&gt;|&lt;img src=x onerror=&quot;alert\(2\)&quot;&gt;/);
+});
+
+test('la ventana de liquidación también escapa la descripción', async () => {
+    const t = montar();
+    t.vista.abrirLiquidacionConsumo(9, 50, 'USD', `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`);
+    assert.doesNotMatch(t.modales[0].html, /<img/);
 });
