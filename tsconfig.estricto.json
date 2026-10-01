@@ -11,6 +11,8 @@
     "src/js/tipos-ipc.d.ts",
     "src/js/api.ts",
     "src/js/ui/dom.ts",
+    "src/js/ui/servicios.ts",
+    "src/js/composicion.ts",
     "src/js/nucleo/*.ts"
   ]
 }

@@ -19,9 +19,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { leerInterfazJs } from '../ayudas/fuentes_interfaz.js';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const UI = readFileSync(join(RAIZ, 'src', 'js', 'ui.js'), 'utf8');
+const UI = leerInterfazJs();
 const HTML = readFileSync(join(RAIZ, 'src', 'index.html'), 'utf8');
 
 // Campos numéricos que **no son dinero** y por eso no llevan `step="0.01"`.

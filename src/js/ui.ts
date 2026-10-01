@@ -14,9 +14,22 @@ class AppUI {
     /** Cancela los oyentes del menú de pasivos abierto, si hay uno. */
     _menuPasivoAbort: AbortController | null = null;
 
+    /** Vistas extraídas a `src/js/vistas/`, por ruta (las registra `composicion.ts`). */
+    vistas = new Map<string, { render(): Promise<void> }>();
+
     constructor() {
         this.contentContainer = elemento('app-content');
         this.notifContainer = elemento('notification-container');
+    }
+
+    /**
+     * Registra una vista extraída y cuelga sus manejadores de `appUI`, que es lo
+     * que llaman los manejadores en línea de su HTML. Es el puente de la
+     * migración: desaparece con esta clase.
+     */
+    registrarVista(ruta: string, vista: { render(): Promise<void> }, puente: object) {
+        this.vistas.set(ruta, vista);
+        Object.assign(this, puente);
     }
 
     // --- TOASTS / NOTIFICACIONES ---
@@ -42,6 +55,13 @@ class AppUI {
         this.contentContainer.innerHTML = '<p style="color: var(--text-muted); text-align:center; padding: 2rem;">Cargando módulo nativo...</p>';
         
         try {
+            // Las vistas ya extraídas (src/js/vistas/) van primero; el `switch`
+            // conserva las que siguen aquí.
+            const registrada = this.vistas.get(route);
+            if (registrada) {
+                await registrada.render();
+                return;
+            }
             switch (route) {
                 case 'dashboard':
                     await this.renderDashboard();
