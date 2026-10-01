@@ -1,8 +1,17 @@
 # Actualizar la aplicación instalada: estabilidad y procedimiento
 
-Estado a 2026-10-02. **Instalada: 1.62.0** (actualizada el 2026-10-01 desde la 1.36.0; ver «Actualización hecha»). Lo que sigue en esta guía es el análisis de la primera actualización (1.36.0 → 1.48.0) y el procedimiento, que se siguió tal cual y vale para la próxima.
+Estado a 2026-10-02. **Instalada: 1.65.0** (actualizada el 2026-10-01: primero 1.36.0 → 1.62.0 y después 1.62.0 → 1.65.0; ver «Actualizaciones hechas»). Lo que sigue en esta guía es el análisis de la primera actualización (1.36.0 → 1.48.0) y el procedimiento, que se siguió tal cual y vale para la próxima.
 
-## Actualización hecha: 1.36.0 → 1.62.0 (2026-10-01)
+## Actualizaciones hechas
+
+### 1.62.0 → 1.65.0 (2026-10-01)
+A petición expresa del titular, con el mismo procedimiento y la misma prueba previa contra una copia de los datos:
+* Respaldo `michelitos_2026-10-01T20-43-54_antes-de-actualizar-a-1.65.0` (base y capital, integridad correcta) y copia de la 1.62.0 en `~/.michelitos/aplicacion-anterior/MiChelitos-1.62.0.app`.
+* **Sin cambios en Rust** desde la 1.62.0 y sin migraciones (`user_version` sigue en 15): lo nuevo es solo la **división de `ui.ts` en once vistas** (1.51.0 a 1.65.0), sin cambios visibles.
+* Probada contra una copia (viva a los 16 s, esquema 15, integridad correcta, mismos conteos por tabla), instalada y abierta: esquema 15, integridad correcta, 0 referencias rotas, mismos conteos por tabla.
+* Volver atrás: cerrar y restituir `MiChelitos-1.62.0.app` (o `MiChelitos-1.36.0.app`) en `/Applications`; la base no se toca.
+
+### 1.36.0 → 1.62.0 (2026-10-01)
 A petición expresa del titular. Se siguió el procedimiento de abajo, con una prueba previa más:
 1. App cerrada; respaldo `michelitos_2026-10-01T19-44-28_antes-de-actualizar-a-1.62.0` (base y capital, integridad correcta) y copia de la 1.36.0 en `~/.michelitos/aplicacion-anterior/MiChelitos-1.36.0.app`.
 2. Compilada desde `main` (`npx tauri build -b app`; el `.app` sale de `src-tauri/target/release/bundle/macos/`).
@@ -10,7 +19,7 @@ A petición expresa del titular. Se siguió el procedimiento de abajo, con una p
 4. Instalada en `/Applications` y abierta: esquema 15, integridad correcta, 0 referencias rotas, mismos conteos por tabla. **Sin migraciones** desde la 1.36.0 (`user_version` sigue en 15).
 5. Lo que trae de nuevo para el titular, además de las correcciones de la 1.36.0 → 1.48.0: la corrección de las bajas y correcciones con motivo (1.62.0: `prompt()` devolvía `null` y `confirm()` no esperaba la respuesta en el WebView; ver `historial_versiones.md`), la carga fija del Resumen por divisa (1.60.0) y el panel de restaurar respaldos.
 * **Volver atrás:** cerrar y restituir `MiChelitos-1.36.0.app` en `/Applications`; la base no se toca (mismo esquema). Un estado de datos anterior se restaura desde Ajustes.
-* **Pendiente de la próxima actualización:** todo lo posterior a la 1.62.0 (la división de `ui.ts` en vistas, sin cambios visibles, y lo que venga).
+* Lo posterior a la 1.62.0 llegó con la actualización a la 1.65.0 (arriba).
 
 ## Antes de la primera actualización (1.36.0 → 1.48.0)
 Esta sección es el análisis que se hizo entonces; se conserva como registro.
