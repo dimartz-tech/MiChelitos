@@ -571,7 +571,7 @@ mod tests {
 
         assert_eq!(valores(), vec!["uno", "dos"], "la base volvió");
         assert!(r.capital_restaurado);
-        assert!(crate::db_nosql::leer_coleccion("capital").to_string().contains("500"));
+        assert!(crate::db_nosql::leer_coleccion("capital").unwrap().to_string().contains("500"));
         // Lo que había antes de restaurar se puede recuperar.
         let seguridad = Connection::open(&r.respaldo_de_seguridad).unwrap();
         let valor: String =
@@ -589,7 +589,7 @@ mod tests {
         let r = restaurar(&bueno.file_name().unwrap().to_string_lossy()).unwrap();
 
         assert!(!r.capital_restaurado, "y así se dice");
-        assert!(crate::db_nosql::leer_coleccion("capital").to_string().contains("700"));
+        assert!(crate::db_nosql::leer_coleccion("capital").unwrap().to_string().contains("700"));
     }
 
     #[test]

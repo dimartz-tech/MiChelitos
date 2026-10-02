@@ -1725,7 +1725,7 @@ pub fn confirmar_pendiente(
 // --- COMANDOS: CAPITAL (NoSQL) ---
 #[tauri::command]
 fn obtener_capital() -> Result<Value, String> {
-    let mut data = db_nosql::leer_coleccion("capital");
+    let mut data = db_nosql::leer_coleccion("capital")?;
     let hoy = Local::now().naive_local().date();
 
     for coleccion in ["certificados", "bolsa"] {
@@ -1767,7 +1767,8 @@ fn marcar_alerta_de_vencimiento(entrada: &mut Value, hoy: NaiveDate) {
 fn guardar_capital(data: Value) -> Result<(), String> {
     // Se exige lo que entra o cambia contra lo que ya estaba guardado; ver
     // `aplicacion::guardar_capital`.
-    let guardado = db_nosql::leer_coleccion("capital");
+    // Si el archivo existe pero no se puede leer, **no se guarda**: sustituirlo por lo que llegue destruiría lo que hubiera.
+    let guardado = db_nosql::leer_coleccion("capital")?;
     let limpio = aplicacion::guardar_capital::preparar_para_guardar(data, &guardado)
         .map_err(|e| e.to_string())?;
     db_nosql::guardar_coleccion("capital", &limpio)
