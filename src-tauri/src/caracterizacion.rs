@@ -643,20 +643,17 @@ fn c16b_el_abono_decide_el_centimo_con_los_digitos_escritos() {
 }
 
 #[test]
-fn c16c_hallazgo_el_nucleo_no_rechaza_un_abono_cero_ni_negativo_solo_lo_hace_la_interfaz() {
-    // **HALLAZGO, sin corregir** (protocolo del proyecto: documentar y fijar antes de corregir; el cambio se
-    // consulta). La comprobación «el monto del abono debe ser mayor que cero» vive **solo en la interfaz**
-    // (`handleAbonoTarjeta`). Quien llame al comando por el IPC puede registrar un abono de 0.00, o uno
-    // **negativo, que sube la deuda**. Ya era así con el `f64`; la migración a texto no lo cambia. Esta prueba
-    // describe el comportamiento ACTUAL: si se decide que el núcleo lo rechace, esta prueba se invierte.
+fn c16c_un_abono_cero_o_negativo_se_rechaza_sin_mover_nada() {
+    // **H resuelto.** Antes la regla «el abono debe ser mayor que cero» vivía solo en la interfaz: por el IPC
+    // se podía registrar un abono de 0.00 o uno negativo, que subía la deuda. Ahora la impone el núcleo.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(50000.0, 0.0);
 
-    registrar_pago_tarjeta(tarjeta, "08/09/2026".to_string(), importe("0.00"), "DOP".to_string(), None, 0.0).unwrap();
-    assert_importe(balances_tarjeta(tarjeta).0, 50000.0, "un abono de cero no mueve nada");
-
-    registrar_pago_tarjeta(tarjeta, "08/09/2026".to_string(), importe("-100.00"), "DOP".to_string(), None, 0.0).unwrap();
-    assert_importe(balances_tarjeta(tarjeta).0, 50100.0, "un abono negativo SUBE la deuda: lo que hoy no impide el núcleo");
+    for texto in ["0.00", "0.004", "-100.00"] {
+        let r = registrar_pago_tarjeta(tarjeta, "08/09/2026".to_string(), importe(texto), "DOP".to_string(), None, 0.0);
+        assert!(r.is_err(), "aceptó {texto}");
+        assert_importe(balances_tarjeta(tarjeta).0, 50000.0, "la deuda no se movió");
+    }
 }
 
 #[test]

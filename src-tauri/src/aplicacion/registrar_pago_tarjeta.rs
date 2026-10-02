@@ -65,6 +65,11 @@ pub fn registrar_pago_tarjeta(
     categoria_comision_id: i64,
     almacen: &mut impl AlmacenAbonos,
 ) -> Result<PagoRegistrado, ErrorAplicacion> {
+    // Antes de tocar nada: un abono que no es positivo no abona (cero) o sube la deuda (negativo).
+    if datos.monto.es_cero() || datos.monto.es_negativo() {
+        return Err(ErrorDominio::AbonoSinImporte.into());
+    }
+
     // El orden importa: primero se resuelve todo lo que puede fallar por una
     // regla, y solo después se toca un saldo. Así una operación rechazada no
     // deja nada a medias ni siquiera antes de la transacción.
@@ -186,6 +191,21 @@ mod tests {
         assert_eq!(a.deuda_en(20, Divisa::Usd), usd(500.0));
         assert_eq!(a.saldo_de(11), usd(1_499.0), "500 más 1.00 de comisión");
         assert_eq!(r.comision, Some(usd(1.0)));
+    }
+
+    #[test]
+    fn un_abono_no_positivo_se_rechaza_sin_mover_nada() {
+        for monto in [0.0, -15.0] {
+            let mut a = almacen();
+            a.ajustar_deuda(20, dop(1_000.0)).unwrap();
+            let r = registrar_pago_tarjeta(datos(dop(monto), Some(10), None), 1, &mut a);
+            assert!(
+                matches!(r, Err(ErrorAplicacion::Dominio(ErrorDominio::AbonoSinImporte))),
+                "aceptó {monto}"
+            );
+            assert_eq!(a.deuda_de(20), dop(1_000.0), "la deuda no se movió");
+            assert_eq!(a.saldo_de(10), dop(500_000.0), "la cuenta tampoco");
+        }
     }
 
     #[test]
