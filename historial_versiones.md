@@ -4,7 +4,20 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.74.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.75.0 (Versión Actual) - 2026-10-02
+**Suscripciones: «Cargos Activos» se divide en Mensuales y Anuales, cada bloque con su subtotal por divisa.**
+
+### 🔧 Qué se hace
+* La tabla de «Cargos Activos» pasa a dos bloques, **📅 Mensuales** y **🗓️ Anuales**, con la misma tabla y las mismas acciones (corregir, editar, eliminar). Cada bloque lleva su **subtotal por divisa** sin mezclarlas: el mensual «al mes» y el anual «al año» con su equivalente al mes (total / 12). Un bloque sin suscripciones no se dibuja; sin ninguna sigue el mensaje vacío.
+* El formulario de alta sigue siendo **uno solo**, compartido (la frecuencia se elige en él).
+* El Resumen ya mostraba mensuales y anuales por separado desde 1.74.0 (sus tres pruebas, que esperaban «Suscripciones Recurrentes», ya estaban ajustadas en ese PR).
+
+### 🧪 Pruebas
+* 4 nuevas (reparto por frecuencia, subtotales por divisa con el equivalente mensual, bloque vacío y formulario único). Cinco mutaciones (filtro de anuales invertido, divisas mezcladas, anual sin dividir entre 12, rótulo año/mes, bloque vacío visible): todas detectadas. **JS 578 pasan.**
+
+---
+
+## 🚀 Versión 1.74.0 - 2026-10-02
 **Resumen: las suscripciones mensuales y anuales se muestran por separado.**
 
 ### 🔧 Qué se hace
