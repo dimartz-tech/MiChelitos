@@ -57,6 +57,74 @@ export class VistaSuscripciones implements Vista {
         const suscripciones = await api.obtenerSuscripciones();
         const tarjetas = await api.obtenerTarjetas();
 
+        // «Cargos Activos» se divide por frecuencia; cada bloque lleva su subtotal por divisa (sin mezclarlas).
+        const tablaCargos = (lista: Suscripcion[]): string => `
+                        <div class="table-responsive">
+                            <table class="table-modern">
+                                <thead>
+                                    <tr>
+                                        <th>Servicio</th>
+                                        <th>Frecuencia</th>
+                                        <th>Día Pago</th>
+                                        <th>Próximo Cobro</th>
+                                        <th>Último Pago</th>
+                                        <th>Tarjeta Cargo</th>
+                                        <th>Monto</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${lista.map(s => `
+                                        <tr>
+                                            <td><strong>${escaparHtml(s.plataforma)}</strong></td>
+                                            <td style="text-transform:capitalize;">${escaparHtml(s.frecuencia)}</td>
+                                            <td>Día ${s.dia_facturacion}</td>
+                                            <td>${
+                                                s.fecha_proximo_cobro
+                                                    ? `${s.avisa ? '🔔 ' : ''}${escaparHtml(s.fecha_proximo_cobro)}` +
+                                                      (s.pendientes.length > 1 ? ` <span style="color:var(--danger, #e05260);">+${s.pendientes.length - 1}</span>` : '')
+                                                    : '<span style="color:var(--danger, #e05260);">Sin fecha: no se cobrará</span>'
+                                            }</td>
+                                            <td>${
+                                                s.impedimento
+                                                    ? `<span style="color:var(--danger, #e05260);" title="${escaparHtml(s.impedimento)}">⛔ ${escaparHtml(s.fecha_ultimo_pago || 'sin fecha')}</span>`
+                                                    : (s.fecha_ultimo_pago ? escaparHtml(s.fecha_ultimo_pago) : '<span style="font-style:italic;color:var(--text-muted);">Pendiente</span>')
+                                            }</td>
+                                            <td>${escaparHtml(s.entidad)} (${escaparHtml(s.nombre_tarjeta)})</td>
+                                            <td class="amount expense">${escaparHtml(s.divisa)} ${formato.importe(s.monto)}</td>
+                                            <td>
+                                                ${s.impedimento ? `<button onclick="appUI.handleCorregirProximoCobro(${s.id})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(224,82,96,0.15); border:1px solid var(--danger, #e05260);" title="Corregir la fecha del último cobro">🔧</button>` : ''}
+                                                <button onclick="appUI.abrirEdicionSuscripcion(${argumentoJs(s)})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Editar">✏️</button>
+                                                <button onclick="appUI.handleEliminarSuscripcion(${s.id})" class="btn btn-danger" style="padding: 0.3rem 0.5rem; font-size:0.8rem;">🗑️</button>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+        `;
+        const subtotalesPorDivisa = (lista: Suscripcion[]): [string, number][] => {
+            const m = new Map<string, number>();
+            for (const s of lista) m.set(s.divisa || 'DOP', (m.get(s.divisa || 'DOP') ?? 0) + s.monto);
+            return [...m.entries()].sort(([x], [y]) => x.localeCompare(y));
+        };
+        const bloque = (titulo: string, lista: Suscripcion[], frecuencia: 'mensual' | 'anual'): string => {
+            if (lista.length === 0) return '';
+            const subtotales = subtotalesPorDivisa(lista)
+                .map(([d, m]) => `${escaparHtml(d)} ${formato.importe(m)}${frecuencia === 'anual' ? ` (≈ ${escaparHtml(d)} ${formato.importe(m / 12.0)} al mes)` : ''}`)
+                .join(' · ');
+            return `
+                        <div class="bloque-suscripciones" data-frecuencia="${frecuencia}" style="margin-bottom:1.2rem;">
+                            <div style="display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; border-bottom:1px solid var(--border-color); padding-bottom:0.3rem; margin-bottom:0.5rem;">
+                                <strong>${escaparHtml(titulo)} <span style="font-weight:400; color:var(--text-muted);">(${lista.length})</span></strong>
+                                <span class="amount expense">Subtotal ${frecuencia === 'anual' ? 'al año' : 'al mes'}: ${subtotales}</span>
+                            </div>
+                            ${tablaCargos(lista)}
+                        </div>`;
+        };
+        const mensuales = suscripciones.filter(s => s.frecuencia === 'mensual');
+        const anuales = suscripciones.filter(s => s.frecuencia !== 'mensual');
+
         pantalla.contenido.innerHTML = `
             <div class="section-title">
                 <h1>Suscripciones Recurrentes</h1>
@@ -164,49 +232,8 @@ export class VistaSuscripciones implements Vista {
                 <div class="card">
                     <h3 style="font-family: var(--font-heading); font-size: 1.1rem; margin-bottom: 1rem;">📋 Cargos Activos</h3>
                     ${suscripciones.length > 0 ? `
-                        <div class="table-responsive">
-                            <table class="table-modern">
-                                <thead>
-                                    <tr>
-                                        <th>Servicio</th>
-                                        <th>Frecuencia</th>
-                                        <th>Día Pago</th>
-                                        <th>Próximo Cobro</th>
-                                        <th>Último Pago</th>
-                                        <th>Tarjeta Cargo</th>
-                                        <th>Monto</th>
-                                        <th>Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${suscripciones.map(s => `
-                                        <tr>
-                                            <td><strong>${escaparHtml(s.plataforma)}</strong></td>
-                                            <td style="text-transform:capitalize;">${escaparHtml(s.frecuencia)}</td>
-                                            <td>Día ${s.dia_facturacion}</td>
-                                            <td>${
-                                                s.fecha_proximo_cobro
-                                                    ? `${s.avisa ? '🔔 ' : ''}${escaparHtml(s.fecha_proximo_cobro)}` +
-                                                      (s.pendientes.length > 1 ? ` <span style="color:var(--danger, #e05260);">+${s.pendientes.length - 1}</span>` : '')
-                                                    : '<span style="color:var(--danger, #e05260);">Sin fecha: no se cobrará</span>'
-                                            }</td>
-                                            <td>${
-                                                s.impedimento
-                                                    ? `<span style="color:var(--danger, #e05260);" title="${escaparHtml(s.impedimento)}">⛔ ${escaparHtml(s.fecha_ultimo_pago || 'sin fecha')}</span>`
-                                                    : (s.fecha_ultimo_pago ? escaparHtml(s.fecha_ultimo_pago) : '<span style="font-style:italic;color:var(--text-muted);">Pendiente</span>')
-                                            }</td>
-                                            <td>${escaparHtml(s.entidad)} (${escaparHtml(s.nombre_tarjeta)})</td>
-                                            <td class="amount expense">${escaparHtml(s.divisa)} ${formato.importe(s.monto)}</td>
-                                            <td>
-                                                ${s.impedimento ? `<button onclick="appUI.handleCorregirProximoCobro(${s.id})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(224,82,96,0.15); border:1px solid var(--danger, #e05260);" title="Corregir la fecha del último cobro">🔧</button>` : ''}
-                                                <button onclick="appUI.abrirEdicionSuscripcion(${argumentoJs(s)})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Editar">✏️</button>
-                                                <button onclick="appUI.handleEliminarSuscripcion(${s.id})" class="btn btn-danger" style="padding: 0.3rem 0.5rem; font-size:0.8rem;">🗑️</button>
-                                            </td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                        </div>
+                        ${bloque('📅 Mensuales', mensuales, 'mensual')}
+                        ${bloque('🗓️ Anuales', anuales, 'anual')}
                     ` : `
                         <p style="color:var(--text-muted); text-align:center; padding:2rem;">No hay suscripciones registradas.</p>
                     `}
