@@ -293,7 +293,7 @@ encogerse, y un importe nuevo que viajara como número rompería la prueba.
 | `actualizar_limites_tarjeta` | seis importes y dos límites ajustados | ✅ texto (el ajustado vacío sigue siendo «sin ajuste» y «0» un tope deliberado) |
 | `crear_gasto` (`GastoInput`) | `monto` | ✅ texto: se casa con la divisa declarada del gasto |
 | `crear_ingreso` (`IngresoInput`) | `monto_total` | ✅ texto: una sola conversión sirve a la retención y a la fila |
-| `crear_prestamo` y `actualizar_prestamo` (estructuras de entrada) | `monto_prestamo`, `monto_cuota`, `saldo_actual`, `limite_credito` | pendiente (requieren cambiar el tipo de los campos de la estructura) |
+| `crear_prestamo` y `actualizar_prestamo` (estructuras de entrada) | `monto_prestamo`, `monto_cuota`, `saldo_actual`, `limite_credito` | ✅ texto: el saldo ausente es el monto ya decidido al céntimo; el límite vacío sigue siendo «no declarado» |
 
 **Cuando no quede ninguno**, la rama «número» de `ImporteDecimal` se retira y la coma flotante deja de entrar por la
 frontera (así lo dice `ipc.rs`). Los porcentajes y las tasas **no se migran**: son tasas, no importes, y su
