@@ -1752,7 +1752,7 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
     // El consumo que las genera, con un 3 % repartido en dos créditos.
     let gasto = crear_gasto(GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: monto(5000.00),
+        monto: monto(5200.00),
         divisa: "DOP".to_string(),
         descripcion: "Consumo bonificado".to_string(),
         categoria_id: id_categoria("Alimentación"),
@@ -1770,7 +1770,7 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
         "Bonificación de categoría".into(), Some(gasto)).unwrap();
 
     assert_eq!(crate::obtener_bonificaciones().unwrap().len(), 2);
-    assert_importe(deuda_pesos(tarjeta), 10000.0 + 5000.00 - 150.00, "el consumo sube y las dos bonificaciones bajan");
+    assert_importe(deuda_pesos(tarjeta), 10000.0 + 5200.00 - 150.00, "el consumo sube y las dos bonificaciones bajan");
 }
 
 #[test]
@@ -2165,7 +2165,7 @@ fn c46_la_tasa_se_deduce_dividiendo_los_dos_importes() {
 
 #[test]
 fn c46b_los_tres_importes_de_una_transferencia_deciden_el_centavo_por_su_texto() {
-    // `1000.005` por texto sube a 1000.01 (por número bajaba a 1000.00): vale para origen, destino y cargo.
+    // `1000.005` por texto sube a 1000.01 (por número bajaba a 1000.0): vale para origen, destino y cargo.
     let _g = entorno_aislado();
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
@@ -3065,7 +3065,7 @@ fn c87_corregir_da_por_cobrado_el_neto_entero_aunque_faltara_algo() {
 
 #[test]
 fn c87a_el_total_corregido_decide_el_centavo_por_su_texto() {
-    // `1000.005` por texto sube a 1000.01 (por número bajaba a 1000.00); la fila guarda ese total.
+    // `1000.005` por texto sube a 1000.01 (por número bajaba a 1000.0); la fila guarda ese total.
     let _g = entorno_aislado();
     let id = crear_ingreso(factura("B-000", 5_000.0, 15.0)).unwrap();
 
@@ -4308,18 +4308,7 @@ fn c97_el_gasto_decide_el_centavo_por_su_texto_y_la_divisa_la_declara_el_gasto()
     // `75.005` por texto sube a 75.01 (por número bajaba a 75.00); en USD cae en la deuda en dólares.
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 100.0);
-    let entrada = GastoInput {
-        fecha: "08/09/2026".to_string(),
-        monto: importe("75.005"),
-        divisa: "USD".to_string(),
-        descripcion: "Suscripción".to_string(),
-        categoria_id: id_categoria("Suscripciones"),
-        metodo_pago: "tarjeta".to_string(),
-        es_lbtr: false,
-        tarjeta_id: Some(tarjeta),
-        cuenta_ahorro_id: None,
-        tasa_cambio: None,
-    };
+    let entrada = GastoInput { monto: importe("75.005"), ..compra_en_dolares(tarjeta) };
     crear_gasto(entrada).unwrap();
 
     let (pesos, dolares) = balances_tarjeta(tarjeta);
@@ -4329,7 +4318,7 @@ fn c97_el_gasto_decide_el_centavo_por_su_texto_y_la_divisa_la_declara_el_gasto()
 
 #[test]
 fn c98_la_factura_decide_el_centavo_y_la_retencion_por_el_texto_del_total() {
-    // 1000.005 por texto sube a 1000.01 (por número bajaba a 1000.00); la retención del 50 % se decide sobre ese total.
+    // 1000.005 por texto sube a 1000.01 (por número bajaba a 1000.0); la retención del 50 % se decide sobre ese total.
     let _g = entorno_aislado();
     let id = crear_ingreso(IngresoInput {
         numero_factura: "T-001".to_string(),
@@ -4345,7 +4334,7 @@ fn c98_la_factura_decide_el_centavo_y_la_retencion_por_el_texto_del_total() {
         .query_row("SELECT monto_total FROM ingresos WHERE id = ?;", params![id], |r| r.get(0))
         .unwrap();
     assert_importe(total, 1000.01, "el total sube el céntimo");
-    assert_importe(retencion_de(id), 500.01, "50 % de 1000.01 = 500.005 → 500.01 (sobre 1000.00 habría sido 500.00)");
+    assert_importe(retencion_de(id), 500.01, "50 % de 1000.01 = 500.005 → 500.01 (sobre 1000.0 habría sido 500.00)");
 }
 
 #[test]

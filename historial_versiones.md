@@ -4,7 +4,26 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.71.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.72.0 (Versión Actual) - 2026-10-02
+**Importes a texto: se migran los 12 comandos que quedaban y se retira la rama «número» de `ImporteDecimal`. La migración queda terminada.**
+
+### 🐛 Qué estaba mal
+* Quedaban comandos cuyos importes la interfaz convertía con `Number(...)`: el núcleo decidía el céntimo sobre un número que ya no valía lo que el titular tecleó (`1.005` llegaba como 1.00499…, y por texto sube a 1.01).
+
+### 🔧 Qué se hace
+* **Rust y envoltorios, un commit por comando:** `marcar_ingreso_pagado`, `marcar_informal_pagado`, `liquidar_consumo_pendiente`, `registrar_pago_tarjeta`, `crear_cuenta` (saldo inicial), `transferir_entre_cuentas` (origen, destino y cargo, cada uno con la divisa de su cuenta), `actualizar_ingreso` (total), `crear_tarjeta` (8 importes), `actualizar_limites_tarjeta` (6 + 2 ajustados; vacío sigue siendo «sin ajuste» y «0» un tope), `crear_gasto`, `crear_ingreso`, `crear_prestamo` y `actualizar_prestamo`.
+* **Interfaz:** las vistas envían el texto recortado; donde el campo no es obligatorio y antes un vacío valía 0 (cargos, límites de tarjeta) se conserva ese comportamiento enviando «0». Las comparaciones (cotas, vista previa del neto) siguen usando el número, solo para comparar.
+* **`ImporteDecimal` ya solo acepta texto:** un número JSON se rechaza. El tipo generado pasa de `string | number` a `string`, y la lista de pendientes del contrato queda vacía (debe seguir así).
+
+### 🧪 Pruebas
+* Pruebas Rust y JS nuevas por comando (céntimo decidido por texto, columnas sin cruzar, vacíos), mutaciones por comando (todas detectadas, salvo un mutante equivalente anotado). **Rust 635 pasan** (+2 ignoradas), **JS 573 pasan**.
+
+### 🔎 Hallazgo (sin corregir, a consultar)
+* `registrar_pago_tarjeta` **no rechaza un abono de 0.00, de 0.004 ni negativo** (uno negativo sube la deuda). Queda fijado por la prueba `c16c`; corregirlo es decisión del titular.
+
+---
+
+## 🚀 Versión 1.71.0 - 2026-10-02
 **Importes a texto: `crear_bonificacion`, el tercero de los comandos que seguían enviándose como número** (quedan 12: ver `politica_redondeo.md`).
 
 ### 🐛 Qué estaba mal
