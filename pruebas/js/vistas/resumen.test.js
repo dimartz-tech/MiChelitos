@@ -142,6 +142,25 @@ test('subdivisión: lo anual se suma como total del año y se divide entre 12 un
     assert.equal(importeDe(html, 'Carga Fija Mensual'), 35 + 7 + 12.5);
 });
 
+test('cobros próximos: el Resumen avisa de los que el núcleo marca (mensuales y anuales) con su tarjeta, y escapa el texto', async () => {
+    const d = datos({ suscripciones: [
+        { frecuencia: 'mensual', monto: 10, divisa: 'USD', plataforma: 'Mensual <b>X</b>', fecha_proximo_cobro: '03/03/2027', entidad: 'Banco Alfa', nombre_tarjeta: 'Oro', avisa: true },
+        { frecuencia: 'anual', monto: 60, divisa: 'USD', plataforma: 'Anual Y', fecha_proximo_cobro: '05/03/2027', entidad: 'Banco Beta', nombre_tarjeta: 'Plata', avisa: true },
+        { frecuencia: 'mensual', monto: 5, divisa: 'USD', plataforma: 'Lejana Z', fecha_proximo_cobro: '25/03/2027', entidad: 'Banco Alfa', nombre_tarjeta: 'Oro', avisa: false },
+    ] });
+    const { html } = await dibujar({ d });
+    assert.match(html, /Cobros próximos[\s\S]*Mensual &lt;b&gt;X&lt;\/b&gt;[\s\S]*USD #10\.00# el 03\/03\/2027, con Banco Alfa \(Oro\)/);
+    assert.match(html, /Anual Y[\s\S]*el 05\/03\/2027, con Banco Beta \(Plata\)/);
+    assert.doesNotMatch(html, /Lejana Z/);
+    assert.doesNotMatch(html, /<b>X<\/b>/);
+    assert.match(html, /edita la suscripción en la pestaña Suscripciones/);
+});
+
+test('sin cobros próximos el Resumen no dibuja el aviso', async () => {
+    const { html } = await dibujar();
+    assert.doesNotMatch(html, /Cobros próximos/);
+});
+
 const MIXTAS = () => datos({
     suscripciones: [
         { frecuencia: 'mensual', monto: 10, divisa: 'DOP' },
