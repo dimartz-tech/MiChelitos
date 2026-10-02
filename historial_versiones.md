@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.76.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.77.0 (Versión Actual) - 2026-10-02
+**Auditoría A-01 y A-02: un capital ilegible ya no se sobrescribe, y la interfaz pierde las APIs nativas de Tauri que no usa.**
+
+### 🐛 A-01 — Qué estaba mal
+* `leer_coleccion` convertía cualquier fallo de lectura o de JSON en un capital **vacío**. La pestaña de capital mostraba «sin datos» y el siguiente guardado **sobrescribía sin aviso** el archivo dañado, justo cuando más falta hacía recuperarlo.
+
+### 🔧 Qué se hace
+* **A-01:** `leer_coleccion` devuelve `Result`: un archivo **ausente** sigue dando la estructura inicial (primer arranque), pero uno que existe y **no se puede leer** o **no es JSON válido** (incluido uno vacío) da un error con mensaje claro. `obtener_capital` lo muestra y `guardar_capital` **se niega a guardar**; el original queda intacto, sin siquiera escribir el temporal.
+* **A-02 (allowlist):** `allowlist.all` pasa a `false` y se quita la función `api-all` de Cargo. La interfaz solo usa `invoke` hacia los comandos de Rust, que Tauri deja siempre disponible; el sistema de archivos, el shell, HTTP, diálogos y procesos ya no están al alcance de la capa web. `withGlobalTauri` se **mantiene**: `api.ts` depende de `window.__TAURI__`. La CSP (la otra mitad de A-02) queda para otro PR: la interfaz usa manejadores y estilos en línea y exige probarla en la app empaquetada. Al quitar `api-all` también salen del `Cargo.lock` 187 dependencias que no se usaban (de 584 a 397).
+
+### 🧪 Pruebas
+* Rust: 5 nuevas con archivos sintéticos (sin archivo, JSON truncado, archivo de cero bytes, un directorio donde iría el archivo = error de E/S, y el camino sano); en las de error se comprueba que el original queda byte a byte igual. JS: contrato nuevo de la superficie (allowlist cerrada, Cargo sin `api-all`, y que la interfaz solo use `invoke`). Mutaciones: 5 de A-01 (4 detectadas; la quinta es equivalente para el capital) y 4 de A-02 detectadas. **Rust 641, JS 584 pasan.**
+* **Comprobado en la app empaquetada**, con un HOME temporal: `fs.readTextFile` y `shell.open` responden «módulo no habilitado»; `invoke` funciona; con un `capital.json` truncado, `obtener_capital` y `guardar_capital` fallan con el mensaje y el archivo queda intacto; con el capital sano, lee y guarda.
+
+---
+
+## 🚀 Versión 1.76.0 - 2026-10-02
 **Aviso de cobros próximos para todas las suscripciones, también en el Resumen, con la tarjeta que cobra y la opción de cambiarla a tiempo.**
 
 ### 🔧 Qué se hace
