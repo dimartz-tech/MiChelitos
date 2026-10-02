@@ -83,7 +83,7 @@ const AppAPI = {
 
     // Calcula el cargo sin guardar nada, para enseñarlo antes de confirmar. La
     // regla vive en el núcleo: la interfaz no la duplica.
-    async simularAvanceEfectivo(monto: string, divisa: string, tipoCargo: string, porcentaje: number | null | undefined, cargoFijo: string | number | null | undefined) {
+    async simularAvanceEfectivo(monto: string, divisa: string, tipoCargo: string, porcentaje: number | null | undefined, cargoFijo: string | null | undefined) {
         return await invoke('simular_avance_efectivo', {
             monto: String(monto),
             divisa,
@@ -93,7 +93,7 @@ const AppAPI = {
         });
     },
 
-    async registrarAvanceEfectivo(tarjetaId: number | string, cuentaAhorroId: number | string, fecha: string, monto: string, divisa: string, tipoCargo: string, porcentaje: number | null | undefined, cargoFijo: string | number | null | undefined, nota: string | null | undefined) {
+    async registrarAvanceEfectivo(tarjetaId: number | string, cuentaAhorroId: number | string, fecha: string, monto: string, divisa: string, tipoCargo: string, porcentaje: number | null | undefined, cargoFijo: string | null | undefined, nota: string | null | undefined) {
         return await invoke('registrar_avance_efectivo', {
             tarjetaId: Number(tarjetaId),
             cuentaAhorroId: Number(cuentaAhorroId),
@@ -115,7 +115,7 @@ const AppAPI = {
         return await invoke('revertir_avance_efectivo', { id: Number(id), motivo });
     },
 
-    async crearCuenta(nombre: string, divisa: string, balance: string, entidad: string | null | undefined, comisionPagoImpuestos: string | number | null | undefined) {
+    async crearCuenta(nombre: string, divisa: string, balance: string, entidad: string | null | undefined, comisionPagoImpuestos: string | null | undefined) {
         return await invoke('crear_cuenta', {
             nombre,
             divisa,
@@ -127,7 +127,7 @@ const AppAPI = {
         });
     },
 
-    async actualizarCuenta(id: number | string, nombre: string, entidad: string | null | undefined, comisionPagoImpuestos: string | number | null | undefined) {
+    async actualizarCuenta(id: number | string, nombre: string, entidad: string | null | undefined, comisionPagoImpuestos: string | null | undefined) {
         return await invoke('actualizar_cuenta', {
             id: Number(id),
             nombre,
@@ -174,7 +174,7 @@ const AppAPI = {
         return await invoke('crear_ingreso', { input: ingresoData });
     },
 
-    async actualizarIngreso(id: number | string, numeroFactura: string, clienteId: number | string, fechaEmision: string, montoTotal: string, porcentajeRetencion: number | string, cobroParcial: string | number | null | undefined, motivo: string | null | undefined) {
+    async actualizarIngreso(id: number | string, numeroFactura: string, clienteId: number | string, fechaEmision: string, montoTotal: string, porcentajeRetencion: number | string, cobroParcial: string | null | undefined, motivo: string | null | undefined) {
         return await invoke('actualizar_ingreso', {
             id: Number(id),
             numeroFactura,

@@ -28,8 +28,8 @@ export function tipoJs(rust) {
     }
     if (t === '()') return 'null';
     if (t === 'Value' || t === 'serde_json::Value') return 'any';
-    // El importe viaja como texto o como número; el texto decide el céntimo.
-    if (t === 'ipc::ImporteDecimal') return 'string | number';
+    // El importe viaja solo como texto: los dígitos escritos deciden el céntimo.
+    if (t === 'ipc::ImporteDecimal') return 'string';
     if (t in PRIMITIVOS) return PRIMITIVOS[t];
     if (/^[A-Z]\w*$/.test(t)) return t; // estructura declarada en main.rs
     throw new Error(`tipo de Rust sin traducción: ${t}`);
