@@ -71,6 +71,13 @@ function importeDe(html, etiqueta) {
     return Number(m[1]);
 }
 
+/** El importe al mes de las anuales (el `<strong>`), no el total del año que va en la nota. */
+function alMesAnual(html) {
+    const m = /Suscripciones Anuales \(al mes\)[\s\S]*?<strong>DOP #(-?[\d.]+)#/.exec(html);
+    assert.ok(m, 'no aparece la fila de anuales');
+    return Number(m[1]);
+}
+
 test('consulta las siete fuentes y dibuja el título', async () => {
     const { html, llamadas } = await dibujar();
     assert.match(html, /Resumen Ejecutivo/);
@@ -117,8 +124,22 @@ test('la carga fija suma las cuotas que corren (flexibles y con cuotas pendiente
     // préstamos: 25 + 10 (el tercero ya no tiene cuotas pendientes: no suma); suscripciones: 10 + 120 / 12
     const { html } = await dibujar();
     assert.equal(importeDe(html, 'Cuotas de Préstamos'), 35);
-    assert.equal(importeDe(html, 'Suscripciones Recurrentes'), 20);
+    assert.equal(importeDe(html, 'Suscripciones Mensuales'), 10);
+    assert.equal(alMesAnual(html), 10);
     assert.equal(importeDe(html, 'Carga Fija Mensual'), 55);
+});
+
+test('subdivisión: lo anual se suma como total del año y se divide entre 12 una sola vez, por divisa', async () => {
+    const d = datos({ suscripciones: [
+        { frecuencia: 'anual', monto: 100, divisa: 'DOP' },
+        { frecuencia: 'anual', monto: 50, divisa: 'DOP' },
+        { frecuencia: 'mensual', monto: 7, divisa: 'DOP' },
+    ] });
+    const { html } = await dibujar({ d });
+    assert.equal(importeDe(html, 'Suscripciones Mensuales'), 7);
+    assert.equal(alMesAnual(html), 12.5);
+    assert.match(html, /total del año: DOP #150\.00#/);
+    assert.equal(importeDe(html, 'Carga Fija Mensual'), 35 + 7 + 12.5);
 });
 
 const MIXTAS = () => datos({
@@ -133,11 +154,11 @@ test('la carga fija no mezcla divisas: los dólares no entran en la suma de peso
     // pesos: préstamos 35 + suscripción 10 = 45; dólares aparte: 10 + 120 / 12 = 20
     const { html } = await dibujar({ d: MIXTAS() });
     assert.equal(importeDe(html, 'Cuotas de Préstamos'), 35);
-    assert.equal(importeDe(html, 'Suscripciones Recurrentes'), 10);
+    assert.equal(importeDe(html, 'Suscripciones Mensuales'), 10);
     assert.equal(importeDe(html, 'Carga Fija Mensual'), 45);
     assert.match(html, /DOP #45\.00# \+ USD #20\.00#/);
-    assert.match(html, /Suscripciones en USD/);
-    assert.match(html, /<strong>USD #20\.00#<\/strong>/);
+    assert.match(html, /Suscripciones Mensuales en USD[\s\S]*?<strong>USD #10\.00#<\/strong>/);
+    assert.match(html, /Suscripciones Anuales en USD \(al mes\)[\s\S]*?total del año: USD #120\.00#[\s\S]*?<strong>USD #10\.00#<\/strong>/);
 });
 
 test('la carga fija no convierte los dólares con la tasa: otra tasa no cambia ninguna cifra', async () => {
@@ -149,15 +170,16 @@ test('la carga fija no convierte los dólares con la tasa: otra tasa no cambia n
 
 test('la carga fija sin dólares no muestra renglón ni cifra en otra divisa; sin divisa cuenta como pesos', async () => {
     const { html } = await dibujar();
-    assert.doesNotMatch(html, /Suscripciones en|USD #\d/);
+    assert.doesNotMatch(html, /Suscripciones (Mensuales|Anuales) en|USD #\d/);
     assert.doesNotMatch(html, /Carga Fija Mensual[^<]*<\/span>\s*<span[^>]*>DOP #55\.00# \+/);
 });
 
 test('una divisa distinta de DOP y USD tampoco se pierde ni se suma a los pesos', async () => {
     const d = datos({ suscripciones: [{ frecuencia: 'mensual', monto: 10, divisa: 'EUR' }] });
     const { html } = await dibujar({ d });
-    assert.equal(importeDe(html, 'Suscripciones Recurrentes'), 0);
+    assert.equal(importeDe(html, 'Suscripciones Mensuales'), 0);
     assert.match(html, /DOP #35\.00# \+ EUR #10\.00#/);
+    assert.doesNotMatch(html, /Suscripciones Anuales en EUR/, 'sin anuales en esa divisa no hay fila anual');
 });
 
 test('el balance del mes cuenta solo lo del mes del reloj inyectado', async () => {
