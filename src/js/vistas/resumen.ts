@@ -109,6 +109,18 @@ export class VistaResumen implements Vista {
         };
         const cargaFija = cuotaPrestamos + cuotaSuscripciones;
 
+        // Cobros de los próximos días (la regla de la ventana es del núcleo: `avisa`). Se avisa aquí, no solo en
+        // Suscripciones, para dar tiempo a cambiar la tarjeta que cobra antes de que caiga el cargo.
+        const cobrosProximos = suscripciones.filter(s => s.avisa);
+        const avisoCobrosProximos = cobrosProximos.length === 0 ? '' : `
+            <div class="card" style="border-left:3px solid var(--warning, #e0a020); margin-bottom:1rem;">
+                <strong>🔔 Cobros próximos</strong>
+                <ul style="margin:0.5rem 0 0 1rem; font-size:0.85rem;">
+                    ${cobrosProximos.map(s => `<li><strong>${escaparHtml(s.plataforma)}</strong> — ${escaparHtml(s.divisa)} ${formato.importe(s.monto)} el ${escaparHtml(s.fecha_proximo_cobro)}, con ${escaparHtml(s.entidad)} (${escaparHtml(s.nombre_tarjeta)})</li>`).join('')}
+                </ul>
+                <p style="margin:0.5rem 0 0; font-size:0.75rem; color:var(--text-muted);">Para cobrarlos con otra tarjeta, edita la suscripción en la pestaña Suscripciones antes de la fecha.</p>
+            </div>`;
+
         // 4. Balance del Mes (basado en monto cobrado/recibido)
         const ingresosMesFormalesCobrados = ingresos.filter(i => i.fecha_emision.endsWith(mesAnioActual)).reduce((sum, i) => sum + (i.monto_recibido || 0.0), 0);
         const ingresosMesInformalesCobrados = informales.filter(inf => inf.fecha.endsWith(mesAnioActual)).reduce((sum, inf) => sum + (inf.monto_recibido || 0.0), 0);
@@ -126,6 +138,8 @@ export class VistaResumen implements Vista {
                 <h1>Resumen Ejecutivo</h1>
                 <span class="subtitle">Cálculos de patrimonio, deuda y flujos recurrentes</span>
             </div>
+
+            ${avisoCobrosProximos}
 
             <!-- Balance Ejecutivo -->
             <div class="card" style="border-left: 6px solid var(--accent-primary);">

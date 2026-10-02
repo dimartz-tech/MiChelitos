@@ -117,6 +117,18 @@ test('el aviso «Cobro próximo» muestra la fecha del próximo cobro (la 1.43.0
     assert.doesNotMatch(t.pantalla.contenido.innerHTML, /el undefined/);
 });
 
+test('el aviso de cobro próximo nombra la tarjeta que cobra y ofrece cambiarla antes de la fecha', async () => {
+    const t = montar({ suscripciones: [sus({ avisa: true, plataforma: 'Plataforma Aviso' }), sus({ id: 2, plataforma: 'Lejana', avisa: false })] });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    const aviso = html.slice(html.indexOf('Cobro próximo'), html.indexOf('Monitoreo'));
+    assert.match(aviso, /Plataforma Aviso[\s\S]*con Banco Alfa \(Oro\)/);
+    assert.match(aviso, /Cambiar tarjeta/);
+    assert.match(aviso, /abrirEdicionSuscripcion\(/);
+    assert.doesNotMatch(aviso, /Lejana/);
+    assert.match(aviso, /bonifique las compras por internet/);
+});
+
 test('con períodos pendientes ofrece asentar o descartar el más antiguo y dice cuántos más hay', async () => {
     const t = montar({ suscripciones: [sus({ pendientes: ['15/01/2027', '15/02/2027'] })] });
     await t.vista.render();

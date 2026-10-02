@@ -192,14 +192,11 @@ impl Suscripcion {
 
     /// Si toca avisar: el cargo cae dentro de los próximos siete días.
     ///
-    /// **Solo las anuales.** Ya no por una limitación —desde que la fecha
-    /// manda, la de una mensual es igual de predecible—, sino porque es lo
-    /// que se pidió, y porque avisar cada semana de ocho suscripciones
-    /// mensuales sería ruido que enseña a ignorar el aviso.
+    /// **Todas, mensuales y anuales** (decisión del titular, 2026-10-02: antes
+    /// solo las anuales, por temor al ruido). Sirve para dar tiempo a cambiar
+    /// la tarjeta que cobra —por ejemplo a una que bonifique compras por
+    /// internet— antes de que caiga el cargo.
     pub fn avisa(&self, hoy: NaiveDate) -> bool {
-        if self.frecuencia != Frecuencia::Anual {
-            return false;
-        }
         match self.proximo_cobro {
             Some(fecha) => (0..=DIAS_DE_AVISO).contains(&(fecha - hoy).num_days()),
             None => false,
@@ -341,16 +338,21 @@ mod tests {
     }
 
     #[test]
-    fn solo_las_anuales_avisan() {
+    fn anuales_y_mensuales_avisan_una_semana_antes() {
         let a = anual(Some(en(2026, 7, 5)), 5);
         assert!(!a.avisa(en(2026, 6, 27)), "ocho días antes todavía no");
         assert!(a.avisa(en(2026, 6, 28)), "siete días antes sí");
         assert!(a.avisa(en(2026, 7, 5)), "y el mismo día");
         assert!(!a.avisa(en(2026, 7, 6)), "pasada la fecha ya no es aviso, es cobro vencido");
 
-        // La mensual **podría** avisar, y no lo hace a propósito: ocho avisos
-        // cada semana serían ruido.
+        // La mensual avisa igual (desde 1.76.0), con la misma ventana.
         let m = mensual(Some(en(2026, 7, 5)), 5);
-        assert!(!m.avisa(en(2026, 7, 1)));
+        assert!(!m.avisa(en(2026, 6, 27)), "ocho días antes todavía no");
+        assert!(m.avisa(en(2026, 7, 1)));
+        assert!(m.avisa(en(2026, 7, 5)));
+        assert!(!m.avisa(en(2026, 7, 6)));
+
+        // Sin fecha de próximo cobro no hay de qué avisar.
+        assert!(!mensual(None, 5).avisa(en(2026, 7, 1)));
     }
 }
