@@ -3346,7 +3346,7 @@ fn escribir_capital_de_prueba(datos: &serde_json::Value) {
 /// Lo que hay en el archivo, sin pasar por `obtener_capital`: es la única
 /// forma de ver si un campo calculado quedó grabado.
 fn capital_en_disco() -> serde_json::Value {
-    crate::db_nosql::leer_coleccion("capital")
+    crate::db_nosql::leer_coleccion("capital").expect("leer capital")
 }
 
 #[test]
@@ -4372,5 +4372,95 @@ fn c110_el_financiamiento_guarda_sus_importes_por_el_texto_y_el_saldo_ausente_es
     .unwrap();
     assert_importe(leer("monto_cuota"), 60.01, "cuota corregida");
     assert_importe(leer("limite_credito"), 4000.01, "límite corregido");
+}
+
+// --- A-01: un capital ilegible no se convierte en un capital vacío ---
+
+fn ruta_del_capital() -> std::path::PathBuf {
+    std::path::PathBuf::from(crate::db_nosql::obtener_ruta_nosql("capital"))
+}
+
+/// Deja el capital como si nunca hubiera existido (archivo o directorio). `entorno_aislado` solo reinicia
+/// la base SQL: un capital sembrado por otra prueba seguiría ahí, y uno roto de esta rompería a las demás.
+fn quitar_capital() {
+    let ruta = ruta_del_capital();
+    if ruta.is_dir() { let _ = std::fs::remove_dir_all(&ruta); } else { let _ = std::fs::remove_file(&ruta); }
+    let _ = std::fs::remove_file(format!("{}.tmp", ruta.display()));
+}
+
+fn capital_valido() -> serde_json::Value {
+    serde_json::json!({ "propiedades": { "inmobiliario": [], "vehiculos": [], "maquinaria": [] }, "certificados": [], "bolsa": [] })
+}
+
+#[test]
+fn c111_sin_archivo_de_capital_se_da_la_estructura_inicial() {
+    let _g = entorno_aislado();
+    quitar_capital();
+    assert!(!ruta_del_capital().exists());
+    let c = crate::db_nosql::leer_coleccion("capital").expect("un archivo ausente no es un error");
+    assert!(c["certificados"].as_array().unwrap().is_empty());
+    assert!(crate::obtener_capital().is_ok());
+    // Una colección ausente que no es el capital empieza vacía.
+    assert_eq!(crate::db_nosql::leer_coleccion("otra").unwrap(), serde_json::json!([]));
+    quitar_capital();
+}
+
+#[test]
+fn c112_un_capital_con_json_dañado_da_error_y_no_se_sobrescribe() {
+    let _g = entorno_aislado();
+    quitar_capital();
+    let ruta = ruta_del_capital();
+    std::fs::create_dir_all(ruta.parent().unwrap()).unwrap();
+    let dañado = r#"{"certificados": [ {"nombre": "sintético", "monto": 1"#; // truncado
+    std::fs::write(&ruta, dañado).unwrap();
+
+    let e = crate::db_nosql::leer_coleccion("capital").expect_err("JSON dañado debe fallar");
+    assert!(e.contains("dañado"), "mensaje: {e}");
+    assert!(crate::obtener_capital().is_err(), "la pestaña no debe mostrar «sin datos»");
+    let g = crate::guardar_capital(capital_valido());
+    assert!(g.is_err(), "no se guarda sobre un archivo que no se pudo leer");
+
+    assert_eq!(std::fs::read_to_string(&ruta).unwrap(), dañado, "el original quedó intacto");
+    assert!(!std::path::Path::new(&format!("{}.tmp", ruta.display())).exists(), "ni siquiera se escribió el temporal");
+    quitar_capital();
+}
+
+#[test]
+fn c113_un_capital_vacio_de_cero_bytes_tambien_es_un_archivo_dañado() {
+    let _g = entorno_aislado();
+    quitar_capital();
+    let ruta = ruta_del_capital();
+    std::fs::create_dir_all(ruta.parent().unwrap()).unwrap();
+    std::fs::write(&ruta, "").unwrap();
+
+    assert!(crate::db_nosql::leer_coleccion("capital").is_err());
+    assert!(crate::guardar_capital(capital_valido()).is_err());
+    assert_eq!(std::fs::read(&ruta).unwrap().len(), 0, "sigue vacío: no se tocó");
+    quitar_capital();
+}
+
+#[test]
+fn c114_un_error_de_lectura_del_archivo_tampoco_produce_un_guardado() {
+    // Un directorio donde debería haber un archivo: existe, pero no se puede leer como texto.
+    let _g = entorno_aislado();
+    quitar_capital();
+    let ruta = ruta_del_capital();
+    std::fs::create_dir_all(&ruta).unwrap();
+
+    let e = crate::db_nosql::leer_coleccion("capital").expect_err("no se puede leer");
+    assert!(e.contains("No se pudo leer"), "mensaje: {e}");
+    assert!(crate::guardar_capital(capital_valido()).is_err());
+    assert!(ruta.is_dir(), "lo que había sigue ahí");
+    quitar_capital();
+}
+
+#[test]
+fn c115_con_el_archivo_sano_lee_y_guarda_como_siempre() {
+    let _g = entorno_aislado();
+    quitar_capital();
+    crate::guardar_capital(capital_valido()).expect("guardar");
+    assert!(crate::db_nosql::leer_coleccion("capital").is_ok());
+    assert!(crate::obtener_capital().is_ok());
+    quitar_capital();
 }
 
