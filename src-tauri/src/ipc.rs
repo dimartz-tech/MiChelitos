@@ -74,27 +74,15 @@ impl ImporteDecimal {
     }
 }
 
-/// Acepta **texto o número**, a propósito.
+/// Acepta **solo texto**: los dígitos tal cual se escribieron.
 ///
-/// El texto es el camino bueno. El número se admite durante la transición
-/// para que la interfaz pueda migrar pantalla a pantalla en vez de en un solo
-/// cambio de todo o nada; cuando no quede ninguna llamada que mande números,
-/// esta rama se retira y la coma flotante deja de entrar por aquí.
+/// Hubo una rama «número» durante la migración, para que la interfaz pasara
+/// pantalla a pantalla; se retiró cuando el último comando migró. Un número JSON
+/// ya viene redondeado por la coma flotante, y por aquí no debe entrar.
 impl<'de> Deserialize<'de> for ImporteDecimal {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<ImporteDecimal, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Entrada {
-            Texto(String),
-            Numero(f64),
-        }
-
-        let centavos = match Entrada::deserialize(d)? {
-            Entrada::Texto(t) => centavos_desde_texto(&t).map_err(de::Error::custom)?,
-            Entrada::Numero(n) => Dinero::nuevo(n, Divisa::Dop)
-                .map_err(de::Error::custom)?
-                .centavos(),
-        };
+        let texto = String::deserialize(d)?;
+        let centavos = centavos_desde_texto(&texto).map_err(de::Error::custom)?;
         Ok(ImporteDecimal { centavos })
     }
 }
@@ -118,13 +106,13 @@ mod tests {
     fn el_texto_decide_el_centimo_donde_la_coma_flotante_fallaba() {
         // La diferencia que justifica el cambio, en la frontera real.
         assert_eq!(leer(r#""1.005""#).unwrap().centavos(), 101, "por texto sube");
-        assert_eq!(leer("1.005").unwrap().centavos(), 100, "por número baja");
     }
 
     #[test]
-    fn un_numero_sigue_admitiendose_durante_la_transicion() {
-        assert_eq!(leer("1234.56").unwrap().centavos(), 123_456);
-        assert_eq!(leer("100").unwrap().centavos(), 10_000);
+    fn un_numero_json_ya_no_entra() {
+        // La coma flotante no debe cruzar la frontera: `1.005` como número ya es 1.00499…
+        assert!(leer("1234.56").is_err());
+        assert!(leer("100").is_err());
     }
 
     #[test]

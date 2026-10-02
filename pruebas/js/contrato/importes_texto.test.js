@@ -81,13 +81,10 @@ test('un importe de tres decimales llega intacto: es el que `Number` deja en 1.0
 // --- los que faltan --------------------------------------------------------------------------
 
 /**
- * Importes que el envoltorio todavía convierte con `Number(...)`, y los cinco comandos que reciben
- * un objeto de importes ya como números desde la vista (`crearGasto`, `crearIngreso`,
- * `crearPrestamo`, `actualizarPrestamo` y el monto de `registrarPagoTarjeta`). **Cada PR de
- * migración quita sus entradas de aquí.**
+ * Importes que el envoltorio todavía convierte con `Number(...)`. **Debe seguir vacía**: un importe
+ * nuevo viaja como texto (`String(x)` en el envoltorio, `ImporteDecimal` en Rust), que ya solo acepta texto.
  */
-const PENDIENTES = [
-];
+const PENDIENTES = [];
 
 const ES_IMPORTE = /monto|limite|sobregiro|balance|saldo|cuota|cargo|comision|valor|importe/i;
 

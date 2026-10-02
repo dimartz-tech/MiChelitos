@@ -21,10 +21,10 @@ export type MovimientoPrestamo = { id: number; fecha: string; tipo: string; mont
 export type CasoCorreccion = { numero_caso: string; fecha: string; tipo: string; referencia_id: number; descripcion: string; importe: number | null; divisa: string | null; motivo: string };
 
 // --- Lo que Rust recibe en estructuras ---
-export type GastoInput = { fecha: string; monto: string | number; divisa: string; descripcion: string; categoria_id: number; metodo_pago: string; es_lbtr: boolean; tarjeta_id: number | null; cuenta_ahorro_id: number | null; tasa_cambio: number | null };
-export type IngresoInput = { numero_factura: string; rnc_cliente: string; nombre_cliente: string; fecha_emision: string; monto_total: string | number; porcentaje_retencion: number };
-export type PrestamoInput = { tipo_prestamo: string; monto_prestamo: string | number; institucion_financiera: string; tasa_actual: number; cuotas_totales: number | null; cuotas_pendientes: number | null; monto_cuota: string | number; dia_pago: number; saldo_actual: string | number | null; limite_credito: string | number | null };
-export type ActualizarPrestamoInput = { id: number; tasa_actual: number; monto_cuota: string | number; dia_pago: number; limite_credito: string | number | null; tarjeta_id: number | null };
+export type GastoInput = { fecha: string; monto: string; divisa: string; descripcion: string; categoria_id: number; metodo_pago: string; es_lbtr: boolean; tarjeta_id: number | null; cuenta_ahorro_id: number | null; tasa_cambio: number | null };
+export type IngresoInput = { numero_factura: string; rnc_cliente: string; nombre_cliente: string; fecha_emision: string; monto_total: string; porcentaje_retencion: number };
+export type PrestamoInput = { tipo_prestamo: string; monto_prestamo: string; institucion_financiera: string; tasa_actual: number; cuotas_totales: number | null; cuotas_pendientes: number | null; monto_cuota: string; dia_pago: number; saldo_actual: string | null; limite_credito: string | null };
+export type ActualizarPrestamoInput = { id: number; tasa_actual: number; monto_cuota: string; dia_pago: number; limite_credito: string | null; tarjeta_id: number | null };
 
 // --- Cada comando: sus argumentos (claves en camelCase, como las envía Tauri) y su respuesta ---
 export type Comandos = {
@@ -35,23 +35,23 @@ export type Comandos = {
     crear_gasto: { args: { input: GastoInput }; ret: number };
     obtener_ingresos: { args: {  }; ret: Ingreso[] };
     crear_ingreso: { args: { input: IngresoInput }; ret: number };
-    marcar_ingreso_pagado: { args: { id: number; cuentaAhorroId: number; fecha: string; montoRecibido: string | number }; ret: null };
+    marcar_ingreso_pagado: { args: { id: number; cuentaAhorroId: number; fecha: string; montoRecibido: string }; ret: null };
     obtener_ingresos_informales: { args: {  }; ret: IngresoInformal[] };
-    crear_ingreso_informal: { args: { fecha: string; descripcion: string; monto: string | number }; ret: number };
-    marcar_informal_pagado: { args: { id: number; cuentaAhorroId: number; fecha: string; montoRecibido: string | number }; ret: null };
+    crear_ingreso_informal: { args: { fecha: string; descripcion: string; monto: string }; ret: number };
+    marcar_informal_pagado: { args: { id: number; cuentaAhorroId: number; fecha: string; montoRecibido: string }; ret: null };
     obtener_tarjetas: { args: {  }; ret: Tarjeta[] };
-    crear_tarjeta: { args: { entidad: string; nombre: string; limitePesos: string | number; limiteDolares: string | number; sobregiroPesos: string | number; sobregiroDolares: string | number; balancePesos: string | number; balanceDolares: string | number; balanceCortePesos: string | number; balanceCorteDolares: string | number; corte: number; pago: number }; ret: number };
-    actualizar_limites_tarjeta: { args: { id: number; limitePesos: string | number; limiteDolares: string | number; sobregiroPesos: string | number; sobregiroDolares: string | number; balanceCortePesos: string | number; balanceCorteDolares: string | number; limiteAjustadoPesos?: string | number | null; limiteAjustadoDolares?: string | number | null; politicaLiquidacion?: string | null }; ret: null };
-    registrar_pago_tarjeta: { args: { id: number; fecha: string; monto: string | number; divisa: string; cuentaAhorroId?: number | null; tasaCambio: number }; ret: null };
+    crear_tarjeta: { args: { entidad: string; nombre: string; limitePesos: string; limiteDolares: string; sobregiroPesos: string; sobregiroDolares: string; balancePesos: string; balanceDolares: string; balanceCortePesos: string; balanceCorteDolares: string; corte: number; pago: number }; ret: number };
+    actualizar_limites_tarjeta: { args: { id: number; limitePesos: string; limiteDolares: string; sobregiroPesos: string; sobregiroDolares: string; balanceCortePesos: string; balanceCorteDolares: string; limiteAjustadoPesos?: string | null; limiteAjustadoDolares?: string | null; politicaLiquidacion?: string | null }; ret: null };
+    registrar_pago_tarjeta: { args: { id: number; fecha: string; monto: string; divisa: string; cuentaAhorroId?: number | null; tasaCambio: number }; ret: null };
     obtener_abonos_tarjeta: { args: { tarjetaId: number }; ret: AbonoTarjeta[] };
     revertir_abono_tarjeta: { args: { id: number; motivo: string }; ret: string };
-    simular_avance_efectivo: { args: { monto: string | number; divisa: string; tipoCargo: string; porcentaje?: number | null; cargoFijo?: string | number | null }; ret: SimulacionAvance };
-    registrar_avance_efectivo: { args: { tarjetaId: number; cuentaAhorroId: number; fecha: string; monto: string | number; divisa: string; tipoCargo: string; porcentaje?: number | null; cargoFijo?: string | number | null; nota?: string | null }; ret: string };
+    simular_avance_efectivo: { args: { monto: string; divisa: string; tipoCargo: string; porcentaje?: number | null; cargoFijo?: string | null }; ret: SimulacionAvance };
+    registrar_avance_efectivo: { args: { tarjetaId: number; cuentaAhorroId: number; fecha: string; monto: string; divisa: string; tipoCargo: string; porcentaje?: number | null; cargoFijo?: string | null; nota?: string | null }; ret: string };
     obtener_avances_tarjeta: { args: { tarjetaId: number }; ret: AvanceEfectivo[] };
     revertir_avance_efectivo: { args: { id: number; motivo: string }; ret: string };
     obtener_suscripciones: { args: {  }; ret: Suscripcion[] };
-    crear_suscripcion: { args: { plataforma: string; monto: string | number; tarjetaId: number; frecuencia: string; diaFacturacion: number; divisa: string; fechaProximoCobro?: string | null }; ret: number };
-    actualizar_suscripcion: { args: { id: number; plataforma: string; monto: string | number; tarjetaId: number; frecuencia: string; diaFacturacion: number; divisa: string; fechaProximoCobro?: string | null }; ret: null };
+    crear_suscripcion: { args: { plataforma: string; monto: string; tarjetaId: number; frecuencia: string; diaFacturacion: number; divisa: string; fechaProximoCobro?: string | null }; ret: number };
+    actualizar_suscripcion: { args: { id: number; plataforma: string; monto: string; tarjetaId: number; frecuencia: string; diaFacturacion: number; divisa: string; fechaProximoCobro?: string | null }; ret: null };
     corregir_proximo_cobro: { args: { id: number; fecha: string }; ret: null };
     eliminar_suscripcion: { args: { id: number }; ret: null };
     procesar_suscripciones: { args: {  }; ret: string[] };
@@ -63,7 +63,7 @@ export type Comandos = {
     crear_prestamo: { args: { input: PrestamoInput }; ret: number };
     actualizar_prestamo: { args: { input: ActualizarPrestamoInput }; ret: null };
     pagar_cuota_prestamo: { args: { id: number; fecha?: string | null }; ret: null };
-    declarar_saldo_prestamo: { args: { id: number; saldo: string | number; fecha?: string | null }; ret: null };
+    declarar_saldo_prestamo: { args: { id: number; saldo: string; fecha?: string | null }; ret: null };
     obtener_movimientos_prestamo: { args: { id: number }; ret: MovimientoPrestamo[] };
     eliminar_prestamo: { args: { id: number }; ret: null };
     obtener_clientes: { args: {  }; ret: Cliente[] };
@@ -73,17 +73,17 @@ export type Comandos = {
     listar_respaldos: { args: {  }; ret: string[] };
     restaurar_respaldo: { args: { nombre: string }; ret: any };
     obtener_cuentas: { args: {  }; ret: CuentaAhorro[] };
-    crear_cuenta: { args: { nombre: string; divisa: string; balance: string | number; entidad?: string | null; comisionPagoImpuestos?: string | number | null }; ret: number };
-    actualizar_cuenta: { args: { id: number; nombre: string; entidad?: string | null; comisionPagoImpuestos?: string | number | null }; ret: null };
+    crear_cuenta: { args: { nombre: string; divisa: string; balance: string; entidad?: string | null; comisionPagoImpuestos?: string | null }; ret: number };
+    actualizar_cuenta: { args: { id: number; nombre: string; entidad?: string | null; comisionPagoImpuestos?: string | null }; ret: null };
     eliminar_cuenta: { args: { id: number }; ret: null };
-    transferir_entre_cuentas: { args: { fecha: string; origenId: number; destinoId: number; montoOrigen: string | number; montoDestino: string | number; cargo: string | number; descripcion: string }; ret: null };
+    transferir_entre_cuentas: { args: { fecha: string; origenId: number; destinoId: number; montoOrigen: string; montoDestino: string; cargo: string; descripcion: string }; ret: null };
     obtener_transacciones_cuentas: { args: {  }; ret: TransaccionCuenta[] };
-    actualizar_ingreso: { args: { id: number; numeroFactura: string; clienteId: number; fechaEmision: string; montoTotal: string | number; porcentajeRetencion: number; cobroParcial?: string | number | null; motivo?: string | null }; ret: string };
-    crear_cobro_efectivo_informal: { args: { fecha: string; descripcion: string; monto: string | number; divisa: string }; ret: number };
+    actualizar_ingreso: { args: { id: number; numeroFactura: string; clienteId: number; fechaEmision: string; montoTotal: string; porcentajeRetencion: number; cobroParcial?: string | null; motivo?: string | null }; ret: string };
+    crear_cobro_efectivo_informal: { args: { fecha: string; descripcion: string; monto: string; divisa: string }; ret: number };
     obtener_bonificaciones: { args: {  }; ret: BonificacionDto[] };
-    crear_bonificacion: { args: { fecha: string; tarjetaId: number; monto: string | number; divisa: string; concepto: string; gastoId?: number | null }; ret: number };
+    crear_bonificacion: { args: { fecha: string; tarjetaId: number; monto: string; divisa: string; concepto: string; gastoId?: number | null }; ret: number };
     eliminar_bonificacion: { args: { id: number }; ret: null };
-    liquidar_consumo_pendiente: { args: { id: number; montoLiquidado: string | number }; ret: number };
+    liquidar_consumo_pendiente: { args: { id: number; montoLiquidado: string }; ret: number };
     obtener_correcciones: { args: {  }; ret: CasoCorreccion[] };
     eliminar_gasto: { args: { id: number; motivo: string }; ret: string };
     eliminar_transaccion_cuenta: { args: { id: number; motivo: string }; ret: string };

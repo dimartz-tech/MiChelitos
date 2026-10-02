@@ -38,7 +38,7 @@ test('api.ts tipa invoke con el mapa de comandos generado desde Rust', () => {
 test('el traductor de tipos rechaza un tipo de Rust desconocido en vez de inventarlo', () => {
     assert.throws(() => tipoJs('HashMap<String, i64>'), /sin traducción/);
     assert.equal(tipoJs('Option<Vec<String>>'), 'string[] | null');
-    assert.equal(tipoJs('Option<ipc::ImporteDecimal>'), 'string | number | null');
+    assert.equal(tipoJs('Option<ipc::ImporteDecimal>'), 'string | null');
 });
 
 test('la interfaz no lee campos de suscripción que Rust ya no envía', () => {
