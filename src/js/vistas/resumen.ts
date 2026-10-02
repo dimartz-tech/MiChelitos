@@ -78,14 +78,35 @@ export class VistaResumen implements Vista {
         // corresponde con lo que se cobra de verdad. Los préstamos no tienen divisa
         // (son en pesos). El total de la cabecera es el de pesos; las demás divisas
         // se muestran aparte, cada una con la suya.
-        const suscripcionesPorDivisa = new Map<string, number>();
+        // Subdivisión por frecuencia, y por divisa sin mezclarlas: lo mensual se suma tal cual; lo anual se
+        // guarda como total del año y su equivalente al mes (total / 12) sale de él, no de cada suscripción.
+        interface Subdivision { mensual: number; anual: number }
+        const subdivisiones = new Map<string, Subdivision>();
         for (const s of suscripciones) {
             const divisa = s.divisa || 'DOP';
-            const alMes = s.frecuencia === 'mensual' ? s.monto : (s.monto / 12.0);
-            suscripcionesPorDivisa.set(divisa, (suscripcionesPorDivisa.get(divisa) ?? 0) + alMes);
+            const sub = subdivisiones.get(divisa) ?? { mensual: 0, anual: 0 };
+            if (s.frecuencia === 'mensual') sub.mensual += s.monto; else sub.anual += s.monto;
+            subdivisiones.set(divisa, sub);
         }
-        const cuotaSuscripciones = suscripcionesPorDivisa.get('DOP') ?? 0;
-        const suscripcionesOtrasDivisas = [...suscripcionesPorDivisa.entries()].filter(([d]) => d !== 'DOP').sort(([x], [y]) => x.localeCompare(y));
+        const alMes = (sub: Subdivision | undefined): number => (sub ? sub.mensual + sub.anual / 12.0 : 0);
+        const subDop = subdivisiones.get('DOP') ?? { mensual: 0, anual: 0 };
+        const cuotaSuscripciones = alMes(subDop);
+        const suscripcionesOtrasDivisas = [...subdivisiones.entries()]
+            .filter(([d]) => d !== 'DOP')
+            .sort(([x], [y]) => x.localeCompare(y))
+            .map(([d, sub]): [string, number] => [d, alMes(sub)]);
+        const filaSuscripcion = (rotulo: string, divisa: string, importe: number, nota = ''): string => `
+                        <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); padding:0.5rem; border-radius:4px;">
+                            <span>${escaparHtml(rotulo)}${nota ? ` <small style="color:var(--text-muted);">${escaparHtml(nota)}</small>` : ''}</span>
+                            <strong>${escaparHtml(divisa)} ${formato.importe(importe)}</strong>
+                        </div>`;
+        const filasSuscripciones = (divisa: string, sub: Subdivision, siempre: boolean): string => {
+            const en = divisa === 'DOP' ? '' : ` en ${divisa}`;
+            return filaSuscripcion(`Suscripciones Mensuales${en}`, divisa, sub.mensual)
+                + (siempre || sub.anual > 0
+                    ? filaSuscripcion(`Suscripciones Anuales${en} (al mes)`, divisa, sub.anual / 12.0, `total del año: ${divisa} ${formato.importe(sub.anual)}`)
+                    : '');
+        };
         const cargaFija = cuotaPrestamos + cuotaSuscripciones;
 
         // 4. Balance del Mes (basado en monto cobrado/recibido)
@@ -180,15 +201,8 @@ export class VistaResumen implements Vista {
                             <span>Cuotas de Préstamos</span>
                             <strong>DOP ${formato.importe(cuotaPrestamos)}</strong>
                         </div>
-                        <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); padding:0.5rem; border-radius:4px;">
-                            <span>Suscripciones Recurrentes</span>
-                            <strong>DOP ${formato.importe(cuotaSuscripciones)}</strong>
-                        </div>
-                        ${suscripcionesOtrasDivisas.map(([d, m]) => `
-                        <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); padding:0.5rem; border-radius:4px;">
-                            <span>Suscripciones en ${escaparHtml(d)}</span>
-                            <strong>${escaparHtml(d)} ${formato.importe(m)}</strong>
-                        </div>`).join('')}
+                        ${filasSuscripciones('DOP', subDop, true)}
+                        ${[...subdivisiones.entries()].filter(([d]) => d !== 'DOP').sort(([x], [y]) => x.localeCompare(y)).map(([d, sub]) => filasSuscripciones(d, sub, false)).join('')}
                     </div>
                 </div>
 
