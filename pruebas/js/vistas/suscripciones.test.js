@@ -64,6 +64,52 @@ test('dibuja la tabla con el formato inyectado, el día de facturación y la fec
     assert.doesNotMatch(html, /undefined|NaN/);
 });
 
+const MIXTAS = () => [
+    sus({ id: 1, plataforma: 'Mensual Pesos', monto: 100, divisa: 'DOP', frecuencia: 'mensual' }),
+    sus({ id: 2, plataforma: 'Mensual Dólares A', monto: 10, divisa: 'USD', frecuencia: 'mensual' }),
+    sus({ id: 3, plataforma: 'Mensual Dólares B', monto: 5, divisa: 'USD', frecuencia: 'mensual' }),
+    sus({ id: 4, plataforma: 'Anual Pesos', monto: 1200, divisa: 'DOP', frecuencia: 'anual' }),
+    sus({ id: 5, plataforma: 'Anual Dólares', monto: 60, divisa: 'USD', frecuencia: 'anual' }),
+];
+const bloquesDe = html => Object.fromEntries([...html.matchAll(/<div class="bloque-suscripciones" data-frecuencia="(\w+)"[\s\S]*?(?=<div class="bloque-suscripciones"|<\/div>\s*<\/div>\s*<\/div>\s*$|$)/g)].map(m => [m[1], m[0]]));
+
+test('«Cargos Activos» se divide en Mensuales y Anuales, cada servicio en el suyo', async () => {
+    const t = montar({ suscripciones: MIXTAS() });
+    await t.vista.render();
+    const b = bloquesDe(t.pantalla.contenido.innerHTML);
+    assert.deepEqual(Object.keys(b).sort(), ['anual', 'mensual']);
+    assert.match(b.mensual, /Mensual Pesos[\s\S]*Mensual Dólares A[\s\S]*Mensual Dólares B/);
+    assert.doesNotMatch(b.mensual, /Anual (Pesos|Dólares)/);
+    assert.match(b.anual, /Anual Pesos[\s\S]*Anual Dólares/);
+    assert.doesNotMatch(b.anual, /Mensual (Pesos|Dólares)/);
+});
+
+test('cada bloque suma su subtotal por divisa sin mezclarlas; el anual dice también cuánto es al mes', async () => {
+    const t = montar({ suscripciones: MIXTAS() });
+    await t.vista.render();
+    const b = bloquesDe(t.pantalla.contenido.innerHTML);
+    assert.match(b.mensual, /Subtotal al mes: DOP #100# · USD #15#/);
+    assert.match(b.anual, /Subtotal al año: DOP #1200# \(≈ DOP #100# al mes\) · USD #60# \(≈ USD #5# al mes\)/);
+});
+
+test('un bloque sin suscripciones no se dibuja; sin ninguna sigue el mensaje vacío', async () => {
+    let t = montar({ suscripciones: [sus({ frecuencia: 'anual' })] });
+    await t.vista.render();
+    assert.deepEqual(Object.keys(bloquesDe(t.pantalla.contenido.innerHTML)), ['anual']);
+    t = montar({ suscripciones: [] });
+    await t.vista.render();
+    assert.deepEqual(Object.keys(bloquesDe(t.pantalla.contenido.innerHTML)), []);
+    assert.match(t.pantalla.contenido.innerHTML, /No hay suscripciones registradas/);
+});
+
+test('el formulario de alta es uno solo y sigue ofreciendo la frecuencia', async () => {
+    const t = montar({ suscripciones: MIXTAS() });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.equal((html.match(/id="form-add-suscripcion"/g) || []).length, 1);
+    assert.match(html, /<option value="anual">/);
+});
+
 test('el aviso «Cobro próximo» muestra la fecha del próximo cobro (la 1.43.0 imprimía «undefined»)', async () => {
     const t = montar({ suscripciones: [sus({ avisa: true })] });
     await t.vista.render();
