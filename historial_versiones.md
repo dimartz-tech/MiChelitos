@@ -4,7 +4,21 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.72.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.73.0 (Versión Actual) - 2026-10-02
+**El núcleo rechaza un abono a tarjeta que no es positivo** (decisión del titular tras el hallazgo de 1.72.0).
+
+### 🐛 Qué estaba mal
+* `registrar_pago_tarjeta` aceptaba un abono de 0.00, de 0.004 (que redondea a cero) o **negativo, que subía la deuda**. La comprobación «mayor que cero» vivía solo en la interfaz.
+
+### 🔧 Qué se hace
+* La regla pasa al caso de uso: antes de tocar ningún saldo, un abono cero o negativo se rechaza con `ErrorDominio::AbonoSinImporte` («Un abono debe ser mayor que cero…»). Es la misma lógica que ya tenían la bonificación y la suscripción. La interfaz no cambia.
+
+### 🧪 Pruebas
+* La prueba de caracterización `c16c` se invierte (0.00, 0.004 y -100.00 se rechazan y la deuda no se mueve) y se añade una del caso de uso (cero y negativo no mueven ni la deuda ni la cuenta). Mutaciones: quitar el chequeo de cero o el de negativo, ambas detectadas. **Rust 636 pasan.**
+
+---
+
+## 🚀 Versión 1.72.0 - 2026-10-02
 **Importes a texto: se migran los 12 comandos que quedaban y se retira la rama «número» de `ImporteDecimal`. La migración queda terminada.**
 
 ### 🐛 Qué estaba mal
