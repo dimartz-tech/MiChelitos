@@ -216,9 +216,10 @@ export class VistaCuentas implements Vista {
         const fec = dom.elemento<Campo>('tra_fec').value;
         const ori = Number(dom.elemento<Campo>('tra_ori').value);
         const des = Number(dom.elemento<Campo>('tra_des').value);
-        const monOri = Number(dom.elemento<Campo>('tra_mon_ori').value);
-        const monDes = Number(dom.elemento<Campo>('tra_mon_des').value);
-        const car = Number(dom.elemento<Campo>('tra_car').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos. Cargo en blanco = sin cargo.
+        const monOri = dom.elemento<Campo>('tra_mon_ori').value.trim();
+        const monDes = dom.elemento<Campo>('tra_mon_des').value.trim();
+        const car = dom.elemento<Campo>('tra_car').value.trim() || '0';
         const txt = dom.elemento<Campo>('tra_des_txt').value;
         try {
             await api.transferirEntreCuentas(fec, ori, des, monOri, monDes, car, txt);

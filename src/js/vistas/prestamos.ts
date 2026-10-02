@@ -649,10 +649,11 @@ export class VistaPrestamos implements Vista {
             await api.actualizarPrestamo({
                 id: Number(id),
                 tasa_actual: Number(dom.elemento<Campo>(`edp_tas_${id}`).value),
-                monto_cuota: Number(dom.elemento<Campo>(`edp_cuo_${id}`).value),
+                // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+                monto_cuota: dom.elemento<Campo>(`edp_cuo_${id}`).value.trim(),
                 dia_pago: Number(dom.elemento<Campo>(`edp_dia_${id}`).value),
                 // En blanco significa «no declarado», que no es lo mismo que cero.
-                limite_credito: limiteTexto === '' ? null : Number(limiteTexto),
+                limite_credito: limiteTexto.trim() === '' ? null : limiteTexto.trim(),
                 tarjeta_id: tarjeta === '' ? null : Number(tarjeta),
             });
             avisos.mostrar("Condiciones actualizadas.");
@@ -668,17 +669,18 @@ export class VistaPrestamos implements Vista {
         const { api, avisos, enrutador, dom } = this.dep;
         const tip = dom.elemento<Campo>('pre_tip').value;
         const ins = dom.elemento<Campo>('pre_ins').value;
-        const mon = Number(dom.elemento<Campo>('pre_mon').value);
+        // Los importes viajan como texto recortado; el número solo sirve para comparar.
+        const mon = dom.elemento<Campo>('pre_mon').value.trim();
         const tas = Number(dom.elemento<Campo>('pre_tas').value);
         const tot = dom.buscar('pre_tot') && dom.elemento<Campo>('pre_tot').value ? Number(dom.elemento<Campo>('pre_tot').value) : null;
         const pen = dom.buscar('pre_pen') && dom.elemento<Campo>('pre_pen').value ? Number(dom.elemento<Campo>('pre_pen').value) : null;
-        const cuo = Number(dom.elemento<Campo>('pre_cuo').value);
+        const cuo = dom.elemento<Campo>('pre_cuo').value.trim();
         const dia = Number(dom.elemento<Campo>('pre_dia').value);
         const salTexto = dom.buscar<Campo>('pre_sal')?.value ?? '';
         const limTexto = dom.buscar<Campo>('pre_lim')?.value ?? '';
         // En blanco significa "no declarado", que no es lo mismo que cero.
-        const sal = salTexto === '' ? null : Number(salTexto);
-        const lim = tip === 'flexible' && limTexto !== '' ? Number(limTexto) : null;
+        const sal = salTexto.trim() === '' ? null : salTexto.trim();
+        const lim = tip === 'flexible' && limTexto.trim() !== '' ? limTexto.trim() : null;
 
         try {
             await api.crearPrestamo({

@@ -191,13 +191,13 @@ const CAMPOS_ALTA = (extra = {}) => ({
     pre_cuo: el({ value: '250' }), pre_dia: el({ value: '15' }), pre_sal: el({ value: '' }), ...extra,
 });
 
-test('alta de consumo: números donde Rust espera números, el saldo en blanco como «no declarado»', async () => {
+test('alta de consumo: importes como texto, el saldo en blanco como «no declarado»', async () => {
     const t = montar({ campos: CAMPOS_ALTA({ pre_tot: el({ value: '24' }), pre_pen: el({ value: '20' }), pre_lim: el({ value: '999' }) }) });
     await t.vista.handleAgregarPrestamo(t.evento);
     assert.equal(t.evento.evitado, 1);
     assert.deepEqual(t.llamadas, [['crearPrestamo', {
-        tipo_prestamo: 'consumo', monto_prestamo: 5000.5, institucion_financiera: 'Banco Alfa', tasa_actual: 12.5,
-        cuotas_totales: 24, cuotas_pendientes: 20, monto_cuota: 250, dia_pago: 15, saldo_actual: null,
+        tipo_prestamo: 'consumo', monto_prestamo: '5000.5', institucion_financiera: 'Banco Alfa', tasa_actual: 12.5,
+        cuotas_totales: 24, cuotas_pendientes: 20, monto_cuota: '250', dia_pago: 15, saldo_actual: null,
         limite_credito: null,   // un consumo no lleva límite aunque el campo tenga algo
     }]]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Financiamiento registrado con éxito.', tipo: undefined }]);
@@ -208,13 +208,25 @@ test('alta de una línea: el límite viaja, las cuotas no, y un saldo declarado 
     const t = montar({ campos: CAMPOS_ALTA({ pre_tip: el({ value: 'flexible' }), pre_tot: el({ value: '' }), pre_pen: el({ value: '' }), pre_lim: el({ value: '1500' }), pre_sal: el({ value: '300' }) }) });
     await t.vista.handleAgregarPrestamo(t.evento);
     const d = t.llamadas[0][1];
-    assert.deepEqual([d.tipo_prestamo, d.cuotas_totales, d.cuotas_pendientes, d.limite_credito, d.saldo_actual], ['flexible', null, null, 1500, 300]);
+    assert.deepEqual([d.tipo_prestamo, d.cuotas_totales, d.cuotas_pendientes, d.limite_credito, d.saldo_actual], ['flexible', null, null, '1500', '300']);
+});
+
+test('los importes del alta y de la edición conservan los dígitos escritos (sin pasar por número)', async () => {
+    let t = montar({ campos: CAMPOS_ALTA({ pre_tip: el({ value: 'flexible' }), pre_mon: el({ value: ' 0075.250 ' }), pre_cuo: el({ value: '0010.500' }), pre_tot: el({ value: '' }), pre_pen: el({ value: '' }), pre_sal: el({ value: '0020.100' }), pre_lim: el({ value: '0300.700' }) }) });
+    await t.vista.handleAgregarPrestamo(t.evento);
+    let d = t.llamadas[0][1];
+    assert.deepEqual([d.monto_prestamo, d.monto_cuota, d.saldo_actual, d.limite_credito], ['0075.250', '0010.500', '0020.100', '0300.700']);
+
+    t = montar({ campos: CAMPOS_EDICION({ edp_cuo_3: el({ value: '0010.500' }), edp_lim_3: el({ value: ' 0300.700 ' }) }) });
+    await t.vista.handleEdicionPrestamo(t.evento, 3);
+    d = t.llamadas[0][1];
+    assert.deepEqual([d.monto_cuota, d.limite_credito], ['0010.500', '0300.700']);
 });
 
 test('un saldo declarado en cero cuenta como cero, no como «no declarado»', async () => {
     const t = montar({ campos: CAMPOS_ALTA({ pre_tot: el({ value: '12' }), pre_pen: el({ value: '12' }), pre_sal: el({ value: '0' }) }) });
     await t.vista.handleAgregarPrestamo(t.evento);
-    assert.equal(t.llamadas[0][1].saldo_actual, 0);
+    assert.equal(t.llamadas[0][1].saldo_actual, '0');
 });
 
 test('alta: si Rust rechaza se avisa el error y no se redibuja', async () => {
@@ -259,10 +271,10 @@ const CAMPOS_EDICION = (extra = {}) => ({
     edp_lim_3: el({ value: '2000' }), 'modal-pre-3': el(), ...extra,
 });
 
-test('editar condiciones: envía números, cierra la ventana y redibuja', async () => {
+test('editar condiciones: envía texto y números, cierra la ventana y redibuja', async () => {
     const t = montar({ campos: CAMPOS_EDICION() });
     await t.vista.handleEdicionPrestamo(t.evento, 3);
-    assert.deepEqual(t.llamadas, [['actualizarPrestamo', { id: 3, tasa_actual: 14.5, monto_cuota: 55, dia_pago: 20, limite_credito: 2000, tarjeta_id: 7 }]]);
+    assert.deepEqual(t.llamadas, [['actualizarPrestamo', { id: 3, tasa_actual: 14.5, monto_cuota: '55', dia_pago: 20, limite_credito: '2000', tarjeta_id: 7 }]]);
     assert.equal(t.registro['modal-pre-3'].quitado, true);
     assert.deepEqual(t.avisos, [{ mensaje: 'Condiciones actualizadas.', tipo: undefined }]);
     assert.deepEqual(t.rutas, ['prestamos']);

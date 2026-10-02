@@ -57,7 +57,7 @@ function montar({ gastos = [gasto()], campos = {}, tarjetas = TARJETAS, cuentas 
 }
 
 const CAMPOS_EFECTIVO = () => ({
-    gas_fec: el({ value: '05/03/2027' }), gas_mon: el({ value: '250.5' }), gas_div: el({ value: 'DOP' }), gas_des: el({ value: 'Compra de prueba' }),
+    gas_fec: el({ value: '05/03/2027' }), gas_mon: el({ value: ' 0075.250 ' }), gas_div: el({ value: 'DOP' }), gas_des: el({ value: 'Compra de prueba' }),
     gas_cat: el({ value: '2' }), gas_met: el({ value: 'efectivo' }),
 });
 
@@ -144,7 +144,7 @@ test('alta en efectivo: envía el gasto completo, con la tarjeta, la cuenta y la
     await t.vista.handleAgregarGasto(t.evento);
     assert.equal(t.evento.evitado, 1);
     assert.deepEqual(t.llamadas, [['crearGasto', {
-        fecha: '05/03/2027', monto: 250.5, divisa: 'DOP', descripcion: 'Compra de prueba', categoria_id: 2, metodo_pago: 'efectivo',
+        fecha: '05/03/2027', monto: '0075.250', divisa: 'DOP', descripcion: 'Compra de prueba', categoria_id: 2, metodo_pago: 'efectivo',
         es_lbtr: false, tarjeta_id: null, cuenta_ahorro_id: null, tasa_cambio: null,
     }]]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Gasto registrado con éxito.', tipo: undefined }]);
@@ -220,11 +220,20 @@ test('liquidar un consumo: abre la ventana con su identificador y el monto forma
     assert.match(t.modales[0].html, /appUI\.handleLiquidacionSubmit\(event, 9, 100\)/);
 });
 
-test('liquidar un consumo: envía el importe en pesos como número, muestra la tasa, cierra la ventana y redibuja', async () => {
+test('liquidar un consumo: el importe viaja como TEXTO, con los espacios recortados y los dígitos intactos', async () => {
+    for (const [escrito, esperado] of [[' 6050.5 ', '6050.5'], ['6050.005', '6050.005'], ['0060.500', '0060.500']]) {
+        const t = montar({ campos: { liq_monto_9: el({ value: escrito }), 'modal-liq-9': el() } });
+        await t.vista.handleLiquidacionSubmit(t.evento, 9, 100);
+        assert.strictEqual(t.llamadas[0][2], esperado, JSON.stringify(escrito));
+        assert.equal(typeof t.llamadas[0][2], 'string');
+    }
+});
+
+test('liquidar un consumo: envía el importe en pesos como texto, muestra la tasa, cierra la ventana y redibuja', async () => {
     const campos = { liq_monto_9: el({ value: '6000' }), 'modal-liq-9': el() };
     const t = montar({ campos });
     await t.vista.handleLiquidacionSubmit(t.evento, 9, 100);
-    assert.deepEqual(t.llamadas, [['liquidarConsumoPendiente', 9, 6000]]);
+    assert.deepEqual(t.llamadas, [['liquidarConsumoPendiente', 9, '6000']]);
     assert.equal(campos['modal-liq-9'].quitado, true);
     assert.match(t.avisos[0].mensaje, /tasa de 59\.5000/);
     assert.deepEqual(t.rutas, ['gastos']);

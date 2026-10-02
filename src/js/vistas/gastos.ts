@@ -420,7 +420,8 @@ export class VistaGastos implements Vista {
         e.preventDefault();
         const { api, avisos, enrutador, dom } = this.dep;
         const fec = dom.elemento<Campo>('gas_fec').value;
-        const mon = Number(dom.elemento<Campo>('gas_mon').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const mon = dom.elemento<Campo>('gas_mon').value.trim();
         const div = dom.elemento<Campo>('gas_div').value;
         const des = dom.elemento<Campo>('gas_des').value;
         const cat = Number(dom.elemento<Campo>('gas_cat').value);
@@ -519,8 +520,9 @@ export class VistaGastos implements Vista {
     async handleLiquidacionSubmit(e: EventoDeFormulario, id: number, montoOrigen: number): Promise<void> {
         e.preventDefault();
         const { api, avisos, enrutador, dom } = this.dep;
-        const monto = Number(dom.elemento<Campo>(`liq_monto_${id}`).value);
-        if (!(monto > 0)) { avisos.mostrar("El importe en pesos debe ser mayor que cero.", "error"); return; }
+        // Texto, tal cual se escribió (convención de 1.21.0); el número solo sirve para comparar.
+        const monto = dom.elemento<Campo>(`liq_monto_${id}`).value.trim();
+        if (!(Number(monto) > 0)) { avisos.mostrar("El importe en pesos debe ser mayor que cero.", "error"); return; }
 
         try {
             const tasa = await api.liquidarConsumoPendiente(id, monto);

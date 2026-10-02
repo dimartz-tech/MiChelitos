@@ -38,13 +38,24 @@ const TRES_DECIMALES = '0075.250';
 /** Cada fila: el método, cómo llamarlo con `1.005` en el importe, y los campos que deben llegar tal cual. */
 const MIGRADOS = [
     ['crearIngresoInformal', A => A.crearIngresoInformal('06/03/2027', 'Clase', TRES_DECIMALES), ['monto']],
+    ['crearCuenta (saldo inicial)', A => A.crearCuenta('Cuenta', 'DOP', TRES_DECIMALES, null, null), ['balance']],
+    ['registrarPagoTarjeta', A => A.registrarPagoTarjeta(1, '01/01/2027', TRES_DECIMALES, 'DOP', null, 0), ['monto']],
+    ['marcarIngresoPagado', A => A.marcarIngresoPagado(1, 2, '01/01/2027', TRES_DECIMALES), ['montoRecibido']],
+    ['marcarInformalPagado', A => A.marcarInformalPagado(1, 2, '01/01/2027', TRES_DECIMALES), ['montoRecibido']],
+    ['liquidarConsumoPendiente', A => A.liquidarConsumoPendiente(1, TRES_DECIMALES), ['montoLiquidado']],
     ['crearBonificacion', A => A.crearBonificacion('06/03/2027', 7, TRES_DECIMALES, 'DOP', 'Cashback'), ['monto']],
     ['crearCobroEfectivoInformal', A => A.crearCobroEfectivoInformal('06/03/2027', 'Cobro', TRES_DECIMALES, 'USD'), ['monto']],
     ['crearSuscripcion', A => A.crearSuscripcion('Plataforma', TRES_DECIMALES, 7, 'mensual', 15, 'USD', null), ['monto']],
     ['actualizarSuscripcion', A => A.actualizarSuscripcion(1, 'Plataforma', TRES_DECIMALES, 7, 'mensual', 15, 'USD', null), ['monto']],
     ['declararSaldoPrestamo', A => A.declararSaldoPrestamo(1, TRES_DECIMALES), ['saldo']],
+    ['transferirEntreCuentas', A => A.transferirEntreCuentas(1, 2, '10', TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, 'x'), ['montoOrigen', 'montoDestino', 'cargo']],
+    ['crearTarjeta', A => A.crearTarjeta('B', 'T', TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, 15, 5),
+        ['limitePesos', 'limiteDolares', 'sobregiroPesos', 'sobregiroDolares', 'balancePesos', 'balanceDolares', 'balanceCortePesos', 'balanceCorteDolares']],
+    ['actualizarLimitesTarjeta', A => A.actualizarLimitesTarjeta(1, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, TRES_DECIMALES, 'origen'),
+        ['limitePesos', 'limiteDolares', 'sobregiroPesos', 'sobregiroDolares', 'balanceCortePesos', 'balanceCorteDolares', 'limiteAjustadoPesos', 'limiteAjustadoDolares']],
     ['crearCuenta (comisión)', A => A.crearCuenta('Cuenta', 'DOP', 10, null, TRES_DECIMALES), ['comisionPagoImpuestos']],
     ['actualizarCuenta (comisión)', A => A.actualizarCuenta(1, 'Cuenta', null, TRES_DECIMALES), ['comisionPagoImpuestos']],
+    ['actualizarIngreso (total)', A => A.actualizarIngreso(1, 'F-1', 2, '01/01/2027', TRES_DECIMALES, 10, null, null), ['montoTotal']],
     ['actualizarIngreso (cobro parcial)', A => A.actualizarIngreso(1, 'F-1', 2, '01/01/2027', 100, 10, TRES_DECIMALES, null), ['cobroParcial']],
     ['simularAvanceEfectivo', A => A.simularAvanceEfectivo(TRES_DECIMALES, 'DOP', 'fijo', null, TRES_DECIMALES), ['monto', 'cargoFijo']],
     ['registrarAvanceEfectivo', A => A.registrarAvanceEfectivo(1, 2, '01/01/2027', TRES_DECIMALES, 'DOP', 'fijo', null, TRES_DECIMALES, null), ['monto', 'cargoFijo']],
@@ -70,25 +81,10 @@ test('un importe de tres decimales llega intacto: es el que `Number` deja en 1.0
 // --- los que faltan --------------------------------------------------------------------------
 
 /**
- * Importes que el envoltorio todavía convierte con `Number(...)`, y los cinco comandos que reciben
- * un objeto de importes ya como números desde la vista (`crearGasto`, `crearIngreso`,
- * `crearPrestamo`, `actualizarPrestamo` y el monto de `registrarPagoTarjeta`). **Cada PR de
- * migración quita sus entradas de aquí.**
+ * Importes que el envoltorio todavía convierte con `Number(...)`. **Debe seguir vacía**: un importe
+ * nuevo viaja como texto (`String(x)` en el envoltorio, `ImporteDecimal` en Rust), que ya solo acepta texto.
  */
-const PENDIENTES = [
-    'actualizarIngreso.montoTotal',
-    'actualizarLimitesTarjeta.balanceCorteDolares', 'actualizarLimitesTarjeta.balanceCortePesos',
-    'actualizarLimitesTarjeta.limiteDolares', 'actualizarLimitesTarjeta.limitePesos',
-    'actualizarLimitesTarjeta.sobregiroDolares', 'actualizarLimitesTarjeta.sobregiroPesos',
-    'crearCuenta.balance',
-    'crearTarjeta.balanceCorteDolares', 'crearTarjeta.balanceCortePesos',
-    'crearTarjeta.balanceDolares', 'crearTarjeta.balancePesos',
-    'crearTarjeta.limiteDolares', 'crearTarjeta.limitePesos',
-    'crearTarjeta.sobregiroDolares', 'crearTarjeta.sobregiroPesos',
-    'liquidarConsumoPendiente.montoLiquidado',
-    'marcarInformalPagado.montoRecibido', 'marcarIngresoPagado.montoRecibido',
-    'transferirEntreCuentas.cargo', 'transferirEntreCuentas.montoDestino', 'transferirEntreCuentas.montoOrigen',
-];
+const PENDIENTES = [];
 
 const ES_IMPORTE = /monto|limite|sobregiro|balance|saldo|cuota|cargo|comision|valor|importe/i;
 

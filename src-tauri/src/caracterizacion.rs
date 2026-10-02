@@ -149,6 +149,13 @@ fn crear_tarjeta(balance_pesos: f64, balance_dolares: f64) -> i64 {
     c.last_insert_rowid()
 }
 
+/// Lee de una tarjeta la columna REAL indicada.
+fn columna_tarjeta(id: i64, columna: &str) -> f64 {
+    conexion()
+        .query_row(&format!("SELECT {columna} FROM tarjetas WHERE id = ?;"), params![id], |r| r.get(0))
+        .unwrap()
+}
+
 fn fijar_balance_tarjeta(id: i64, pesos: f64, dolares: f64) {
     conexion()
         .execute(
@@ -220,10 +227,10 @@ fn declarar_comision_de_impuestos(cuenta_id: i64, tarifa: f64) {
         .expect("declarar comisión de impuestos");
 }
 
-fn transferencia(monto: f64, categoria: &str, descripcion: &str, cuenta_id: i64) -> GastoInput {
+fn transferencia(importe_gasto: f64, categoria: &str, descripcion: &str, cuenta_id: i64) -> GastoInput {
     GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto,
+        monto: monto(importe_gasto),
         divisa: "DOP".to_string(),
         descripcion: descripcion.to_string(),
         categoria_id: id_categoria(categoria),
@@ -337,7 +344,7 @@ fn c8_el_gasto_con_tarjeta_en_dolares_solo_mueve_el_balance_en_dolares() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 75.0,
+        monto: monto(75.0),
         divisa: "USD".to_string(),
         descripcion: "Suscripción anual".to_string(),
         categoria_id: id_categoria("Suscripciones"),
@@ -362,7 +369,7 @@ fn c9_el_gasto_en_efectivo_descuenta_de_la_caja_de_su_divisa() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 1200.0,
+        monto: monto(1200.0),
         divisa: "DOP".to_string(),
         descripcion: "Almuerzo".to_string(),
         categoria_id: id_categoria("Alimentación"),
@@ -396,7 +403,7 @@ fn c10_renombrar_la_caja_ya_no_impide_que_el_gasto_se_asiente() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 1200.0,
+        monto: monto(1200.0),
         divisa: "DOP".to_string(),
         descripcion: "Almuerzo".to_string(),
         categoria_id: id_categoria("Alimentación"),
@@ -451,7 +458,7 @@ fn c10c_los_gastos_en_efectivo_quedan_vinculados_a_la_caja_por_identificador() {
     let _g = entorno_aislado();
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 1200.0,
+        monto: monto(1200.0),
         divisa: "DOP".to_string(),
         descripcion: "Almuerzo".to_string(),
         categoria_id: id_categoria("Alimentación"),
@@ -484,7 +491,7 @@ fn c11_un_gasto_con_tarjeta_sin_identificador_se_rechaza() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 900.0,
+        monto: monto(900.0),
         divisa: "DOP".to_string(),
         descripcion: "Compra sin tarjeta indicada".to_string(),
         categoria_id: id_categoria("Otros"),
@@ -514,7 +521,7 @@ fn c12_la_reversion_de_tarjeta_deja_saldo_a_favor_en_vez_de_recortar() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 150.0,
+        monto: monto(150.0),
         divisa: "DOP".to_string(),
         descripcion: "Compra".to_string(),
         categoria_id: id_categoria("Otros"),
@@ -602,7 +609,7 @@ fn c16_una_divisa_distinta_de_usd_se_trata_como_pesos() {
 
     let entrada = GastoInput {
         fecha: "08/09/2026".to_string(),
-        monto: 300.0,
+        monto: monto(300.0),
         divisa: "EUR".to_string(),
         descripcion: "Compra en euros".to_string(),
         categoria_id: id_categoria("Otros"),
@@ -625,6 +632,34 @@ fn c16_una_divisa_distinta_de_usd_se_trata_como_pesos() {
 // =====================================================================
 
 #[test]
+fn c16b_el_abono_decide_el_centimo_con_los_digitos_escritos() {
+    // `1000.005` sube a 1000.01: la deuda baja exactamente ese céntimo, y sin cuenta de ahorro no hay comisión.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(50000.0, 0.0);
+
+    registrar_pago_tarjeta(tarjeta, "08/09/2026".to_string(), importe("1000.005"), "DOP".to_string(), None, 0.0).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 50000.0 - 1000.01, "la deuda baja el céntimo decidido con los dígitos");
+}
+
+#[test]
+fn c16c_hallazgo_el_nucleo_no_rechaza_un_abono_cero_ni_negativo_solo_lo_hace_la_interfaz() {
+    // **HALLAZGO, sin corregir** (protocolo del proyecto: documentar y fijar antes de corregir; el cambio se
+    // consulta). La comprobación «el monto del abono debe ser mayor que cero» vive **solo en la interfaz**
+    // (`handleAbonoTarjeta`). Quien llame al comando por el IPC puede registrar un abono de 0.00, o uno
+    // **negativo, que sube la deuda**. Ya era así con el `f64`; la migración a texto no lo cambia. Esta prueba
+    // describe el comportamiento ACTUAL: si se decide que el núcleo lo rechace, esta prueba se invierte.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(50000.0, 0.0);
+
+    registrar_pago_tarjeta(tarjeta, "08/09/2026".to_string(), importe("0.00"), "DOP".to_string(), None, 0.0).unwrap();
+    assert_importe(balances_tarjeta(tarjeta).0, 50000.0, "un abono de cero no mueve nada");
+
+    registrar_pago_tarjeta(tarjeta, "08/09/2026".to_string(), importe("-100.00"), "DOP".to_string(), None, 0.0).unwrap();
+    assert_importe(balances_tarjeta(tarjeta).0, 50100.0, "un abono negativo SUBE la deuda: lo que hoy no impide el núcleo");
+}
+
+#[test]
 fn c17_el_abono_en_igual_divisa_cobra_la_comision_sobre_el_monto() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(50000.0, 0.0);
@@ -634,7 +669,7 @@ fn c17_el_abono_en_igual_divisa_cobra_la_comision_sobre_el_monto() {
     registrar_pago_tarjeta(
         tarjeta,
         "08/09/2026".to_string(),
-        12345.67,
+        monto(12345.67),
         "DOP".to_string(),
         Some(cuenta),
         0.0,
@@ -662,7 +697,7 @@ fn c18_el_abono_multidivisa_convierte_y_comisiona_al_centavo() {
     registrar_pago_tarjeta(
         tarjeta,
         "08/09/2026".to_string(),
-        250.0,
+        monto(250.0),
         "USD".to_string(),
         Some(cuenta),
         60.25,
@@ -686,7 +721,7 @@ fn c19_un_abono_sin_cuenta_de_origen_no_genera_comision() {
     registrar_pago_tarjeta(
         tarjeta,
         "08/09/2026".to_string(),
-        10000.0,
+        monto(10000.0),
         "DOP".to_string(),
         None,
         0.0,
@@ -708,7 +743,7 @@ fn c20_el_abono_superior_a_la_deuda_deja_saldo_a_favor() {
     registrar_pago_tarjeta(
         tarjeta,
         "08/09/2026".to_string(),
-        800.0,
+        monto(800.0),
         "DOP".to_string(),
         None,
         0.0,
@@ -1273,7 +1308,7 @@ fn s20_un_cargo_en_dolares_a_una_tarjeta_que_traduce_queda_pendiente_y_se_puede_
     assert_importe(pesos, 0.0, "y todavía no existe cifra en pesos");
 
     // El titular registra lo que el emisor cargó: 15 USD a 60.50 = 907.50.
-    crate::liquidar_consumo_pendiente(gasto, 907.5).unwrap();
+    crate::liquidar_consumo_pendiente(gasto, monto(907.5)).unwrap();
 
     assert_eq!(estado_conversion(gasto).as_deref(), Some("liquidado"));
     let (pesos, dolares) = balances_tarjeta(tarjeta);
@@ -1478,7 +1513,7 @@ fn c22_una_divisa_no_admitida_se_normaliza_al_persistir() {
 
     let entrada = GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: 300.0,
+        monto: monto(300.0),
         divisa: "EUR".to_string(),
         descripcion: "Compra en euros".to_string(),
         categoria_id: id_categoria("Otros"),
@@ -1575,7 +1610,7 @@ fn estado_conversion(gasto_id: i64) -> Option<String> {
 fn compra_en_dolares(tarjeta: i64) -> GastoInput {
     GastoInput {
         fecha: "10/09/2026".to_string(),
-        monto: 100.0,
+        monto: monto(100.0),
         divisa: "USD".to_string(),
         descripcion: "Compra en el exterior".to_string(),
         categoria_id: id_categoria("Otros"),
@@ -1620,7 +1655,7 @@ fn c28_liquidar_traslada_el_saldo_entre_divisas_y_guarda_la_tasa_deducida() {
     let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
 
     // El emisor informa que cargó 6 050.00 en pesos.
-    let tasa = crate::liquidar_consumo_pendiente(id, 6050.0).unwrap();
+    let tasa = crate::liquidar_consumo_pendiente(id, monto(6050.0)).unwrap();
 
     assert_importe(tasa, 60.5, "la tasa se deduce del importe, no se pide");
     assert_eq!(estado_conversion(id).as_deref(), Some("liquidado"));
@@ -1630,14 +1665,43 @@ fn c28_liquidar_traslada_el_saldo_entre_divisas_y_guarda_la_tasa_deducida() {
 }
 
 #[test]
+fn c28b_el_importe_liquidado_lo_decide_el_nucleo_con_los_digitos_escritos() {
+    // El emisor cargó 6 050.005 en pesos: el céntimo sube a 6 050.01 como en el resto de la frontera, y
+    // la tasa se deduce de ese importe ya decidido.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    fijar_politica(tarjeta, "traduce");
+    let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
+
+    let tasa = crate::liquidar_consumo_pendiente(id, importe("6050.005")).unwrap();
+
+    assert_importe(balances_tarjeta(tarjeta).0, 6050.01, "los pesos reciben el céntimo decidido con los dígitos");
+    assert_importe(tasa, 60.5001, "la tasa sale del importe decidido, no del número binario");
+}
+
+#[test]
+fn c28c_un_importe_liquidado_que_no_es_positivo_no_liquida_nada() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    fijar_politica(tarjeta, "traduce");
+    let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
+
+    for escrito in ["0.00", "0.004", "-6050.00"] {
+        assert!(crate::liquidar_consumo_pendiente(id, importe(escrito)).is_err(), "{escrito} no liquida");
+    }
+    assert_eq!(estado_conversion(id).as_deref(), Some("pendiente"), "sigue pendiente");
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "ningún saldo se movió");
+}
+
+#[test]
 fn c29_no_se_liquida_dos_veces_ni_lo_que_no_esta_pendiente() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
     fijar_politica(tarjeta, "traduce");
     let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
 
-    crate::liquidar_consumo_pendiente(id, 6050.0).unwrap();
-    assert!(crate::liquidar_consumo_pendiente(id, 6050.0).is_err(), "no se liquida dos veces");
+    crate::liquidar_consumo_pendiente(id, monto(6050.0)).unwrap();
+    assert!(crate::liquidar_consumo_pendiente(id, monto(6050.0)).is_err(), "no se liquida dos veces");
     assert_importe(balances_tarjeta(tarjeta).0, 6050.0, "ni se duplica el traslado");
 }
 
@@ -1656,7 +1720,7 @@ fn c30_una_bonificacion_reduce_la_deuda_sin_tocar_el_gasto() {
 
     let entrada = GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: 1234.56,
+        monto: monto(1234.56),
         divisa: "DOP".to_string(),
         descripcion: "Suscripción".to_string(),
         categoria_id: id_categoria("Suscripciones"),
@@ -1688,7 +1752,7 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
     // El consumo que las genera, con un 3 % repartido en dos créditos.
     let gasto = crear_gasto(GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: 5000.00,
+        monto: monto(5200.00),
         divisa: "DOP".to_string(),
         descripcion: "Consumo bonificado".to_string(),
         categoria_id: id_categoria("Alimentación"),
@@ -1706,7 +1770,7 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
         "Bonificación de categoría".into(), Some(gasto)).unwrap();
 
     assert_eq!(crate::obtener_bonificaciones().unwrap().len(), 2);
-    assert_importe(deuda_pesos(tarjeta), 10000.0 + 5000.00 - 150.00, "el consumo sube y las dos bonificaciones bajan");
+    assert_importe(deuda_pesos(tarjeta), 10000.0 + 5200.00 - 150.00, "el consumo sube y las dos bonificaciones bajan");
 }
 
 #[test]
@@ -1890,15 +1954,15 @@ fn c39_el_limite_solo_se_admite_en_una_linea_revolvente() {
     let _g = entorno_aislado();
     let con_limite = |tipo: &str| crate::crear_prestamo(crate::PrestamoInput {
         tipo_prestamo: tipo.into(),
-        monto_prestamo: 100_000.0,
+        monto_prestamo: monto(100_000.0),
         institucion_financiera: "Banco Ejemplo".into(),
         tasa_actual: 12.0,
         cuotas_totales: Some(60),
         cuotas_pendientes: Some(60),
-        monto_cuota: 5_000.0,
+        monto_cuota: monto(5_000.0),
         dia_pago: 25,
         saldo_actual: None,
-        limite_credito: Some(150_000.0),
+        limite_credito: Some(monto(150_000.0)),
     });
 
     assert!(con_limite("vehiculo").is_err(), "un amortizable no repone cupo");
@@ -1923,7 +1987,7 @@ fn vincular_a_tarjeta(prestamo_id: i64, tarjeta_id: Option<i64>) -> Result<(), S
     crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
         id: prestamo_id,
         tasa_actual: tasa,
-        monto_cuota: cuota,
+        monto_cuota: monto(cuota),
         dia_pago: dia,
         limite_credito: None,
         tarjeta_id,
@@ -1997,9 +2061,9 @@ fn c43_actualizar_no_es_una_puerta_trasera_para_mover_el_saldo() {
     crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
         id: linea,
         tasa_actual: 24.0,
-        monto_cuota: 7_000.0,
+        monto_cuota: monto(7_000.0),
         dia_pago: 10,
-        limite_credito: Some(200_000.0),
+        limite_credito: Some(monto(200_000.0)),
         tarjeta_id: None,
     })
     .unwrap();
@@ -2020,12 +2084,12 @@ fn c43_actualizar_no_es_una_puerta_trasera_para_mover_el_saldo() {
 fn c44_actualizar_rechaza_lo_que_no_tiene_sentido() {
     let _g = entorno_aislado();
     let auto = crear_prestamo_de_prueba("vehiculo", 100_000.0, 12.0, 5_000.0, Some((100, 89)), None);
-    let base = |limite, tarjeta, dia| crate::ActualizarPrestamoInput {
+    let base = |limite: Option<f64>, tarjeta, dia| crate::ActualizarPrestamoInput {
         id: auto,
         tasa_actual: 12.0,
-        monto_cuota: 5_000.0,
+        monto_cuota: monto(5_000.0),
         dia_pago: dia,
-        limite_credito: limite,
+        limite_credito: limite.map(monto),
         tarjeta_id: tarjeta,
     };
 
@@ -2072,7 +2136,7 @@ fn c45_una_transferencia_mueve_los_dos_saldos_y_cobra_el_cargo_al_origen() {
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
 
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 100.0, "Traspaso".into(),
+        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(100.0), "Traspaso".into(),
     )
     .unwrap();
 
@@ -2088,7 +2152,7 @@ fn c46_la_tasa_se_deduce_dividiendo_los_dos_importes() {
     let destino = crear_cuenta("Cuenta Ahorros USD", "USD", 0.0);
 
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 6_000.0, 100.0, 0.0, "Compra de divisa".into(),
+        "13/09/2026".into(), origen, destino, monto(6_000.0), monto(100.0), monto(0.0), "Compra de divisa".into(),
     )
     .unwrap();
 
@@ -2100,12 +2164,27 @@ fn c46_la_tasa_se_deduce_dividiendo_los_dos_importes() {
 }
 
 #[test]
+fn c46b_los_tres_importes_de_una_transferencia_deciden_el_centavo_por_su_texto() {
+    // `1000.005` por texto sube a 1000.01 (por número bajaba a 1000.0): vale para origen, destino y cargo.
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000.0);
+    let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
+    crate::transferir_entre_cuentas(
+        "13/09/2026".into(), origen, destino, importe("1000.005"), importe("1000.005"), importe("1.005"), "Traspaso".into(),
+    )
+    .unwrap();
+
+    assert_importe(saldo_cuenta_id(origen), 5_000.0 - 1000.01 - 1.01, "origen y cargo suben el céntimo");
+    assert_importe(saldo_cuenta_id(destino), 1000.01, "destino sube el céntimo");
+}
+
+#[test]
 fn c47_revertir_una_transferencia_devuelve_el_monto_y_el_cargo_al_origen() {
     let _g = entorno_aislado();
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 100.0, "Traspaso".into(),
+        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(100.0), "Traspaso".into(),
     )
     .unwrap();
 
@@ -2129,7 +2208,7 @@ fn c48_h10_la_reversion_devuelve_los_dos_saldos_aunque_el_destino_quede_negativo
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 0.0, "Traspaso".into(),
+        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(0.0), "Traspaso".into(),
     )
     .unwrap();
 
@@ -2158,7 +2237,7 @@ fn c49_h11_una_transferencia_de_una_cuenta_a_si_misma_se_rechaza() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
 
     let error = crate::transferir_entre_cuentas(
-        "13/09/2026".into(), cuenta, cuenta, 8_000.0, 8_000.0, 100.0, "A sí misma".into(),
+        "13/09/2026".into(), cuenta, cuenta, monto(8_000.0), monto(8_000.0), monto(100.0), "A sí misma".into(),
     )
     .unwrap_err();
 
@@ -2184,7 +2263,7 @@ fn c50_h12_el_importe_de_destino_se_interpreta_en_la_divisa_de_su_cuenta() {
     let destino = crear_cuenta("Cuenta Ahorros USD", "USD", 0.0);
 
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 6_000.0, 6_000.0, 0.0, "Sin convertir".into(),
+        "13/09/2026".into(), origen, destino, monto(6_000.0), monto(6_000.0), monto(0.0), "Sin convertir".into(),
     )
     .unwrap();
 
@@ -2201,7 +2280,7 @@ fn c51_h13_una_cuenta_con_transferencias_no_se_puede_eliminar() {
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 0.0, "Traspaso".into(),
+        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(0.0), "Traspaso".into(),
     )
     .unwrap();
     assert_eq!(total_transferencias(), 1);
@@ -2231,7 +2310,7 @@ fn c53_una_transferencia_puede_dejar_el_origen_en_negativo() {
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
 
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 5_000.0, 5_000.0, 0.0, "Sobregiro".into(),
+        "13/09/2026".into(), origen, destino, monto(5_000.0), monto(5_000.0), monto(0.0), "Sobregiro".into(),
     )
     .unwrap();
 
@@ -2244,7 +2323,7 @@ fn c54_revertir_dos_veces_la_misma_transferencia_falla_la_segunda() {
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
     crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, 8_000.0, 8_000.0, 0.0, "Traspaso".into(),
+        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(0.0), "Traspaso".into(),
     )
     .unwrap();
     let id = ultima_transferencia();
@@ -2483,7 +2562,7 @@ fn c64_registrar_y_revertir_un_abono_deja_tarjeta_y_cuenta_como_estaban() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
 
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+        tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), Some(cuenta), 0.0,
     )
     .unwrap();
     assert_importe(balances_tarjeta(tarjeta).0, 18_000.0, "la deuda bajó");
@@ -2504,7 +2583,7 @@ fn c65_revertir_un_abono_en_divisa_devuelve_los_pesos_que_salieron() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
 
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 100.0, "USD".to_string(), Some(cuenta), 60.0,
+        tarjeta, "14/09/2026".to_string(), monto(100.0), "USD".to_string(), Some(cuenta), 60.0,
     )
     .unwrap();
     assert_importe(balances_tarjeta(tarjeta).1, 400.0, "la deuda en dólares bajó");
@@ -2522,7 +2601,7 @@ fn c66_revertir_un_abono_sin_cuenta_solo_repone_la_deuda() {
     let tarjeta = crear_tarjeta(30_000.0, 0.0);
 
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), None, 0.0,
+        tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), None, 0.0,
     )
     .unwrap();
 
@@ -2542,7 +2621,7 @@ fn c67_revertir_un_abono_que_dejo_saldo_a_favor_lo_deshace_sin_recorte() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 500_000.0);
 
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 5_000.0, "USD".to_string(), Some(cuenta), 59.9,
+        tarjeta, "14/09/2026".to_string(), monto(5_000.0), "USD".to_string(), Some(cuenta), 59.9,
     )
     .unwrap();
     assert_importe(balances_tarjeta(tarjeta).1, -5_000.0, "queda saldo a favor, no cero");
@@ -2559,7 +2638,7 @@ fn c68_revertir_dos_veces_falla_la_segunda_sin_duplicar_la_devolucion() {
     let tarjeta = crear_tarjeta(30_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+        tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), Some(cuenta), 0.0,
     )
     .unwrap();
     let abono = ultimo_abono();
@@ -2584,13 +2663,13 @@ fn c68_revertir_dos_veces_falla_la_segunda_sin_duplicar_la_devolucion() {
 //  nada compartido que impidiera repetirlo.
 // ===========================================================================
 
-fn factura(numero: &str, monto: f64, retencion: f64) -> IngresoInput {
+fn factura(numero: &str, importe_factura: f64, retencion: f64) -> IngresoInput {
     IngresoInput {
         numero_factura: numero.to_string(),
         rnc_cliente: "000000000".to_string(),
         nombre_cliente: "Cliente Ejemplo".to_string(),
         fecha_emision: "16/09/2026".to_string(),
-        monto_total: monto,
+        monto_total: monto(importe_factura),
         porcentaje_retencion: retencion,
     }
 }
@@ -2658,7 +2737,7 @@ fn c74_corregir_una_factura_usa_la_misma_regla_que_al_crearla() {
     let _g = entorno_aislado();
     let id = crear_ingreso(factura("A-006", 1_000.0, 15.0)).unwrap();
 
-    actualizar_ingreso(id, "A-006".into(), 1, "16/09/2026".into(), 1_234.56, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "A-006".into(), 1, "16/09/2026".into(), monto(1_234.56), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(retencion_de(id), 185.18, "crear y corregir no divergen");
 }
@@ -2671,10 +2750,38 @@ fn c75_cobrar_una_factura_acredita_la_cuenta_indicada() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("A-007", 10_000.0, 15.0)).unwrap();
 
-    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), monto(8_500.0)).unwrap();
 
     assert_eq!(estatus_de(id), "pagada");
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "entra el neto recibido");
+}
+
+#[test]
+fn c75b_el_cobro_decide_el_centimo_con_los_digitos_escritos_y_la_fila_guarda_lo_que_se_acredita() {
+    // El importe se usa dos veces —se acredita a la cuenta y se guarda en la fila—; ambos salen de la misma
+    // decisión, así que no pueden divergir. `8500.005` sube a 8500.01.
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso(factura("A-007", 10_000.0, 15.0)).unwrap();
+
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), importe("8500.005")).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0 + 8_500.01, "la cuenta recibe el céntimo decidido");
+    let fila = crate::obtener_ingresos().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    assert_importe(fila.monto_recibido.unwrap(), 8_500.01, "la fila guarda exactamente lo que se acreditó");
+}
+
+#[test]
+fn c75c_un_cobro_que_no_es_positivo_o_redondea_a_cero_no_acredita_nada() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso(factura("A-007", 10_000.0, 15.0)).unwrap();
+
+    for escrito in ["-100.00", "0.004"] {
+        let r = marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), importe(escrito));
+        assert!(r.is_err() || (saldo_cuenta_id(cuenta) - 1_000.0).abs() < 1e-9, "{escrito}: no debe acreditar");
+    }
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "ningún saldo se movió");
 }
 
 #[test]
@@ -2687,7 +2794,7 @@ fn c76_h17_resuelto_cobrar_a_una_cuenta_inexistente_falla() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("A-008", 10_000.0, 15.0)).unwrap();
 
-    let r = marcar_ingreso_pagado(id, 9_999, "16/09/2026".into(), 8_500.0);
+    let r = marcar_ingreso_pagado(id, 9_999, "16/09/2026".into(), monto(8_500.0));
 
     assert!(r.is_err(), "no se cobra contra una cuenta que no existe");
     assert_eq!(estatus_de(id), "emitida", "la factura sigue pendiente");
@@ -2702,7 +2809,7 @@ fn c77_h18_resuelto_cobrar_una_factura_inexistente_falla() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
 
-    let r = marcar_ingreso_pagado(404, cuenta, "16/09/2026".into(), 100.0);
+    let r = marcar_ingreso_pagado(404, cuenta, "16/09/2026".into(), monto(100.0));
 
     assert!(r.is_err(), "ahora lo dice");
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "y no acredita nada");
@@ -2722,7 +2829,7 @@ fn c78_h19_resuelto_cobrar_en_otra_divisa_se_rechaza() {
     let cuenta_usd = crear_cuenta("Cuenta Ahorros USD", "USD", 100.0);
     let id = crear_ingreso(factura("A-009", 10_000.0, 15.0)).unwrap();
 
-    let r = marcar_ingreso_pagado(id, cuenta_usd, "16/09/2026".into(), 8_500.0);
+    let r = marcar_ingreso_pagado(id, cuenta_usd, "16/09/2026".into(), monto(8_500.0));
 
     assert!(r.is_err(), "no se reinterpretan pesos como dólares");
     assert_eq!(estatus_de(id), "emitida", "la factura sigue pendiente");
@@ -2737,7 +2844,7 @@ fn c78b_cobrar_en_una_cuenta_de_la_misma_divisa_funciona() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("A-010b", 10_000.0, 15.0)).unwrap();
 
-    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), monto(8_500.0)).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "entra el neto, sin estorbos");
 }
@@ -2749,7 +2856,7 @@ fn c79_borrar_una_factura_cobrada_revierte_el_abono() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("A-010", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), monto(8_500.0)).unwrap();
 
     eliminar_ingreso(id, motivo_de_prueba()).unwrap();
 
@@ -2765,7 +2872,7 @@ fn c80_h20_resuelto_borrar_una_factura_no_recorta_el_saldo() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
     let id = crear_ingreso(factura("A-011", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), monto(8_500.0)).unwrap();
     // El titular gasta lo cobrado antes de advertir el error de registro.
     conexion()
         .execute("UPDATE cuentas_ahorro SET balance_actual = 500.0 WHERE id = ?;", params![cuenta])
@@ -2826,10 +2933,23 @@ fn c82_h17_el_informal_comparte_el_arreglo() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), monto(2_000.0)).unwrap();
 
-    let r = marcar_informal_pagado(id, 9_999, "16/09/2026".into(), 2_000.0);
+    let r = marcar_informal_pagado(id, 9_999, "16/09/2026".into(), monto(2_000.0));
 
     assert!(r.is_err(), "el informal falla igual que la factura");
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "ningún saldo se movió");
+}
+
+#[test]
+fn c82b_el_cobro_de_un_informal_decide_el_centimo_con_los_digitos_escritos() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
+    let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), monto(2_000.0)).unwrap();
+
+    marcar_informal_pagado(id, cuenta, "16/09/2026".into(), importe("2000.005")).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), 1_000.0 + 2_000.01, "la cuenta recibe el céntimo decidido");
+    let fila = crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    assert_importe(fila.monto_recibido.unwrap(), 2_000.01, "la fila guarda exactamente lo que se acreditó");
 }
 
 #[test]
@@ -2837,7 +2957,7 @@ fn c83_borrar_un_informal_cobrado_revierte_su_abono() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso_informal("16/09/2026".into(), "Trabajo suelto".into(), monto(2_000.0)).unwrap();
-    marcar_informal_pagado(id, cuenta, "16/09/2026".into(), 2_000.0).unwrap();
+    marcar_informal_pagado(id, cuenta, "16/09/2026".into(), monto(2_000.0)).unwrap();
 
     eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
 
@@ -2902,11 +3022,11 @@ fn c85_corregir_al_alza_una_factura_cobrada_acredita_la_diferencia() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-001", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "entró el neto");
 
     // Eran 12 000, no 10 000. El neto sube de 8 500 a 10 200.
-    actualizar_ingreso(id, "B-001".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "B-001".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(retencion_de(id), 1_800.0, "la retención se recalcula");
     assert_importe(recibido_de(id), 10_200.0, "y lo recibido también");
@@ -2918,9 +3038,9 @@ fn c86_corregir_a_la_baja_retira_de_la_cuenta_lo_que_sobraba() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-002", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
-    actualizar_ingreso(id, "B-002".into(), 1, "20/09/2026".into(), 8_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "B-002".into(), 1, "20/09/2026".into(), monto(8_000.0), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 7_800.0, "se retiran los 1 700 de más");
     assert_importe(recibido_de(id), 6_800.0, "lo recibido baja con el neto");
@@ -2935,12 +3055,26 @@ fn c87_corregir_da_por_cobrado_el_neto_entero_aunque_faltara_algo() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-003", 10_000.0, 15.0)).unwrap();
     // Neto de 8 500, pero solo entraron 8 000.
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_000.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_000.0)).unwrap();
 
-    actualizar_ingreso(id, "B-003".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "B-003".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(recibido_de(id), 10_200.0, "el neto nuevo, entero");
     assert_importe(saldo_cuenta_id(cuenta), 11_200.0, "la cuenta sube los 2 200 que faltaban");
+}
+
+#[test]
+fn c87a_el_total_corregido_decide_el_centavo_por_su_texto() {
+    // `1000.005` por texto sube a 1000.01 (por número bajaba a 1000.0); la fila guarda ese total.
+    let _g = entorno_aislado();
+    let id = crear_ingreso(factura("B-000", 5_000.0, 15.0)).unwrap();
+
+    actualizar_ingreso(id, "B-000".into(), 1, "20/09/2026".into(), importe("1000.005"), 15.0, None, None).unwrap();
+
+    let total: f64 = conexion()
+        .query_row("SELECT monto_total FROM ingresos WHERE id = ?;", params![id], |r| r.get(0))
+        .unwrap();
+    assert_importe(total, 1000.01, "el total sube el céntimo");
 }
 
 #[test]
@@ -2951,9 +3085,9 @@ fn c87b_un_cobro_parcial_declarado_conserva_lo_que_falta() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-006", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
-    actualizar_ingreso(id, "B-006".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, Some(importe("9137.25")), Some(motivo_de_prueba()))
+    actualizar_ingreso(id, "B-006".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, Some(importe("9137.25")), Some(motivo_de_prueba()))
         .unwrap();
 
     assert_importe(recibido_de(id), 9_137.25, "lo que de verdad entró");
@@ -2966,10 +3100,10 @@ fn c87c_un_cobro_parcial_mayor_que_el_neto_se_rechaza() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-007", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     let r = actualizar_ingreso(
-        id, "B-007".into(), 1, "20/09/2026".into(), 10_000.0, 15.0, Some(importe("9137.25")),
+        id, "B-007".into(), 1, "20/09/2026".into(), monto(10_000.0), 15.0, Some(importe("9137.25")),
         Some(motivo_de_prueba()),
     );
 
@@ -2981,10 +3115,10 @@ fn c88_corregir_sin_cambiar_importes_no_mueve_ningun_saldo() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-004", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     // Solo cambia la fecha.
-    actualizar_ingreso(id, "B-004".into(), 1, "21/09/2026".into(), 10_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "B-004".into(), 1, "21/09/2026".into(), monto(10_000.0), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 9_500.0, "corregir la fecha no toca la cuenta");
 }
@@ -2995,7 +3129,7 @@ fn c89_corregir_una_factura_sin_cobrar_no_toca_ninguna_cuenta() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("B-005", 10_000.0, 15.0)).unwrap();
 
-    actualizar_ingreso(id, "B-005".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, Some(motivo_de_prueba())).unwrap();
+    actualizar_ingreso(id, "B-005".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, None, Some(motivo_de_prueba())).unwrap();
 
     assert_importe(retencion_de(id), 1_800.0, "las cifras sí cambian");
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "pero no hay dinero que ajustar");
@@ -3004,7 +3138,7 @@ fn c89_corregir_una_factura_sin_cobrar_no_toca_ninguna_cuenta() {
 #[test]
 fn c90_corregir_una_factura_inexistente_falla_en_vez_de_callar() {
     let _g = entorno_aislado();
-    let r = actualizar_ingreso(404, "X".into(), 1, "20/09/2026".into(), 100.0, 15.0, None, Some(motivo_de_prueba()));
+    let r = actualizar_ingreso(404, "X".into(), 1, "20/09/2026".into(), monto(100.0), 15.0, None, Some(motivo_de_prueba()));
 
     assert!(r.is_err(), "no se corrige lo que no existe");
 }
@@ -3039,12 +3173,12 @@ fn c91_corregir_una_factura_cobrada_abre_caso_con_el_ajuste() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("C-001", 14_400.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 12_240.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(12_240.0)).unwrap();
     assert_eq!(casos_abiertos(), 0);
 
     // Eran 16 000: el neto sube de 12 240 a 13 600.
     actualizar_ingreso(
-        id, "C-001".into(), 1, "20/09/2026".into(), 16_000.0, 15.0, None,
+        id, "C-001".into(), 1, "20/09/2026".into(), monto(16_000.0), 15.0, None,
         Some(motivo_de_prueba()),
     )
     .unwrap();
@@ -3065,10 +3199,10 @@ fn c92_corregir_sin_mover_dinero_no_abre_caso() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("C-002", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     actualizar_ingreso(
-        id, "C-002".into(), 1, "21/09/2026".into(), 10_000.0, 15.0, None, None,
+        id, "C-002".into(), 1, "21/09/2026".into(), monto(10_000.0), 15.0, None, None,
     )
     .unwrap();
 
@@ -3082,7 +3216,7 @@ fn c93_corregir_una_factura_sin_cobrar_tampoco_abre_caso() {
     let id = crear_ingreso(factura("C-003", 10_000.0, 15.0)).unwrap();
 
     actualizar_ingreso(
-        id, "C-003".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, None,
+        id, "C-003".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, None, None,
     )
     .unwrap();
 
@@ -3096,10 +3230,10 @@ fn c94_mover_dinero_sin_motivo_se_rechaza_y_no_corrige_nada() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let id = crear_ingreso(factura("C-004", 10_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 8_500.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(8_500.0)).unwrap();
 
     let r = actualizar_ingreso(
-        id, "C-004".into(), 1, "20/09/2026".into(), 12_000.0, 15.0, None, None,
+        id, "C-004".into(), 1, "20/09/2026".into(), monto(12_000.0), 15.0, None, None,
     );
 
     assert!(r.is_err(), "mover un saldo exige explicarlo");
@@ -3127,10 +3261,19 @@ fn comision_de(cuenta_id: i64) -> Option<f64> {
 }
 
 #[test]
+fn c94b_el_saldo_inicial_de_una_cuenta_lo_decide_el_nucleo_con_los_digitos_escritos() {
+    // `100.005` sube a 100.01: el saldo inicial entra por la misma puerta que el resto de los importes.
+    let _g = entorno_aislado();
+    crate::crear_cuenta("Cuenta Nueva DOP".into(), "DOP".into(), importe("100.005"), None, None).unwrap();
+
+    assert_importe(balance_cuenta("Cuenta Nueva DOP"), 100.01, "el saldo inicial lleva el céntimo decidido");
+}
+
+#[test]
 fn c95_una_comision_con_fraccion_de_centimo_se_decide_al_crear() {
     let _g = entorno_aislado();
     let id = crate::crear_cuenta(
-        "Cuenta Corriente DOP".into(), "DOP".into(), 0.0,
+        "Cuenta Corriente DOP".into(), "DOP".into(), monto(0.0),
         Some("Banco Ejemplo".into()), Some(importe("75.005")),
     )
     .unwrap();
@@ -3162,7 +3305,7 @@ fn c97_una_comision_sin_declarar_sigue_siendo_nula_y_no_cero() {
     // cobra». Pasar por `Dinero` no puede borrar esa distinción.
     let _g = entorno_aislado();
     let id = crate::crear_cuenta(
-        "Cuenta Ahorros DOP".into(), "DOP".into(), 0.0, None, None,
+        "Cuenta Ahorros DOP".into(), "DOP".into(), monto(0.0), None, None,
     )
     .unwrap();
 
@@ -3173,7 +3316,7 @@ fn c97_una_comision_sin_declarar_sigue_siendo_nula_y_no_cero() {
 fn c98_una_comision_negativa_se_sigue_rechazando() {
     let _g = entorno_aislado();
     let r = crate::crear_cuenta(
-        "Cuenta Ahorros DOP".into(), "DOP".into(), 0.0, None, Some(importe("-1.00")),
+        "Cuenta Ahorros DOP".into(), "DOP".into(), monto(0.0), None, Some(importe("-1.00")),
     );
 
     assert!(r.is_err());
@@ -3868,7 +4011,7 @@ fn c130_una_cuenta_con_una_factura_cobrada_en_ella_no_se_puede_eliminar() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
     let id = crear_ingreso(factura("Z-001", 5_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 4_250.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(4_250.0)).unwrap();
 
     let error = crate::eliminar_cuenta(cuenta).unwrap_err();
 
@@ -3885,7 +4028,7 @@ fn c131_revertida_la_factura_la_cuenta_vuelve_a_poder_eliminarse() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
     let id = crear_ingreso(factura("Z-002", 5_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), 4_250.0).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(4_250.0)).unwrap();
     assert!(crate::eliminar_cuenta(cuenta).is_err());
 
     eliminar_ingreso(id, motivo_de_prueba()).unwrap();
@@ -3898,7 +4041,7 @@ fn c132_una_cuenta_con_un_ingreso_informal_cobrado_en_ella_no_se_puede_eliminar(
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
     let id = crear_ingreso_informal("20/09/2026".into(), "Trabajo puntual".into(), monto(3_000.0)).unwrap();
-    marcar_informal_pagado(id, cuenta, "20/09/2026".into(), 3_000.0).unwrap();
+    marcar_informal_pagado(id, cuenta, "20/09/2026".into(), monto(3_000.0)).unwrap();
 
     let error = crate::eliminar_cuenta(cuenta).unwrap_err();
 
@@ -3914,7 +4057,7 @@ fn c133_una_cuenta_que_pago_un_abono_no_se_elimina_aunque_borren_el_gasto_de_su_
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(1_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000.0);
-    registrar_pago_tarjeta(tarjeta, "20/09/2026".into(), 500.0, "DOP".into(), Some(cuenta), 0.0).unwrap();
+    registrar_pago_tarjeta(tarjeta, "20/09/2026".into(), monto(500.0), "DOP".into(), Some(cuenta), 0.0).unwrap();
     let gasto_comision: i64 = conexion()
         .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
         .unwrap();
@@ -3933,7 +4076,7 @@ fn c134_las_guardas_que_ya_existian_siguen_diciendo_lo_mismo() {
     let _g = entorno_aislado();
     let origen = crear_cuenta("Origen", "DOP", 1_000.0);
     let destino = crear_cuenta("Destino", "DOP", 0.0);
-    crate::transferir_entre_cuentas("20/09/2026".into(), origen, destino, 500.0, 500.0, 0.0, "x".into()).unwrap();
+    crate::transferir_entre_cuentas("20/09/2026".into(), origen, destino, monto(500.0), monto(500.0), monto(0.0), "x".into()).unwrap();
 
     let error = crate::eliminar_cuenta(destino).unwrap_err();
 
@@ -3957,7 +4100,7 @@ fn c136_la_comision_de_un_abono_no_se_puede_borrar_por_separado() {
     let tarjeta = crear_tarjeta(30_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+        tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), Some(cuenta), 0.0,
     )
     .unwrap();
     let gasto_comision: i64 = conexion()
@@ -3984,7 +4127,7 @@ fn c137_tras_el_rechazo_revertir_el_abono_deja_la_cuenta_exactamente_como_estaba
     let tarjeta = crear_tarjeta(30_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
     registrar_pago_tarjeta(
-        tarjeta, "14/09/2026".to_string(), 12_000.0, "DOP".to_string(), Some(cuenta), 0.0,
+        tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), Some(cuenta), 0.0,
     )
     .unwrap();
     let abono = ultimo_abono();
@@ -4009,7 +4152,7 @@ fn c138_un_gasto_con_bonificacion_se_puede_borrar_porque_el_vinculo_solo_informa
         .unwrap();
     let gasto = crear_gasto(GastoInput {
         fecha: "09/09/2026".to_string(),
-        monto: 1_234.56,
+        monto: monto(1_234.56),
         divisa: "DOP".to_string(),
         descripcion: "Compra".to_string(),
         categoria_id: categoria,
@@ -4097,3 +4240,137 @@ fn volcado_de_datos_para_comparar_vistas() {
     std::fs::write(&salida, serde_json::to_string(&Value::Object(v)).unwrap()).unwrap();
     let _ = std::fs::remove_dir_all(&raiz);
 }
+
+#[test]
+fn c95_crear_tarjeta_guarda_cada_importe_por_su_texto_y_en_su_columna() {
+    // Ocho importes distintos, para que un cruce de columnas se note; `.005` sube por texto.
+    let _g = entorno_aislado();
+    let id = crate::crear_tarjeta(
+        "Banco".into(), "Visa".into(),
+        importe("1000.005"), importe("2000.005"), importe("3000.005"), importe("4000.005"),
+        importe("5000.005"), importe("6000.005"), importe("7000.005"), importe("8000.005"),
+        15, 5,
+    )
+    .unwrap();
+
+    assert_importe(columna_tarjeta(id, "limite_pesos"), 1000.01, "límite DOP");
+    assert_importe(columna_tarjeta(id, "limite_dolares"), 2000.01, "límite USD");
+    assert_importe(columna_tarjeta(id, "limite_sobregiro_pesos"), 3000.01, "sobregiro DOP");
+    assert_importe(columna_tarjeta(id, "limite_sobregiro_dolares"), 4000.01, "sobregiro USD");
+    assert_importe(columna_tarjeta(id, "balance_pesos"), 5000.01, "balance DOP");
+    assert_importe(columna_tarjeta(id, "balance_dolares"), 6000.01, "balance USD");
+    assert_importe(columna_tarjeta(id, "balance_corte_pesos"), 7000.01, "corte DOP");
+    assert_importe(columna_tarjeta(id, "balance_corte_dolares"), 8000.01, "corte USD");
+}
+
+#[test]
+fn c96_actualizar_limites_guarda_cada_importe_por_su_texto_y_distingue_sin_ajuste_de_cero() {
+    let _g = entorno_aislado();
+    let id = crear_tarjeta(0.0, 0.0);
+
+    crate::actualizar_limites_tarjeta(
+        id,
+        importe("1000.005"), importe("2000.005"), importe("3000.005"), importe("4000.005"),
+        importe("5000.005"), importe("6000.005"),
+        Some(importe("0.00")), None, None,
+    )
+    .unwrap();
+
+    assert_importe(columna_tarjeta(id, "limite_pesos"), 1000.01, "límite DOP");
+    assert_importe(columna_tarjeta(id, "limite_dolares"), 2000.01, "límite USD");
+    assert_importe(columna_tarjeta(id, "limite_sobregiro_pesos"), 3000.01, "sobregiro DOP");
+    assert_importe(columna_tarjeta(id, "limite_sobregiro_dolares"), 4000.01, "sobregiro USD");
+    assert_importe(columna_tarjeta(id, "balance_corte_pesos"), 5000.01, "corte DOP");
+    assert_importe(columna_tarjeta(id, "balance_corte_dolares"), 6000.01, "corte USD");
+    assert_importe(columna_tarjeta(id, "limite_ajustado_pesos"), 0.0, "cero es un tope deliberado");
+    let sin: Option<f64> = conexion()
+        .query_row("SELECT limite_ajustado_dolares FROM tarjetas WHERE id = ?;", params![id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(sin, None, "None es «sin ajuste»");
+}
+
+#[test]
+fn c96b_el_limite_ajustado_tambien_decide_el_centavo_por_su_texto() {
+    let _g = entorno_aislado();
+    let id = crear_tarjeta(0.0, 0.0);
+    crate::actualizar_limites_tarjeta(
+        id,
+        importe("9000"), importe("9000"), importe("0"), importe("0"), importe("0"), importe("0"),
+        Some(importe("1000.005")), Some(importe("2000.005")), None,
+    )
+    .unwrap();
+    assert_importe(columna_tarjeta(id, "limite_ajustado_pesos"), 1000.01, "ajustado DOP");
+    assert_importe(columna_tarjeta(id, "limite_ajustado_dolares"), 2000.01, "ajustado USD");
+}
+
+#[test]
+fn c97_el_gasto_decide_el_centavo_por_su_texto_y_la_divisa_la_declara_el_gasto() {
+    // `75.005` por texto sube a 75.01 (por número bajaba a 75.00); en USD cae en la deuda en dólares.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 100.0);
+    let entrada = GastoInput { monto: importe("75.005"), ..compra_en_dolares(tarjeta) };
+    crear_gasto(entrada).unwrap();
+
+    let (pesos, dolares) = balances_tarjeta(tarjeta);
+    assert_importe(dolares, 175.01, "la deuda en USD sube el céntimo");
+    assert_importe(pesos, 0.0, "la de DOP no se toca");
+}
+
+#[test]
+fn c98_la_factura_decide_el_centavo_y_la_retencion_por_el_texto_del_total() {
+    // 1000.005 por texto sube a 1000.01 (por número bajaba a 1000.0); la retención del 50 % se decide sobre ese total.
+    let _g = entorno_aislado();
+    let id = crear_ingreso(IngresoInput {
+        numero_factura: "T-001".to_string(),
+        rnc_cliente: "000000000".to_string(),
+        nombre_cliente: "Cliente Ejemplo".to_string(),
+        fecha_emision: "16/09/2026".to_string(),
+        monto_total: importe("1000.005"),
+        porcentaje_retencion: 50.0,
+    })
+    .unwrap();
+
+    let total: f64 = conexion()
+        .query_row("SELECT monto_total FROM ingresos WHERE id = ?;", params![id], |r| r.get(0))
+        .unwrap();
+    assert_importe(total, 1000.01, "el total sube el céntimo");
+    assert_importe(retencion_de(id), 500.01, "50 % de 1000.01 = 500.005 → 500.01 (sobre 1000.0 habría sido 500.00)");
+}
+
+#[test]
+fn c110_el_financiamiento_guarda_sus_importes_por_el_texto_y_el_saldo_ausente_es_el_monto() {
+    // `.005` sube por texto; sin saldo declarado se asume el monto ya decidido al céntimo.
+    let _g = entorno_aislado();
+    let id = crate::crear_prestamo(crate::PrestamoInput {
+        tipo_prestamo: "flexible".into(),
+        monto_prestamo: importe("2000.005"),
+        institucion_financiera: "Banco Ejemplo".into(),
+        tasa_actual: 12.0,
+        cuotas_totales: None,
+        cuotas_pendientes: None,
+        monto_cuota: importe("50.005"),
+        dia_pago: 25,
+        saldo_actual: None,
+        limite_credito: Some(importe("3000.005")),
+    })
+    .unwrap();
+
+    let leer = |col: &str| -> f64 {
+        conexion()
+            .query_row(&format!("SELECT {col} FROM prestamos WHERE id = ?;"), [id], |r| r.get(0))
+            .unwrap()
+    };
+    assert_importe(leer("monto_prestamo"), 2000.01, "monto");
+    assert_importe(leer("saldo_actual"), 2000.01, "saldo ausente = monto");
+    assert_importe(leer("monto_cuota"), 50.01, "cuota");
+    assert_importe(leer("limite_credito"), 3000.01, "límite");
+
+    crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
+        id, tasa_actual: 12.0, monto_cuota: importe("60.005"), dia_pago: 25,
+        limite_credito: Some(importe("4000.005")), tarjeta_id: None,
+    })
+    .unwrap();
+    assert_importe(leer("monto_cuota"), 60.01, "cuota corregida");
+    assert_importe(leer("limite_credito"), 4000.01, "límite corregido");
+}
+

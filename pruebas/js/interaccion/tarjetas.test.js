@@ -26,7 +26,7 @@ test('alta de tarjeta: cada importe llega en su posición (el orden de AppAPI.cr
     // (entidad, nombre, límDOP, límUSD, sobDOP, sobUSD, balDOP, balUSD, corteDOP, corteUSD, díaCorte, díaPago)
     llamoUnaVez(ui, 'crearTarjeta', [
         'Banco de Prueba', 'Tarjeta Uno',
-        1001.01, 5005.05, 2002.02, 6006.06, 3003.03, 7007.07, 4004.04, 8008.08, 15, 5,
+        '1001.01', '5005.05', '2002.02', '6006.06', '3003.03', '7007.07', '4004.04', '8008.08', 15, 5,
     ]);
     avisoExito(ui, /Tarjeta registrada/);
     redibujo(ui, 'tarjetas');
@@ -50,7 +50,7 @@ test('editar límites: orden de argumentos, ajustes vacíos = null, cierra el mo
     const ui = cargarInterfaz({ campos: limites });
     await ui.appUI.handleEdicionLimitesTarjetaSubmit(crearEvento(), 3);
     // (id, límDOP, límUSD, sobDOP, sobUSD, corteDOP, corteUSD, ajusteDOP, ajusteUSD, política)
-    llamoUnaVez(ui, 'actualizarLimitesTarjeta', [3, 1000.1, 4000.4, 200.2, 500.5, 300.3, 600.6, null, null, 'origen']);
+    llamoUnaVez(ui, 'actualizarLimitesTarjeta', [3, '1000.10', '4000.40', '200.20', '500.50', '300.30', '600.60', null, null, 'origen']);
     assert.deepEqual(ui.eliminados, ['modal-edit-tar-3']);
     redibujo(ui, 'tarjetas');
 });
@@ -59,8 +59,8 @@ test('editar límites: un ajuste «0» es un tope deliberado (0), no «sin ajust
     const ui = cargarInterfaz({ campos: { ...limites, edit_aju_dop_3: '0', edit_aju_usd_3: '250.25' } });
     await ui.appUI.handleEdicionLimitesTarjetaSubmit(crearEvento(), 3);
     const args = ui.llamadasA('actualizarLimitesTarjeta')[0].args;
-    assert.equal(args[7], 0);
-    assert.equal(args[8], 250.25);
+    assert.equal(args[7], '0');
+    assert.equal(args[8], '250.25');
 });
 
 test('editar límites: política elegida viaja; sin selector o vacía vale «origen»', async () => {
@@ -99,7 +99,7 @@ const abono = (extra = {}) => ({
 test('abono sin cuenta: (id, fecha, monto, divisa, null, 0) y sin consultar cuentas', async () => {
     const ui = cargarInterfaz({ campos: abono() });
     await ui.appUI.handleAbonoTarjeta(crearEvento(), 3);
-    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', 321.45, 'DOP', null, 0]);
+    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', '321.45', 'DOP', null, 0]);
     noLlamoA(ui, 'obtenerCuentas');
     avisoExito(ui, /Abono a tarjeta guardado/);
     redibujo(ui, 'tarjetas');
@@ -111,7 +111,7 @@ test('abono desde cuenta en la misma divisa: viaja el id de la cuenta elegida (n
         api: { obtenerCuentas: [{ id: 7, divisa: 'DOP', nombre: 'Otra' }, { id: 8, divisa: 'DOP', nombre: 'Cuenta A' }] },
     });
     await ui.appUI.handleAbonoTarjeta(crearEvento(), 3);
-    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', 321.45, 'DOP', 8, 0]);
+    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', '321.45', 'DOP', 8, 0]);
     assert.deepEqual(ui.preguntas, []);
 });
 
@@ -121,7 +121,7 @@ test('abono USD desde cuenta en DOP con tasa tecleada: no se pregunta nada', asy
         api: { obtenerCuentas: [{ id: 8, divisa: 'DOP', nombre: 'Cuenta A' }] },
     });
     await ui.appUI.handleAbonoTarjeta(crearEvento(), 3);
-    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', 321.45, 'USD', 8, 59.5]);
+    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', '321.45', 'USD', 8, 59.5]);
     assert.deepEqual(ui.preguntas, []);
 });
 
@@ -133,7 +133,7 @@ test('abono USD desde cuenta en DOP sin tasa: la pide con prompt y la usa', asyn
     });
     await ui.appUI.handleAbonoTarjeta(crearEvento(), 3);
     assert.equal(ui.preguntas.length, 1);
-    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', 321.45, 'USD', 8, 58.25]);
+    llamoUnaVez(ui, 'registrarPagoTarjeta', [3, '20/03/2026', '321.45', 'USD', 8, 58.25]);
 });
 
 test('abono con conversión: cancelar el prompt de la tasa cancela el abono', async () => {

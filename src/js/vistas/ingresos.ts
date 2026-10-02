@@ -252,7 +252,8 @@ export class VistaIngresos implements Vista {
         const fec = dom.elemento<Campo>('fec_em').value;
         const cli = dom.elemento<Campo>('cli_nom').value;
         const rnc = dom.elemento<Campo>('cli_rnc').value;
-        const mon = Number(dom.elemento<Campo>('mon_tot').value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const mon = dom.elemento<Campo>('mon_tot').value.trim();
         const ret = Number(dom.elemento<Campo>('ret_por').value);
 
         try {
@@ -386,7 +387,9 @@ export class VistaIngresos implements Vista {
         const fac = dom.elemento<Campo>(`edit_num_fac_${id}`).value;
         const fec = dom.elemento<Campo>(`edit_fec_em_${id}`).value;
         const cliId = Number(dom.elemento<Campo>(`edit_cli_select_${id}`).value);
-        const mon = Number(dom.elemento<Campo>(`edit_mon_tot_${id}`).value);
+        // El total viaja como texto, tal cual se escribió; el número solo sirve para el neto de la vista previa.
+        const monTxt = dom.elemento<Campo>(`edit_mon_tot_${id}`).value.trim();
+        const mon = Number(monTxt);
         const ret = Number(dom.elemento<Campo>(`edit_ret_por_${id}`).value);
 
         // Corregir una factura cobrada mueve dinero, así que se confirma con
@@ -447,7 +450,7 @@ export class VistaIngresos implements Vista {
         }
 
         try {
-            const resumen = await api.actualizarIngreso(id, fac, cliId, fec, mon, ret, parcial, motivo);
+            const resumen = await api.actualizarIngreso(id, fac, cliId, fec, monTxt, ret, parcial, motivo);
             avisos.mostrar(resumen || "Factura corregida.");
             dom.elemento(`modal-edit-for-${id}`).remove();
             await enrutador.mostrar('ingresos');
@@ -503,7 +506,8 @@ export class VistaIngresos implements Vista {
         const { api, avisos, enrutador, dom } = this.dep;
         const ban = dom.elemento<Campo>(`cob_ban_${id}`).value;
         const fec = dom.elemento<Campo>(`cob_fec_${id}`).value;
-        const mon = Number(dom.elemento<Campo>(`cob_mon_${id}`).value);
+        // Texto, tal cual se escribió: el céntimo lo deciden los dígitos (convención de 1.21.0).
+        const mon = dom.elemento<Campo>(`cob_mon_${id}`).value.trim();
 
         try {
             await api.marcarIngresoPagado(id, ban, fec, mon);
@@ -561,7 +565,7 @@ export class VistaIngresos implements Vista {
         const { api, avisos, enrutador, dom } = this.dep;
         const ban = dom.elemento<Campo>(`cob_ban_inf_${id}`).value;
         const fec = dom.elemento<Campo>(`cob_fec_inf_${id}`).value;
-        const mon = Number(dom.elemento<Campo>(`cob_mon_inf_${id}`).value);
+        const mon = dom.elemento<Campo>(`cob_mon_inf_${id}`).value.trim();
 
         try {
             await api.marcarInformalPagado(id, ban, fec, mon);

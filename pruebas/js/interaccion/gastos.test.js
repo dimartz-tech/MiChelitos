@@ -13,12 +13,12 @@ const base = {
     gas_cat: '3', gas_met: 'efectivo', gas_lbtr: false, gas_tar: AUSENTE, gas_cue: AUSENTE,
 };
 const gastoEsperado = {
-    fecha: '15/03/2026', monto: 123.45, divisa: 'DOP', descripcion: 'Compra de prueba', categoria_id: 3,
+    fecha: '15/03/2026', monto: '123.45', divisa: 'DOP', descripcion: 'Compra de prueba', categoria_id: 3,
     metodo_pago: 'efectivo', es_lbtr: false, tarjeta_id: null, cuenta_ahorro_id: null, tasa_cambio: null,
 };
 const cuentaDop = { value: '9', text: 'Cuenta A', dataset: { divisa: 'DOP' } };
 
-test('gasto en efectivo: sin tarjeta, sin cuenta, sin tasa; el importe viaja como número', async () => {
+test('gasto en efectivo: sin tarjeta, sin cuenta, sin tasa; el importe viaja como texto', async () => {
     const ui = cargarInterfaz({ campos: base });
     await ui.appUI.handleAgregarGasto(crearEvento());
     llamoUnaVez(ui, 'crearGasto', [gastoEsperado]);
@@ -119,7 +119,7 @@ test('gasto: si Rust rechaza se muestra el error, no se redibuja y no se rompe',
 test('liquidar consumo: envía id y el importe en pesos, cierra el modal y avisa la tasa', async () => {
     const ui = cargarInterfaz({ campos: { liq_monto_7: '777.77', 'modal-liq-7': {} }, api: { liquidarConsumoPendiente: 58.5 } });
     await ui.appUI.handleLiquidacionSubmit(crearEvento(), 7, 12.34);
-    llamoUnaVez(ui, 'liquidarConsumoPendiente', [7, 777.77]);
+    llamoUnaVez(ui, 'liquidarConsumoPendiente', [7, '777.77']);
     avisoExito(ui, /tasa de 58\.5000/);
     assert.deepEqual(ui.eliminados, ['modal-liq-7']);
     redibujo(ui, 'gastos');

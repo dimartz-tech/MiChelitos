@@ -17,12 +17,12 @@ const factura = {
     mon_tot: '1234.56', ret_por: '5',
 };
 
-test('alta de factura: los importes y el porcentaje viajan como número, los textos tal cual', async () => {
+test('alta de factura: el total viaja como texto, el porcentaje como número, los textos tal cual', async () => {
     const ui = cargarInterfaz({ campos: factura });
     await ui.appUI.handleAgregarIngreso(crearEvento());
     llamoUnaVez(ui, 'crearIngreso', [{
         numero_factura: 'F-0001', rnc_cliente: '000000000', nombre_cliente: 'Cliente de Prueba',
-        fecha_emision: '10/02/2026', monto_total: 1234.56, porcentaje_retencion: 5,
+        fecha_emision: '10/02/2026', monto_total: '1234.56', porcentaje_retencion: 5,
     }]);
     avisoExito(ui, /Factura registrada/);
     redibujo(ui, 'ingresos');
@@ -98,7 +98,7 @@ function edicion({ cobrada = false, recibido = '0', mon = '1200.40', ret = '10',
 test('editar factura no cobrada: se envía sin parcial ni motivo, y se cierra el modal', async () => {
     const ui = cargarInterfaz({ campos: edicion(), api: { actualizarIngreso: 'Resumen de prueba' } });
     await ui.appUI.handleEdicionFormalSubmit(crearEvento(), 5);
-    llamoUnaVez(ui, 'actualizarIngreso', [5, 'F-0002', 3, '12/02/2026', 1200.4, 10, null, null]);
+    llamoUnaVez(ui, 'actualizarIngreso', [5, 'F-0002', 3, '12/02/2026', '1200.40', 10, null, null]);
     avisoExito(ui, /Resumen de prueba/);
     assert.deepEqual(ui.eliminados, ['modal-edit-for-5']);
     redibujo(ui, 'ingresos');
@@ -115,7 +115,7 @@ test('editar factura cobrada cuyo neto cambia: pide motivo y lo envía', async (
     // neto = 1200,40 − 10 % = 1080,36; antes se recibieron 800,80 → hay ajuste.
     const ui = cargarInterfaz({ campos: edicion({ cobrada: true, recibido: '800.80' }), prompt: MOTIVO });
     await ui.appUI.handleEdicionFormalSubmit(crearEvento(), 5);
-    llamoUnaVez(ui, 'actualizarIngreso', [5, 'F-0002', 3, '12/02/2026', 1200.4, 10, null, MOTIVO]);
+    llamoUnaVez(ui, 'actualizarIngreso', [5, 'F-0002', 3, '12/02/2026', '1200.40', 10, null, MOTIVO]);
     assert.equal(ui.preguntas.length, 1);
 });
 
@@ -137,7 +137,7 @@ test('editar factura cobrada: un motivo corto se rechaza', async () => {
 test('editar factura cobrada sin cambio de saldo: pide confirmación, no motivo', async () => {
     const ui = cargarInterfaz({ campos: edicion({ cobrada: true, recibido: '1080.36' }), confirm: true });
     await ui.appUI.handleEdicionFormalSubmit(crearEvento(), 5);
-    llamoUnaVez(ui, 'actualizarIngreso', [5, 'F-0002', 3, '12/02/2026', 1200.4, 10, null, null]);
+    llamoUnaVez(ui, 'actualizarIngreso', [5, 'F-0002', 3, '12/02/2026', '1200.40', 10, null, null]);
     assert.equal(ui.confirmaciones.length, 1);
     assert.deepEqual(ui.preguntas, []);
 });
@@ -154,7 +154,7 @@ test('cobro parcial: el importe viaja como TEXTO tal como se escribió', async (
         prompt: MOTIVO,
     });
     await ui.appUI.handleEdicionFormalSubmit(crearEvento(), 5);
-    llamoUnaVez(ui, 'actualizarIngreso', [5, 'F-0002', 3, '12/02/2026', 1200.4, 10, '450.50', MOTIVO]);
+    llamoUnaVez(ui, 'actualizarIngreso', [5, 'F-0002', 3, '12/02/2026', '1200.40', 10, '450.50', MOTIVO]);
 });
 
 test('cobro parcial marcado y vacío o con forma inválida: no se envía', async () => {
@@ -191,7 +191,7 @@ test('cobro de factura: id de factura, cuenta (tal cual sale del selector), fech
         campos: { cob_ban_5: '2', cob_fec_5: '13/02/2026', cob_mon_5: '888.88', 'modal-cobro-for-5': {} },
     });
     await ui.appUI.handleCobroFormalSubmit(crearEvento(), 5);
-    llamoUnaVez(ui, 'marcarIngresoPagado', [5, '2', '13/02/2026', 888.88]);
+    llamoUnaVez(ui, 'marcarIngresoPagado', [5, '2', '13/02/2026', '888.88']);
     avisoExito(ui, /marcada como pagada/);
     assert.deepEqual(ui.eliminados, ['modal-cobro-for-5']);
     redibujo(ui, 'ingresos');
@@ -211,7 +211,7 @@ test('cobro informal: id, cuenta, fecha y monto numérico; cierra su modal', asy
         campos: { cob_ban_inf_6: '2', cob_fec_inf_6: '14/02/2026', cob_mon_inf_6: '555.55', 'modal-cobro-inf-6': {} },
     });
     await ui.appUI.handleCobroInformalSubmit(crearEvento(), 6);
-    llamoUnaVez(ui, 'marcarInformalPagado', [6, '2', '14/02/2026', 555.55]);
+    llamoUnaVez(ui, 'marcarInformalPagado', [6, '2', '14/02/2026', '555.55']);
     avisoExito(ui, /registrado como pagado/);
     assert.deepEqual(ui.eliminados, ['modal-cobro-inf-6']);
     redibujo(ui, 'ingresos');

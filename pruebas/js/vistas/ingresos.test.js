@@ -64,7 +64,7 @@ function montar({ ingresos = [factura()], informales = [informal()], campos = {}
 
 const CAMPOS_FORMAL = () => ({
     num_fac: el({ value: 'FAC-0008' }), fec_em: el({ value: '05/03/2027' }), cli_nom: el({ value: 'Cliente Uno' }),
-    cli_rnc: el({ value: '101000001' }), mon_tot: el({ value: '1000.50' }), ret_por: el({ value: '10' }),
+    cli_rnc: el({ value: '101000001' }), mon_tot: el({ value: ' 0075.250 ' }), ret_por: el({ value: '10' }),
 });
 
 test('dibuja facturas e informales, y propone la factura siguiente a la última', async () => {
@@ -107,13 +107,13 @@ test('solo la factura emitida ofrece «cobrar»; la cobrada muestra su depósito
     assert.match(html, /En Banco Beta el 13\/03\/2027/);
 });
 
-test('alta de factura: importes y porcentaje como número, textos tal cual, y redibuja', async () => {
+test('alta de factura: el total como texto recortado, el porcentaje como número, textos tal cual, y redibuja', async () => {
     const t = montar({ campos: CAMPOS_FORMAL() });
     await t.vista.handleAgregarIngreso(t.evento);
     assert.equal(t.evento.evitado, 1);
     assert.deepEqual(t.llamadas, [['crearIngreso', {
         numero_factura: 'FAC-0008', rnc_cliente: '101000001', nombre_cliente: 'Cliente Uno',
-        fecha_emision: '05/03/2027', monto_total: 1000.5, porcentaje_retencion: 10,
+        fecha_emision: '05/03/2027', monto_total: '0075.250', porcentaje_retencion: 10,
     }]]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Factura registrada exitosamente.', tipo: undefined }]);
     assert.deepEqual(t.rutas, ['ingresos']);
@@ -166,12 +166,24 @@ test('cobro de factura: abre su ventana con el neto sugerido y la cuenta elegibl
     assert.match(t.modales[0].html, /Cuenta Pesos/);
 });
 
-test('cobro de factura: envía id, cuenta tal cual, fecha y monto numérico; cierra la ventana', async () => {
+test('cobro de factura: envía id, cuenta tal cual, fecha y monto como texto; cierra la ventana', async () => {
     const t = montar({ campos: { cob_ban_4: el({ value: '1' }), cob_fec_4: el({ value: '07/03/2027' }), cob_mon_4: el({ value: '900.00' }), 'modal-cobro-for-4': el() } });
     await t.vista.handleCobroFormalSubmit(t.evento, 4);
-    assert.deepEqual(t.llamadas, [['marcarIngresoPagado', 4, '1', '07/03/2027', 900]]);
+    assert.deepEqual(t.llamadas, [['marcarIngresoPagado', 4, '1', '07/03/2027', '900.00']]);
     assert.equal(t.registro['modal-cobro-for-4'].quitado, true);
     assert.deepEqual(t.rutas, ['ingresos']);
+});
+
+test('los cobros (de factura y de informal): el importe viaja como TEXTO, recortado y con los dígitos intactos', async () => {
+    for (const [escrito, esperado] of [[' 900.5 ', '900.5'], ['8500.005', '8500.005'], ['0900.500', '0900.500']]) {
+        const f = montar({ campos: { cob_ban_4: el({ value: '1' }), cob_fec_4: el({ value: '07/03/2027' }), cob_mon_4: el({ value: escrito }), 'modal-cobro-for-4': el() } });
+        await f.vista.handleCobroFormalSubmit(f.evento, 4);
+        assert.strictEqual(f.llamadas[0][4], esperado, `factura ${JSON.stringify(escrito)}`);
+        const i = montar({ campos: { cob_ban_inf_8: el({ value: '1' }), cob_fec_inf_8: el({ value: '14/03/2027' }), cob_mon_inf_8: el({ value: escrito }), 'modal-cobro-inf-8': el() } });
+        await i.vista.handleCobroInformalSubmit(i.evento, 8);
+        assert.strictEqual(i.llamadas[0][4], esperado, `informal ${JSON.stringify(escrito)}`);
+        assert.equal(typeof i.llamadas[0][4], 'string');
+    }
 });
 
 test('cobro de factura: si Rust rechaza, la ventana sigue abierta', async () => {
@@ -191,7 +203,7 @@ test('cobro informal: su ventana, el envío y el cierre', async () => {
     t.registro.cob_fec_inf_8 = el({ value: '14/03/2027' });
     t.registro.cob_mon_inf_8 = el({ value: '300' });
     await t.vista.handleCobroInformalSubmit(t.evento, 8);
-    assert.deepEqual(t.llamadas, [['marcarInformalPagado', 8, '1', '14/03/2027', 300]]);
+    assert.deepEqual(t.llamadas, [['marcarInformalPagado', 8, '1', '14/03/2027', '300']]);
     assert.equal(t.registro['modal-cobro-inf-8'].quitado, true);
 });
 
@@ -221,7 +233,7 @@ const CAMPOS_EDICION = (extra = {}, ventana = {}) => ({
 test('editar factura sin cobrar: se envía sin parcial ni motivo y se cierra', async () => {
     const t = montar({ campos: CAMPOS_EDICION() });
     await t.vista.handleEdicionFormalSubmit(t.evento, 4);
-    assert.deepEqual(t.llamadas, [['actualizarIngreso', 4, 'FAC-0007', 2, '10/03/2027', 1000, 10, null, null]]);
+    assert.deepEqual(t.llamadas, [['actualizarIngreso', 4, 'FAC-0007', 2, '10/03/2027', '1000', 10, null, null]]);
     assert.equal(t.motivos.length + t.confirmaciones.length, 0);
     assert.deepEqual(t.avisos, [{ mensaje: 'Factura corregida (prueba).', tipo: undefined }]);
     assert.equal(t.registro['modal-edit-for-4'].quitado, true);
@@ -233,7 +245,7 @@ test('editar factura cobrada cuyo neto cambia: pide motivo con el ajuste y lo en
     await t.vista.handleEdicionFormalSubmit(t.evento, 4);
     assert.equal(t.motivos.length, 1);
     assert.match(t.motivos[0].texto, /DOP #100#/);
-    assert.deepEqual(t.llamadas, [['actualizarIngreso', 4, 'FAC-0007', 2, '10/03/2027', 1000, 10, null, 'Neto corregido']]);
+    assert.deepEqual(t.llamadas, [['actualizarIngreso', 4, 'FAC-0007', 2, '10/03/2027', '1000', 10, null, 'Neto corregido']]);
 });
 
 test('editar factura cobrada: cancelar el motivo no envía nada ni cierra la ventana', async () => {

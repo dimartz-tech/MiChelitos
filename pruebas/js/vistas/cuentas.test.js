@@ -86,13 +86,19 @@ test('sin transferencias dibuja el mensaje vacío', async () => {
     assert.match(t.pantalla.contenido.innerHTML, /No hay transferencias entre cuentas registradas/);
 });
 
-test('transferir: envía fecha, ids y los tres importes como números, avisa y vuelve a dibujar', async () => {
+test('transferir: envía fecha, ids y los tres importes como texto, avisa y vuelve a dibujar', async () => {
     const t = montar({ campos: CAMPOS_TRANSFERENCIA });
     await t.vista.handleTransferirCuentas(t.evento);
     assert.equal(t.evitado(), 1, 'debe cancelar el envío nativo del formulario');
-    assert.deepEqual(t.llamadas, [['transferirEntreCuentas', '05/03/2027', 2, 1, 10.5, 630, 1.5, 'Cambio de prueba']]);
+    assert.deepEqual(t.llamadas, [['transferirEntreCuentas', '05/03/2027', 2, 1, '10.5', '630', '1.5', 'Cambio de prueba']]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Transacción ejecutada con éxito.', tipo: undefined }]);
     assert.deepEqual(t.rutas, ['cuentas']);
+});
+
+test('transferir: un cargo en blanco se envía como «0» (sin cargo), no como texto vacío', async () => {
+    const t = montar({ campos: { ...CAMPOS_TRANSFERENCIA, tra_car: elementoFalso({ value: '  ' }) } });
+    await t.vista.handleTransferirCuentas(t.evento);
+    assert.deepEqual(t.llamadas, [['transferirEntreCuentas', '05/03/2027', 2, 1, '10.5', '630', '0', 'Cambio de prueba']]);
 });
 
 test('transferir: si la API falla avisa del error y no vuelve a dibujar', async () => {
