@@ -33,6 +33,9 @@ pub enum ErrorDominio {
     /// Una suscripción cobra un importe mayor que cero: uno de cero o negativo
     /// no cobra, abonaría a la tarjeta cada período.
     SuscripcionSinImporte,
+    /// Un abono a la tarjeta es mayor que cero: uno de cero no abona nada y uno
+    /// negativo **subiría** la deuda.
+    AbonoSinImporte,
     /// El día de facturación tiene que ser un día del mes.
     DiaDeFacturacionInvalido { dia: i32 },
     /// La frecuencia no es ninguna de las que admite el esquema.
@@ -66,6 +69,10 @@ impl fmt::Display for ErrorDominio {
             ErrorDominio::SuscripcionSinImporte => write!(
                 f,
                 "Una suscripción debe cobrar un importe mayor que cero: con cero o menos no cobraría, abonaría a la tarjeta cada período."
+            ),
+            ErrorDominio::AbonoSinImporte => write!(
+                f,
+                "Un abono debe ser mayor que cero: con cero no abona nada y con un importe negativo subiría la deuda."
             ),
             ErrorDominio::DiaDeFacturacionInvalido { dia } => write!(
                 f,
