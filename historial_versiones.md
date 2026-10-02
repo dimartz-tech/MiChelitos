@@ -4,7 +4,19 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.73.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.74.0 (Versión Actual) - 2026-10-02
+**Resumen: las suscripciones mensuales y anuales se muestran por separado.**
+
+### 🔧 Qué se hace
+* En la tarjeta «Carga Fija Mensual» las suscripciones se subdividen por frecuencia y por divisa (sin mezclarlas): **Suscripciones Mensuales** (suma de las mensuales) y **Suscripciones Anuales (al mes)**, con una nota «total del año» (la suma de lo que se cobra una vez al año). El equivalente al mes de las anuales se calcula **una sola vez** sobre ese total (total / 12), en vez de dividir cada suscripción.
+* Los totales no cambian (la carga fija suma lo mismo que antes); solo se ve de dónde sale cada cifra. En divisas distintas de pesos la fila anual solo aparece si hay alguna anual.
+
+### 🧪 Pruebas
+* Tres pruebas existentes pasan a los nuevos rótulos y una nueva fija la subdivisión (dos anuales de 100 y 50 y una mensual de 7: 7, 12.50 al mes y «total del año 150.00»). Cinco mutaciones (dividir entre 11, intercambiar mensual y anual, no dividir la fila anual, mostrar siempre la fila anual en otras divisas, tomar «sin divisa» como dólares): todas detectadas. **JS 574 pasan.**
+
+---
+
+## 🚀 Versión 1.73.0 - 2026-10-02
 **El núcleo rechaza un abono a tarjeta que no es positivo** (decisión del titular tras el hallazgo de 1.72.0).
 
 ### 🐛 Qué estaba mal
