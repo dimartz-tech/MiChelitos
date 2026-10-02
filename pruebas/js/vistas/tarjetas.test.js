@@ -182,9 +182,18 @@ test('abono en efectivo: el monto como número, sin cuenta y sin tasa; redibuja 
     const t = montar({ campos: CAMPOS_PAGO() });
     await t.vista.handleAbonoTarjeta(t.evento, 7);
     assert.equal(t.evento.evitado, 1);
-    assert.deepEqual(t.llamadas, [['registrarPagoTarjeta', 7, '10/03/2027', 120.5, 'DOP', null, 0]]);
+    assert.deepEqual(t.llamadas, [['registrarPagoTarjeta', 7, '10/03/2027', '120.5', 'DOP', null, 0]]);
     assert.deepEqual(t.avisos, [{ mensaje: 'Abono a tarjeta guardado.', tipo: undefined }]);
     assert.deepEqual(t.rutas, ['tarjetas']);
+});
+
+test('abono: el importe viaja como TEXTO, recortado y con los dígitos intactos (la tasa sigue siendo un número)', async () => {
+    for (const [escrito, esperado] of [[' 120.5 ', '120.5'], ['1000.005', '1000.005'], ['0120.500', '0120.500']]) {
+        const t = montar({ campos: CAMPOS_PAGO({ pag_monto_7: el({ value: escrito }) }) });
+        await t.vista.handleAbonoTarjeta(t.evento, 7);
+        assert.strictEqual(t.llamadas[0][3], esperado, JSON.stringify(escrito));
+        assert.equal(typeof t.llamadas[0][3], 'string');
+    }
 });
 
 test('abono: un importe que no es mayor que cero se rechaza antes de tocar la API', async () => {
@@ -203,7 +212,7 @@ test('abono en dólares desde una cuenta en pesos pide la tasa, con 60.0 por def
     await espera;
     assert.equal(t.preguntas[0].d, '60.0');
     assert.match(t.preguntas[0].m, /USD 120\.5 desde la cuenta en Pesos "Cuenta Pesos"/);
-    assert.deepEqual(t.llamadas, [['registrarPagoTarjeta', 7, '10/03/2027', 120.5, 'USD', 1, 58.5]]);
+    assert.deepEqual(t.llamadas, [['registrarPagoTarjeta', 7, '10/03/2027', '120.5', 'USD', 1, 58.5]]);
 });
 
 test('abono con la tasa ya escrita, o entre cuentas de la misma divisa, no la pregunta', async () => {
@@ -477,11 +486,11 @@ const CAMPOS_LIMITES = (extra = {}) => ({
     edit_aju_dop_7: el({ value: '' }), edit_aju_usd_7: el({ value: '' }), edit_pol_7: el({ value: 'traduce' }), 'modal-edit-tar-7': el(), ...extra,
 });
 
-test('guardar límites: números, ajuste en blanco como «sin ajuste» y política elegida; cierra la ventana y redibuja', async () => {
+test('guardar límites: texto, ajuste en blanco como «sin ajuste» y política elegida; cierra la ventana y redibuja', async () => {
     const t = montar({ campos: CAMPOS_LIMITES() });
     await t.vista.handleEdicionLimitesTarjetaSubmit(t.evento, 7);
     // (id, límite DOP, límite USD, sobregiro DOP, sobregiro USD, corte DOP, corte USD, ajustado DOP, ajustado USD, política)
-    assert.deepEqual(t.llamadas, [['actualizarLimitesTarjeta', 7, 500, 100, 50, 10, 150, 30, null, null, 'traduce']]);
+    assert.deepEqual(t.llamadas, [['actualizarLimitesTarjeta', 7, '500', '100', '50', '10', '150', '30', null, null, 'traduce']]);
     assert.equal(t.registro['modal-edit-tar-7'].quitado, true);
     assert.deepEqual(t.rutas, ['tarjetas']);
 });
@@ -490,7 +499,19 @@ test('un límite ajustado de cero es un tope deliberado, no «sin ajuste»; la p
     const t = montar({ campos: CAMPOS_LIMITES({ edit_aju_dop_7: el({ value: '0' }), edit_pol_7: undefined }) });
     delete t.registro.edit_pol_7;
     await t.vista.handleEdicionLimitesTarjetaSubmit(t.evento, 7);
-    assert.deepEqual([t.llamadas[0][8], t.llamadas[0][9], t.llamadas[0][10]], [0, null, 'origen']);
+    assert.deepEqual([t.llamadas[0][8], t.llamadas[0][9], t.llamadas[0][10]], ['0', null, 'origen']);
+});
+
+test('guardar límites: un límite en blanco se envía como «0» y un ajustado conserva sus dígitos escritos', async () => {
+    const t = montar({ campos: CAMPOS_LIMITES({ edit_sob_dop_7: el({ value: '  ' }), edit_aju_dop_7: el({ value: '0075.250' }), edit_aju_usd_7: el({ value: ' 1.005 ' }) }) });
+    await t.vista.handleEdicionLimitesTarjetaSubmit(t.evento, 7);
+    assert.deepEqual(t.llamadas[0].slice(1, 10), [7, '500', '100', '0', '10', '150', '30', '0075.250', '1.005']);
+});
+
+test('un ajustado se compara como número con el aprobado (1000 supera a 999), no como texto', async () => {
+    const t = montar({ campos: CAMPOS_LIMITES({ edit_lim_dop_7: el({ value: '999' }), edit_aju_dop_7: el({ value: '1000' }) }) });
+    await t.vista.handleEdicionLimitesTarjetaSubmit(t.evento, 7);
+    assert.deepEqual(t.llamadas, []);
 });
 
 test('un límite ajustado mayor que el aprobado se rechaza antes de tocar la API', async () => {

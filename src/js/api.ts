@@ -83,7 +83,7 @@ const AppAPI = {
 
     // Calcula el cargo sin guardar nada, para enseñarlo antes de confirmar. La
     // regla vive en el núcleo: la interfaz no la duplica.
-    async simularAvanceEfectivo(monto: string, divisa: string, tipoCargo: string, porcentaje: number | null | undefined, cargoFijo: string | number | null | undefined) {
+    async simularAvanceEfectivo(monto: string, divisa: string, tipoCargo: string, porcentaje: number | null | undefined, cargoFijo: string | null | undefined) {
         return await invoke('simular_avance_efectivo', {
             monto: String(monto),
             divisa,
@@ -93,7 +93,7 @@ const AppAPI = {
         });
     },
 
-    async registrarAvanceEfectivo(tarjetaId: number | string, cuentaAhorroId: number | string, fecha: string, monto: string, divisa: string, tipoCargo: string, porcentaje: number | null | undefined, cargoFijo: string | number | null | undefined, nota: string | null | undefined) {
+    async registrarAvanceEfectivo(tarjetaId: number | string, cuentaAhorroId: number | string, fecha: string, monto: string, divisa: string, tipoCargo: string, porcentaje: number | null | undefined, cargoFijo: string | null | undefined, nota: string | null | undefined) {
         return await invoke('registrar_avance_efectivo', {
             tarjetaId: Number(tarjetaId),
             cuentaAhorroId: Number(cuentaAhorroId),
@@ -115,18 +115,19 @@ const AppAPI = {
         return await invoke('revertir_avance_efectivo', { id: Number(id), motivo });
     },
 
-    async crearCuenta(nombre: string, divisa: string, balance: number | string, entidad: string | null | undefined, comisionPagoImpuestos: string | number | null | undefined) {
+    async crearCuenta(nombre: string, divisa: string, balance: string, entidad: string | null | undefined, comisionPagoImpuestos: string | null | undefined) {
         return await invoke('crear_cuenta', {
             nombre,
             divisa,
-            balance: Number(balance),
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            balance: String(balance),
             entidad: entidad || null,
             // Texto, por el mismo motivo que el saldo del préstamo.
             comisionPagoImpuestos: comisionPagoImpuestos ?? null
         });
     },
 
-    async actualizarCuenta(id: number | string, nombre: string, entidad: string | null | undefined, comisionPagoImpuestos: string | number | null | undefined) {
+    async actualizarCuenta(id: number | string, nombre: string, entidad: string | null | undefined, comisionPagoImpuestos: string | null | undefined) {
         return await invoke('actualizar_cuenta', {
             id: Number(id),
             nombre,
@@ -139,14 +140,14 @@ const AppAPI = {
         return await invoke('eliminar_cuenta', { id: Number(id) });
     },
 
-    async transferirEntreCuentas(fecha: string, origenId: number | string, destinoId: number | string, montoOrigen: number | string, montoDestino: number | string, cargo: number | string, descripcion: string) {
+    async transferirEntreCuentas(fecha: string, origenId: number | string, destinoId: number | string, montoOrigen: string, montoDestino: string, cargo: string, descripcion: string) {
         return await invoke('transferir_entre_cuentas', {
             fecha,
             origenId: Number(origenId),
             destinoId: Number(destinoId),
-            montoOrigen: Number(montoOrigen),
-            montoDestino: Number(montoDestino),
-            cargo: Number(cargo),
+            montoOrigen: String(montoOrigen),
+            montoDestino: String(montoDestino),
+            cargo: String(cargo),
             descripcion
         });
     },
@@ -173,13 +174,13 @@ const AppAPI = {
         return await invoke('crear_ingreso', { input: ingresoData });
     },
 
-    async actualizarIngreso(id: number | string, numeroFactura: string, clienteId: number | string, fechaEmision: string, montoTotal: number | string, porcentajeRetencion: number | string, cobroParcial: string | number | null | undefined, motivo: string | null | undefined) {
+    async actualizarIngreso(id: number | string, numeroFactura: string, clienteId: number | string, fechaEmision: string, montoTotal: string, porcentajeRetencion: number | string, cobroParcial: string | null | undefined, motivo: string | null | undefined) {
         return await invoke('actualizar_ingreso', {
             id: Number(id),
             numeroFactura,
             clienteId: Number(clienteId),
             fechaEmision,
-            montoTotal: Number(montoTotal),
+            montoTotal: String(montoTotal),
             porcentajeRetencion: Number(porcentajeRetencion),
             // Nulo es la regla: se da por cobrado el neto entero.
             cobroParcial: cobroParcial ?? null,
@@ -188,12 +189,13 @@ const AppAPI = {
         });
     },
 
-    async marcarIngresoPagado(id: number | string, cuentaAhorroId: number | string, fecha: string, montoRecibido: number | string) {
+    async marcarIngresoPagado(id: number | string, cuentaAhorroId: number | string, fecha: string, montoRecibido: string) {
         return await invoke('marcar_ingreso_pagado', {
             id: Number(id),
             cuentaAhorroId: Number(cuentaAhorroId),
             fecha,
-            montoRecibido: Number(montoRecibido)
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            montoRecibido: String(montoRecibido)
         });
     },
 
@@ -211,12 +213,13 @@ const AppAPI = {
         });
     },
 
-    async marcarInformalPagado(id: number | string, cuentaAhorroId: number | string, fecha: string, montoRecibido: number | string) {
+    async marcarInformalPagado(id: number | string, cuentaAhorroId: number | string, fecha: string, montoRecibido: string) {
         return await invoke('marcar_informal_pagado', {
             id: Number(id),
             cuentaAhorroId: Number(cuentaAhorroId),
             fecha,
-            montoRecibido: Number(montoRecibido)
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            montoRecibido: String(montoRecibido)
         });
     },
 
@@ -225,18 +228,18 @@ const AppAPI = {
         return await invoke('obtener_tarjetas');
     },
 
-    async crearTarjeta(entidad: string, nombre: string, limitePesos: number | string, limiteDolares: number | string, sobregiroPesos: number | string, sobregiroDolares: number | string, balancePesos: number | string, balanceDolares: number | string, balanceCortePesos: number | string, balanceCorteDolares: number | string, corte: number | string, pago: number | string) {
+    async crearTarjeta(entidad: string, nombre: string, limitePesos: string, limiteDolares: string, sobregiroPesos: string, sobregiroDolares: string, balancePesos: string, balanceDolares: string, balanceCortePesos: string, balanceCorteDolares: string, corte: number | string, pago: number | string) {
         return await invoke('crear_tarjeta', {
             entidad,
             nombre,
-            limitePesos: Number(limitePesos),
-            limiteDolares: Number(limiteDolares),
-            sobregiroPesos: Number(sobregiroPesos),
-            sobregiroDolares: Number(sobregiroDolares),
-            balancePesos: Number(balancePesos),
-            balanceDolares: Number(balanceDolares),
-            balanceCortePesos: Number(balanceCortePesos),
-            balanceCorteDolares: Number(balanceCorteDolares),
+            limitePesos: String(limitePesos),
+            limiteDolares: String(limiteDolares),
+            sobregiroPesos: String(sobregiroPesos),
+            sobregiroDolares: String(sobregiroDolares),
+            balancePesos: String(balancePesos),
+            balanceDolares: String(balanceDolares),
+            balanceCortePesos: String(balanceCortePesos),
+            balanceCorteDolares: String(balanceCorteDolares),
             corte: Number(corte),
             pago: Number(pago)
         });
@@ -244,17 +247,17 @@ const AppAPI = {
 
     // Los límites ajustados son opcionales: null significa "sin ajuste", y se
     // distingue de 0, que es un tope deliberado que congela la tarjeta.
-    async actualizarLimitesTarjeta(id: number | string, limitePesos: number | string, limiteDolares: number | string, sobregiroPesos: number | string, sobregiroDolares: number | string, balanceCortePesos: number | string, balanceCorteDolares: number | string, ajustadoPesos: number | string | null = null, ajustadoDolares: number | string | null = null, politicaLiquidacion: string | null | undefined = 'origen') {
+    async actualizarLimitesTarjeta(id: number | string, limitePesos: string, limiteDolares: string, sobregiroPesos: string, sobregiroDolares: string, balanceCortePesos: string, balanceCorteDolares: string, ajustadoPesos: string | null = null, ajustadoDolares: string | null = null, politicaLiquidacion: string | null | undefined = 'origen') {
         return await invoke('actualizar_limites_tarjeta', {
             id: Number(id),
-            limitePesos: Number(limitePesos),
-            limiteDolares: Number(limiteDolares),
-            sobregiroPesos: Number(sobregiroPesos),
-            sobregiroDolares: Number(sobregiroDolares),
-            balanceCortePesos: Number(balanceCortePesos),
-            balanceCorteDolares: Number(balanceCorteDolares),
-            limiteAjustadoPesos: ajustadoPesos === null || ajustadoPesos === '' ? null : Number(ajustadoPesos),
-            limiteAjustadoDolares: ajustadoDolares === null || ajustadoDolares === '' ? null : Number(ajustadoDolares),
+            limitePesos: String(limitePesos),
+            limiteDolares: String(limiteDolares),
+            sobregiroPesos: String(sobregiroPesos),
+            sobregiroDolares: String(sobregiroDolares),
+            balanceCortePesos: String(balanceCortePesos),
+            balanceCorteDolares: String(balanceCorteDolares),
+            limiteAjustadoPesos: ajustadoPesos === null || ajustadoPesos === '' ? null : String(ajustadoPesos),
+            limiteAjustadoDolares: ajustadoDolares === null || ajustadoDolares === '' ? null : String(ajustadoDolares),
             politicaLiquidacion
         });
     },
@@ -282,11 +285,12 @@ const AppAPI = {
         return await invoke('eliminar_bonificacion', { id: Number(id) });
     },
 
-    async registrarPagoTarjeta(id: number | string, fec: string, mon: number, div: string, cuentaAhorroId: number | null = null, tasaCambio: number | string = 0) {
+    async registrarPagoTarjeta(id: number | string, fec: string, mon: string, div: string, cuentaAhorroId: number | null = null, tasaCambio: number | string = 0) {
         return await invoke('registrar_pago_tarjeta', { 
             id: Number(id), 
             fecha: fec, 
-            monto: mon, 
+            // Texto, tal como se escribió: el céntimo lo deciden los dígitos.
+            monto: String(mon), 
             divisa: div, 
             cuentaAhorroId: cuentaAhorroId ? Number(cuentaAhorroId) : null,
             tasaCambio: Number(tasaCambio || 0)
@@ -408,10 +412,11 @@ const AppAPI = {
     // --- CORRECCIONES ---
     // El emisor comunica cuánto cargó en moneda local; la tasa la deduce el
     // backend y la devuelve para poder mostrarla.
-    async liquidarConsumoPendiente(id: number | string, montoLiquidado: number | string) {
+    async liquidarConsumoPendiente(id: number | string, montoLiquidado: string) {
         return await invoke('liquidar_consumo_pendiente', {
             id: Number(id),
-            montoLiquidado: Number(montoLiquidado)
+            // Texto, tal como se escribió: el céntimo (y con él la tasa) lo deciden los dígitos.
+            montoLiquidado: String(montoLiquidado)
         });
     },
 

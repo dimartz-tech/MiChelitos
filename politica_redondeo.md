@@ -264,14 +264,14 @@ alta de cuenta, que 1.21.0 daba por migrada y seguía enviándose como número.)
   pasar un envío a `onclick`, dejar un id sin declarar): las cinco hacen fallar
   la prueba.
 
-## Migración de los importes a texto (en curso)
+## Migración de los importes a texto (terminada)
 
-La puerta de entrada ya acepta texto (`ImporteDecimal`, tramo 4a), pero **quedan comandos cuyos importes siguen
-siendo un `f64`**: la interfaz los envía con `Number(...)` y el núcleo decide el céntimo sobre un número que ya no
-vale lo que el titular tecleó. Se migran **uno por PR** (Rust: `ImporteDecimal` y `unidades()` al guardar; envoltorio:
+La puerta de entrada (`ImporteDecimal`, tramo 4a) aceptó texto o número mientras **quedaban comandos cuyos importes
+siguían siendo un `f64`**: la interfaz los enviaba con `Number(...)` y el núcleo decidía el céntimo sobre un número
+que ya no valía lo que el titular tecleó. Se migraron **uno por comando** (Rust: `ImporteDecimal` y `unidades()` al guardar; envoltorio:
 `String(x)`; vista: el texto recortado, sin convertir), porque cada uno toca un comando de dinero y merece su propia
-comprobación. La lista de lo que falta es una **prueba** (`pruebas/js/contrato/importes_texto.test.js`): solo puede
-encogerse, y un importe nuevo que viajara como número rompería la prueba.
+comprobación. La lista de pendientes es una **prueba** (`pruebas/js/contrato/importes_texto.test.js`) y quedó vacía:
+un importe nuevo que viajara como número la rompería.
 
 | Comando | Importes | Estado |
 |---|---|---|
@@ -281,18 +281,20 @@ encogerse, y un importe nuevo que viajara como número rompería la prueba.
 | `actualizar_ingreso` | `cobro_parcial` | ✅ texto (el total, no) |
 | `simular_avance_efectivo`, `registrar_avance_efectivo` | `monto`, `cargo_fijo` | ✅ texto |
 | **`crear_ingreso_informal`** | `monto` | ✅ **texto (1.69.0)**: antes guardaba el número tal cual, sin que el núcleo decidiera el céntimo |
-| `marcar_ingreso_pagado`, `marcar_informal_pagado` | `monto_recibido` | pendiente |
+| `marcar_ingreso_pagado`, `marcar_informal_pagado` | `monto_recibido` | ✅ texto |
 | **`crear_cobro_efectivo_informal`** | `monto` | ✅ **texto (1.70.0)**: el importe se usa **dos veces** (el ingreso y el saldo de la caja) y ahora una sola conversión exacta garantiza que reciben lo mismo |
 | **`crear_bonificacion`** | `monto` | ✅ **texto (1.71.0)**: ya pasaba por `Dinero::nuevo(f64)`; ahora entra por los dígitos escritos y se casa con la divisa declarada |
-| `liquidar_consumo_pendiente` | `monto_liquidado` | pendiente |
-| `registrar_pago_tarjeta` | `monto` (la tasa de cambio es una tasa, no un importe) | pendiente |
-| `crear_cuenta` | `balance` | pendiente |
-| `transferir_entre_cuentas` | `monto_origen`, `monto_destino`, `cargo` | pendiente |
-| `actualizar_ingreso` | `monto_total` (el porcentaje de retención es una tasa) | pendiente |
-| `crear_tarjeta` | ocho límites, sobregiros, balances y cortes | pendiente |
-| `actualizar_limites_tarjeta` | seis importes y dos límites ajustados | pendiente |
-| `crear_gasto` (`GastoInput`), `crear_ingreso` (`IngresoInput`), `crear_prestamo` y `actualizar_prestamo` (estructuras de entrada) | `monto`, `monto_total`, `monto_prestamo`, `monto_cuota`, `saldo_actual`, `limite_credito` | pendiente (requieren cambiar el tipo de los campos de la estructura) |
+| `liquidar_consumo_pendiente` | `monto_liquidado` | ✅ texto |
+| `registrar_pago_tarjeta` | `monto` (la tasa de cambio es una tasa, no un importe) | ✅ texto |
+| `crear_cuenta` | `balance` | ✅ texto |
+| `transferir_entre_cuentas` | `monto_origen`, `monto_destino`, `cargo` | ✅ texto: cada importe se casa con la divisa de su cuenta; el cargo en blanco viaja como «0» |
+| `actualizar_ingreso` | `monto_total` (el porcentaje de retención es una tasa) | ✅ texto: una sola conversión sirve al cálculo, a la fila y al caso de auditoría |
+| `crear_tarjeta` | ocho límites, sobregiros, balances y cortes | ✅ texto (en blanco = 0, como antes) |
+| `actualizar_limites_tarjeta` | seis importes y dos límites ajustados | ✅ texto (el ajustado vacío sigue siendo «sin ajuste» y «0» un tope deliberado) |
+| `crear_gasto` (`GastoInput`) | `monto` | ✅ texto: se casa con la divisa declarada del gasto |
+| `crear_ingreso` (`IngresoInput`) | `monto_total` | ✅ texto: una sola conversión sirve a la retención y a la fila |
+| `crear_prestamo` y `actualizar_prestamo` (estructuras de entrada) | `monto_prestamo`, `monto_cuota`, `saldo_actual`, `limite_credito` | ✅ texto: el saldo ausente es el monto ya decidido al céntimo; el límite vacío sigue siendo «no declarado» |
 
-**Cuando no quede ninguno**, la rama «número» de `ImporteDecimal` se retira y la coma flotante deja de entrar por la
-frontera (así lo dice `ipc.rs`). Los porcentajes y las tasas **no se migran**: son tasas, no importes, y su
+**Ya no queda ninguno**: la rama «número» de `ImporteDecimal` se retiró y la coma flotante no entra por la frontera
+(un número JSON se rechaza; así lo dice `ipc.rs`). Los porcentajes y las tasas **no se migran**: son tasas, no importes, y su
 representación se midió en el tramo 3.

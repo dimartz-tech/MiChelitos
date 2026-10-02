@@ -401,7 +401,7 @@ fn obtener_gastos() -> Result<Vec<Gasto>, String> {
 #[derive(Deserialize)]
 struct GastoInput {
     fecha: String,
-    monto: f64,
+    monto: ipc::ImporteDecimal,
     divisa: String,
     descripcion: String,
     categoria_id: i64,
@@ -427,7 +427,8 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
 
     let datos = DatosGasto {
         fecha: input.fecha,
-        monto: Dinero::nuevo(input.monto, divisa)?,
+        // El importe llega como se escribió; se casa con la divisa declarada del gasto.
+        monto: input.monto.con_divisa(divisa),
         descripcion: input.descripcion,
         categoria_id: input.categoria_id,
         metodo,
@@ -495,7 +496,7 @@ struct IngresoInput {
     rnc_cliente: String,
     nombre_cliente: String,
     fecha_emision: String,
-    monto_total: f64,
+    monto_total: ipc::ImporteDecimal,
     porcentaje_retencion: f64,
 }
 
@@ -534,8 +535,10 @@ fn crear_ingreso(input: IngresoInput) -> Result<i64, String> {
 
     // H16 resuelto: la retención se decide al céntimo, con el mismo núcleo
     // que el resto del sistema.
+    // El total llega como se escribió; una sola conversión sirve a la retención y a la fila.
+    let monto_total = input.monto_total.con_divisa(MONEDA_LOCAL);
     let monto_retenido = dominio::ingreso::retencion(
-        Dinero::nuevo(input.monto_total, MONEDA_LOCAL)?,
+        monto_total,
         Porcentaje::desde_porcentaje(input.porcentaje_retencion)?,
     )?
     .unidades();
@@ -547,7 +550,7 @@ fn crear_ingreso(input: IngresoInput) -> Result<i64, String> {
             &input.numero_factura,
             cliente_id,
             &input.fecha_emision,
-            input.monto_total,
+            monto_total.unidades(),
             input.porcentaje_retencion,
             monto_retenido,
         )
@@ -581,7 +584,7 @@ fn resolver_deposito(
     tx: &rusqlite::Transaction,
     cuenta_id: i64,
     divisa_cobrada: Divisa,
-    importe: f64,
+    importe: ipc::ImporteDecimal,
 ) -> Result<dominio::ingreso::Deposito, String> {
     let divisa_cuenta: String = tx
         .query_row("SELECT divisa FROM cuentas_ahorro WHERE id = ?;", [cuenta_id], |r| r.get(0))
@@ -590,7 +593,8 @@ fn resolver_deposito(
     let deposito = dominio::ingreso::Deposito::nuevo(
         cuenta_id,
         Divisa::desde_codigo(&divisa_cuenta)?,
-        Dinero::nuevo(importe, divisa_cobrada)?,
+        // El céntimo lo deciden los dígitos escritos, y es el mismo que se guarda en la fila.
+        importe.con_divisa(divisa_cobrada),
     )?;
     Ok(deposito)
 }
@@ -622,13 +626,15 @@ fn marcar_ingreso_pagado(
     id: i64,
     cuenta_ahorro_id: i64,
     fecha: String,
-    monto_recibido: f64,
+    monto_recibido: ipc::ImporteDecimal,
 ) -> Result<(), String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     // Una factura se emite en moneda local, de modo que su cobro también.
     let deposito = resolver_deposito(&tx, cuenta_ahorro_id, MONEDA_LOCAL, monto_recibido)?;
+    // La fila guarda exactamente el mismo importe que se acredita a la cuenta.
+    let monto_recibido = monto_recibido.unidades();
     let nombre: String = tx
         .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -703,13 +709,15 @@ fn marcar_informal_pagado(
     id: i64,
     cuenta_ahorro_id: i64,
     fecha: String,
-    monto_recibido: f64,
+    monto_recibido: ipc::ImporteDecimal,
 ) -> Result<(), String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     // Una factura se emite en moneda local, de modo que su cobro también.
     let deposito = resolver_deposito(&tx, cuenta_ahorro_id, MONEDA_LOCAL, monto_recibido)?;
+    // La fila guarda exactamente el mismo importe que se acredita a la cuenta.
+    let monto_recibido = monto_recibido.unidades();
     let nombre: String = tx
         .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -840,14 +848,14 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
 fn crear_tarjeta(
     entidad: String,
     nombre: String,
-    limite_pesos: f64,
-    limite_dolares: f64,
-    sobregiro_pesos: f64,
-    sobregiro_dolares: f64,
-    balance_pesos: f64,
-    balance_dolares: f64,
-    balance_corte_pesos: f64,
-    balance_corte_dolares: f64,
+    limite_pesos: ipc::ImporteDecimal,
+    limite_dolares: ipc::ImporteDecimal,
+    sobregiro_pesos: ipc::ImporteDecimal,
+    sobregiro_dolares: ipc::ImporteDecimal,
+    balance_pesos: ipc::ImporteDecimal,
+    balance_dolares: ipc::ImporteDecimal,
+    balance_corte_pesos: ipc::ImporteDecimal,
+    balance_corte_dolares: ipc::ImporteDecimal,
     corte: i32,
     pago: i32
 ) -> Result<i64, String> {
@@ -855,7 +863,9 @@ fn crear_tarjeta(
     conn.execute(
         "INSERT INTO tarjetas (entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
-        (entidad, nombre, limite_pesos, limite_dolares, sobregiro_pesos, sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, corte, pago)
+        // Cada importe llega como se escribió: el céntimo lo deciden esos dígitos, no un número ya redondeado.
+        (entidad, nombre, limite_pesos.unidades(), limite_dolares.unidades(), sobregiro_pesos.unidades(), sobregiro_dolares.unidades(),
+         balance_pesos.unidades(), balance_dolares.unidades(), balance_corte_pesos.unidades(), balance_corte_dolares.unidades(), corte, pago)
     ).map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
 }
@@ -863,20 +873,23 @@ fn crear_tarjeta(
 #[tauri::command]
 fn actualizar_limites_tarjeta(
     id: i64,
-    limite_pesos: f64,
-    limite_dolares: f64,
-    sobregiro_pesos: f64,
-    sobregiro_dolares: f64,
-    balance_corte_pesos: f64,
-    balance_corte_dolares: f64,
-    limite_ajustado_pesos: Option<f64>,
-    limite_ajustado_dolares: Option<f64>,
+    limite_pesos: ipc::ImporteDecimal,
+    limite_dolares: ipc::ImporteDecimal,
+    sobregiro_pesos: ipc::ImporteDecimal,
+    sobregiro_dolares: ipc::ImporteDecimal,
+    balance_corte_pesos: ipc::ImporteDecimal,
+    balance_corte_dolares: ipc::ImporteDecimal,
+    // `None` es «sin ajuste»; cero es un tope deliberado.
+    limite_ajustado_pesos: Option<ipc::ImporteDecimal>,
+    limite_ajustado_dolares: Option<ipc::ImporteDecimal>,
     politica_liquidacion: Option<String>
 ) -> Result<(), String> {
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE tarjetas SET limite_pesos = ?, limite_dolares = ?, limite_sobregiro_pesos = ?, limite_sobregiro_dolares = ?, balance_corte_pesos = ?, balance_corte_dolares = ?, limite_ajustado_pesos = ?, limite_ajustado_dolares = ?, politica_liquidacion = ? WHERE id = ?;",
-        (limite_pesos, limite_dolares, sobregiro_pesos, sobregiro_dolares, balance_corte_pesos, balance_corte_dolares, limite_ajustado_pesos, limite_ajustado_dolares,
+        (limite_pesos.unidades(), limite_dolares.unidades(), sobregiro_pesos.unidades(), sobregiro_dolares.unidades(),
+         balance_corte_pesos.unidades(), balance_corte_dolares.unidades(),
+         limite_ajustado_pesos.map(|i| i.unidades()), limite_ajustado_dolares.map(|i| i.unidades()),
          PoliticaLiquidacion::desde_codigo(politica_liquidacion.as_deref()).codigo(), id)
     ).map_err(|e| e.to_string())?;
     Ok(())
@@ -886,7 +899,7 @@ fn actualizar_limites_tarjeta(
 fn registrar_pago_tarjeta(
     id: i64,
     fecha: String,
-    monto: f64,
+    monto: ipc::ImporteDecimal,
     divisa: String,
     cuenta_ahorro_id: Option<i64>,
     tasa_cambio: f64
@@ -907,7 +920,8 @@ fn registrar_pago_tarjeta(
             DatosPago {
                 tarjeta_id: id,
                 fecha,
-                monto: Dinero::nuevo(monto, Divisa::desde_codigo(&divisa)?)?,
+                // El céntimo lo deciden los dígitos escritos; la divisa es la declarada por el abono.
+                monto: monto.con_divisa(Divisa::desde_codigo(&divisa)?),
                 cuenta_ahorro_id,
                 // Una tasa de cero es como la interfaz dice «no aplica».
                 tasa_cambio: if tasa_cambio > 0.0 {
@@ -1867,18 +1881,18 @@ fn obtener_prestamos() -> Result<Vec<Prestamo>, String> {
 #[derive(Deserialize)]
 struct PrestamoInput {
     tipo_prestamo: String,
-    monto_prestamo: f64,
+    monto_prestamo: ipc::ImporteDecimal,
     institucion_financiera: String,
     tasa_actual: f64,
     cuotas_totales: Option<i32>,
     cuotas_pendientes: Option<i32>,
-    monto_cuota: f64,
+    monto_cuota: ipc::ImporteDecimal,
     dia_pago: i32,
     /// Capital pendiente hoy. Si no se indica se asume el monto íntegro, que
     /// es lo correcto en un financiamiento recién desembolsado.
-    saldo_actual: Option<f64>,
+    saldo_actual: Option<ipc::ImporteDecimal>,
     /// Solo en líneas revolventes: el cupo aprobado.
-    limite_credito: Option<f64>,
+    limite_credito: Option<ipc::ImporteDecimal>,
 }
 
 #[tauri::command]
@@ -1911,7 +1925,9 @@ fn crear_prestamo(input: PrestamoInput) -> Result<i64, String> {
         return Err("Solo una línea revolvente tiene límite de crédito.".to_string());
     }
 
-    let saldo_actual = input.saldo_actual.unwrap_or(input.monto_prestamo);
+    // Los importes llegan como se escribieron; cada uno se convierte una vez al guardar.
+    let monto_prestamo = input.monto_prestamo.unidades();
+    let saldo_actual = input.saldo_actual.map(|s| s.unidades()).unwrap_or(monto_prestamo);
 
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
@@ -1919,15 +1935,15 @@ fn crear_prestamo(input: PrestamoInput) -> Result<i64, String> {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
         (
             &input.tipo_prestamo,
-            input.monto_prestamo,
+            monto_prestamo,
             &input.institucion_financiera,
             input.tasa_actual,
             c_totales,
             c_pendientes,
-            input.monto_cuota,
+            input.monto_cuota.unidades(),
             input.dia_pago,
             saldo_actual,
-            input.limite_credito,
+            input.limite_credito.map(|l| l.unidades()),
         )
     ).map_err(|e| e.to_string())?;
 
@@ -1938,9 +1954,9 @@ fn crear_prestamo(input: PrestamoInput) -> Result<i64, String> {
 struct ActualizarPrestamoInput {
     id: i64,
     tasa_actual: f64,
-    monto_cuota: f64,
+    monto_cuota: ipc::ImporteDecimal,
     dia_pago: i32,
-    limite_credito: Option<f64>,
+    limite_credito: Option<ipc::ImporteDecimal>,
     tarjeta_id: Option<i64>,
 }
 
@@ -1990,9 +2006,9 @@ fn actualizar_prestamo(input: ActualizarPrestamoInput) -> Result<(), String> {
          WHERE id = ?;",
         (
             input.tasa_actual,
-            input.monto_cuota,
+            input.monto_cuota.unidades(),
             input.dia_pago,
-            input.limite_credito,
+            input.limite_credito.map(|l| l.unidades()),
             input.tarjeta_id,
             input.id,
         ),
@@ -2294,10 +2310,12 @@ fn obtener_cuentas() -> Result<Vec<CuentaAhorro>, String> {
 fn crear_cuenta(
     nombre: String,
     divisa: String,
-    balance: f64,
+    balance: ipc::ImporteDecimal,
     entidad: Option<String>,
     comision_pago_impuestos: Option<ipc::ImporteDecimal>,
 ) -> Result<i64, String> {
+    // El saldo inicial llega como se escribió: el céntimo lo deciden esos dígitos.
+    let balance = balance.unidades();
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let nombre_clean = nombre.trim();
     if nombre_clean.is_empty() {
@@ -2402,9 +2420,9 @@ fn transferir_entre_cuentas(
     fecha: String,
     origen_id: i64,
     destino_id: i64,
-    monto_origen: f64,
-    monto_destino: f64,
-    cargo: f64,
+    monto_origen: ipc::ImporteDecimal,
+    monto_destino: ipc::ImporteDecimal,
+    cargo: ipc::ImporteDecimal,
     descripcion: String
 ) -> Result<(), String> {
     // Traducción pura: la operación y sus invariantes viven en el dominio y
@@ -2425,9 +2443,12 @@ fn transferir_entre_cuentas(
                 fecha,
                 origen_id,
                 destino_id,
-                monto_origen: Dinero::nuevo(monto_origen, divisa_origen)?,
-                monto_destino: Dinero::nuevo(monto_destino, divisa_destino)?,
-                cargo: Dinero::nuevo(cargo, divisa_origen)?,
+                // Los tres importes llegan como se escribieron: el céntimo (y con él la tasa que se
+                // deduce entre origen y destino) lo deciden esos dígitos. Cada uno se casa con la divisa
+                // de SU cuenta, que se lee, no se declara.
+                monto_origen: monto_origen.con_divisa(divisa_origen),
+                monto_destino: monto_destino.con_divisa(divisa_destino),
+                cargo: cargo.con_divisa(divisa_origen),
                 descripcion,
             },
             &mut almacen,
@@ -2478,7 +2499,7 @@ fn actualizar_ingreso(
     numero_factura: String,
     cliente_id: i64,
     fecha_emision: String,
-    monto_total: f64,
+    monto_total: ipc::ImporteDecimal,
     porcentaje_retencion: f64,
     // Importe cobrado cuando no entró el neto entero. `None` es la regla: se
     // da por cobrado el neto completo.
@@ -2516,8 +2537,10 @@ fn actualizar_ingreso(
         None => dominio::ingreso::Cobro::Completo,
     };
 
+    // El total llega como se escribió; una sola conversión sirve al cálculo, a la fila y al caso.
+    let monto_total = monto_total.con_divisa(MONEDA_LOCAL);
     let correccion = dominio::ingreso::corregir(
-        Dinero::nuevo(monto_total, MONEDA_LOCAL)?,
+        monto_total,
         Porcentaje::desde_porcentaje(porcentaje_retencion)?,
         recibido_anterior,
         cobro,
@@ -2527,7 +2550,7 @@ fn actualizar_ingreso(
         "UPDATE ingresos SET numero_factura = ?, cliente_id = ?, fecha_emision = ?,
                              monto_total = ?, porcentaje_retencion = ?, monto_retenido = ?
          WHERE id = ?;",
-        (&numero_factura, cliente_id, &fecha_emision, monto_total, porcentaje_retencion,
+        (&numero_factura, cliente_id, &fecha_emision, monto_total.unidades(), porcentaje_retencion,
          correccion.retencion.unidades(), id),
     )
     .map_err(|e| e.to_string())?;
@@ -2546,7 +2569,7 @@ fn actualizar_ingreso(
                 referencia_id: id,
                 descripcion: format!(
                     "Factura {}: {:.2} → {:.2}",
-                    numero_factura, total_ant, monto_total
+                    numero_factura, total_ant, monto_total.unidades()
                 ),
                 importe: Some(correccion.ajuste.unidades()),
                 divisa: Some(MONEDA_LOCAL.codigo().to_string()),
@@ -2698,12 +2721,13 @@ fn eliminar_bonificacion(id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn liquidar_consumo_pendiente(id: i64, monto_liquidado: f64) -> Result<f64, String> {
+fn liquidar_consumo_pendiente(id: i64, monto_liquidado: ipc::ImporteDecimal) -> Result<f64, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let tasa = {
         let mut almacen = AlmacenSqlite::nuevo(&tx);
-        let importe = Dinero::nuevo(monto_liquidado, MONEDA_LOCAL)?;
+        // El importe llega como se escribió: el céntimo (y con él la tasa que se deduce) sale de esos dígitos.
+        let importe = monto_liquidado.con_divisa(MONEDA_LOCAL);
         liquidar_gasto(id, importe, &mut almacen)?.tasa().valor()
     };
     tx.commit().map_err(|e| e.to_string())?;

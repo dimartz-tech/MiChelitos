@@ -15,9 +15,9 @@ const alta = (extra = {}) => ({
     pre_tot: '24', pre_pen: '20', pre_cuo: '555.55', pre_dia: '15', pre_sal: '9000.99', pre_lim: '', ...extra,
 });
 const prestamo = {
-    tipo_prestamo: 'personal', monto_prestamo: 10001.11, institucion_financiera: 'Institución de Prueba',
-    tasa_actual: 12.5, cuotas_totales: 24, cuotas_pendientes: 20, monto_cuota: 555.55, dia_pago: 15,
-    saldo_actual: 9000.99, limite_credito: null,
+    tipo_prestamo: 'personal', monto_prestamo: '10001.11', institucion_financiera: 'Institución de Prueba',
+    tasa_actual: 12.5, cuotas_totales: 24, cuotas_pendientes: 20, monto_cuota: '555.55', dia_pago: 15,
+    saldo_actual: '9000.99', limite_credito: null,
 };
 
 test('alta de préstamo: cada campo llega a su nombre; el límite solo se envía a las líneas flexibles', async () => {
@@ -31,7 +31,7 @@ test('alta de préstamo: cada campo llega a su nombre; el límite solo se envía
 test('alta de línea flexible: el límite de crédito viaja como número', async () => {
     const ui = cargarInterfaz({ campos: alta({ pre_tip: 'flexible', pre_lim: '3000.30' }) });
     await ui.appUI.handleAgregarPrestamo(crearEvento());
-    llamoUnaVez(ui, 'crearPrestamo', [{ ...prestamo, tipo_prestamo: 'flexible', limite_credito: 3000.3 }]);
+    llamoUnaVez(ui, 'crearPrestamo', [{ ...prestamo, tipo_prestamo: 'flexible', limite_credito: '3000.30' }]);
 });
 
 test('alta de préstamo: cuotas y saldo en blanco (o campos ausentes) = null, no 0', async () => {
@@ -59,23 +59,23 @@ test('editar condiciones: (id, tasa, cuota, día) por su nombre; sin límite ni 
     const ui = cargarInterfaz({ campos: edicion() });
     await ui.appUI.handleEdicionPrestamo(crearEvento(), 6);
     llamoUnaVez(ui, 'actualizarPrestamo', [{
-        id: 6, tasa_actual: 11.75, monto_cuota: 444.44, dia_pago: 10, limite_credito: null, tarjeta_id: null,
+        id: 6, tasa_actual: 11.75, monto_cuota: '444.44', dia_pago: 10, limite_credito: null, tarjeta_id: null,
     }]);
     avisoExito(ui, /Condiciones actualizadas/);
     assert.deepEqual(ui.eliminados, ['modal-pre-6']);
     redibujo(ui, 'prestamos');
 });
 
-test('editar condiciones: límite y tarjeta vinculada viajan como número; límite «0» es 0, no null', async () => {
+test('editar condiciones: el límite viaja como texto y la tarjeta como número; límite «0» es «0», no null', async () => {
     let ui = cargarInterfaz({ campos: edicion({ edp_lim_6: '2500.25', edp_tar_6: '3' }) });
     await ui.appUI.handleEdicionPrestamo(crearEvento(), 6);
     let args = ui.llamadasA('actualizarPrestamo')[0].args[0];
-    assert.equal(args.limite_credito, 2500.25);
+    assert.equal(args.limite_credito, '2500.25');
     assert.equal(args.tarjeta_id, 3);
 
     ui = cargarInterfaz({ campos: edicion({ edp_lim_6: '0' }) });
     await ui.appUI.handleEdicionPrestamo(crearEvento(), 6);
-    assert.equal(ui.llamadasA('actualizarPrestamo')[0].args[0].limite_credito, 0);
+    assert.equal(ui.llamadasA('actualizarPrestamo')[0].args[0].limite_credito, '0');
 });
 
 test('editar condiciones: sin campo de límite (préstamo no flexible) se envía null', async () => {
