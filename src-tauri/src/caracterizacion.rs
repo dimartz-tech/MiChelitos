@@ -1168,12 +1168,15 @@ fn s18_el_aviso_se_enciende_una_semana_antes_del_cobro_anual() {
 }
 
 #[test]
-fn s19_una_mensual_no_avisa_aunque_su_fecha_sea_igual_de_predecible() {
-    // Podría, desde que la fecha manda. No lo hace porque ocho avisos cada
-    // semana serían ruido que enseña a ignorar el aviso.
+fn s19_una_mensual_tambien_avisa_una_semana_antes_de_su_cobro() {
+    // Decisión del titular (2026-10-02): el aviso vale para todas, para dar tiempo a cambiar
+    // la tarjeta que cobra antes de que caiga el cargo. Antes solo avisaban las anuales.
     let _g = entorno_aislado();
     let (_, _) = suscripcion_mensual(5, "05/07/2026");
-    assert!(!avisa_en(2026, 7, 1));
+    assert!(!avisa_en(2026, 6, 27), "ocho días antes todavía no");
+    assert!(avisa_en(2026, 6, 28), "siete días antes sí");
+    assert!(avisa_en(2026, 7, 5), "y el mismo día");
+    assert!(!avisa_en(2026, 7, 6), "pasada la fecha ya no es aviso, es cobro vencido");
 }
 
 // --- La marca del último cobro, que dejó de decidir ---

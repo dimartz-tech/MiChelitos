@@ -4,7 +4,20 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.75.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.76.0 (Versión Actual) - 2026-10-02
+**Aviso de cobros próximos para todas las suscripciones, también en el Resumen, con la tarjeta que cobra y la opción de cambiarla a tiempo.**
+
+### 🔧 Qué se hace
+* **Regla (Rust):** `avisa` deja de limitarse a las anuales: toda suscripción cuyo próximo cobro cae en los próximos siete días avisa, mensual o anual. Es una **decisión del titular** (2026-10-02) que revierte la anterior de avisar solo las anuales «para no hacer ruido»; el motivo es dar tiempo a cambiar la tarjeta que cobra, por ejemplo a una que bonifique las compras por internet.
+* **Suscripciones:** el aviso «🔔 Cobro próximo» nombra la tarjeta que cobra y trae un botón **✏️ Cambiar tarjeta** (abre la edición) y una nota sobre bonificaciones.
+* **Resumen:** nuevo aviso «🔔 Cobros próximos» arriba, con plataforma, importe, fecha y tarjeta de cada uno (texto escapado), y la indicación de editar la suscripción antes de la fecha.
+
+### 🧪 Pruebas
+* Rust: la prueba del dominio y la de caracterización (`s19`, que afirmaba que una mensual NO avisaba) se invierten y cubren la ventana de siete días y la ausencia de fecha. JS: 3 nuevas (aviso del Resumen con escape y tarjeta, sin aviso cuando no toca, aviso de Suscripciones con tarjeta y botón). Seis mutaciones del frontend y la de volver a «solo anuales» en Rust: todas detectadas. **Rust 636, JS 581 pasan.**
+
+---
+
+## 🚀 Versión 1.75.0 - 2026-10-02
 **Suscripciones: «Cargos Activos» se divide en Mensuales y Anuales, cada bloque con su subtotal por divisa.**
 
 ### 🔧 Qué se hace

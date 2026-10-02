@@ -163,8 +163,10 @@ export class VistaSuscripciones implements Vista {
                     return `<div class="card" style="border-left:3px solid var(--warning, #e0a020); margin-bottom:1rem;">
                         <strong>🔔 Cobro próximo</strong>
                         <ul style="margin:0.5rem 0 0 1rem; font-size:0.85rem;">
-                            ${avisan.map(s => `<li><strong>${escaparHtml(s.plataforma)}</strong> — ${escaparHtml(s.divisa)} ${formato.importe(s.monto)} el ${escaparHtml(s.fecha_proximo_cobro)}</li>`).join('')}
+                            ${avisan.map(s => `<li><strong>${escaparHtml(s.plataforma)}</strong> — ${escaparHtml(s.divisa)} ${formato.importe(s.monto)} el ${escaparHtml(s.fecha_proximo_cobro)}, con ${escaparHtml(s.entidad)} (${escaparHtml(s.nombre_tarjeta)})
+                                <button onclick="appUI.abrirEdicionSuscripcion(${argumentoJs(s)})" class="btn" style="padding: 0.15rem 0.4rem; font-size:0.75rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Cambiar la tarjeta que cobra">✏️ Cambiar tarjeta</button></li>`).join('')}
                         </ul>
+                        <p style="margin:0.5rem 0 0; font-size:0.75rem; color:var(--text-muted);">¿Vas a pagar con otra tarjeta, por ejemplo una que bonifique las compras por internet? Cámbiala antes de la fecha.</p>
                     </div>`;
                 })()}
                 <span class="subtitle">Monitoreo de membresías mensuales y anuales debidamente cargadas</span>
