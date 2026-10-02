@@ -1881,18 +1881,18 @@ fn obtener_prestamos() -> Result<Vec<Prestamo>, String> {
 #[derive(Deserialize)]
 struct PrestamoInput {
     tipo_prestamo: String,
-    monto_prestamo: f64,
+    monto_prestamo: ipc::ImporteDecimal,
     institucion_financiera: String,
     tasa_actual: f64,
     cuotas_totales: Option<i32>,
     cuotas_pendientes: Option<i32>,
-    monto_cuota: f64,
+    monto_cuota: ipc::ImporteDecimal,
     dia_pago: i32,
     /// Capital pendiente hoy. Si no se indica se asume el monto íntegro, que
     /// es lo correcto en un financiamiento recién desembolsado.
-    saldo_actual: Option<f64>,
+    saldo_actual: Option<ipc::ImporteDecimal>,
     /// Solo en líneas revolventes: el cupo aprobado.
-    limite_credito: Option<f64>,
+    limite_credito: Option<ipc::ImporteDecimal>,
 }
 
 #[tauri::command]
@@ -1925,7 +1925,9 @@ fn crear_prestamo(input: PrestamoInput) -> Result<i64, String> {
         return Err("Solo una línea revolvente tiene límite de crédito.".to_string());
     }
 
-    let saldo_actual = input.saldo_actual.unwrap_or(input.monto_prestamo);
+    // Los importes llegan como se escribieron; cada uno se convierte una vez al guardar.
+    let monto_prestamo = input.monto_prestamo.unidades();
+    let saldo_actual = input.saldo_actual.map(|s| s.unidades()).unwrap_or(monto_prestamo);
 
     let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     conn.execute(
@@ -1933,15 +1935,15 @@ fn crear_prestamo(input: PrestamoInput) -> Result<i64, String> {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
         (
             &input.tipo_prestamo,
-            input.monto_prestamo,
+            monto_prestamo,
             &input.institucion_financiera,
             input.tasa_actual,
             c_totales,
             c_pendientes,
-            input.monto_cuota,
+            input.monto_cuota.unidades(),
             input.dia_pago,
             saldo_actual,
-            input.limite_credito,
+            input.limite_credito.map(|l| l.unidades()),
         )
     ).map_err(|e| e.to_string())?;
 
@@ -1952,9 +1954,9 @@ fn crear_prestamo(input: PrestamoInput) -> Result<i64, String> {
 struct ActualizarPrestamoInput {
     id: i64,
     tasa_actual: f64,
-    monto_cuota: f64,
+    monto_cuota: ipc::ImporteDecimal,
     dia_pago: i32,
-    limite_credito: Option<f64>,
+    limite_credito: Option<ipc::ImporteDecimal>,
     tarjeta_id: Option<i64>,
 }
 
@@ -2004,9 +2006,9 @@ fn actualizar_prestamo(input: ActualizarPrestamoInput) -> Result<(), String> {
          WHERE id = ?;",
         (
             input.tasa_actual,
-            input.monto_cuota,
+            input.monto_cuota.unidades(),
             input.dia_pago,
-            input.limite_credito,
+            input.limite_credito.map(|l| l.unidades()),
             input.tarjeta_id,
             input.id,
         ),

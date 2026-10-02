@@ -1954,15 +1954,15 @@ fn c39_el_limite_solo_se_admite_en_una_linea_revolvente() {
     let _g = entorno_aislado();
     let con_limite = |tipo: &str| crate::crear_prestamo(crate::PrestamoInput {
         tipo_prestamo: tipo.into(),
-        monto_prestamo: 100_000.0,
+        monto_prestamo: monto(100_000.0),
         institucion_financiera: "Banco Ejemplo".into(),
         tasa_actual: 12.0,
         cuotas_totales: Some(60),
         cuotas_pendientes: Some(60),
-        monto_cuota: 5_000.0,
+        monto_cuota: monto(5_000.0),
         dia_pago: 25,
         saldo_actual: None,
-        limite_credito: Some(150_000.0),
+        limite_credito: Some(monto(150_000.0)),
     });
 
     assert!(con_limite("vehiculo").is_err(), "un amortizable no repone cupo");
@@ -1987,7 +1987,7 @@ fn vincular_a_tarjeta(prestamo_id: i64, tarjeta_id: Option<i64>) -> Result<(), S
     crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
         id: prestamo_id,
         tasa_actual: tasa,
-        monto_cuota: cuota,
+        monto_cuota: monto(cuota),
         dia_pago: dia,
         limite_credito: None,
         tarjeta_id,
@@ -2061,9 +2061,9 @@ fn c43_actualizar_no_es_una_puerta_trasera_para_mover_el_saldo() {
     crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
         id: linea,
         tasa_actual: 24.0,
-        monto_cuota: 7_000.0,
+        monto_cuota: monto(7_000.0),
         dia_pago: 10,
-        limite_credito: Some(200_000.0),
+        limite_credito: Some(monto(200_000.0)),
         tarjeta_id: None,
     })
     .unwrap();
@@ -2084,12 +2084,12 @@ fn c43_actualizar_no_es_una_puerta_trasera_para_mover_el_saldo() {
 fn c44_actualizar_rechaza_lo_que_no_tiene_sentido() {
     let _g = entorno_aislado();
     let auto = crear_prestamo_de_prueba("vehiculo", 100_000.0, 12.0, 5_000.0, Some((100, 89)), None);
-    let base = |limite, tarjeta, dia| crate::ActualizarPrestamoInput {
+    let base = |limite: Option<f64>, tarjeta, dia| crate::ActualizarPrestamoInput {
         id: auto,
         tasa_actual: 12.0,
-        monto_cuota: 5_000.0,
+        monto_cuota: monto(5_000.0),
         dia_pago: dia,
-        limite_credito: limite,
+        limite_credito: limite.map(monto),
         tarjeta_id: tarjeta,
     };
 
@@ -4346,5 +4346,42 @@ fn c98_la_factura_decide_el_centavo_y_la_retencion_por_el_texto_del_total() {
         .unwrap();
     assert_importe(total, 1000.01, "el total sube el céntimo");
     assert_importe(retencion_de(id), 500.01, "50 % de 1000.01 = 500.005 → 500.01 (sobre 1000.00 habría sido 500.00)");
+}
+
+#[test]
+fn c110_el_financiamiento_guarda_sus_importes_por_el_texto_y_el_saldo_ausente_es_el_monto() {
+    // `.005` sube por texto; sin saldo declarado se asume el monto ya decidido al céntimo.
+    let _g = entorno_aislado();
+    let id = crate::crear_prestamo(crate::PrestamoInput {
+        tipo_prestamo: "flexible".into(),
+        monto_prestamo: importe("2000.005"),
+        institucion_financiera: "Banco Ejemplo".into(),
+        tasa_actual: 12.0,
+        cuotas_totales: None,
+        cuotas_pendientes: None,
+        monto_cuota: importe("50.005"),
+        dia_pago: 25,
+        saldo_actual: None,
+        limite_credito: Some(importe("3000.005")),
+    })
+    .unwrap();
+
+    let leer = |col: &str| -> f64 {
+        conexion()
+            .query_row(&format!("SELECT {col} FROM prestamos WHERE id = ?;"), [id], |r| r.get(0))
+            .unwrap()
+    };
+    assert_importe(leer("monto_prestamo"), 2000.01, "monto");
+    assert_importe(leer("saldo_actual"), 2000.01, "saldo ausente = monto");
+    assert_importe(leer("monto_cuota"), 50.01, "cuota");
+    assert_importe(leer("limite_credito"), 3000.01, "límite");
+
+    crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
+        id, tasa_actual: 12.0, monto_cuota: importe("60.005"), dia_pago: 25,
+        limite_credito: Some(importe("4000.005")), tarjeta_id: None,
+    })
+    .unwrap();
+    assert_importe(leer("monto_cuota"), 60.01, "cuota corregida");
+    assert_importe(leer("limite_credito"), 4000.01, "límite corregido");
 }
 

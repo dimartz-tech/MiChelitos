@@ -23,8 +23,8 @@ export type CasoCorreccion = { numero_caso: string; fecha: string; tipo: string;
 // --- Lo que Rust recibe en estructuras ---
 export type GastoInput = { fecha: string; monto: string | number; divisa: string; descripcion: string; categoria_id: number; metodo_pago: string; es_lbtr: boolean; tarjeta_id: number | null; cuenta_ahorro_id: number | null; tasa_cambio: number | null };
 export type IngresoInput = { numero_factura: string; rnc_cliente: string; nombre_cliente: string; fecha_emision: string; monto_total: string | number; porcentaje_retencion: number };
-export type PrestamoInput = { tipo_prestamo: string; monto_prestamo: number; institucion_financiera: string; tasa_actual: number; cuotas_totales: number | null; cuotas_pendientes: number | null; monto_cuota: number; dia_pago: number; saldo_actual: number | null; limite_credito: number | null };
-export type ActualizarPrestamoInput = { id: number; tasa_actual: number; monto_cuota: number; dia_pago: number; limite_credito: number | null; tarjeta_id: number | null };
+export type PrestamoInput = { tipo_prestamo: string; monto_prestamo: string | number; institucion_financiera: string; tasa_actual: number; cuotas_totales: number | null; cuotas_pendientes: number | null; monto_cuota: string | number; dia_pago: number; saldo_actual: string | number | null; limite_credito: string | number | null };
+export type ActualizarPrestamoInput = { id: number; tasa_actual: number; monto_cuota: string | number; dia_pago: number; limite_credito: string | number | null; tarjeta_id: number | null };
 
 // --- Cada comando: sus argumentos (claves en camelCase, como las envía Tauri) y su respuesta ---
 export type Comandos = {
