@@ -733,3 +733,84 @@ impl RepositorioTransferencias for AlmacenEnMemoria {
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "transferencia", id })
     }
 }
+
+/// Doble en memoria del puerto de catálogos.
+///
+/// Guarda lo mismo que las tablas: categorías con su nombre, clientes con RNC y nombre, y, para ejercitar
+/// las guardas de borrado, cuántos gastos usan cada categoría y cuántas facturas tiene cada cliente.
+#[derive(Default)]
+pub struct CatalogosEnMemoria {
+    pub categorias: Vec<CategoriaGuardada>,
+    pub clientes: Vec<ClienteGuardado>,
+    pub gastos_por_categoria: HashMap<i64, i64>,
+    pub facturas_por_cliente: HashMap<i64, i64>,
+    siguiente_id: i64,
+}
+
+impl CatalogosEnMemoria {
+    pub fn nuevo() -> Self {
+        CatalogosEnMemoria { siguiente_id: 1, ..Default::default() }
+    }
+    pub fn con_categoria(mut self, nombre: &str) -> Self {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.categorias.push(CategoriaGuardada { id, nombre: nombre.to_string() });
+        self
+    }
+    pub fn id_de_categoria(&self, nombre: &str) -> i64 {
+        self.categorias.iter().find(|c| c.nombre == nombre).expect("categoría sembrada").id
+    }
+}
+
+impl AlmacenCatalogos for CatalogosEnMemoria {
+    fn categorias(&self) -> Result<Vec<CategoriaGuardada>, ErrorAlmacen> {
+        let mut v = self.categorias.clone();
+        v.sort_by(|a, b| a.nombre.cmp(&b.nombre));
+        Ok(v)
+    }
+    fn categoria_existe(&self, nombre: &str) -> Result<bool, ErrorAlmacen> {
+        Ok(self.categorias.iter().any(|c| c.nombre.to_lowercase() == nombre.to_lowercase()))
+    }
+    fn insertar_categoria(&mut self, nombre: &str) -> Result<i64, ErrorAlmacen> {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.categorias.push(CategoriaGuardada { id, nombre: nombre.to_string() });
+        Ok(id)
+    }
+    fn nombre_de_categoria(&self, id: i64) -> Result<String, ErrorAlmacen> {
+        self.categorias
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| c.nombre.clone())
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "la categoría", id })
+    }
+    fn gastos_de_categoria(&self, id: i64) -> Result<i64, ErrorAlmacen> {
+        Ok(*self.gastos_por_categoria.get(&id).unwrap_or(&0))
+    }
+    fn eliminar_categoria(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.categorias.retain(|c| c.id != id);
+        Ok(())
+    }
+    fn clientes(&self) -> Result<Vec<ClienteGuardado>, ErrorAlmacen> {
+        let mut v = self.clientes.clone();
+        v.sort_by(|a, b| a.nombre.cmp(&b.nombre));
+        Ok(v)
+    }
+    fn rnc_registrado(&self, rnc: &str) -> Result<bool, ErrorAlmacen> {
+        Ok(self.clientes.iter().any(|c| c.rnc == rnc))
+    }
+    fn insertar_cliente(&mut self, rnc: &str, nombre: &str) -> Result<i64, ErrorAlmacen> {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.clientes.push(ClienteGuardado { id, rnc: rnc.to_string(), nombre: nombre.to_string() });
+        Ok(id)
+    }
+    fn facturas_de_cliente(&self, id: i64) -> Result<i64, ErrorAlmacen> {
+        Ok(*self.facturas_por_cliente.get(&id).unwrap_or(&0))
+    }
+    fn eliminar_cliente(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.clientes.retain(|c| c.id != id);
+        Ok(())
+    }
+}
+
