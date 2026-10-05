@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.78.0 (Versión Actual) - 2026-10-05
+## 🚀 Versión 1.79.0 (Versión Actual) - 2026-10-05
+**Auditoría A-03, primer vertical: categorías y clientes salen de `main.rs` y pasan a dominio, caso de uso y adaptador.** Sin cambios de reglas ni de mensajes.
+
+### 🔧 Qué se hace
+* **Orden de trabajo (el de la auditoría):** primero pruebas de caracterización de los seis comandos (`k1`–`k7`, en su propio commit, contra el código de antes), después la extracción, con las mismas pruebas intactas.
+* **Dominio** (`dominio::catalogo`): nombre de categoría recortado y no vacío; la categoría de sistema «Otros» y las que tienen gastos no se eliminan (en ese orden); cliente con RNC y nombre; cliente con facturas no se elimina. Los siete mensajes de error son los de siempre.
+* **Caso de uso** (`aplicacion::catalogos`): crear y eliminar categoría y cliente sobre el puerto `AlmacenCatalogos`, con el mismo orden de comprobaciones que los comandos.
+* **Puerto y adaptadores:** `AlmacenCatalogos` (puerto), `CatalogosSqlite` (SQL sobre una transacción abierta) y `CatalogosEnMemoria` (doble de pruebas).
+* **`main.rs`:** los seis comandos quedan en una línea o dos sobre un ayudante (`con_catalogos`, que abre y confirma la transacción). Comandos con SQL directo: **54 → 49**.
+* **Un único cambio visible, en un caso que la interfaz no produce:** eliminar una categoría cuyo identificador no existe antes mostraba el texto interno de SQLite («Query returned no rows»); ahora dice «No se encontró la categoría con identificador N.». Ahora además cada comando corre dentro de una transacción.
+
+### 🧪 Pruebas
+* 7 de caracterización (mensajes, recorte, duplicado sin distinguir mayúsculas, orden, guardas), 5 del dominio y 7 del caso de uso con el doble. Doce mutaciones (guardas invertidas, comparación sin mayúsculas, sin recortar, validación a medias, `>=` por `>`, sin comprobar duplicado ni facturas, borrar antes de validar, SQL sin `LOWER`, orden descendente, tabla o columna equivocadas): todas detectadas. **Rust 660 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): crear recortado, duplicado, vacío, «Otros», inexistente, cliente duplicado y vacío, y borrados, con los mensajes de siempre; las categorías vuelven ordenadas.
+
+---
+
+## 🚀 Versión 1.78.0 - 2026-10-05
 **Auditoría A-02, segunda mitad: la aplicación ahora tiene una política de contenido (CSP).**
 
 ### 🐛 Qué estaba mal

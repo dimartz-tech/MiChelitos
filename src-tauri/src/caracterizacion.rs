@@ -4464,3 +4464,125 @@ fn c115_con_el_archivo_sano_lee_y_guarda_como_siempre() {
     quitar_capital();
 }
 
+// --- A-03, vertical «catálogos» (categorías y clientes): caracterización antes de extraer ---
+//
+// Fijan lo que los seis comandos hacen HOY, con sus mensajes exactos, para que la extracción a
+// dominio / caso de uso / adaptador no cambie nada observable.
+
+fn nombres_de_categorias() -> Vec<String> {
+    crate::obtener_categorias().unwrap().into_iter().map(|c| c.nombre).collect()
+}
+
+#[test]
+fn k1_una_categoria_se_crea_recortada_y_se_lista_ordenada_por_nombre() {
+    let _g = entorno_aislado();
+    let c = crate::crear_categoria("  Zapatería  ".into()).unwrap();
+    assert_eq!(c.nombre, "Zapatería");
+    assert!(c.id > 0);
+    crate::crear_categoria("Academia".into()).unwrap();
+    let nombres = nombres_de_categorias();
+    let a = nombres.iter().position(|n| n == "Academia").unwrap();
+    let z = nombres.iter().position(|n| n == "Zapatería").unwrap();
+    assert!(a < z, "orden ascendente por nombre: {nombres:?}");
+    let mut ordenados = nombres.clone();
+    ordenados.sort();
+    assert_eq!(nombres, ordenados, "el orden es el binario de SQLite");
+}
+
+#[test]
+fn k2_una_categoria_vacia_o_repetida_se_rechaza_con_su_mensaje() {
+    let _g = entorno_aislado();
+    assert_eq!(crate::crear_categoria("   ".into()).unwrap_err(), "El nombre de la categoría no puede estar vacío.");
+    crate::crear_categoria("Mascotas".into()).unwrap();
+    for repetido in ["Mascotas", "mascotas", "MASCOTAS", "  mascotas "] {
+        assert_eq!(crate::crear_categoria(repetido.into()).unwrap_err(), "La categoría ya existe.", "aceptó «{repetido}»");
+    }
+    let antes = nombres_de_categorias().len();
+    assert!(crate::crear_categoria("Otros".into()).is_err(), "«Otros» ya existe de fábrica");
+    assert_eq!(nombres_de_categorias().len(), antes);
+}
+
+fn gasto_en_categoria(categoria_id: i64) {
+    conexion()
+        .execute(
+            "INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago, costo_adicional)
+             VALUES ('08/09/2026', 10.0, 'DOP', 'Prueba', ?, 'efectivo', 0.0);",
+            [categoria_id],
+        )
+        .expect("insertar gasto de prueba");
+}
+
+#[test]
+fn k3_eliminar_categoria_respeta_otros_los_gastos_y_borra_la_que_esta_libre() {
+    let _g = entorno_aislado();
+    let otros = crate::obtener_categorias().unwrap().into_iter().find(|c| c.nombre == "Otros").expect("«Otros» existe de fábrica").id;
+    assert_eq!(
+        crate::eliminar_categoria(otros).unwrap_err(),
+        "No se puede eliminar la categoría de sistema 'Otros'."
+    );
+
+    let con_gastos = crate::crear_categoria("Con gastos".into()).unwrap().id;
+    gasto_en_categoria(con_gastos);
+    assert_eq!(
+        crate::eliminar_categoria(con_gastos).unwrap_err(),
+        "No se puede eliminar la categoría porque tiene gastos registrados asociados."
+    );
+    assert!(nombres_de_categorias().contains(&"Con gastos".to_string()));
+
+    let libre = crate::crear_categoria("Libre".into()).unwrap().id;
+    crate::eliminar_categoria(libre).unwrap();
+    assert!(!nombres_de_categorias().contains(&"Libre".to_string()));
+}
+
+#[test]
+fn k4_eliminar_una_categoria_inexistente_falla_sin_borrar_nada() {
+    let _g = entorno_aislado();
+    let antes = nombres_de_categorias().len();
+    assert!(crate::eliminar_categoria(987_654).is_err());
+    assert_eq!(nombres_de_categorias().len(), antes);
+}
+
+#[test]
+fn k5_un_cliente_se_crea_recortado_y_se_lista_por_nombre() {
+    let _g = entorno_aislado();
+    let a = crate::crear_cliente("  101010101 ".into(), "  Beta SRL ".into()).unwrap();
+    assert_eq!((a.rnc.as_str(), a.nombre.as_str()), ("101010101", "Beta SRL"));
+    crate::crear_cliente("202020202".into(), "Alfa SRL".into()).unwrap();
+    let nombres: Vec<String> = crate::obtener_clientes().unwrap().into_iter().map(|c| c.nombre).collect();
+    assert_eq!(nombres, vec!["Alfa SRL".to_string(), "Beta SRL".to_string()]);
+}
+
+#[test]
+fn k6_un_cliente_sin_datos_o_con_rnc_repetido_se_rechaza_con_su_mensaje() {
+    let _g = entorno_aislado();
+    for (rnc, nombre) in [("", "Algo"), ("123", ""), ("  ", "  ")] {
+        assert_eq!(
+            crate::crear_cliente(rnc.into(), nombre.into()).unwrap_err(),
+            "RNC y nombre no pueden estar vacíos."
+        );
+    }
+    crate::crear_cliente("303030303".into(), "Gamma".into()).unwrap();
+    assert_eq!(
+        crate::crear_cliente(" 303030303 ".into(), "Otro nombre".into()).unwrap_err(),
+        "Ya existe un cliente con este RNC."
+    );
+    assert_eq!(crate::obtener_clientes().unwrap().len(), 1);
+}
+
+#[test]
+fn k7_eliminar_cliente_exige_que_no_tenga_facturas() {
+    let _g = entorno_aislado();
+    let con_factura = crear_ingreso(factura("K-001", 1000.0, 15.0)).unwrap();
+    let _ = con_factura;
+    let cliente = crate::obtener_clientes().unwrap().into_iter().next().expect("la factura creó su cliente").id;
+    assert_eq!(
+        crate::eliminar_cliente(cliente).unwrap_err(),
+        "No se puede eliminar el cliente porque tiene facturas registradas."
+    );
+    assert_eq!(crate::obtener_clientes().unwrap().len(), 1);
+
+    let libre = crate::crear_cliente("404040404".into(), "Delta".into()).unwrap().id;
+    crate::eliminar_cliente(libre).unwrap();
+    assert_eq!(crate::obtener_clientes().unwrap().len(), 1);
+}
+

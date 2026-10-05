@@ -36,6 +36,14 @@ pub enum ErrorDominio {
     /// Un abono a la tarjeta es mayor que cero: uno de cero no abona nada y uno
     /// negativo **subiría** la deuda.
     AbonoSinImporte,
+    /// Catálogos (categorías y clientes). Los textos son los de siempre: la interfaz los muestra tal cual.
+    CategoriaSinNombre,
+    CategoriaExistente,
+    CategoriaDelSistema,
+    CategoriaConGastos,
+    ClienteSinDatos,
+    ClienteDuplicado,
+    ClienteConFacturas,
     /// El día de facturación tiene que ser un día del mes.
     DiaDeFacturacionInvalido { dia: i32 },
     /// La frecuencia no es ninguna de las que admite el esquema.
@@ -69,6 +77,19 @@ impl fmt::Display for ErrorDominio {
             ErrorDominio::SuscripcionSinImporte => write!(
                 f,
                 "Una suscripción debe cobrar un importe mayor que cero: con cero o menos no cobraría, abonaría a la tarjeta cada período."
+            ),
+            ErrorDominio::CategoriaSinNombre => write!(f, "El nombre de la categoría no puede estar vacío."),
+            ErrorDominio::CategoriaExistente => write!(f, "La categoría ya existe."),
+            ErrorDominio::CategoriaDelSistema => write!(f, "No se puede eliminar la categoría de sistema 'Otros'."),
+            ErrorDominio::CategoriaConGastos => write!(
+                f,
+                "No se puede eliminar la categoría porque tiene gastos registrados asociados."
+            ),
+            ErrorDominio::ClienteSinDatos => write!(f, "RNC y nombre no pueden estar vacíos."),
+            ErrorDominio::ClienteDuplicado => write!(f, "Ya existe un cliente con este RNC."),
+            ErrorDominio::ClienteConFacturas => write!(
+                f,
+                "No se puede eliminar el cliente porque tiene facturas registradas."
             ),
             ErrorDominio::AbonoSinImporte => write!(
                 f,
