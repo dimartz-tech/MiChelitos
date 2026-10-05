@@ -30,6 +30,8 @@ use chrono::{NaiveDate, Local, Datelike};
 use dominio::dinero::{Dinero, Divisa, Porcentaje, TasaCambio};
 use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::catalogos::CatalogosSqlite;
+use adaptadores::sqlite::cuentas::CuentasSqlite;
+use puertos::repositorios::CatalogoDeCuentas;
 use adaptadores::sqlite::gastos::AlmacenSqlite;
 use puertos::repositorios::AlmacenCatalogos;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
@@ -2199,29 +2201,33 @@ fn restaurar_respaldo(nombre: String) -> Result<serde_json::Value, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Como `con_catalogos`, para el alta, corrección y consulta de cuentas.
+fn con_cuentas<T>(f: impl FnOnce(&mut CuentasSqlite) -> Result<T, String>) -> Result<T, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let resultado = {
+        let mut almacen = CuentasSqlite::nuevo(&tx);
+        f(&mut almacen)?
+    };
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(resultado)
+}
+
 #[tauri::command]
 fn obtener_cuentas() -> Result<Vec<CuentaAhorro>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT id, nombre, divisa, balance_actual, entidad, comision_pago_impuestos
-         FROM cuentas_ahorro ORDER BY nombre ASC;"
-    ).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], |row| {
-        Ok(CuentaAhorro {
-            id: row.get(0)?,
-            nombre: row.get(1)?,
-            divisa: row.get(2)?,
-            balance_actual: row.get(3)?,
-            entidad: row.get(4)?,
-            comision_pago_impuestos: row.get(5)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+    con_cuentas(|a| {
+        Ok(a.cuentas()?
+            .into_iter()
+            .map(|c| CuentaAhorro {
+                id: c.id,
+                nombre: c.nombre,
+                divisa: c.divisa,
+                balance_actual: c.balance_actual,
+                entidad: c.entidad,
+                comision_pago_impuestos: c.comision_pago_impuestos,
+            })
+            .collect())
+    })
 }
 
 #[tauri::command]
@@ -2232,58 +2238,20 @@ fn crear_cuenta(
     entidad: Option<String>,
     comision_pago_impuestos: Option<ipc::ImporteDecimal>,
 ) -> Result<i64, String> {
-    // El saldo inicial llega como se escribió: el céntimo lo deciden esos dígitos.
-    let balance = balance.unidades();
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let nombre_clean = nombre.trim();
-    if nombre_clean.is_empty() {
-        return Err("El nombre de la cuenta no puede estar vacío.".to_string());
-    }
-    let (entidad, comision) = depurar_datos_de_cuenta(entidad, comision_pago_impuestos)?;
-
-    conn.execute(
-        "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual, entidad, comision_pago_impuestos)
-         VALUES (?, ?, ?, ?, ?);",
-        (nombre_clean, divisa, balance, entidad, comision)
-    ).map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
-}
-
-/// Normaliza los dos datos declarativos de una cuenta.
-///
-/// Una cadena en blanco y un campo sin rellenar significan lo mismo —no lo ha
-/// declarado— y ambos se guardan como nulo, para que la ausencia tenga una
-/// sola representación. Una tarifa negativa se rechaza: sería un banco que
-/// paga por cobrar.
-fn depurar_datos_de_cuenta(
-    entidad: Option<String>,
-    comision: Option<ipc::ImporteDecimal>,
-) -> Result<(Option<String>, Option<f64>), String> {
-    let entidad = entidad
-        .map(|e| e.trim().to_string())
-        .filter(|e| !e.is_empty());
-
-    // **La comisión pasa por `Dinero`.** Antes se comprobaba que fuera finita
-    // y no negativa, y se escribía tal cual: una comisión de 75.005 entraba
-    // con su tercer decimal. Era la única vía por la que un importe llegaba a
-    // la base sin que el núcleo decidiera su céntimo.
-    //
-    // La divisa es la local porque la comisión la cobra el banco sobre una
-    // operación en moneda local; si algún día una cuenta en divisa declarara
-    // la suya, habría que leerla de la fila como se hace en los depósitos.
-    let comision = match comision {
-        None => None,
-        Some(c) => {
-            // Llega ya en centavos: el céntimo lo decidió el analizador de
-            // texto, no una conversión desde binario.
-            if c.centavos() < 0 {
-                return Err("La comisión por pago de impuestos no puede ser negativa.".to_string());
-            }
-            Some(c.con_divisa(MONEDA_LOCAL).unidades())
-        }
-    };
-
-    Ok((entidad, comision))
+    con_cuentas(|a| {
+        // Los importes llegan como se escribieron: el céntimo lo deciden esos dígitos. La comisión se cobra
+        // en moneda local; el saldo inicial se guarda en las unidades que se escribieron.
+        Ok(aplicacion::cuentas::crear_cuenta(
+            aplicacion::cuentas::DatosCuentaNueva {
+                nombre,
+                divisa,
+                saldo_inicial: balance.con_divisa(Divisa::Dop),
+                entidad,
+                comision_pago_impuestos: comision_pago_impuestos.map(|c| c.con_divisa(MONEDA_LOCAL)),
+            },
+            a,
+        )?)
+    })
 }
 
 /// Actualiza los datos declarativos de una cuenta.
@@ -2298,23 +2266,17 @@ fn actualizar_cuenta(
     entidad: Option<String>,
     comision_pago_impuestos: Option<ipc::ImporteDecimal>,
 ) -> Result<(), String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let nombre_clean = nombre.trim();
-    if nombre_clean.is_empty() {
-        return Err("El nombre de la cuenta no puede estar vacío.".to_string());
-    }
-    let (entidad, comision) = depurar_datos_de_cuenta(entidad, comision_pago_impuestos)?;
-
-    let filas = conn.execute(
-        "UPDATE cuentas_ahorro SET nombre = ?, entidad = ?, comision_pago_impuestos = ?
-         WHERE id = ?;",
-        (nombre_clean, entidad, comision, id)
-    ).map_err(|e| e.to_string())?;
-
-    if filas == 0 {
-        return Err(format!("No se encontró la cuenta {}.", id));
-    }
-    Ok(())
+    con_cuentas(|a| {
+        Ok(aplicacion::cuentas::actualizar_cuenta(
+            aplicacion::cuentas::DatosCuentaCorregida {
+                id,
+                nombre,
+                entidad,
+                comision_pago_impuestos: comision_pago_impuestos.map(|c| c.con_divisa(MONEDA_LOCAL)),
+            },
+            a,
+        )?)
+    })
 }
 
 #[tauri::command]
@@ -2379,36 +2341,24 @@ fn transferir_entre_cuentas(
 
 #[tauri::command]
 fn obtener_transacciones_cuentas() -> Result<Vec<TransaccionCuenta>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT t.id, t.fecha, t.cuenta_origen_id, co.nombre, t.cuenta_destino_id, cd.nombre, t.monto_origen, t.monto_destino, t.tasa_cambio, t.cargo, t.descripcion
-         FROM transacciones_cuentas t
-         JOIN cuentas_ahorro co ON t.cuenta_origen_id = co.id
-         JOIN cuentas_ahorro cd ON t.cuenta_destino_id = cd.id
-         ORDER BY t.id DESC;"
-    ).map_err(|e| e.to_string())?;
-
-    let rows = stmt.query_map([], |row| {
-        Ok(TransaccionCuenta {
-            id: row.get(0)?,
-            fecha: row.get(1)?,
-            cuenta_origen_id: row.get(2)?,
-            cuenta_origen_nombre: row.get(3)?,
-            cuenta_destino_id: row.get(4)?,
-            cuenta_destino_nombre: row.get(5)?,
-            monto_origen: row.get(6)?,
-            monto_destino: row.get(7)?,
-            tasa_cambio: row.get(8)?,
-            cargo: row.get(9)?,
-            descripcion: row.get(10)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+    con_cuentas(|a| {
+        Ok(a.transacciones()?
+            .into_iter()
+            .map(|t| TransaccionCuenta {
+                id: t.id,
+                fecha: t.fecha,
+                cuenta_origen_id: t.cuenta_origen_id,
+                cuenta_origen_nombre: t.cuenta_origen_nombre,
+                cuenta_destino_id: t.cuenta_destino_id,
+                cuenta_destino_nombre: t.cuenta_destino_nombre,
+                monto_origen: t.monto_origen,
+                monto_destino: t.monto_destino,
+                tasa_cambio: t.tasa_cambio,
+                cargo: t.cargo,
+                descripcion: t.descripcion,
+            })
+            .collect())
+    })
 }
 
 #[tauri::command]

@@ -814,3 +814,60 @@ impl AlmacenCatalogos for CatalogosEnMemoria {
     }
 }
 
+/// Doble en memoria del puerto de cuentas: guarda lo mismo que las columnas, y las transacciones ya armadas.
+#[derive(Default)]
+pub struct CuentasEnMemoria {
+    pub cuentas: Vec<CuentaLeida>,
+    pub transacciones_guardadas: Vec<TransaccionLeida>,
+    siguiente_id: i64,
+}
+
+impl CuentasEnMemoria {
+    pub fn nuevo() -> Self {
+        CuentasEnMemoria { siguiente_id: 1, ..Default::default() }
+    }
+}
+
+impl CatalogoDeCuentas for CuentasEnMemoria {
+    fn cuentas(&self) -> Result<Vec<CuentaLeida>, ErrorAlmacen> {
+        let mut v = self.cuentas.clone();
+        v.sort_by(|a, b| a.nombre.cmp(&b.nombre));
+        Ok(v)
+    }
+    fn insertar_cuenta(&mut self, c: &CuentaNueva) -> Result<i64, ErrorAlmacen> {
+        if self.cuentas.iter().any(|x| x.nombre == c.nombre) {
+            return Err(ErrorAlmacen::Fallo("UNIQUE constraint failed: cuentas_ahorro.nombre".into()));
+        }
+        if c.divisa != "DOP" && c.divisa != "USD" {
+            return Err(ErrorAlmacen::Fallo("CHECK constraint failed: divisa IN ('DOP', 'USD')".into()));
+        }
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.cuentas.push(CuentaLeida {
+            id,
+            nombre: c.nombre.clone(),
+            divisa: c.divisa.clone(),
+            balance_actual: c.saldo_inicial,
+            entidad: c.entidad.clone(),
+            comision_pago_impuestos: c.comision_pago_impuestos,
+        });
+        Ok(id)
+    }
+    fn corregir_cuenta(&mut self, c: &CuentaCorregida) -> Result<bool, ErrorAlmacen> {
+        match self.cuentas.iter_mut().find(|x| x.id == c.id) {
+            None => Ok(false),
+            Some(x) => {
+                x.nombre = c.nombre.clone();
+                x.entidad = c.entidad.clone();
+                x.comision_pago_impuestos = c.comision_pago_impuestos;
+                Ok(true)
+            }
+        }
+    }
+    fn transacciones(&self) -> Result<Vec<TransaccionLeida>, ErrorAlmacen> {
+        let mut v = self.transacciones_guardadas.clone();
+        v.sort_by(|a, b| b.id.cmp(&a.id));
+        Ok(v)
+    }
+}
+

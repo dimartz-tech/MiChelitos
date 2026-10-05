@@ -93,6 +93,65 @@ impl GastoGuardado {
     }
 }
 
+/// Una cuenta de ahorro tal como se lee. Importes en `f64`: es un modelo de lectura, igual que las columnas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CuentaLeida {
+    pub id: i64,
+    pub nombre: String,
+    pub divisa: String,
+    pub balance_actual: f64,
+    pub entidad: Option<String>,
+    pub comision_pago_impuestos: Option<f64>,
+}
+
+/// Una cuenta nueva, con todo ya decidido (recortado, céntimo fijado).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CuentaNueva {
+    pub nombre: String,
+    /// El texto de la divisa tal como llegó: la valida el esquema (`CHECK`), como siempre.
+    pub divisa: String,
+    pub saldo_inicial: f64,
+    pub entidad: Option<String>,
+    pub comision_pago_impuestos: Option<f64>,
+}
+
+/// Los datos declarativos que se pueden corregir; el saldo no.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CuentaCorregida {
+    pub id: i64,
+    pub nombre: String,
+    pub entidad: Option<String>,
+    pub comision_pago_impuestos: Option<f64>,
+}
+
+/// Una transferencia entre cuentas tal como la muestra el historial: con los nombres de los extremos.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransaccionLeida {
+    pub id: i64,
+    pub fecha: String,
+    pub cuenta_origen_id: i64,
+    pub cuenta_origen_nombre: String,
+    pub cuenta_destino_id: i64,
+    pub cuenta_destino_nombre: String,
+    pub monto_origen: f64,
+    pub monto_destino: f64,
+    pub tasa_cambio: f64,
+    pub cargo: f64,
+    pub descripcion: Option<String>,
+}
+
+/// Alta, corrección y consulta de cuentas y de su historial de transferencias. (Mover dinero entre ellas
+/// vive en `RepositorioCuentas` y en los casos de uso de `transferir`.)
+pub trait CatalogoDeCuentas {
+    /// Ordenadas por nombre, ascendente (el orden binario de SQLite).
+    fn cuentas(&self) -> Result<Vec<CuentaLeida>, ErrorAlmacen>;
+    fn insertar_cuenta(&mut self, cuenta: &CuentaNueva) -> Result<i64, ErrorAlmacen>;
+    /// `false` si no hay ninguna cuenta con ese identificador (no se cambió nada).
+    fn corregir_cuenta(&mut self, cuenta: &CuentaCorregida) -> Result<bool, ErrorAlmacen>;
+    /// De la más nueva a la más vieja.
+    fn transacciones(&self) -> Result<Vec<TransaccionLeida>, ErrorAlmacen>;
+}
+
 /// Una categoría de gasto tal como se guarda.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CategoriaGuardada {
