@@ -4515,7 +4515,7 @@ fn gasto_en_categoria(categoria_id: i64) {
 #[test]
 fn k3_eliminar_categoria_respeta_otros_los_gastos_y_borra_la_que_esta_libre() {
     let _g = entorno_aislado();
-    let otros = id_categoria("Otros");
+    let otros = crate::obtener_categorias().unwrap().into_iter().find(|c| c.nombre == "Otros").expect("«Otros» existe de fábrica").id;
     assert_eq!(
         crate::eliminar_categoria(otros).unwrap_err(),
         "No se puede eliminar la categoría de sistema 'Otros'."
