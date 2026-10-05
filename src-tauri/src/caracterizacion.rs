@@ -4586,3 +4586,160 @@ fn k7_eliminar_cliente_exige_que_no_tenga_facturas() {
     assert_eq!(crate::obtener_clientes().unwrap().len(), 1);
 }
 
+// --- A-03, vertical «cuentas»: caracterización antes de extraer ---
+//
+// Fijan lo que `crear_cuenta`, `actualizar_cuenta`, `obtener_cuentas` y `obtener_transacciones_cuentas`
+// hacen HOY. (Transferir y eliminar cuentas ya pasan por casos de uso y tienen sus pruebas.)
+
+fn columnas_de_cuenta(id: i64) -> (String, Option<String>, Option<f64>, f64) {
+    conexion()
+        .query_row(
+            "SELECT nombre, entidad, comision_pago_impuestos, balance_actual FROM cuentas_ahorro WHERE id = ?;",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .expect("leer cuenta")
+}
+
+fn total_de_cuentas() -> usize {
+    crate::obtener_cuentas().unwrap().len()
+}
+
+#[test]
+fn m1_una_cuenta_se_crea_recortada_con_su_entidad_y_su_saldo() {
+    let _g = entorno_aislado();
+    let id = crate::crear_cuenta(
+        "  Cuenta Prueba  ".into(), "USD".into(), importe("250.50"), Some("  Banco Ejemplo ".into()), Some(importe("12.00")),
+    )
+    .unwrap();
+    let (nombre, entidad, comision, saldo) = columnas_de_cuenta(id);
+    assert_eq!(nombre, "Cuenta Prueba");
+    assert_eq!(entidad.as_deref(), Some("Banco Ejemplo"));
+    assert_importe(comision.unwrap(), 12.0, "comisión");
+    assert_importe(saldo, 250.5, "saldo inicial");
+    let divisa: String = conexion()
+        .query_row("SELECT divisa FROM cuentas_ahorro WHERE id = ?;", params![id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(divisa, "USD");
+}
+
+#[test]
+fn m2_una_entidad_en_blanco_se_guarda_como_nula_igual_que_una_ausente() {
+    let _g = entorno_aislado();
+    let a = crate::crear_cuenta("Con espacios".into(), "DOP".into(), monto(0.0), Some("   ".into()), None).unwrap();
+    let b = crate::crear_cuenta("Sin entidad".into(), "DOP".into(), monto(0.0), None, None).unwrap();
+    assert_eq!(columnas_de_cuenta(a).1, None);
+    assert_eq!(columnas_de_cuenta(b).1, None);
+}
+
+#[test]
+fn m3_crear_una_cuenta_rechaza_nombre_vacio_y_comision_negativa_con_su_mensaje_y_en_ese_orden() {
+    let _g = entorno_aislado();
+    assert_eq!(
+        crate::crear_cuenta("   ".into(), "DOP".into(), monto(0.0), None, None).unwrap_err(),
+        "El nombre de la cuenta no puede estar vacío."
+    );
+    assert_eq!(
+        crate::crear_cuenta("Negativa".into(), "DOP".into(), monto(0.0), None, Some(importe("-0.01"))).unwrap_err(),
+        "La comisión por pago de impuestos no puede ser negativa."
+    );
+    // El nombre se comprueba primero.
+    assert_eq!(
+        crate::crear_cuenta(" ".into(), "DOP".into(), monto(0.0), None, Some(importe("-5"))).unwrap_err(),
+        "El nombre de la cuenta no puede estar vacío."
+    );
+    // Una comisión de cero es válida (el banco no cobra), y distinta de ninguna.
+    let id = crate::crear_cuenta("Cero".into(), "DOP".into(), monto(0.0), None, Some(importe("0.00"))).unwrap();
+    assert_importe(columnas_de_cuenta(id).2.unwrap(), 0.0, "cero declarado");
+    assert_eq!(total_de_cuentas(), 1 + cuentas_de_fabrica(), "las rechazadas no dejaron nada");
+}
+
+fn cuentas_de_fabrica() -> usize {
+    crate::obtener_cuentas().unwrap().iter().filter(|c| c.nombre.starts_with("Efectivo")).count()
+}
+
+#[test]
+fn m4_una_divisa_ilegal_o_un_nombre_repetido_los_rechaza_el_esquema_y_no_dejan_nada() {
+    let _g = entorno_aislado();
+    let antes = total_de_cuentas();
+    let e = crate::crear_cuenta("Euro".into(), "EUR".into(), monto(0.0), None, None).unwrap_err();
+    assert!(e.contains("CHECK constraint failed"), "mensaje: {e}");
+    crate::crear_cuenta("Repetida".into(), "DOP".into(), monto(0.0), None, None).unwrap();
+    let e = crate::crear_cuenta("Repetida".into(), "DOP".into(), monto(0.0), None, None).unwrap_err();
+    assert!(e.contains("UNIQUE constraint failed"), "mensaje: {e}");
+    assert_eq!(total_de_cuentas(), antes + 1);
+}
+
+#[test]
+fn m5_actualizar_una_cuenta_corrige_nombre_entidad_y_comision_sin_tocar_el_saldo() {
+    let _g = entorno_aislado();
+    let id = crear_cuenta("Original", "DOP", 777.0);
+    crate::actualizar_cuenta(id, "  Renombrada ".into(), Some(" Banco Nuevo ".into()), Some(importe("5.00"))).unwrap();
+    let (nombre, entidad, comision, saldo) = columnas_de_cuenta(id);
+    assert_eq!((nombre.as_str(), entidad.as_deref()), ("Renombrada", Some("Banco Nuevo")));
+    assert_importe(comision.unwrap(), 5.0, "comisión");
+    assert_importe(saldo, 777.0, "el saldo no se toca");
+
+    // Sin entidad ni comisión las deja nulas: corregir con vacío borra lo declarado.
+    crate::actualizar_cuenta(id, "Renombrada".into(), Some("  ".into()), None).unwrap();
+    let (_, entidad, comision, _) = columnas_de_cuenta(id);
+    assert_eq!(entidad, None);
+    assert!(comision.is_none());
+}
+
+#[test]
+fn m6_actualizar_rechaza_vacio_negativo_e_inexistente_con_su_mensaje() {
+    let _g = entorno_aislado();
+    let id = crear_cuenta("Estable", "DOP", 10.0);
+    assert_eq!(
+        crate::actualizar_cuenta(id, "  ".into(), None, None).unwrap_err(),
+        "El nombre de la cuenta no puede estar vacío."
+    );
+    assert_eq!(
+        crate::actualizar_cuenta(id, "Estable".into(), None, Some(importe("-1"))).unwrap_err(),
+        "La comisión por pago de impuestos no puede ser negativa."
+    );
+    assert_eq!(
+        crate::actualizar_cuenta(987_654, "Nada".into(), None, None).unwrap_err(),
+        "No se encontró la cuenta 987654."
+    );
+    assert_eq!(columnas_de_cuenta(id).0, "Estable", "lo rechazado no cambió nada");
+}
+
+#[test]
+fn m7_las_cuentas_se_listan_por_nombre_con_todos_sus_campos() {
+    let _g = entorno_aislado();
+    crate::crear_cuenta("Zeta".into(), "USD".into(), importe("1.50"), Some("Banco Z".into()), Some(importe("3.00"))).unwrap();
+    crate::crear_cuenta("Alfa".into(), "DOP".into(), importe("2.25"), None, None).unwrap();
+    let todas = crate::obtener_cuentas().unwrap();
+    let nombres: Vec<&str> = todas.iter().map(|c| c.nombre.as_str()).collect();
+    let mut ordenados = nombres.clone();
+    ordenados.sort();
+    assert_eq!(nombres, ordenados, "orden binario por nombre");
+    let zeta = todas.iter().find(|c| c.nombre == "Zeta").unwrap();
+    assert_eq!((zeta.divisa.as_str(), zeta.entidad.as_deref()), ("USD", Some("Banco Z")));
+    assert_importe(zeta.balance_actual, 1.5, "saldo");
+    assert_importe(zeta.comision_pago_impuestos.unwrap(), 3.0, "comisión");
+    let alfa = todas.iter().find(|c| c.nombre == "Alfa").unwrap();
+    assert!(alfa.entidad.is_none() && alfa.comision_pago_impuestos.is_none());
+}
+
+#[test]
+fn m8_las_transacciones_entre_cuentas_salen_de_la_mas_nueva_a_la_mas_vieja_con_los_nombres() {
+    let _g = entorno_aislado();
+    let a = crear_cuenta("Origen DOP", "DOP", 1000.0);
+    let b = crear_cuenta("Destino USD", "USD", 0.0);
+    crate::transferir_entre_cuentas("01/09/2026".into(), a, b, importe("600.00"), importe("10.00"), importe("1.00"), "Primera".into()).unwrap();
+    crate::transferir_entre_cuentas("02/09/2026".into(), a, b, importe("120.00"), importe("2.00"), importe("0.00"), "Segunda".into()).unwrap();
+    let t = crate::obtener_transacciones_cuentas().unwrap();
+    assert_eq!(t.len(), 2);
+    assert_eq!(t[0].descripcion.as_deref(), Some("Segunda"), "la más nueva primero");
+    assert_eq!(t[1].descripcion.as_deref(), Some("Primera"));
+    assert_eq!((t[0].cuenta_origen_nombre.as_str(), t[0].cuenta_destino_nombre.as_str()), ("Origen DOP", "Destino USD"));
+    assert_eq!((t[0].cuenta_origen_id, t[0].cuenta_destino_id), (a, b));
+    assert_importe(t[1].monto_origen, 600.0, "origen");
+    assert_importe(t[1].monto_destino, 10.0, "destino");
+    assert_importe(t[1].tasa_cambio, 10.0 / 600.0, "tasa");
+    assert_importe(t[1].cargo, 1.0, "cargo");
+}
+
