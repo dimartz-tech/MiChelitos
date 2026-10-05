@@ -29,7 +29,9 @@ use chrono::{NaiveDate, Local, Datelike};
 
 use dominio::dinero::{Dinero, Divisa, Porcentaje, TasaCambio};
 use dominio::gasto::MetodoPago;
+use adaptadores::sqlite::catalogos::CatalogosSqlite;
 use adaptadores::sqlite::gastos::AlmacenSqlite;
+use puertos::repositorios::AlmacenCatalogos;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
 use aplicacion::revertir_gasto::revertir_gasto;
 use aplicacion::registrar_pago_tarjeta::{registrar_pago_tarjeta as registrar_pago_tarjeta_caso, DatosPago};
@@ -286,79 +288,41 @@ fn cupo(
 }
 
 // --- COMANDOS: CATEGORÍAS ---
+/// Corre `f` sobre el almacén de catálogos dentro de una transacción y la confirma si salió bien.
+///
+/// Es todo lo que los comandos de categorías y clientes tienen de infraestructura; las reglas están en
+/// `dominio::catalogo` y `aplicacion::catalogos`.
+fn con_catalogos<T>(
+    f: impl FnOnce(&mut CatalogosSqlite) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let resultado = {
+        let mut almacen = CatalogosSqlite::nuevo(&tx);
+        f(&mut almacen)?
+    };
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(resultado)
+}
+
 #[tauri::command]
 fn obtener_categorias() -> Result<Vec<Categoria>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, nombre FROM categorias ORDER BY nombre ASC;").map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], |row| {
-        Ok(Categoria {
-            id: row.get(0)?,
-            nombre: row.get(1)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+    con_catalogos(|a| {
+        Ok(a.categorias()?.into_iter().map(|c| Categoria { id: c.id, nombre: c.nombre }).collect())
+    })
 }
 
 #[tauri::command]
 fn crear_categoria(nombre: String) -> Result<Categoria, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let nombre_clean = nombre.trim();
-    if nombre_clean.is_empty() {
-        return Err("El nombre de la categoría no puede estar vacío.".to_string());
-    }
-
-    // Verificar duplicado
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM categorias WHERE LOWER(nombre) = LOWER(?);",
-        [nombre_clean],
-        |r| r.get(0),
-    ).map_err(|e| e.to_string())?;
-
-    if count > 0 {
-        return Err("La categoría ya existe.".to_string());
-    }
-
-    conn.execute("INSERT INTO categorias (nombre) VALUES (?);", [nombre_clean]).map_err(|e| e.to_string())?;
-    let id = conn.last_insert_rowid();
-
-    Ok(Categoria {
-        id,
-        nombre: nombre_clean.to_string(),
+    con_catalogos(|a| {
+        let c = aplicacion::catalogos::crear_categoria(&nombre, a)?;
+        Ok(Categoria { id: c.id, nombre: c.nombre })
     })
 }
 
 #[tauri::command]
 fn eliminar_categoria(id: i64) -> Result<(), String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-
-    // Verificar si es "Otros"
-    let nombre: String = conn.query_row(
-        "SELECT nombre FROM categorias WHERE id = ?;",
-        [id],
-        |r| r.get(0)
-    ).map_err(|e| e.to_string())?;
-    if nombre == "Otros" {
-        return Err("No se puede eliminar la categoría de sistema 'Otros'.".to_string());
-    }
-
-    // Verificar integridad referencial de gastos
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM gastos WHERE categoria_id = ?;",
-        [id],
-        |r| r.get(0)
-    ).map_err(|e| e.to_string())?;
-
-    if count > 0 {
-        return Err("No se puede eliminar la categoría porque tiene gastos registrados asociados.".to_string());
-    }
-
-    conn.execute("DELETE FROM categorias WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
-    Ok(())
+    con_catalogos(|a| Ok(aplicacion::catalogos::eliminar_categoria(id, a)?))
 }
 
 // --- COMANDOS: GASTOS ---
@@ -2184,69 +2148,22 @@ fn eliminar_prestamo(id: i64) -> Result<(), String> {
 
 #[tauri::command]
 fn obtener_clientes() -> Result<Vec<Cliente>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, rnc, nombre FROM clientes ORDER BY nombre ASC;").map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], |row| {
-        Ok(Cliente {
-            id: row.get(0)?,
-            rnc: row.get(1)?,
-            nombre: row.get(2)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+    con_catalogos(|a| {
+        Ok(a.clientes()?.into_iter().map(|c| Cliente { id: c.id, rnc: c.rnc, nombre: c.nombre }).collect())
+    })
 }
 
 #[tauri::command]
 fn crear_cliente(rnc: String, nombre: String) -> Result<Cliente, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let rnc_clean = rnc.trim();
-    let nombre_clean = nombre.trim();
-    if rnc_clean.is_empty() || nombre_clean.is_empty() {
-        return Err("RNC y nombre no pueden estar vacíos.".to_string());
-    }
-
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM clientes WHERE rnc = ?;",
-        [rnc_clean],
-        |r| r.get(0)
-    ).map_err(|e| e.to_string())?;
-
-    if count > 0 {
-        return Err("Ya existe un cliente con este RNC.".to_string());
-    }
-
-    conn.execute(
-        "INSERT INTO clientes (rnc, nombre) VALUES (?, ?);",
-        [rnc_clean, nombre_clean]
-    ).map_err(|e| e.to_string())?;
-
-    Ok(Cliente {
-        id: conn.last_insert_rowid(),
-        rnc: rnc_clean.to_string(),
-        nombre: nombre_clean.to_string(),
+    con_catalogos(|a| {
+        let c = aplicacion::catalogos::crear_cliente(&rnc, &nombre, a)?;
+        Ok(Cliente { id: c.id, rnc: c.rnc, nombre: c.nombre })
     })
 }
 
 #[tauri::command]
 fn eliminar_cliente(id: i64) -> Result<(), String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM ingresos WHERE cliente_id = ?;",
-        [id],
-        |r| r.get(0)
-    ).map_err(|e| e.to_string())?;
-
-    if count > 0 {
-        return Err("No se puede eliminar el cliente porque tiene facturas registradas.".to_string());
-    }
-
-    conn.execute("DELETE FROM clientes WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
-    Ok(())
+    con_catalogos(|a| Ok(aplicacion::catalogos::eliminar_cliente(id, a)?))
 }
 
 /// Toma un respaldo bajo demanda y devuelve dónde quedó.

@@ -93,6 +93,43 @@ impl GastoGuardado {
     }
 }
 
+/// Una categoría de gasto tal como se guarda.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CategoriaGuardada {
+    pub id: i64,
+    pub nombre: String,
+}
+
+/// Un cliente tal como se guarda.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClienteGuardado {
+    pub id: i64,
+    pub rnc: String,
+    pub nombre: String,
+}
+
+/// Categorías y clientes: dos catálogos pequeños con las mismas operaciones y la misma forma de
+/// guardarse, de ahí un solo puerto. Quien lo implementa abre la transacción.
+pub trait AlmacenCatalogos {
+    /// Ordenadas por nombre, ascendente (el orden binario de SQLite).
+    fn categorias(&self) -> Result<Vec<CategoriaGuardada>, ErrorAlmacen>;
+    /// Si ya hay una categoría con ese nombre, **sin distinguir mayúsculas**.
+    fn categoria_existe(&self, nombre: &str) -> Result<bool, ErrorAlmacen>;
+    fn insertar_categoria(&mut self, nombre: &str) -> Result<i64, ErrorAlmacen>;
+    /// `NoEncontrado` si no hay ninguna con ese identificador.
+    fn nombre_de_categoria(&self, id: i64) -> Result<String, ErrorAlmacen>;
+    fn gastos_de_categoria(&self, id: i64) -> Result<i64, ErrorAlmacen>;
+    fn eliminar_categoria(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+
+    /// Ordenados por nombre, ascendente.
+    fn clientes(&self) -> Result<Vec<ClienteGuardado>, ErrorAlmacen>;
+    /// Si ya hay un cliente con ese RNC (exacto).
+    fn rnc_registrado(&self, rnc: &str) -> Result<bool, ErrorAlmacen>;
+    fn insertar_cliente(&mut self, rnc: &str, nombre: &str) -> Result<i64, ErrorAlmacen>;
+    fn facturas_de_cliente(&self, id: i64) -> Result<i64, ErrorAlmacen>;
+    fn eliminar_cliente(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+}
+
 pub trait RepositorioCategorias {
     /// Nombre de la categoría, o `None` si no existe. La ausencia no es un
     /// error: hoy un identificador inexistente hace que no se aplique la
