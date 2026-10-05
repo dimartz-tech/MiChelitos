@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.77.0 (Versión Actual) - 2026-10-02
+## 🚀 Versión 1.78.0 (Versión Actual) - 2026-10-05
+**Auditoría A-02, segunda mitad: la aplicación ahora tiene una política de contenido (CSP).**
+
+### 🐛 Qué estaba mal
+* `security.csp` era `null`: sin política, una inyección en la interfaz podía cargar scripts de cualquier sitio, abrir marcos, ejecutar `eval` o enviar datos a un servidor externo.
+
+### 🔧 Qué se hace
+* **CSP:** `default-src 'self'`; `script-src 'self'` (sin `unsafe-inline` ni `unsafe-eval`); `object-src 'none'`; `base-uri 'none'`; `form-action 'none'`; `connect-src 'self' ipc: http://ipc.localhost` (ningún origen externo); `font-src` y `style-src` con `fonts.googleapis.com`/`fonts.gstatic.com` solo para las fuentes; `img-src 'self' data: asset:`.
+* **Dos excepciones, y son las únicas:** `script-src-attr 'unsafe-inline'` y `style-src-attr 'unsafe-inline'`, porque las plantillas usan manejadores en línea (`onclick=`, `onsubmit=`) y `style=`. Sin ellas la interfaz entera dejaría de responder. Quitarlas exige migrar esos manejadores a `addEventListener`, trabajo aparte; el contrato de pruebas lo deja anotado. Un script en línea, `eval` o una conexión externa **siguen bloqueados**.
+
+### 🧪 Pruebas
+* JS: 3 contratos nuevos en `tauri_superficie.test.js` (CSP no nula y cerrada por defecto; solo las excepciones esperadas; `index.html` sin scripts en línea, de otros orígenes ni `<style>`). Diez mutaciones (CSP nula, `unsafe-eval`, `unsafe-inline` en scripts, script o conexión externos, sin `object-src`, `form-action` abierto, `default-src *`, script y estilo en línea en `index.html`): todas detectadas.
+* **Comprobado en la app empaquetada**, con un HOME temporal: los manejadores en línea y los estilos en atributo **funcionan**; un `<script>` inyectado, `eval`, `fetch` a un sitio externo quedan **bloqueados**; las **11 pestañas** se dibujan y un formulario con `onsubmit` real (agregar categoría) guarda sin navegar.
+
+---
+
+## 🚀 Versión 1.77.0 - 2026-10-02
 **Auditoría A-01 y A-02: un capital ilegible ya no se sobrescribe, y la interfaz pierde las APIs nativas de Tauri que no usa.**
 
 ### 🐛 A-01 — Qué estaba mal

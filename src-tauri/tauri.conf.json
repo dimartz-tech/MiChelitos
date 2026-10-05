@@ -7,7 +7,7 @@
   },
   "package": {
     "productName": "MiChelitos",
-    "version": "1.77.0"
+    "version": "1.78.0"
   },
   "tauri": {
     "allowlist": {
@@ -45,7 +45,7 @@
       }
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; script-src-attr 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com; style-src-attr 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: asset: https://asset.localhost; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'"
     },
     "windows": [
       {
