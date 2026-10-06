@@ -118,6 +118,129 @@ pub fn disponible(limite: Dinero, saldo: Dinero) -> Result<Dinero, ErrorDominio>
     limite.restar(&saldo)
 }
 
+// --- Reglas de alta y consulta de un financiamiento -------------------------------------------------
+//
+// Salen de `crear_prestamo`, `actualizar_prestamo` y `obtener_prestamos` (A-03) sin cambiar ninguna regla ni
+// ningún mensaje; las pruebas de caracterización `q1`–`q9` lo fijan.
+
+/// Las cuotas con las que nace un financiamiento. Una línea **flexible** no cuenta cuotas (ignora las que se le den);
+/// cualquier otro tipo exige las dos y que las pendientes no superen a las totales.
+pub fn cuotas_de_un_financiamiento(
+    tipo: &str,
+    totales: Option<i32>,
+    pendientes: Option<i32>,
+) -> Result<(Option<i32>, Option<i32>), ErrorDominio> {
+    if tipo == "flexible" {
+        return Ok((None, None));
+    }
+    let totales = totales.ok_or(ErrorDominio::CuotasTotalesRequeridas)?;
+    let pendientes = pendientes.ok_or(ErrorDominio::CuotasPendientesRequeridas)?;
+    if pendientes > totales {
+        return Err(ErrorDominio::CuotasPendientesExcedenTotales);
+    }
+    Ok((Some(totales), Some(pendientes)))
+}
+
+/// El día de pago tiene que ser un día del mes.
+pub fn dia_de_pago(dia: i32) -> Result<i32, ErrorDominio> {
+    if !(1..=31).contains(&dia) {
+        return Err(ErrorDominio::DiaDePagoInvalido);
+    }
+    Ok(dia)
+}
+
+/// El límite de crédito solo significa algo donde hay cupo que reponer: una línea revolvente.
+pub fn limite_permitido(tipo: &str, lleva_limite: bool) -> Result<(), ErrorDominio> {
+    let es_revolvente = TipoPrestamo::desde_codigo(tipo).map(|t| t.es_revolvente()).unwrap_or(false);
+    if lleva_limite && !es_revolvente {
+        return Err(ErrorDominio::LimiteSoloEnLineaRevolvente);
+    }
+    Ok(())
+}
+
+/// El recordatorio de la próxima cuota: si hay alerta (faltan 3 días o menos) y el mensaje.
+///
+/// Solo corre para un financiamiento vigente: una línea flexible o uno amortizable con cuotas pendientes. El mes se
+/// aproxima con 30 días (`(30 - hoy) + día`), tal como se ha hecho siempre; ver `recordatorio_de_pago_*`.
+pub fn recordatorio_de_pago(
+    tipo: &str,
+    cuotas_pendientes: Option<i32>,
+    dia_pago: i32,
+    dia_actual: i32,
+) -> (bool, String) {
+    let vigente = tipo == "flexible" || cuotas_pendientes.unwrap_or(0) > 0;
+    if !vigente {
+        return (false, "-".to_string());
+    }
+    let dias_para_pago = if dia_pago >= dia_actual { dia_pago - dia_actual } else { (30 - dia_actual) + dia_pago };
+    if dias_para_pago <= 3 {
+        let mensaje = if dias_para_pago == 0 {
+            "Hoy vence la cuota.".to_string()
+        } else {
+            format!("¡Vence en {} días!", dias_para_pago)
+        };
+        (true, mensaje)
+    } else {
+        (false, format!("Faltan {} días para el pago.", dias_para_pago))
+    }
+}
+
+#[cfg(test)]
+mod tests_de_alta_y_consulta {
+    use super::*;
+
+    #[test]
+    fn una_linea_flexible_ignora_las_cuotas_y_los_demas_tipos_las_exigen() {
+        assert_eq!(cuotas_de_un_financiamiento("flexible", Some(10), Some(20)), Ok((None, None)));
+        assert_eq!(cuotas_de_un_financiamiento("vehiculo", None, Some(1)), Err(ErrorDominio::CuotasTotalesRequeridas));
+        assert_eq!(cuotas_de_un_financiamiento("vehiculo", Some(1), None), Err(ErrorDominio::CuotasPendientesRequeridas));
+        assert_eq!(cuotas_de_un_financiamiento("vehiculo", Some(12), Some(13)), Err(ErrorDominio::CuotasPendientesExcedenTotales));
+        assert_eq!(cuotas_de_un_financiamiento("vehiculo", Some(12), Some(12)), Ok((Some(12), Some(12))));
+        // Las totales se comprueban antes que las pendientes.
+        assert_eq!(cuotas_de_un_financiamiento("vehiculo", None, None), Err(ErrorDominio::CuotasTotalesRequeridas));
+    }
+
+    #[test]
+    fn el_dia_de_pago_va_de_1_a_31() {
+        for dia in [1, 15, 31] {
+            assert_eq!(dia_de_pago(dia), Ok(dia));
+        }
+        for dia in [0, 32, -1, i32::MIN] {
+            assert_eq!(dia_de_pago(dia), Err(ErrorDominio::DiaDePagoInvalido));
+        }
+    }
+
+    #[test]
+    fn el_limite_solo_se_admite_en_una_linea_revolvente() {
+        assert_eq!(limite_permitido("flexible", true), Ok(()));
+        assert_eq!(limite_permitido("vehiculo", true), Err(ErrorDominio::LimiteSoloEnLineaRevolvente));
+        assert_eq!(limite_permitido("vehiculo", false), Ok(()));
+        assert_eq!(limite_permitido("tipo-desconocido", true), Err(ErrorDominio::LimiteSoloEnLineaRevolvente));
+    }
+
+    #[test]
+    fn recordatorio_de_pago_hoy_dentro_de_tres_dias_y_mas_lejos() {
+        assert_eq!(recordatorio_de_pago("flexible", None, 10, 10), (true, "Hoy vence la cuota.".into()));
+        assert_eq!(recordatorio_de_pago("flexible", None, 13, 10), (true, "¡Vence en 3 días!".into()));
+        assert_eq!(recordatorio_de_pago("flexible", None, 14, 10), (false, "Faltan 4 días para el pago.".into()));
+    }
+
+    #[test]
+    fn recordatorio_de_pago_si_el_dia_ya_paso_cuenta_hasta_el_del_mes_siguiente_con_meses_de_30() {
+        // Hoy 28, vence el 2: (30 - 28) + 2 = 4 días.
+        assert_eq!(recordatorio_de_pago("flexible", None, 2, 28), (false, "Faltan 4 días para el pago.".into()));
+        // Hoy 29, vence el 1: (30 - 29) + 1 = 2 días.
+        assert_eq!(recordatorio_de_pago("flexible", None, 1, 29), (true, "¡Vence en 2 días!".into()));
+    }
+
+    #[test]
+    fn solo_un_financiamiento_vigente_tiene_recordatorio() {
+        assert_eq!(recordatorio_de_pago("vehiculo", Some(0), 10, 10), (false, "-".into()));
+        assert_eq!(recordatorio_de_pago("vehiculo", None, 10, 10), (false, "-".into()));
+        assert_eq!(recordatorio_de_pago("vehiculo", Some(1), 10, 10), (true, "Hoy vence la cuota.".into()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
