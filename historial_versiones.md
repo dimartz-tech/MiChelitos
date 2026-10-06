@@ -4,7 +4,26 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.80.0 (Versión Actual) - 2026-10-05
+## 🚀 Versión 1.81.0 (Versión Actual) - 2026-10-06
+**Auditoría A-03, tercer vertical (primera parte): ingresos formales — listar, emitir y cobrar facturas — salen de `main.rs`.** Sin cambios de reglas ni de mensajes. Quedan para un segundo PR corregir y eliminar facturas, que además abren casos de corrección.
+
+### 🔧 Qué se hace
+* **Orden de trabajo:** primero 7 pruebas de caracterización (`n1`–`n7`, en su propio commit, contra el código de antes; completan `c70`–`c78b`) y después la extracción, con todas intactas.
+* **Caso de uso** (`aplicacion::ingresos`): `crear_ingreso` (número repetido sin distinguir mayúsculas, **antes** de crear ningún cliente; cliente por RNC que conserva su nombre; retención al céntimo) y `marcar_ingreso_pagado` (cuenta, depósito en la divisa de la cuenta, factura pendiente y, solo al final, el saldo; cobrar dos veces no acredita dos veces).
+* **Puerto y adaptadores:** `AlmacenIngresos`, implementado sobre `AlmacenSqlite` (que ya envuelve la transacción y el puerto de cuentas: el cobro toca las dos cosas), y el doble en memoria.
+* **`main.rs`:** los tres comandos delgados sobre `con_almacen`. Comandos con SQL directo: **46 → 44**.
+* **Sin cambios visibles:** los mensajes son los de siempre (la cuenta inexistente, la factura no pendiente, la divisa incompatible, el importe inválido, el número repetido). `resolver_deposito` se queda en `main.rs`: todavía lo usan los cobros informales.
+
+### 🔎 Hallazgos (sin corregir, a consultar; fijados por `n4`)
+* `crear_ingreso` **acepta un porcentaje de retención fuera de 0–100** (150 % o −5 %, con una retención mayor que el total o negativa) y **datos vacíos** (número de factura, RNC y nombre): el formulario los exige, el comando no. Es la misma clase de hueco que tenía el abono no positivo.
+
+### 🧪 Pruebas
+* 7 de caracterización y 7 del caso de uso con el doble. Doce mutaciones (sin chequeo de duplicado, cliente siempre nuevo, porcentaje o retención erróneos, sin comprobar la divisa del depósito, factura inexistente sin aviso, saldo antes de cobrar o sin acreditar, cobro sin filtro de pendiente, duplicado sensible a mayúsculas, listado ascendente, nombre de otra cuenta): todas detectadas. **Rust 691 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): emitir con el céntimo decidido (1234.565 → 1234.57, retención 185.19), número repetido sin distinguir mayúsculas, cuenta y factura inexistentes, cuenta en dólares, cobro que acredita lo mismo que guarda la fila, y cobrar de nuevo rechazado sin acreditar dos veces.
+
+---
+
+## 🚀 Versión 1.80.0 - 2026-10-05
 **Auditoría A-03, segundo vertical: las cuentas salen de `main.rs`.** Alta, corrección, listado y el historial de transferencias pasan a dominio, caso de uso y adaptador. Sin cambios de reglas.
 
 ### 🔧 Qué se hace

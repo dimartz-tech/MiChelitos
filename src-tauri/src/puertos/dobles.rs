@@ -23,8 +23,27 @@ pub struct CuentaEnMemoria {
     pub comision_impuestos: Option<Dinero>,
 }
 
+/// Una factura en el doble: lo que guarda la fila.
+#[derive(Debug, Clone)]
+pub struct FacturaEnMemoria {
+    pub id: i64,
+    pub numero_factura: String,
+    pub cliente_id: i64,
+    pub fecha_emision: String,
+    pub monto_total: f64,
+    pub porcentaje_retencion: f64,
+    pub monto_retenido: f64,
+    pub estatus: String,
+    pub cuenta_ahorro_id: Option<i64>,
+    pub institucion_deposito: Option<String>,
+    pub fecha_pago: Option<String>,
+    pub monto_recibido: Option<f64>,
+}
+
 #[derive(Default)]
 pub struct AlmacenEnMemoria {
+    pub facturas: Vec<FacturaEnMemoria>,
+    pub clientes_de_facturas: Vec<ClienteGuardado>,
     pub categorias: HashMap<i64, String>,
     pub cuentas: HashMap<i64, CuentaEnMemoria>,
     /// Una deuda por tarjeta Y divisa, igual que las columnas separadas
@@ -868,6 +887,85 @@ impl CatalogoDeCuentas for CuentasEnMemoria {
         let mut v = self.transacciones_guardadas.clone();
         v.sort_by(|a, b| b.id.cmp(&a.id));
         Ok(v)
+    }
+}
+
+impl AlmacenIngresos for AlmacenEnMemoria {
+    fn ingresos(&self) -> Result<Vec<IngresoLeido>, ErrorAlmacen> {
+        let mut v: Vec<IngresoLeido> = self
+            .facturas
+            .iter()
+            .map(|f| {
+                let c = self.clientes_de_facturas.iter().find(|c| c.id == f.cliente_id).expect("cliente de la factura");
+                IngresoLeido {
+                    id: f.id,
+                    numero_factura: f.numero_factura.clone(),
+                    cliente_id: f.cliente_id,
+                    cliente_nombre: c.nombre.clone(),
+                    cliente_rnc: c.rnc.clone(),
+                    fecha_emision: f.fecha_emision.clone(),
+                    estatus: f.estatus.clone(),
+                    monto_total: f.monto_total,
+                    porcentaje_retencion: f.porcentaje_retencion,
+                    monto_retenido: f.monto_retenido,
+                    institucion_deposito: f.institucion_deposito.clone(),
+                    fecha_pago: f.fecha_pago.clone(),
+                    monto_recibido: f.monto_recibido,
+                }
+            })
+            .collect();
+        v.sort_by(|a, b| b.id.cmp(&a.id));
+        Ok(v)
+    }
+    fn factura_existe(&self, numero: &str) -> Result<bool, ErrorAlmacen> {
+        Ok(self.facturas.iter().any(|f| f.numero_factura.to_lowercase() == numero.to_lowercase()))
+    }
+    fn cliente_por_rnc(&self, rnc: &str) -> Result<Option<i64>, ErrorAlmacen> {
+        Ok(self.clientes_de_facturas.iter().find(|c| c.rnc == rnc).map(|c| c.id))
+    }
+    fn registrar_cliente(&mut self, rnc: &str, nombre: &str) -> Result<i64, ErrorAlmacen> {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.clientes_de_facturas.push(ClienteGuardado { id, rnc: rnc.to_string(), nombre: nombre.to_string() });
+        Ok(id)
+    }
+    fn insertar_factura(&mut self, f: &FacturaNueva) -> Result<i64, ErrorAlmacen> {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.facturas.push(FacturaEnMemoria {
+            id,
+            numero_factura: f.numero_factura.clone(),
+            cliente_id: f.cliente_id,
+            fecha_emision: f.fecha_emision.clone(),
+            monto_total: f.monto_total,
+            porcentaje_retencion: f.porcentaje_retencion,
+            monto_retenido: f.monto_retenido,
+            estatus: "emitida".to_string(),
+            cuenta_ahorro_id: None,
+            institucion_deposito: None,
+            fecha_pago: None,
+            monto_recibido: None,
+        });
+        Ok(id)
+    }
+    fn nombre_de_cuenta(&self, cuenta_id: i64) -> Result<String, ErrorAlmacen> {
+        self.cuentas
+            .get(&cuenta_id)
+            .map(|c| c.nombre.clone())
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
+    }
+    fn marcar_cobrada(&mut self, id: i64, cuenta_id: i64, nombre: &str, fecha: &str, monto: f64) -> Result<bool, ErrorAlmacen> {
+        match self.facturas.iter_mut().find(|f| f.id == id && f.estatus != "pagada") {
+            None => Ok(false),
+            Some(f) => {
+                f.estatus = "pagada".to_string();
+                f.cuenta_ahorro_id = Some(cuenta_id);
+                f.institucion_deposito = Some(nombre.to_string());
+                f.fecha_pago = Some(fecha.to_string());
+                f.monto_recibido = Some(monto);
+                Ok(true)
+            }
+        }
     }
 }
 

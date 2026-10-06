@@ -13,7 +13,7 @@ use crate::puertos::repositorios::*;
 use rusqlite::{params, OptionalExtension, Transaction};
 
 pub struct AlmacenSqlite<'a> {
-    tx: &'a Transaction<'a>,
+    pub(super) tx: &'a Transaction<'a>,
 }
 
 impl<'a> AlmacenSqlite<'a> {
