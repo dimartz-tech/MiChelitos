@@ -85,6 +85,57 @@ impl AlmacenIngresos for AlmacenSqlite<'_> {
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
     }
 
+    fn estado_de_factura(&self, id: i64) -> Result<Option<EstadoDeFactura>, ErrorAlmacen> {
+        self.tx
+            .query_row(
+                "SELECT numero_factura, estatus, monto_total, institucion_deposito, monto_recibido
+                 FROM ingresos WHERE id = ?;",
+                [id],
+                |r| {
+                    Ok(EstadoDeFactura {
+                        numero_factura: r.get(0)?,
+                        estatus: r.get(1)?,
+                        monto_total: r.get(2)?,
+                        institucion_deposito: r.get(3)?,
+                        monto_recibido: r.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(fallo)
+    }
+
+    fn corregir_factura(&mut self, f: &FacturaCorregida) -> Result<(), ErrorAlmacen> {
+        self.tx
+            .execute(
+                "UPDATE ingresos SET numero_factura = ?, cliente_id = ?, fecha_emision = ?,
+                                     monto_total = ?, porcentaje_retencion = ?, monto_retenido = ?
+                 WHERE id = ?;",
+                (&f.numero_factura, f.cliente_id, &f.fecha_emision, f.monto_total, f.porcentaje_retencion, f.monto_retenido, f.id),
+            )
+            .map_err(fallo)?;
+        Ok(())
+    }
+
+    fn fijar_recibido(&mut self, id: i64, monto_recibido: f64) -> Result<(), ErrorAlmacen> {
+        self.tx
+            .execute("UPDATE ingresos SET monto_recibido = ? WHERE id = ?;", (monto_recibido, id))
+            .map_err(fallo)?;
+        Ok(())
+    }
+
+    fn eliminar_factura(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.tx.execute("DELETE FROM ingresos WHERE id = ?;", [id]).map_err(fallo)?;
+        Ok(())
+    }
+
+    fn cuenta_por_nombre(&self, nombre: &str) -> Result<Option<i64>, ErrorAlmacen> {
+        self.tx
+            .query_row("SELECT id FROM cuentas_ahorro WHERE nombre = ?;", [nombre], |r| r.get(0))
+            .optional()
+            .map_err(fallo)
+    }
+
     fn marcar_cobrada(
         &mut self,
         id: i64,
@@ -103,5 +154,23 @@ impl AlmacenIngresos for AlmacenSqlite<'_> {
             )
             .map_err(fallo)?;
         Ok(filas > 0)
+    }
+}
+
+impl RegistroDeCorrecciones for AlmacenSqlite<'_> {
+    fn anotar_caso(&mut self, caso: &CasoAAnotar) -> Result<String, ErrorAlmacen> {
+        crate::correcciones::insertar(
+            self.tx,
+            &crate::correcciones::Correccion {
+                tipo: &caso.tipo,
+                referencia_id: caso.referencia_id,
+                descripcion: caso.descripcion.clone(),
+                importe: caso.importe,
+                divisa: caso.divisa.clone(),
+                motivo: &caso.motivo,
+            },
+            &caso.motivo,
+        )
+        .map_err(ErrorAlmacen::Fallo)
     }
 }

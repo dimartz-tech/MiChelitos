@@ -4896,3 +4896,119 @@ fn n7_las_facturas_se_listan_de_la_mas_nueva_a_la_mas_vieja_con_los_datos_de_su_
     assert!(dos.institucion_deposito.is_none() && dos.fecha_pago.is_none() && dos.monto_recibido.is_none());
 }
 
+// --- A-03, vertical «ingresos formales» (parte 2: corregir y eliminar): caracterización antes de extraer ---
+//
+// Completan c85–c94 y c79/c80 con los mensajes exactos, la forma del caso de corrección y los bordes.
+
+fn casos_de_correccion() -> Vec<(String, String, i64, String, Option<f64>, Option<String>)> {
+    conexion()
+        .prepare("SELECT numero_caso, tipo, referencia_id, descripcion, importe, divisa FROM correcciones ORDER BY id;")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+fn factura_cobrada(numero: &str, cuenta_nombre: &str, saldo: f64) -> (i64, i64) {
+    let cuenta = crear_cuenta(cuenta_nombre, "DOP", saldo);
+    let id = crear_ingreso(input_de_factura(numero, "909090909", "Cli", "2000", 15.0)).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "06/10/2026".into(), importe("1700")).unwrap();
+    (id, cuenta)
+}
+
+#[test]
+fn o1_corregir_una_factura_inexistente_dice_su_mensaje() {
+    let _g = entorno_aislado();
+    let e = actualizar_ingreso(404, "X".into(), 1, "06/10/2026".into(), importe("10"), 0.0, None, None).unwrap_err();
+    assert_eq!(e, "No se encontró la factura 404.");
+}
+
+#[test]
+fn o2_los_tres_resumenes_de_corregir_son_los_de_siempre() {
+    let _g = entorno_aislado();
+    // Sin cobrar: no hay dinero que mover.
+    let libre = crear_ingreso(input_de_factura("O-001", "808080808", "Cli", "100", 0.0)).unwrap();
+    let r = actualizar_ingreso(libre, "O-001".into(), fila_de_factura(libre).1, "06/10/2026".into(), importe("200"), 0.0, None, None).unwrap();
+    assert_eq!(r, "Factura corregida.");
+
+    // Cobrada y el ajuste mueve dinero: dice la cuenta, el ajuste con dos decimales y el caso.
+    let (id, cuenta) = factura_cobrada("O-002", "Cuenta Resumen", 100.0);
+    let cliente = fila_de_factura(id).1;
+    let r = actualizar_ingreso(id, "O-002".into(), cliente, "06/10/2026".into(), importe("3000"), 15.0, None, Some(motivo_de_prueba())).unwrap();
+    assert_eq!(r, "Factura corregida. Se ajustó «Cuenta Resumen» en DOP 850.00. Caso COR-2026-0001.".replace("2026", &chrono::Local::now().format("%Y").to_string()));
+    assert_importe(saldo_cuenta_id(cuenta), 100.0 + 1700.0 + 850.0, "la cuenta recibió el ajuste");
+
+    // Cobrada sin cuenta de depósito que ajustar.
+    conexion().execute("UPDATE ingresos SET institucion_deposito = NULL WHERE id = ?;", params![id]).unwrap();
+    let r = actualizar_ingreso(id, "O-002".into(), cliente, "06/10/2026".into(), importe("4000"), 15.0, None, Some(motivo_de_prueba())).unwrap();
+    assert!(r.starts_with("Factura corregida. No tenía cuenta de depósito que ajustar. Caso COR-"), "{r}");
+}
+
+#[test]
+fn o3_si_la_cuenta_de_deposito_ya_no_existe_corregir_falla_y_no_deja_nada() {
+    let _g = entorno_aislado();
+    let (id, cuenta) = factura_cobrada("O-003", "Cuenta Que Se Va", 100.0);
+    let cliente = fila_de_factura(id).1;
+    conexion().execute("UPDATE cuentas_ahorro SET nombre = 'Otro Nombre' WHERE id = ?;", params![cuenta]).unwrap();
+
+    let e = actualizar_ingreso(id, "O-003".into(), cliente, "06/10/2026".into(), importe("3000"), 15.0, None, Some(motivo_de_prueba())).unwrap_err();
+    assert_eq!(
+        e,
+        "La factura se cobró en «Cuenta Que Se Va», que ya no existe. Corrige o recrea esa cuenta antes de modificar la factura."
+    );
+    assert_importe(fila_de_factura(id).3, 2000.0, "la factura no cambió (transacción deshecha)");
+    assert!(casos_de_correccion().is_empty(), "ni dejó un caso huérfano");
+}
+
+#[test]
+fn o4_eliminar_una_factura_inexistente_o_con_motivo_corto_dice_su_mensaje() {
+    let _g = entorno_aislado();
+    assert_eq!(
+        eliminar_ingreso(404, motivo_de_prueba()).unwrap_err(),
+        "No se encontró factura con identificador 404."
+    );
+    let id = crear_ingreso(input_de_factura("O-004", "707070707", "Cli", "100", 0.0)).unwrap();
+    let e = eliminar_ingreso(id, "  corto ".into()).unwrap_err();
+    assert!(e.starts_with("Explica la corrección en al menos 15 caracteres."), "{e}");
+    assert!(e.contains("«corto»"), "el motivo recortado va en el mensaje: {e}");
+    assert_eq!(fila_de_factura(id).0, "O-004", "no se borró nada");
+}
+
+#[test]
+fn o5_eliminar_deja_un_caso_con_la_factura_el_total_y_la_divisa_y_devuelve_su_numero() {
+    let _g = entorno_aislado();
+    let id = crear_ingreso(input_de_factura("O-005", "606060606", "Cli", "250", 0.0)).unwrap();
+    let caso = eliminar_ingreso(id, motivo_de_prueba()).unwrap();
+    let casos = casos_de_correccion();
+    assert_eq!(casos.len(), 1);
+    let (numero, tipo, referencia, descripcion, importe_caso, divisa) = &casos[0];
+    assert_eq!(&caso, numero);
+    assert_eq!((tipo.as_str(), *referencia, descripcion.as_str(), divisa.as_deref()), ("factura", id, "Factura O-005", Some("DOP")));
+    assert_importe(importe_caso.unwrap(), 250.0, "total de la factura");
+}
+
+#[test]
+fn o6_eliminar_una_factura_cobrada_cuya_cuenta_ya_no_existe_la_borra_igual_sin_mover_saldos() {
+    // Comportamiento ACTUAL, distinto de corregir (que sí falla): el borrado ajusta «por nombre» y, si no hay
+    // cuenta con ese nombre, no hace nada y sigue. Se documenta tal cual.
+    let _g = entorno_aislado();
+    let (id, cuenta) = factura_cobrada("O-006", "Cuenta Desaparecida", 100.0);
+    conexion().execute("UPDATE cuentas_ahorro SET nombre = 'Otro Nombre' WHERE id = ?;", params![cuenta]).unwrap();
+    let saldo_antes = saldo_cuenta_id(cuenta);
+
+    eliminar_ingreso(id, motivo_de_prueba()).unwrap();
+
+    assert_importe(saldo_cuenta_id(cuenta), saldo_antes, "ninguna cuenta se tocó");
+    assert_eq!(crate::obtener_ingresos().unwrap().len(), 0, "la factura se borró");
+}
+
+#[test]
+fn o7_eliminar_una_factura_sin_cobrar_no_toca_ningun_saldo() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Intacta", "DOP", 321.0);
+    let id = crear_ingreso(input_de_factura("O-007", "505050505", "Cli", "100", 0.0)).unwrap();
+    eliminar_ingreso(id, motivo_de_prueba()).unwrap();
+    assert_importe(saldo_cuenta_id(cuenta), 321.0, "sin cobro no hay nada que revertir");
+}
+

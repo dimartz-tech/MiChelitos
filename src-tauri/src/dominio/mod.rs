@@ -8,6 +8,7 @@ pub mod capital;
 pub mod catalogo;
 pub mod cargos;
 pub mod conversion;
+pub mod correccion;
 pub mod cuenta;
 pub mod dinero;
 pub mod errores;
