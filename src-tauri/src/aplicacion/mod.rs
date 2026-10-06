@@ -4,6 +4,7 @@
 pub mod catalogos;
 pub mod cuentas;
 pub mod cobrar_suscripcion;
+pub mod informales;
 pub mod ingresos;
 pub mod guardar_capital;
 pub mod liquidar_gasto;
