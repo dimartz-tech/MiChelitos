@@ -4743,3 +4743,156 @@ fn m8_las_transacciones_entre_cuentas_salen_de_la_mas_nueva_a_la_mas_vieja_con_l
     assert_importe(t[1].cargo, 1.0, "cargo");
 }
 
+// --- A-03, vertical «ingresos formales» (alta y cobro): caracterización antes de extraer ---
+//
+// Completan c70–c78b (que ya cubren lo principal) con los mensajes exactos, la forma de la fila, el listado y la
+// atomicidad. Fijan lo que `crear_ingreso`, `marcar_ingreso_pagado` y `obtener_ingresos` hacen HOY.
+
+fn fila_de_factura(id: i64) -> (String, i64, String, f64, f64, f64, String) {
+    conexion()
+        .query_row(
+            "SELECT numero_factura, cliente_id, fecha_emision, monto_total, porcentaje_retencion, monto_retenido, estatus
+             FROM ingresos WHERE id = ?;",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .expect("leer factura")
+}
+
+fn input_de_factura(numero: &str, rnc: &str, nombre: &str, total: &str, porcentaje: f64) -> IngresoInput {
+    IngresoInput {
+        numero_factura: numero.to_string(),
+        rnc_cliente: rnc.to_string(),
+        nombre_cliente: nombre.to_string(),
+        fecha_emision: "05/10/2026".to_string(),
+        monto_total: importe(total),
+        porcentaje_retencion: porcentaje,
+    }
+}
+
+fn clientes_con_rnc(rnc: &str) -> i64 {
+    conexion().query_row("SELECT COUNT(*) FROM clientes WHERE rnc = ?;", params![rnc], |r| r.get(0)).unwrap()
+}
+
+#[test]
+fn n1_una_factura_se_guarda_emitida_con_su_cliente_nuevo_y_su_retencion() {
+    let _g = entorno_aislado();
+    let id = crear_ingreso(input_de_factura("N-001", "131313131", "Cliente Nuevo", "2000", 15.0)).unwrap();
+    let (numero, cliente_id, fecha, total, porcentaje, retenido, estatus) = fila_de_factura(id);
+    assert_eq!((numero.as_str(), fecha.as_str(), estatus.as_str()), ("N-001", "05/10/2026", "emitida"));
+    assert_importe(total, 2000.0, "total");
+    assert_importe(porcentaje, 15.0, "porcentaje");
+    assert_importe(retenido, 300.0, "retención");
+    let (rnc, nombre): (String, String) = conexion()
+        .query_row("SELECT rnc, nombre FROM clientes WHERE id = ?;", params![cliente_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((rnc.as_str(), nombre.as_str()), ("131313131", "Cliente Nuevo"));
+}
+
+#[test]
+fn n2_el_cliente_existente_se_reutiliza_por_rnc_y_conserva_su_nombre() {
+    let _g = entorno_aislado();
+    let a = crear_ingreso(input_de_factura("N-002", "141414141", "Nombre Original", "100", 0.0)).unwrap();
+    let b = crear_ingreso(input_de_factura("N-003", "141414141", "Otro Nombre", "100", 0.0)).unwrap();
+    assert_eq!(fila_de_factura(a).1, fila_de_factura(b).1, "mismo cliente");
+    assert_eq!(clientes_con_rnc("141414141"), 1);
+    let nombre: String = conexion()
+        .query_row("SELECT nombre FROM clientes WHERE rnc = '141414141';", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(nombre, "Nombre Original", "el nombre de la segunda factura no lo cambia");
+}
+
+#[test]
+fn n3_una_factura_repetida_se_rechaza_con_su_mensaje_antes_de_crear_ningun_cliente() {
+    let _g = entorno_aislado();
+    crear_ingreso(input_de_factura("N-004", "151515151", "Primero", "100", 0.0)).unwrap();
+    for repetido in ["N-004", "n-004"] {
+        let e = crear_ingreso(input_de_factura(repetido, "161616161", "Segundo", "100", 0.0)).unwrap_err();
+        assert_eq!(e, "El número de factura ya está registrado.");
+    }
+    assert_eq!(clientes_con_rnc("161616161"), 0, "no se creó el cliente de la rechazada");
+}
+
+#[test]
+fn n4_hallazgo_la_factura_acepta_un_porcentaje_fuera_de_rango_y_datos_vacios() {
+    // **HALLAZGOS, sin corregir** (protocolo del proyecto: documentar y fijar; el cambio se consulta).
+    // `crear_ingreso` no valida que el porcentaje de retención esté entre 0 y 100 —acepta 150 y -5, con una
+    // retención mayor que el total o negativa— ni que número de factura, RNC y nombre no estén vacíos (el
+    // formulario sí los exige, el comando no). Esta prueba describe el comportamiento ACTUAL: si se decide
+    // rechazarlos, se invierte.
+    let _g = entorno_aislado();
+    let alto = crear_ingreso(input_de_factura("N-005", "171717171", "Alto", "200", 150.0)).unwrap();
+    assert_importe(fila_de_factura(alto).5, 300.0, "150 % de 200: la retención supera el total");
+    let negativo = crear_ingreso(input_de_factura("N-006", "181818181", "Negativo", "200", -5.0)).unwrap();
+    assert_importe(fila_de_factura(negativo).5, -10.0, "-5 %: retención negativa");
+    assert!(crear_ingreso(input_de_factura("", "", "", "0", 0.0)).is_ok(), "datos vacíos aceptados");
+}
+
+#[test]
+fn n5_cobrar_una_factura_la_deja_pagada_con_la_cuenta_la_fecha_y_el_importe() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Cobro", "DOP", 500.0);
+    let id = crear_ingreso(input_de_factura("N-007", "191919191", "Cli", "2000", 15.0)).unwrap();
+    marcar_ingreso_pagado(id, cuenta, "06/10/2026".into(), importe("1700.50")).unwrap();
+    let (estatus, institucion, cuenta_id, fecha, recibido): (String, String, i64, String, f64) = conexion()
+        .query_row(
+            "SELECT estatus, institucion_deposito, cuenta_ahorro_id, fecha_pago, monto_recibido FROM ingresos WHERE id = ?;",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .unwrap();
+    assert_eq!((estatus.as_str(), institucion.as_str(), cuenta_id, fecha.as_str()), ("pagada", "Cuenta Cobro", cuenta, "06/10/2026"));
+    assert_importe(recibido, 1700.5, "recibido");
+    assert_importe(saldo_cuenta_id(cuenta), 2200.5, "la cuenta recibe lo mismo que la fila guarda");
+}
+
+#[test]
+fn n6_los_rechazos_del_cobro_dicen_su_causa_y_no_dejan_nada_a_medias() {
+    let _g = entorno_aislado();
+    let dop = crear_cuenta("Cuenta DOP", "DOP", 100.0);
+    let usd = crear_cuenta("Cuenta USD", "USD", 100.0);
+    let id = crear_ingreso(input_de_factura("N-008", "202020202", "Cli", "1500", 0.0)).unwrap();
+    let cobrar = |factura: i64, cuenta: i64, monto: &str| marcar_ingreso_pagado(factura, cuenta, "06/10/2026".into(), importe(monto));
+
+    assert_eq!(cobrar(id, 9_999, "10").unwrap_err(), "No se encontró la cuenta 9999.");
+    assert_eq!(cobrar(404, dop, "10").unwrap_err(), "No se encontró una factura 404 pendiente de cobro.");
+    assert_eq!(
+        cobrar(id, usd, "10").unwrap_err(),
+        "No se pueden combinar montos en USD y DOP: indique una tasa de cambio para convertirlos."
+    );
+    assert_eq!(cobrar(id, dop, "-10").unwrap_err(), "El monto -10 no es un número válido.");
+    assert_eq!(estatus_de(id), "emitida", "la factura sigue pendiente");
+    assert_importe(saldo_cuenta_id(dop), 100.0, "ningún saldo se movió");
+    assert_importe(saldo_cuenta_id(usd), 100.0, "ningún saldo se movió");
+
+    cobrar(id, dop, "10").unwrap();
+    assert_eq!(
+        cobrar(id, dop, "10").unwrap_err(),
+        format!("No se encontró una factura {id} pendiente de cobro."),
+        "cobrar dos veces no acredita dos veces"
+    );
+    assert_importe(saldo_cuenta_id(dop), 110.0, "solo se acreditó una vez");
+}
+
+#[test]
+fn n7_las_facturas_se_listan_de_la_mas_nueva_a_la_mas_vieja_con_los_datos_de_su_cliente() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Lista", "DOP", 0.0);
+    let a = crear_ingreso(input_de_factura("N-009", "212121212", "Cliente Uno", "300", 10.0)).unwrap();
+    let b = crear_ingreso(input_de_factura("N-010", "232323232", "Cliente Dos", "400", 0.0)).unwrap();
+    marcar_ingreso_pagado(a, cuenta, "07/10/2026".into(), importe("270")).unwrap();
+
+    let lista = crate::obtener_ingresos().unwrap();
+    assert_eq!(lista.iter().map(|i| i.id).collect::<Vec<_>>(), vec![b, a], "la más nueva primero");
+    let uno = &lista[1];
+    assert_eq!((uno.numero_factura.as_str(), uno.cliente_nombre.as_str(), uno.cliente_rnc.as_str()), ("N-009", "Cliente Uno", "212121212"));
+    assert_eq!(uno.estatus, "pagada");
+    assert_eq!((uno.institucion_deposito.as_deref(), uno.fecha_pago.as_deref()), (Some("Cuenta Lista"), Some("07/10/2026")));
+    assert_importe(uno.monto_total, 300.0, "total");
+    assert_importe(uno.monto_retenido, 30.0, "retenido");
+    assert_importe(uno.monto_recibido.unwrap(), 270.0, "recibido");
+    let dos = &lista[0];
+    assert_eq!(dos.estatus, "emitida");
+    assert!(dos.institucion_deposito.is_none() && dos.fecha_pago.is_none() && dos.monto_recibido.is_none());
+}
+

@@ -31,7 +31,7 @@ use dominio::dinero::{Dinero, Divisa, Porcentaje, TasaCambio};
 use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::catalogos::CatalogosSqlite;
 use adaptadores::sqlite::cuentas::CuentasSqlite;
-use puertos::repositorios::CatalogoDeCuentas;
+use puertos::repositorios::{AlmacenIngresos, CatalogoDeCuentas};
 use adaptadores::sqlite::gastos::AlmacenSqlite;
 use puertos::repositorios::AlmacenCatalogos;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
@@ -420,40 +420,40 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
 }
 
 // --- COMANDOS: INGRESOS FORMALES ---
+/// Corre `f` sobre el almacén de gastos/cuentas/facturas dentro de una transacción y la confirma si salió bien.
+fn con_almacen<T>(f: impl FnOnce(&mut AlmacenSqlite) -> Result<T, String>) -> Result<T, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let resultado = {
+        let mut almacen = AlmacenSqlite::nuevo(&tx);
+        f(&mut almacen)?
+    };
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(resultado)
+}
+
 #[tauri::command]
 fn obtener_ingresos() -> Result<Vec<Ingreso>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT i.id, i.numero_factura, i.cliente_id, c.nombre, c.rnc, i.fecha_emision, i.estatus,
-                i.monto_total, i.porcentaje_retencion, i.monto_retenido, i.institucion_deposito, i.fecha_pago, i.monto_recibido
-         FROM ingresos i
-         JOIN clientes c ON i.cliente_id = c.id
-         ORDER BY i.id DESC;"
-    ).map_err(|e| e.to_string())?;
-
-    let rows = stmt.query_map([], |row| {
-        Ok(Ingreso {
-            id: row.get(0)?,
-            numero_factura: row.get(1)?,
-            cliente_id: row.get(2)?,
-            cliente_nombre: row.get(3)?,
-            cliente_rnc: row.get(4)?,
-            fecha_emision: row.get(5)?,
-            estatus: row.get(6)?,
-            monto_total: row.get(7)?,
-            porcentaje_retencion: row.get(8)?,
-            monto_retenido: row.get(9)?,
-            institucion_deposito: row.get(10)?,
-            fecha_pago: row.get(11)?,
-            monto_recibido: row.get(12)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+    con_almacen(|a| {
+        Ok(AlmacenIngresos::ingresos(a)?
+            .into_iter()
+            .map(|i| Ingreso {
+                id: i.id,
+                numero_factura: i.numero_factura,
+                cliente_id: i.cliente_id,
+                cliente_nombre: i.cliente_nombre,
+                cliente_rnc: i.cliente_rnc,
+                fecha_emision: i.fecha_emision,
+                estatus: i.estatus,
+                monto_total: i.monto_total,
+                porcentaje_retencion: i.porcentaje_retencion,
+                monto_retenido: i.monto_retenido,
+                institucion_deposito: i.institucion_deposito,
+                fecha_pago: i.fecha_pago,
+                monto_recibido: i.monto_recibido,
+            })
+            .collect())
+    })
 }
 
 #[derive(Deserialize)]
@@ -468,63 +468,20 @@ struct IngresoInput {
 
 #[tauri::command]
 fn crear_ingreso(input: IngresoInput) -> Result<i64, String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    
-    // Verificar duplicado de factura
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM ingresos WHERE LOWER(numero_factura) = LOWER(?);",
-        [&input.numero_factura],
-        |r| r.get(0)
-    ).map_err(|e| e.to_string())?;
-
-    if count > 0 {
-        return Err("El número de factura ya está registrado.".to_string());
-    }
-
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    // Obtener o crear cliente
-    let cliente_id: i64 = match tx.query_row(
-        "SELECT id FROM clientes WHERE rnc = ?;",
-        [&input.rnc_cliente],
-        |r| r.get(0)
-    ) {
-        Ok(id) => id,
-        Err(_) => {
-            tx.execute(
-                "INSERT INTO clientes (rnc, nombre) VALUES (?, ?);",
-                [&input.rnc_cliente, &input.nombre_cliente]
-            ).map_err(|e| e.to_string())?;
-            tx.last_insert_rowid()
-        }
-    };
-
-    // H16 resuelto: la retención se decide al céntimo, con el mismo núcleo
-    // que el resto del sistema.
-    // El total llega como se escribió; una sola conversión sirve a la retención y a la fila.
-    let monto_total = input.monto_total.con_divisa(MONEDA_LOCAL);
-    let monto_retenido = dominio::ingreso::retencion(
-        monto_total,
-        Porcentaje::desde_porcentaje(input.porcentaje_retencion)?,
-    )?
-    .unidades();
-
-    tx.execute(
-        "INSERT INTO ingresos (numero_factura, cliente_id, fecha_emision, monto_total, porcentaje_retencion, monto_retenido, estatus)
-         VALUES (?, ?, ?, ?, ?, ?, 'emitida');",
-        (
-            &input.numero_factura,
-            cliente_id,
-            &input.fecha_emision,
-            monto_total.unidades(),
-            input.porcentaje_retencion,
-            monto_retenido,
-        )
-    ).map_err(|e| e.to_string())?;
-
-    let id = tx.last_insert_rowid();
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(id)
+    con_almacen(|a| {
+        // El total llega como se escribió; el céntimo lo deciden esos dígitos. Una factura es en moneda local.
+        Ok(aplicacion::ingresos::crear_ingreso(
+            aplicacion::ingresos::DatosFactura {
+                numero_factura: input.numero_factura,
+                rnc_cliente: input.rnc_cliente,
+                nombre_cliente: input.nombre_cliente,
+                fecha_emision: input.fecha_emision,
+                monto_total: input.monto_total.con_divisa(MONEDA_LOCAL),
+                porcentaje_retencion: input.porcentaje_retencion,
+            },
+            a,
+        )?)
+    })
 }
 
 /// Resuelve la cuenta que recibe un cobro y comprueba que puede recibirlo.
@@ -594,38 +551,16 @@ fn marcar_ingreso_pagado(
     fecha: String,
     monto_recibido: ipc::ImporteDecimal,
 ) -> Result<(), String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    // Una factura se emite en moneda local, de modo que su cobro también.
-    let deposito = resolver_deposito(&tx, cuenta_ahorro_id, MONEDA_LOCAL, monto_recibido)?;
-    // La fila guarda exactamente el mismo importe que se acredita a la cuenta.
-    let monto_recibido = monto_recibido.unidades();
-    let nombre: String = tx
-        .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-
-    // H18: un cobro que no encuentra su factura deja de devolver éxito.
-    let filas = tx
-        .execute(
-            "UPDATE ingresos SET estatus = 'pagada', institucion_deposito = ?,
-                                 cuenta_ahorro_id = ?, fecha_pago = ?, monto_recibido = ?
-             WHERE id = ? AND estatus <> 'pagada';",
-            (&nombre, cuenta_ahorro_id, &fecha, monto_recibido, id),
-        )
-        .map_err(|e| e.to_string())?;
-
-    if filas == 0 {
-        return Err(format!(
-            "No se encontró una factura {} pendiente de cobro.",
-            id
-        ));
-    }
-
-    acreditar(&tx, &deposito)?;
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+    con_almacen(|a| {
+        // Una factura se emite en moneda local, de modo que su cobro también.
+        Ok(aplicacion::ingresos::marcar_ingreso_pagado(
+            id,
+            cuenta_ahorro_id,
+            &fecha,
+            monto_recibido.con_divisa(MONEDA_LOCAL),
+            a,
+        )?)
+    })
 }
 
 // --- COMANDOS: INGRESOS INFORMALES ---
