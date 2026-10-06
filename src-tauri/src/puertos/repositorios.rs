@@ -93,6 +93,107 @@ impl GastoGuardado {
     }
 }
 
+/// Un financiamiento tal como se lee, con los datos de su tarjeta si cuelga de una.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrestamoLeido {
+    pub id: i64,
+    pub tipo_prestamo: String,
+    pub monto_prestamo: f64,
+    pub institucion_financiera: String,
+    pub tasa_actual: f64,
+    pub cuotas_totales: Option<i32>,
+    pub cuotas_pendientes: Option<i32>,
+    pub monto_cuota: f64,
+    pub dia_pago: i32,
+    /// `None` en un registro antiguo sin saldo llevado; el listado lo toma como el monto.
+    pub saldo_actual: Option<f64>,
+    pub limite_credito: Option<f64>,
+    pub tarjeta_id: Option<i64>,
+    pub tarjeta_nombre: Option<String>,
+    pub tarjeta_fecha_corte: Option<i32>,
+    pub tarjeta_fecha_limite_pago: Option<i32>,
+}
+
+/// Un financiamiento nuevo, con todo ya decidido (el céntimo, las cuotas, el saldo).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrestamoNuevo {
+    pub tipo_prestamo: String,
+    pub monto_prestamo: f64,
+    pub institucion_financiera: String,
+    pub tasa_actual: f64,
+    pub cuotas_totales: Option<i32>,
+    pub cuotas_pendientes: Option<i32>,
+    pub monto_cuota: f64,
+    pub dia_pago: i32,
+    pub saldo_actual: f64,
+    pub limite_credito: Option<f64>,
+}
+
+/// Las condiciones que se pueden corregir de un financiamiento ya registrado. **No** el monto original ni el saldo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrestamoCorregido {
+    pub id: i64,
+    pub tasa_actual: f64,
+    pub monto_cuota: f64,
+    pub dia_pago: i32,
+    pub limite_credito: Option<f64>,
+    pub tarjeta_id: Option<i64>,
+}
+
+/// Lo que hace falta del financiamiento para asentarle un movimiento.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EstadoDePrestamo {
+    /// Un saldo sin llevar vale cero para este cálculo (así ha sido siempre).
+    pub saldo: f64,
+    pub tasa_anual: f64,
+    pub monto_cuota: f64,
+}
+
+/// Una línea del libro de movimientos del financiamiento.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MovimientoDePrestamo {
+    pub id: i64,
+    pub fecha: String,
+    pub tipo: String,
+    pub monto: f64,
+    pub interes: f64,
+    pub capital: f64,
+    pub saldo_resultante: f64,
+}
+
+/// Un movimiento por asentar.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MovimientoNuevo {
+    pub prestamo_id: i64,
+    pub fecha: String,
+    /// «cuota», «declaracion» o «disposicion» (lo exige el esquema).
+    pub tipo: String,
+    pub monto: Dinero,
+    pub interes: Dinero,
+    pub capital: Dinero,
+    pub saldo_resultante: Dinero,
+}
+
+/// Financiamientos (préstamos y líneas de crédito): alta, corrección, libro de movimientos y baja.
+pub trait AlmacenPrestamos {
+    /// Del más nuevo al más viejo.
+    fn prestamos(&self) -> Result<Vec<PrestamoLeido>, ErrorAlmacen>;
+    fn insertar_prestamo(&mut self, prestamo: &PrestamoNuevo) -> Result<i64, ErrorAlmacen>;
+    /// El tipo del financiamiento, o `None` si no existe.
+    fn tipo_de_prestamo(&self, id: i64) -> Result<Option<String>, ErrorAlmacen>;
+    fn tarjeta_existe(&self, tarjeta_id: i64) -> Result<bool, ErrorAlmacen>;
+    fn corregir_prestamo(&mut self, prestamo: &PrestamoCorregido) -> Result<(), ErrorAlmacen>;
+    fn estado_de_prestamo(&self, id: i64) -> Result<Option<EstadoDePrestamo>, ErrorAlmacen>;
+    /// Anota el movimiento **y** deja el saldo del financiamiento en su resultado.
+    fn asentar_movimiento(&mut self, movimiento: &MovimientoNuevo) -> Result<(), ErrorAlmacen>;
+    /// Baja el contador una cuota sin pasar de cero; no hace nada si el financiamiento no cuenta cuotas.
+    fn descontar_cuota(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+    /// Del más nuevo al más viejo.
+    fn movimientos(&self, id: i64) -> Result<Vec<MovimientoDePrestamo>, ErrorAlmacen>;
+    /// Sin guardas, y se lleva su libro. Borrar uno que no existe no es un error.
+    fn eliminar_prestamo(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+}
+
 /// Un ingreso informal tal como se lee.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InformalLeido {
