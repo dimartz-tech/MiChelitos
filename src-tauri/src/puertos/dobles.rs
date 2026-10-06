@@ -43,6 +43,7 @@ pub struct FacturaEnMemoria {
 #[derive(Default)]
 pub struct AlmacenEnMemoria {
     pub facturas: Vec<FacturaEnMemoria>,
+    pub casos: Vec<CasoAAnotar>,
     pub clientes_de_facturas: Vec<ClienteGuardado>,
     pub categorias: HashMap<i64, String>,
     pub cuentas: HashMap<i64, CuentaEnMemoria>,
@@ -954,6 +955,39 @@ impl AlmacenIngresos for AlmacenEnMemoria {
             .map(|c| c.nombre.clone())
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
     }
+    fn estado_de_factura(&self, id: i64) -> Result<Option<EstadoDeFactura>, ErrorAlmacen> {
+        Ok(self.facturas.iter().find(|f| f.id == id).map(|f| EstadoDeFactura {
+            numero_factura: f.numero_factura.clone(),
+            estatus: f.estatus.clone(),
+            monto_total: f.monto_total,
+            institucion_deposito: f.institucion_deposito.clone(),
+            monto_recibido: f.monto_recibido,
+        }))
+    }
+    fn corregir_factura(&mut self, c: &FacturaCorregida) -> Result<(), ErrorAlmacen> {
+        if let Some(f) = self.facturas.iter_mut().find(|f| f.id == c.id) {
+            f.numero_factura = c.numero_factura.clone();
+            f.cliente_id = c.cliente_id;
+            f.fecha_emision = c.fecha_emision.clone();
+            f.monto_total = c.monto_total;
+            f.porcentaje_retencion = c.porcentaje_retencion;
+            f.monto_retenido = c.monto_retenido;
+        }
+        Ok(())
+    }
+    fn fijar_recibido(&mut self, id: i64, monto: f64) -> Result<(), ErrorAlmacen> {
+        if let Some(f) = self.facturas.iter_mut().find(|f| f.id == id) {
+            f.monto_recibido = Some(monto);
+        }
+        Ok(())
+    }
+    fn eliminar_factura(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.facturas.retain(|f| f.id != id);
+        Ok(())
+    }
+    fn cuenta_por_nombre(&self, nombre: &str) -> Result<Option<i64>, ErrorAlmacen> {
+        Ok(self.cuentas.iter().find(|(_, c)| c.nombre == nombre).map(|(id, _)| *id))
+    }
     fn marcar_cobrada(&mut self, id: i64, cuenta_id: i64, nombre: &str, fecha: &str, monto: f64) -> Result<bool, ErrorAlmacen> {
         match self.facturas.iter_mut().find(|f| f.id == id && f.estatus != "pagada") {
             None => Ok(false),
@@ -966,6 +1000,14 @@ impl AlmacenIngresos for AlmacenEnMemoria {
                 Ok(true)
             }
         }
+    }
+}
+
+/// Los casos que el doble ha anotado, con su número correlativo.
+impl RegistroDeCorrecciones for AlmacenEnMemoria {
+    fn anotar_caso(&mut self, caso: &CasoAAnotar) -> Result<String, ErrorAlmacen> {
+        self.casos.push(caso.clone());
+        Ok(format!("CASO-{:04}", self.casos.len()))
     }
 }
 
