@@ -1101,3 +1101,114 @@ impl AlmacenInformales for AlmacenEnMemoria {
     }
 }
 
+/// Doble en memoria del puerto de financiamientos: guarda las filas y su libro de movimientos.
+#[derive(Default)]
+pub struct PrestamosEnMemoria {
+    pub prestamos: Vec<PrestamoLeido>,
+    pub libro: Vec<(i64, MovimientoDePrestamo)>,
+    pub tarjetas: Vec<i64>,
+    siguiente_id: i64,
+    siguiente_movimiento: i64,
+}
+
+impl PrestamosEnMemoria {
+    pub fn nuevo() -> Self {
+        PrestamosEnMemoria { siguiente_id: 1, siguiente_movimiento: 1, ..Default::default() }
+    }
+    pub fn con_tarjeta(mut self, id: i64) -> Self {
+        self.tarjetas.push(id);
+        self
+    }
+}
+
+impl AlmacenPrestamos for PrestamosEnMemoria {
+    fn prestamos(&self) -> Result<Vec<PrestamoLeido>, ErrorAlmacen> {
+        let mut v = self.prestamos.clone();
+        v.sort_by(|a, b| b.id.cmp(&a.id));
+        Ok(v)
+    }
+    fn insertar_prestamo(&mut self, p: &PrestamoNuevo) -> Result<i64, ErrorAlmacen> {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.prestamos.push(PrestamoLeido {
+            id,
+            tipo_prestamo: p.tipo_prestamo.clone(),
+            monto_prestamo: p.monto_prestamo,
+            institucion_financiera: p.institucion_financiera.clone(),
+            tasa_actual: p.tasa_actual,
+            cuotas_totales: p.cuotas_totales,
+            cuotas_pendientes: p.cuotas_pendientes,
+            monto_cuota: p.monto_cuota,
+            dia_pago: p.dia_pago,
+            saldo_actual: Some(p.saldo_actual),
+            limite_credito: p.limite_credito,
+            tarjeta_id: None,
+            tarjeta_nombre: None,
+            tarjeta_fecha_corte: None,
+            tarjeta_fecha_limite_pago: None,
+        });
+        Ok(id)
+    }
+    fn tipo_de_prestamo(&self, id: i64) -> Result<Option<String>, ErrorAlmacen> {
+        Ok(self.prestamos.iter().find(|p| p.id == id).map(|p| p.tipo_prestamo.clone()))
+    }
+    fn tarjeta_existe(&self, tarjeta_id: i64) -> Result<bool, ErrorAlmacen> {
+        Ok(self.tarjetas.contains(&tarjeta_id))
+    }
+    fn corregir_prestamo(&mut self, c: &PrestamoCorregido) -> Result<(), ErrorAlmacen> {
+        if let Some(p) = self.prestamos.iter_mut().find(|p| p.id == c.id) {
+            p.tasa_actual = c.tasa_actual;
+            p.monto_cuota = c.monto_cuota;
+            p.dia_pago = c.dia_pago;
+            p.limite_credito = c.limite_credito;
+            p.tarjeta_id = c.tarjeta_id;
+        }
+        Ok(())
+    }
+    fn estado_de_prestamo(&self, id: i64) -> Result<Option<EstadoDePrestamo>, ErrorAlmacen> {
+        Ok(self.prestamos.iter().find(|p| p.id == id).map(|p| EstadoDePrestamo {
+            saldo: p.saldo_actual.unwrap_or(0.0),
+            tasa_anual: p.tasa_actual,
+            monto_cuota: p.monto_cuota,
+        }))
+    }
+    fn asentar_movimiento(&mut self, m: &MovimientoNuevo) -> Result<(), ErrorAlmacen> {
+        let id = self.siguiente_movimiento;
+        self.siguiente_movimiento += 1;
+        self.libro.push((
+            m.prestamo_id,
+            MovimientoDePrestamo {
+                id,
+                fecha: m.fecha.clone(),
+                tipo: m.tipo.clone(),
+                monto: m.monto.unidades(),
+                interes: m.interes.unidades(),
+                capital: m.capital.unidades(),
+                saldo_resultante: m.saldo_resultante.unidades(),
+            },
+        ));
+        if let Some(p) = self.prestamos.iter_mut().find(|p| p.id == m.prestamo_id) {
+            p.saldo_actual = Some(m.saldo_resultante.unidades());
+        }
+        Ok(())
+    }
+    fn descontar_cuota(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        if let Some(p) = self.prestamos.iter_mut().find(|p| p.id == id) {
+            if let Some(c) = p.cuotas_pendientes {
+                p.cuotas_pendientes = Some((c - 1).max(0));
+            }
+        }
+        Ok(())
+    }
+    fn movimientos(&self, id: i64) -> Result<Vec<MovimientoDePrestamo>, ErrorAlmacen> {
+        let mut v: Vec<MovimientoDePrestamo> = self.libro.iter().filter(|(p, _)| *p == id).map(|(_, m)| m.clone()).collect();
+        v.sort_by(|a, b| b.id.cmp(&a.id));
+        Ok(v)
+    }
+    fn eliminar_prestamo(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.prestamos.retain(|p| p.id != id);
+        self.libro.retain(|(p, _)| *p != id);
+        Ok(())
+    }
+}
+

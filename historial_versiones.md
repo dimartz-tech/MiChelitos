@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.83.0 (Versión Actual) - 2026-10-06
+## 🚀 Versión 1.84.0 (Versión Actual) - 2026-10-06
+**Auditoría A-03, cuarto vertical: los préstamos y líneas de crédito salen de `main.rs`.** Los siete comandos (listar, crear, corregir condiciones, pagar cuota, declarar saldo, movimientos y eliminar) pasan a dominio, caso de uso y adaptador. Sin cambios de reglas ni de mensajes.
+
+### 🔧 Qué se hace
+* **Orden de trabajo:** primero 9 pruebas de caracterización (`q1`–`q9`, en su propio commit, contra el código de antes; completan `c34`–`c44`) y después la extracción, con todas intactas.
+* **Dominio** (`dominio::prestamo`): las cuotas con las que nace un financiamiento (una línea flexible **no cuenta cuotas** y ignora las que se le den; los demás tipos exigen las dos y que las pendientes no superen a las totales), el día de pago (1–31), el límite de crédito (solo en una línea revolvente) y el **recordatorio de pago** (alerta a 3 días o menos; el mes se aproxima con 30 días, como siempre), antes mezclado con la consulta. Los siete mensajes de error son los de siempre.
+* **Caso de uso** (`aplicacion::prestamos`): crear, corregir, pagar una cuota (amortiza solo el capital; si la cuota no cubre el interés la deuda crece; baja el contador sin pasar de cero), declarar el saldo (deja la diferencia como movimiento propio), listar (con saldo, cupo, el día de pago de la tarjeta y el recordatorio) y eliminar. Corregir sigue sin tocar el monto original ni el saldo.
+* **Puerto y adaptadores:** `AlmacenPrestamos`, `PrestamosSqlite` y el doble `PrestamosEnMemoria`.
+* **`main.rs`:** los comandos quedan delgados sobre `con_prestamos`; salen `estado_prestamo` y `asentar_movimiento`. Comandos con SQL directo: **37 → 31** (de 54 al empezar A-03).
+* **Un cambio visible, mínimo:** el listado y los movimientos ahora corren dentro de una transacción de lectura y, como en los demás verticales, un error del esquema llevaría el prefijo «Error de almacenamiento: ». Los demás mensajes no cambian.
+
+### 🧪 Pruebas
+* 9 de caracterización, 5 del dominio y 12 del caso de uso con el doble. Veinticuatro mutaciones (reglas de cuotas, límites del día, límite en cualquier tipo, umbral y mes del recordatorio, saldo por omisión, orden de las comprobaciones, tarjeta sin comprobar, el saldo bajando por la cuota entera, contador sin descontar o sin tope, movimiento sin interés, signo de la declaración, día de la tarjeta, cupo, orden de las listas, saldo sin actualizar): todas detectadas. **Rust 758 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): alta con el céntimo decidido (100000.005 → 100000.01), una flexible que ignora las cuotas, los tres rechazos de alta, corregir (inexistente, tarjeta inexistente y válido), pagar (cuota de 5000.01: 1000 de interés y 4000.01 de capital), declarar, el libro de movimientos, y eliminar (dos veces) con su libro.
+
+---
+
+## 🚀 Versión 1.83.0 - 2026-10-06
 **Auditoría A-03, tercer vertical (parte 3): los ingresos informales — listar, crear, cobrar, cobrar en efectivo y eliminar — salen de `main.rs`.** Sin cambios de reglas ni de mensajes.
 
 ### 🔧 Qué se hace

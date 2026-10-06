@@ -39,6 +39,13 @@ pub enum ErrorDominio {
     /// Catálogos (categorías y clientes). Los textos son los de siempre: la interfaz los muestra tal cual.
     FacturaDuplicada,
     IngresoNoPendiente { id: i64 },
+    CuotasTotalesRequeridas,
+    CuotasPendientesRequeridas,
+    CuotasPendientesExcedenTotales,
+    DiaDePagoInvalido,
+    LimiteSoloEnLineaRevolvente,
+    FinanciamientoNoEncontrado { id: i64 },
+    TarjetaNoEncontrada { id: i64 },
     FacturaNoEncontrada { id: i64 },
     /// Una factura cobrada en una cuenta que ya no existe no se puede corregir: el ajuste no tendría adónde ir.
     CuentaDeDepositoInexistente { cuenta: String },
@@ -100,6 +107,16 @@ impl fmt::Display for ErrorDominio {
                 super::correccion::MINIMO_DEL_MOTIVO,
                 motivo
             ),
+            ErrorDominio::CuotasTotalesRequeridas => write!(f, "Las cuotas totales son requeridas."),
+            ErrorDominio::CuotasPendientesRequeridas => write!(f, "Las cuotas pendientes son requeridas."),
+            ErrorDominio::CuotasPendientesExcedenTotales => write!(
+                f,
+                "Error: El número de cuotas pendientes no puede ser mayor al número total de cuotas del préstamo."
+            ),
+            ErrorDominio::DiaDePagoInvalido => write!(f, "El día de pago debe ser un día válido del mes (1-31)."),
+            ErrorDominio::LimiteSoloEnLineaRevolvente => write!(f, "Solo una línea revolvente tiene límite de crédito."),
+            ErrorDominio::FinanciamientoNoEncontrado { id } => write!(f, "No se encontró el financiamiento {}.", id),
+            ErrorDominio::TarjetaNoEncontrada { id } => write!(f, "No se encontró la tarjeta {}.", id),
             ErrorDominio::IngresoNoPendiente { id } => {
                 write!(f, "No se encontró un ingreso {} pendiente de cobro.", id)
             }

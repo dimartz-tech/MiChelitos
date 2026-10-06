@@ -31,7 +31,8 @@ use dominio::dinero::{Dinero, Divisa, TasaCambio};
 use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::catalogos::CatalogosSqlite;
 use adaptadores::sqlite::cuentas::CuentasSqlite;
-use puertos::repositorios::{AlmacenInformales, AlmacenIngresos, CatalogoDeCuentas};
+use adaptadores::sqlite::prestamos::PrestamosSqlite;
+use puertos::repositorios::{AlmacenInformales, AlmacenIngresos, AlmacenPrestamos, CatalogoDeCuentas};
 use adaptadores::sqlite::gastos::AlmacenSqlite;
 use puertos::repositorios::AlmacenCatalogos;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
@@ -48,7 +49,6 @@ use dominio::tarjeta::{LimitesDivisa, PoliticaLiquidacion, MONEDA_LOCAL};
 use aplicacion::liquidar_gasto::liquidar_gasto;
 use aplicacion::registrar_bonificacion::{registrar_bonificacion, revertir_bonificacion, DatosBonificacion};
 use dominio::bonificacion::Bonificacion;
-use dominio::prestamo::{self, TipoPrestamo};
 use dominio::suscripcion::{Frecuencia, Suscripcion as SuscripcionDominio};
 use puertos::reloj::Reloj;
 
@@ -1584,108 +1584,51 @@ fn guardar_capital(data: Value) -> Result<(), String> {
 }
 
 // --- COMANDOS: DEUDAS Y FINANCIAMIENTOS ---
+/// Como `con_catalogos`, para los financiamientos.
+fn con_prestamos<T>(f: impl FnOnce(&mut PrestamosSqlite) -> Result<T, String>) -> Result<T, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let resultado = {
+        let mut almacen = PrestamosSqlite::nuevo(&tx);
+        f(&mut almacen)?
+    };
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(resultado)
+}
+
+/// La fecha de hoy como la guarda la aplicación: `dd/mm/aaaa`.
+fn hoy_dd_mm_aaaa() -> String {
+    Local::now().format("%d/%m/%Y").to_string()
+}
+
 #[tauri::command]
 fn obtener_prestamos() -> Result<Vec<Prestamo>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT p.id, p.tipo_prestamo, p.monto_prestamo, p.institucion_financiera, p.tasa_actual,
-                p.cuotas_totales, p.cuotas_pendientes, p.monto_cuota, p.dia_pago, p.saldo_actual,
-                p.limite_credito, p.tarjeta_id, t.nombre_tarjeta, t.fecha_corte, t.fecha_limite_pago
-         FROM prestamos p LEFT JOIN tarjetas t ON t.id = p.tarjeta_id
-         ORDER BY p.id DESC;"
-    ).map_err(|e| e.to_string())?;
-
-    let hoy = Local::now();
-    let dia_actual = hoy.day() as i32;
-
-    let rows = stmt.query_map([], |row| {
-        let id: i64 = row.get(0)?;
-        let tipo_prestamo: String = row.get(1)?;
-        let monto_prestamo: f64 = row.get(2)?;
-        let institucion_financiera: String = row.get(3)?;
-        let tasa_actual: f64 = row.get(4)?;
-        let cuotas_totales: Option<i32> = row.get(5)?;
-        let cuotas_pendientes: Option<i32> = row.get(6)?;
-        let monto_cuota: f64 = row.get(7)?;
-        let dia_pago: i32 = row.get(8)?;
-        let saldo_actual: f64 = row.get::<_, Option<f64>>(9)?.unwrap_or(monto_prestamo);
-        let limite_credito: Option<f64> = row.get(10)?;
-        let tarjeta_id: Option<i64> = row.get(11)?;
-        let tarjeta_nombre: Option<String> = row.get(12)?;
-        let dia_corte: Option<i32> = row.get(13)?;
-        let vencimiento_de_la_tarjeta: Option<i32> = row.get(14)?;
-
-        // Una facilidad que cuelga de una tarjeta se paga cuando se paga la
-        // tarjeta. Su `dia_pago` propio deja de mandar: sería una segunda
-        // copia de un dato que ya vive en otro sitio.
-        let dia_pago = vencimiento_de_la_tarjeta.unwrap_or(dia_pago);
-
-        // El cupo liberado solo tiene sentido en una línea revolvente: es lo
-        // que hace visible que pagar devuelve capacidad de disponer.
-        let es_revolvente = TipoPrestamo::desde_codigo(&tipo_prestamo)
-            .map(|t| t.es_revolvente())
-            .unwrap_or(false);
-        // El resto lo resuelve el dominio, igual que el cupo de las tarjetas.
-        // Ante datos corruptos se degrada a `None` en vez de tumbar la consulta.
-        let disponible = match (es_revolvente, limite_credito) {
-            (true, Some(limite)) => Dinero::nuevo(limite, MONEDA_LOCAL)
-                .and_then(|l| Ok((l, Dinero::nuevo(saldo_actual, MONEDA_LOCAL)?)))
-                .and_then(|(l, s)| prestamo::disponible(l, s))
-                .map(|d| d.unidades())
-                .ok(),
-            _ => None,
-        };
-
-        // Calcular recordatorios
-        let mut alerta_pago = false;
-        let mut dias_pago_msg = "-".to_string();
-
-        let esta_vigente = tipo_prestamo == "flexible" || cuotas_pendientes.unwrap_or(0) > 0;
-        if esta_vigente {
-            let dias_para_pago = if dia_pago >= dia_actual {
-                dia_pago - dia_actual
-            } else {
-                (30 - dia_actual) + dia_pago
-            };
-            if dias_para_pago <= 3 {
-                alerta_pago = true;
-                dias_pago_msg = if dias_para_pago == 0 {
-                    "Hoy vence la cuota.".to_string()
-                } else {
-                    format!("¡Vence en {} días!", dias_para_pago)
-                };
-            } else {
-                dias_pago_msg = format!("Faltan {} días para el pago.", dias_para_pago);
-            }
-        }
-
-        Ok(Prestamo {
-            id,
-            tipo_prestamo,
-            monto_prestamo,
-            institucion_financiera,
-            tasa_actual,
-            cuotas_totales,
-            cuotas_pendientes,
-            monto_cuota,
-            dia_pago,
-            saldo_actual,
-            limite_credito,
-            tarjeta_id,
-            tarjeta_nombre,
-            dia_corte,
-            disponible,
-            es_revolvente,
-            alerta_pago,
-            dias_pago_msg,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+    let dia_actual = Local::now().day() as i32;
+    con_prestamos(|a| {
+        Ok(aplicacion::prestamos::listar_prestamos(dia_actual, a)?
+            .into_iter()
+            .map(|p| Prestamo {
+                id: p.leido.id,
+                tipo_prestamo: p.leido.tipo_prestamo,
+                monto_prestamo: p.leido.monto_prestamo,
+                institucion_financiera: p.leido.institucion_financiera,
+                tasa_actual: p.leido.tasa_actual,
+                cuotas_totales: p.leido.cuotas_totales,
+                cuotas_pendientes: p.leido.cuotas_pendientes,
+                monto_cuota: p.leido.monto_cuota,
+                dia_pago: p.dia_pago,
+                saldo_actual: p.saldo_actual,
+                limite_credito: p.leido.limite_credito,
+                tarjeta_id: p.leido.tarjeta_id,
+                tarjeta_nombre: p.leido.tarjeta_nombre,
+                dia_corte: p.leido.tarjeta_fecha_corte,
+                disponible: p.disponible,
+                es_revolvente: p.es_revolvente,
+                alerta_pago: p.alerta_pago,
+                dias_pago_msg: p.dias_pago_msg,
+            })
+            .collect())
+    })
 }
 
 #[derive(Deserialize)]
@@ -1707,57 +1650,24 @@ struct PrestamoInput {
 
 #[tauri::command]
 fn crear_prestamo(input: PrestamoInput) -> Result<i64, String> {
-    // 1. Excepción: Validación estricta de cuotas en tipo no flexible
-    let (c_totales, c_pendientes) = if input.tipo_prestamo == "flexible" {
-        (None, None)
-    } else {
-        let tot = input.cuotas_totales.ok_or_else(|| "Las cuotas totales son requeridas.".to_string())?;
-        let pend = input.cuotas_pendientes.ok_or_else(|| "Las cuotas pendientes son requeridas.".to_string())?;
-        (Some(tot), Some(pend))
-    };
-
-    // 2. Excepción: Cuotas pendientes no pueden superar a las totales
-    if let (Some(t), Some(p)) = (c_totales, c_pendientes) {
-        if p > t {
-            return Err("Error: El número de cuotas pendientes no puede ser mayor al número total de cuotas del préstamo.".to_string());
-        }
-    }
-
-    if !(1..=31).contains(&input.dia_pago) {
-        return Err("El día de pago debe ser un día válido del mes (1-31).".to_string());
-    }
-
-    // El límite solo significa algo donde hay cupo que reponer.
-    let es_revolvente = TipoPrestamo::desde_codigo(&input.tipo_prestamo)
-        .map(|t| t.es_revolvente())
-        .unwrap_or(false);
-    if input.limite_credito.is_some() && !es_revolvente {
-        return Err("Solo una línea revolvente tiene límite de crédito.".to_string());
-    }
-
-    // Los importes llegan como se escribieron; cada uno se convierte una vez al guardar.
-    let monto_prestamo = input.monto_prestamo.unidades();
-    let saldo_actual = input.saldo_actual.map(|s| s.unidades()).unwrap_or(monto_prestamo);
-
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT INTO prestamos (tipo_prestamo, monto_prestamo, institucion_financiera, tasa_actual, cuotas_totales, cuotas_pendientes, monto_cuota, dia_pago, saldo_actual, limite_credito)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
-        (
-            &input.tipo_prestamo,
-            monto_prestamo,
-            &input.institucion_financiera,
-            input.tasa_actual,
-            c_totales,
-            c_pendientes,
-            input.monto_cuota.unidades(),
-            input.dia_pago,
-            saldo_actual,
-            input.limite_credito.map(|l| l.unidades()),
-        )
-    ).map_err(|e| e.to_string())?;
-
-    Ok(conn.last_insert_rowid())
+    con_prestamos(|a| {
+        // Los importes llegan como se escribieron; cada uno se convierte una vez al guardar. Todo es en moneda local.
+        Ok(aplicacion::prestamos::crear_prestamo(
+            aplicacion::prestamos::DatosPrestamoNuevo {
+                tipo_prestamo: input.tipo_prestamo,
+                monto_prestamo: input.monto_prestamo.con_divisa(MONEDA_LOCAL),
+                institucion_financiera: input.institucion_financiera,
+                tasa_actual: input.tasa_actual,
+                cuotas_totales: input.cuotas_totales,
+                cuotas_pendientes: input.cuotas_pendientes,
+                monto_cuota: input.monto_cuota.con_divisa(MONEDA_LOCAL),
+                dia_pago: input.dia_pago,
+                saldo_actual: input.saldo_actual.map(|s| s.con_divisa(MONEDA_LOCAL)),
+                limite_credito: input.limite_credito.map(|l| l.con_divisa(MONEDA_LOCAL)),
+            },
+            a,
+        )?)
+    })
 }
 
 #[derive(Deserialize)]
@@ -1784,162 +1694,40 @@ struct ActualizarPrestamoInput {
 /// sin dejar rastro.
 #[tauri::command]
 fn actualizar_prestamo(input: ActualizarPrestamoInput) -> Result<(), String> {
-    if !(1..=31).contains(&input.dia_pago) {
-        return Err("El día de pago debe ser un día válido del mes (1-31).".to_string());
-    }
-
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-
-    let tipo: String = conn
-        .query_row("SELECT tipo_prestamo FROM prestamos WHERE id = ?;", [input.id], |r| r.get(0))
-        .map_err(|_| format!("No se encontró el financiamiento {}.", input.id))?;
-
-    let es_revolvente = TipoPrestamo::desde_codigo(&tipo)
-        .map(|t| t.es_revolvente())
-        .unwrap_or(false);
-    if input.limite_credito.is_some() && !es_revolvente {
-        return Err("Solo una línea revolvente tiene límite de crédito.".to_string());
-    }
-
-    if let Some(tarjeta_id) = input.tarjeta_id {
-        let existe: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tarjetas WHERE id = ?;", [tarjeta_id], |r| r.get(0))
-            .map_err(|e| e.to_string())?;
-        if existe == 0 {
-            return Err(format!("No se encontró la tarjeta {}.", tarjeta_id));
-        }
-    }
-
-    conn.execute(
-        "UPDATE prestamos SET tasa_actual = ?, monto_cuota = ?, dia_pago = ?,
-                              limite_credito = ?, tarjeta_id = ?
-         WHERE id = ?;",
-        (
-            input.tasa_actual,
-            input.monto_cuota.unidades(),
-            input.dia_pago,
-            input.limite_credito.map(|l| l.unidades()),
-            input.tarjeta_id,
-            input.id,
-        ),
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-/// Lee saldo, tasa y cuota de un financiamiento dentro de una transacción.
-fn estado_prestamo(tx: &rusqlite::Transaction, id: i64) -> Result<(Dinero, f64, Dinero), String> {
-    let (saldo, tasa, cuota): (f64, f64, f64) = tx
-        .query_row(
-            "SELECT saldo_actual, tasa_actual, monto_cuota FROM prestamos WHERE id = ?;",
-            [id],
-            |r| Ok((r.get::<_, Option<f64>>(0)?.unwrap_or(0.0), r.get(1)?, r.get(2)?)),
-        )
-        .map_err(|_| format!("No se encontró el financiamiento {}.", id))?;
-
-    Ok((
-        Dinero::nuevo(saldo, MONEDA_LOCAL)?,
-        tasa,
-        Dinero::nuevo(cuota, MONEDA_LOCAL)?,
-    ))
-}
-
-/// Asienta un movimiento y deja el saldo del financiamiento en su resultado.
-fn asentar_movimiento(
-    tx: &rusqlite::Transaction,
-    id: i64,
-    fecha: &str,
-    tipo: &str,
-    monto: Dinero,
-    interes: Dinero,
-    capital: Dinero,
-    saldo_resultante: Dinero,
-) -> Result<(), String> {
-    tx.execute(
-        "INSERT INTO movimientos_prestamo (prestamo_id, fecha, tipo, monto, interes, capital, saldo_resultante)
-         VALUES (?, ?, ?, ?, ?, ?, ?);",
-        (
-            id,
-            fecha,
-            tipo,
-            monto.unidades(),
-            interes.unidades(),
-            capital.unidades(),
-            saldo_resultante.unidades(),
-        ),
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "UPDATE prestamos SET saldo_actual = ? WHERE id = ?;",
-        (saldo_resultante.unidades(), id),
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    con_prestamos(|a| {
+        Ok(aplicacion::prestamos::actualizar_prestamo(
+            aplicacion::prestamos::DatosPrestamoCorregido {
+                id: input.id,
+                tasa_actual: input.tasa_actual,
+                monto_cuota: input.monto_cuota.con_divisa(MONEDA_LOCAL),
+                dia_pago: input.dia_pago,
+                limite_credito: input.limite_credito.map(|l| l.con_divisa(MONEDA_LOCAL)),
+                tarjeta_id: input.tarjeta_id,
+            },
+            a,
+        )?)
+    })
 }
 
 #[tauri::command]
 fn pagar_cuota_prestamo(id: i64, fecha: Option<String>) -> Result<(), String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    let (saldo, tasa, cuota) = estado_prestamo(&tx, id)?;
-
-    // La cuota no reduce la deuda por su importe entero: parte se va en el
-    // interés del período. Antes esto no se calculaba porque el saldo no se
-    // llevaba; solo se descontaba una cuota del contador.
-    let desglose = prestamo::desglosar_cuota(saldo, tasa, cuota)?;
-    let saldo_resultante = saldo.restar(&desglose.capital)?;
-
-    let fecha = fecha.unwrap_or_else(|| Local::now().format("%d/%m/%Y").to_string());
-    asentar_movimiento(
-        &tx, id, &fecha, "cuota", cuota, desglose.interes, desglose.capital, saldo_resultante,
-    )?;
-
-    // El contador de cuotas solo existe en los amortizables. La línea
-    // revolvente no tiene cuotas contadas, y por eso el comando anterior
-    // —cuyo `WHERE` exigía que las tuviera— nunca la tocaba.
-    tx.execute(
-        "UPDATE prestamos SET cuotas_pendientes = MAX(0, cuotas_pendientes - 1) WHERE id = ? AND cuotas_pendientes IS NOT NULL;",
-        [id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+    con_prestamos(|a| {
+        let fecha = fecha.unwrap_or_else(hoy_dd_mm_aaaa);
+        Ok(aplicacion::prestamos::pagar_cuota(id, &fecha, a)?)
+    })
 }
 
 /// Fija el saldo al que dice el estado de cuenta.
 ///
-/// Es el punto de reconciliación: el saldo que lleva la aplicación se estima
-/// cuota a cuota, y ninguna estimación cuadra al centavo con el acreedor
-/// —comisiones, seguros y días de gracia no entran en la fórmula—. La
-/// declaración no corrige la estimación en silencio: queda asentada como un
+/// Es el punto de reconciliación: el saldo que lleva la aplicación se estima cuota a cuota, y ninguna estimación
+/// cuadra al centavo con el acreedor. La declaración no corrige la estimación en silencio: queda asentada como un
 /// movimiento propio, con la diferencia que introdujo.
 #[tauri::command]
 fn declarar_saldo_prestamo(id: i64, saldo: ipc::ImporteDecimal, fecha: Option<String>) -> Result<(), String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    let (saldo_previo, _, _) = estado_prestamo(&tx, id)?;
-    let declarado = saldo.con_divisa(MONEDA_LOCAL);
-    let diferencia = declarado.restar(&saldo_previo)?;
-
-    let fecha = fecha.unwrap_or_else(|| Local::now().format("%d/%m/%Y").to_string());
-    asentar_movimiento(
-        &tx,
-        id,
-        &fecha,
-        "declaracion",
-        diferencia,
-        Dinero::cero(MONEDA_LOCAL),
-        diferencia.negado(),
-        declarado,
-    )?;
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+    con_prestamos(|a| {
+        let fecha = fecha.unwrap_or_else(hoy_dd_mm_aaaa);
+        Ok(aplicacion::prestamos::declarar_saldo(id, saldo.con_divisa(MONEDA_LOCAL), &fecha, a)?)
+    })
 }
 
 #[derive(Serialize)]
@@ -1955,40 +1743,25 @@ pub struct MovimientoPrestamo {
 
 #[tauri::command]
 fn obtener_movimientos_prestamo(id: i64) -> Result<Vec<MovimientoPrestamo>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, fecha, tipo, monto, interes, capital, saldo_resultante
-             FROM movimientos_prestamo WHERE prestamo_id = ? ORDER BY id DESC;",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let filas = stmt
-        .query_map([id], |r| {
-            Ok(MovimientoPrestamo {
-                id: r.get(0)?,
-                fecha: r.get(1)?,
-                tipo: r.get(2)?,
-                monto: r.get(3)?,
-                interes: r.get(4)?,
-                capital: r.get(5)?,
-                saldo_resultante: r.get(6)?,
+    con_prestamos(|a| {
+        Ok(a.movimientos(id)?
+            .into_iter()
+            .map(|m| MovimientoPrestamo {
+                id: m.id,
+                fecha: m.fecha,
+                tipo: m.tipo,
+                monto: m.monto,
+                interes: m.interes,
+                capital: m.capital,
+                saldo_resultante: m.saldo_resultante,
             })
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut lista = Vec::new();
-    for f in filas {
-        lista.push(f.map_err(|e| e.to_string())?);
-    }
-    Ok(lista)
+            .collect())
+    })
 }
 
 #[tauri::command]
 fn eliminar_prestamo(id: i64) -> Result<(), String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM prestamos WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
-    Ok(())
+    con_prestamos(|a| Ok(aplicacion::prestamos::eliminar_prestamo(id, a)?))
 }
 
 #[tauri::command]
