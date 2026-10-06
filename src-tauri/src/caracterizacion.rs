@@ -5168,3 +5168,181 @@ fn p9_eliminar_un_cobro_en_efectivo_en_dolares_revierte_la_caja_de_dolares() {
     assert_importe(balance_cuenta("Efectivo DOP"), dop, "la de pesos no se toca");
 }
 
+// --- A-03, vertical «préstamos»: caracterización antes de extraer ---
+//
+// Completan c34–c44 con los mensajes exactos, los valores por omisión, el contador de cuotas, el listado con sus
+// recordatorios y el borrado. Fijan lo que los siete comandos hacen HOY.
+
+fn entrada_de_prestamo(tipo: &str, monto: &str, cuotas: Option<(i32, i32)>, cuota: &str, dia: i32) -> crate::PrestamoInput {
+    crate::PrestamoInput {
+        tipo_prestamo: tipo.into(),
+        monto_prestamo: importe(monto),
+        institucion_financiera: "Banco Ejemplo".into(),
+        tasa_actual: 12.0,
+        cuotas_totales: cuotas.map(|c| c.0),
+        cuotas_pendientes: cuotas.map(|c| c.1),
+        monto_cuota: importe(cuota),
+        dia_pago: dia,
+        saldo_actual: None,
+        limite_credito: None,
+    }
+}
+
+type FilaDePrestamo = (String, f64, Option<i32>, Option<i32>, f64, i32, Option<f64>, Option<f64>);
+
+fn fila_de_prestamo(id: i64) -> FilaDePrestamo {
+    conexion()
+        .query_row(
+            "SELECT tipo_prestamo, monto_prestamo, cuotas_totales, cuotas_pendientes, monto_cuota, dia_pago, saldo_actual, limite_credito
+             FROM prestamos WHERE id = ?;",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
+        )
+        .expect("leer préstamo")
+}
+
+#[test]
+fn q1_crear_un_prestamo_guarda_sus_cifras_y_el_saldo_por_omision_es_el_monto() {
+    let _g = entorno_aislado();
+    let id = crate::crear_prestamo(entrada_de_prestamo("vehiculo", "50000.50", Some((60, 58)), "1250.25", 15)).unwrap();
+    let (tipo, monto, totales, pendientes, cuota, dia, saldo, limite) = fila_de_prestamo(id);
+    assert_eq!((tipo.as_str(), totales, pendientes, dia, limite), ("vehiculo", Some(60), Some(58), 15, None));
+    assert_importe(monto, 50000.5, "monto");
+    assert_importe(cuota, 1250.25, "cuota");
+    assert_importe(saldo.unwrap(), 50000.5, "sin saldo declarado se asume el monto íntegro");
+
+    let con_saldo = crate::crear_prestamo(crate::PrestamoInput { saldo_actual: Some(importe("40000")), ..entrada_de_prestamo("consumo", "50000", Some((12, 12)), "100", 5) }).unwrap();
+    assert_importe(fila_de_prestamo(con_saldo).6.unwrap(), 40000.0, "el saldo declarado manda");
+}
+
+#[test]
+fn q2_un_prestamo_flexible_ignora_las_cuotas_que_se_le_den() {
+    let _g = entorno_aislado();
+    let id = crate::crear_prestamo(entrada_de_prestamo("flexible", "1000", Some((10, 20)), "50", 5)).unwrap();
+    let (_, _, totales, pendientes, ..) = fila_de_prestamo(id);
+    assert_eq!((totales, pendientes), (None, None), "ni siquiera valida que 20 > 10: no hay cuotas que contar");
+}
+
+#[test]
+fn q3_crear_rechaza_lo_que_no_tiene_sentido_con_su_mensaje_y_en_su_orden() {
+    let _g = entorno_aislado();
+    let e = |entrada: crate::PrestamoInput| crate::crear_prestamo(entrada).unwrap_err();
+    assert_eq!(e(entrada_de_prestamo("vehiculo", "100", None, "10", 5)), "Las cuotas totales son requeridas.");
+    assert_eq!(
+        e(crate::PrestamoInput { cuotas_pendientes: None, ..entrada_de_prestamo("vehiculo", "100", Some((12, 12)), "10", 5) }),
+        "Las cuotas pendientes son requeridas."
+    );
+    assert_eq!(
+        e(entrada_de_prestamo("vehiculo", "100", Some((12, 13)), "10", 5)),
+        "Error: El número de cuotas pendientes no puede ser mayor al número total de cuotas del préstamo."
+    );
+    for dia in [0, 32, -1] {
+        assert_eq!(e(entrada_de_prestamo("vehiculo", "100", Some((12, 12)), "10", dia)), "El día de pago debe ser un día válido del mes (1-31).");
+    }
+    assert_eq!(
+        e(crate::PrestamoInput { limite_credito: Some(importe("500")), ..entrada_de_prestamo("vehiculo", "100", Some((12, 12)), "10", 5) }),
+        "Solo una línea revolvente tiene límite de crédito."
+    );
+    // El orden: primero las cuotas, después el día, al final el límite.
+    assert_eq!(e(entrada_de_prestamo("vehiculo", "100", None, "10", 0)), "Las cuotas totales son requeridas.");
+    let n: i64 = conexion().query_row("SELECT COUNT(*) FROM prestamos;", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 0, "lo rechazado no dejó nada");
+}
+
+#[test]
+fn q4_actualizar_rechaza_inexistente_tarjeta_inexistente_dia_y_limite_con_su_mensaje() {
+    let _g = entorno_aislado();
+    let auto = crear_prestamo_de_prueba("vehiculo", 100_000.0, 12.0, 5_000.0, Some((100, 89)), None);
+    let linea = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, Some(150_000.0));
+    let base = |id: i64| crate::ActualizarPrestamoInput { id, tasa_actual: 12.0, monto_cuota: importe("5000"), dia_pago: 25, limite_credito: None, tarjeta_id: None };
+    let e = |entrada: crate::ActualizarPrestamoInput| crate::actualizar_prestamo(entrada).unwrap_err();
+
+    assert_eq!(e(base(987_654)), "No se encontró el financiamiento 987654.");
+    assert_eq!(e(crate::ActualizarPrestamoInput { dia_pago: 32, ..base(auto) }), "El día de pago debe ser un día válido del mes (1-31).");
+    assert_eq!(e(crate::ActualizarPrestamoInput { dia_pago: 0, ..base(987_654) }), "El día de pago debe ser un día válido del mes (1-31).", "el día se comprueba antes de buscar el financiamiento");
+    assert_eq!(e(crate::ActualizarPrestamoInput { limite_credito: Some(importe("1")), ..base(auto) }), "Solo una línea revolvente tiene límite de crédito.");
+    assert_eq!(e(crate::ActualizarPrestamoInput { tarjeta_id: Some(999_999), ..base(linea) }), "No se encontró la tarjeta 999999.");
+    // Con la línea sí puede llevar límite, y se guarda.
+    crate::actualizar_prestamo(crate::ActualizarPrestamoInput { limite_credito: Some(importe("200000")), ..base(linea) }).unwrap();
+    assert_importe(fila_de_prestamo(linea).7.unwrap(), 200_000.0, "límite corregido");
+}
+
+#[test]
+fn q5_pagar_y_declarar_sobre_un_financiamiento_inexistente_dicen_su_mensaje_y_no_asientan_nada() {
+    let _g = entorno_aislado();
+    assert_eq!(crate::pagar_cuota_prestamo(404, None).unwrap_err(), "No se encontró el financiamiento 404.");
+    assert_eq!(crate::declarar_saldo_prestamo(404, importe("10"), None).unwrap_err(), "No se encontró el financiamiento 404.");
+    assert!(crate::obtener_movimientos_prestamo(404).unwrap().is_empty(), "sin financiamiento no hay movimientos");
+}
+
+#[test]
+fn q6_el_contador_de_cuotas_baja_de_uno_en_uno_sin_pasar_de_cero_y_la_linea_no_lo_tiene() {
+    let _g = entorno_aislado();
+    let amortizable = crear_prestamo_de_prueba("vehiculo", 10_000.0, 12.0, 1_000.0, Some((12, 1)), None);
+    crate::pagar_cuota_prestamo(amortizable, Some("01/10/2026".into())).unwrap();
+    assert_eq!(cuotas_pendientes(amortizable), Some(0));
+    crate::pagar_cuota_prestamo(amortizable, Some("01/11/2026".into())).unwrap();
+    assert_eq!(cuotas_pendientes(amortizable), Some(0), "no baja de cero");
+    assert_eq!(crate::obtener_movimientos_prestamo(amortizable).unwrap().len(), 2, "pero el pago se asienta igual");
+
+    let linea = crear_prestamo_de_prueba("flexible", 10_000.0, 12.0, 1_000.0, None, Some(20_000.0));
+    crate::pagar_cuota_prestamo(linea, Some("01/10/2026".into())).unwrap();
+    assert_eq!(cuotas_pendientes(linea), None, "la línea no cuenta cuotas");
+}
+
+#[test]
+fn q7_la_fecha_por_omision_de_un_pago_es_hoy_y_una_declaracion_deja_el_desglose_en_cero_interes() {
+    let _g = entorno_aislado();
+    let id = crear_prestamo_de_prueba("flexible", 10_000.0, 12.0, 1_000.0, None, Some(20_000.0));
+    crate::pagar_cuota_prestamo(id, None).unwrap();
+    crate::declarar_saldo_prestamo(id, importe("9500"), None).unwrap();
+    let hoy = chrono::Local::now().format("%d/%m/%Y").to_string();
+    let movs = crate::obtener_movimientos_prestamo(id).unwrap();
+    assert_eq!(movs.len(), 2);
+    assert!(movs.iter().all(|m| m.fecha == hoy), "sin fecha, hoy");
+    let declaracion = &movs[0];
+    assert_eq!(declaracion.tipo, "declaracion");
+    assert_importe(declaracion.interes, 0.0, "una declaración no genera interés");
+    assert_importe(declaracion.capital, -(declaracion.monto), "el capital es la diferencia con el signo cambiado");
+    assert_importe(declaracion.saldo_resultante, 9_500.0, "saldo declarado");
+}
+
+#[test]
+fn q8_el_listado_trae_el_cupo_la_tarjeta_y_los_recordatorios_de_pago() {
+    use chrono::Datelike;
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0); // corte 15, límite de pago 5
+    let dia_hoy = chrono::Local::now().day() as i32;
+    let linea = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, Some(150_000.0));
+    let auto = crear_prestamo_de_prueba("vehiculo", 100_000.0, 12.0, 5_000.0, Some((100, 0)), None);
+    let por_pagar = crear_prestamo_de_prueba("consumo", 20_000.0, 12.0, 500.0, Some((10, 5)), None);
+    conexion().execute("UPDATE prestamos SET dia_pago = ? WHERE id = ?;", params![dia_hoy, por_pagar]).unwrap();
+    conexion().execute("UPDATE prestamos SET tarjeta_id = ? WHERE id = ?;", params![tarjeta, linea]).unwrap();
+
+    let lista = crate::obtener_prestamos().unwrap();
+    assert_eq!(lista.iter().map(|p| p.id).collect::<Vec<_>>(), vec![por_pagar, auto, linea], "el más nuevo primero");
+    let l = lista.iter().find(|p| p.id == linea).unwrap();
+    assert!(l.es_revolvente);
+    assert_importe(l.disponible.unwrap(), 50_000.0, "cupo = límite - saldo");
+    assert_eq!((l.tarjeta_id, l.tarjeta_nombre.as_deref(), l.dia_corte), (Some(tarjeta), Some("Tarjeta Ejemplo"), Some(15)));
+    assert_eq!(l.dia_pago, 5, "manda el vencimiento de la tarjeta");
+
+    let a = lista.iter().find(|p| p.id == auto).unwrap();
+    assert!(!a.es_revolvente && a.disponible.is_none());
+    assert_eq!((a.alerta_pago, a.dias_pago_msg.as_str()), (false, "-"), "sin cuotas pendientes no hay recordatorio");
+
+    let p = lista.iter().find(|p| p.id == por_pagar).unwrap();
+    assert_eq!((p.alerta_pago, p.dias_pago_msg.as_str()), (true, "Hoy vence la cuota."));
+}
+
+#[test]
+fn q9_eliminar_un_financiamiento_no_tiene_guardas_y_se_lleva_sus_movimientos() {
+    let _g = entorno_aislado();
+    let id = crear_prestamo_de_prueba("flexible", 10_000.0, 12.0, 1_000.0, None, Some(20_000.0));
+    crate::pagar_cuota_prestamo(id, Some("01/10/2026".into())).unwrap();
+    crate::eliminar_prestamo(id).unwrap();
+    assert!(crate::obtener_prestamos().unwrap().is_empty());
+    assert!(crate::obtener_movimientos_prestamo(id).unwrap().is_empty(), "el libro se va con él (ON DELETE CASCADE)");
+    assert!(crate::eliminar_prestamo(id).is_ok(), "borrar uno que ya no está no es un error");
+}
+
