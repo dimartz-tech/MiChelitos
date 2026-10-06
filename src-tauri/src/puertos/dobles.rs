@@ -40,8 +40,23 @@ pub struct FacturaEnMemoria {
     pub monto_recibido: Option<f64>,
 }
 
+/// Un ingreso informal en el doble: lo que guarda la fila.
+#[derive(Debug, Clone)]
+pub struct InformalEnMemoria {
+    pub id: i64,
+    pub fecha: String,
+    pub descripcion: String,
+    pub monto: f64,
+    pub estatus: String,
+    pub cuenta_ahorro_id: Option<i64>,
+    pub institucion_deposito: Option<String>,
+    pub fecha_pago: Option<String>,
+    pub monto_recibido: Option<f64>,
+}
+
 #[derive(Default)]
 pub struct AlmacenEnMemoria {
+    pub informales: Vec<InformalEnMemoria>,
     pub facturas: Vec<FacturaEnMemoria>,
     pub casos: Vec<CasoAAnotar>,
     pub clientes_de_facturas: Vec<ClienteGuardado>,
@@ -949,12 +964,6 @@ impl AlmacenIngresos for AlmacenEnMemoria {
         });
         Ok(id)
     }
-    fn nombre_de_cuenta(&self, cuenta_id: i64) -> Result<String, ErrorAlmacen> {
-        self.cuentas
-            .get(&cuenta_id)
-            .map(|c| c.nombre.clone())
-            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
-    }
     fn estado_de_factura(&self, id: i64) -> Result<Option<EstadoDeFactura>, ErrorAlmacen> {
         Ok(self.facturas.iter().find(|f| f.id == id).map(|f| EstadoDeFactura {
             numero_factura: f.numero_factura.clone(),
@@ -985,9 +994,6 @@ impl AlmacenIngresos for AlmacenEnMemoria {
         self.facturas.retain(|f| f.id != id);
         Ok(())
     }
-    fn cuenta_por_nombre(&self, nombre: &str) -> Result<Option<i64>, ErrorAlmacen> {
-        Ok(self.cuentas.iter().find(|(_, c)| c.nombre == nombre).map(|(id, _)| *id))
-    }
     fn marcar_cobrada(&mut self, id: i64, cuenta_id: i64, nombre: &str, fecha: &str, monto: f64) -> Result<bool, ErrorAlmacen> {
         match self.facturas.iter_mut().find(|f| f.id == id && f.estatus != "pagada") {
             None => Ok(false),
@@ -1008,6 +1014,90 @@ impl RegistroDeCorrecciones for AlmacenEnMemoria {
     fn anotar_caso(&mut self, caso: &CasoAAnotar) -> Result<String, ErrorAlmacen> {
         self.casos.push(caso.clone());
         Ok(format!("CASO-{:04}", self.casos.len()))
+    }
+}
+
+impl BusquedaDeCuentas for AlmacenEnMemoria {
+    fn nombre_de_cuenta(&self, cuenta_id: i64) -> Result<String, ErrorAlmacen> {
+        self.cuentas
+            .get(&cuenta_id)
+            .map(|c| c.nombre.clone())
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
+    }
+    fn cuenta_por_nombre(&self, nombre: &str) -> Result<Option<i64>, ErrorAlmacen> {
+        Ok(self.cuentas.iter().find(|(_, c)| c.nombre == nombre).map(|(id, _)| *id))
+    }
+}
+
+impl AlmacenInformales for AlmacenEnMemoria {
+    fn informales(&self) -> Result<Vec<InformalLeido>, ErrorAlmacen> {
+        let mut v: Vec<InformalLeido> = self
+            .informales
+            .iter()
+            .map(|i| InformalLeido {
+                id: i.id,
+                fecha: i.fecha.clone(),
+                descripcion: i.descripcion.clone(),
+                monto: i.monto,
+                estatus: i.estatus.clone(),
+                institucion_deposito: i.institucion_deposito.clone(),
+                fecha_pago: i.fecha_pago.clone(),
+                monto_recibido: i.monto_recibido,
+            })
+            .collect();
+        v.sort_by(|a, b| b.id.cmp(&a.id));
+        Ok(v)
+    }
+    fn insertar_informal(&mut self, fecha: &str, descripcion: &str, monto: f64) -> Result<i64, ErrorAlmacen> {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.informales.push(InformalEnMemoria {
+            id,
+            fecha: fecha.into(),
+            descripcion: descripcion.into(),
+            monto,
+            estatus: "pendiente".into(),
+            cuenta_ahorro_id: None,
+            institucion_deposito: None,
+            fecha_pago: None,
+            monto_recibido: None,
+        });
+        Ok(id)
+    }
+    fn insertar_cobro_en_efectivo(&mut self, fecha: &str, descripcion: &str, monto: f64, caja: &str) -> Result<i64, ErrorAlmacen> {
+        let id = self.insertar_informal(fecha, descripcion, monto)?;
+        let i = self.informales.iter_mut().find(|i| i.id == id).unwrap();
+        i.estatus = "pagado".into();
+        i.institucion_deposito = Some(caja.into());
+        i.fecha_pago = Some(fecha.into());
+        i.monto_recibido = Some(monto);
+        Ok(id)
+    }
+    fn estado_de_informal(&self, id: i64) -> Result<Option<EstadoDeInformal>, ErrorAlmacen> {
+        Ok(self.informales.iter().find(|i| i.id == id).map(|i| EstadoDeInformal {
+            descripcion: i.descripcion.clone(),
+            estatus: i.estatus.clone(),
+            monto: i.monto,
+            institucion_deposito: i.institucion_deposito.clone(),
+            monto_recibido: i.monto_recibido,
+        }))
+    }
+    fn marcar_informal_cobrado(&mut self, id: i64, cuenta_id: i64, nombre: &str, fecha: &str, monto: f64) -> Result<bool, ErrorAlmacen> {
+        match self.informales.iter_mut().find(|i| i.id == id && i.estatus != "pagado") {
+            None => Ok(false),
+            Some(i) => {
+                i.estatus = "pagado".into();
+                i.cuenta_ahorro_id = Some(cuenta_id);
+                i.institucion_deposito = Some(nombre.into());
+                i.fecha_pago = Some(fecha.into());
+                i.monto_recibido = Some(monto);
+                Ok(true)
+            }
+        }
+    }
+    fn eliminar_informal(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.informales.retain(|i| i.id != id);
+        Ok(())
     }
 }
 

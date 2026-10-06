@@ -5012,3 +5012,159 @@ fn o7_eliminar_una_factura_sin_cobrar_no_toca_ningun_saldo() {
     assert_importe(saldo_cuenta_id(cuenta), 321.0, "sin cobro no hay nada que revertir");
 }
 
+// --- A-03, vertical «ingresos informales»: caracterización antes de extraer ---
+//
+// Completan c81–c84b con los mensajes exactos, el listado, la forma de las filas y los bordes. Fijan lo que
+// los cinco comandos hacen HOY.
+
+fn informal_por_id(id: i64) -> crate::IngresoInformal {
+    crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).expect("informal")
+}
+
+#[test]
+fn p1_un_informal_se_crea_pendiente_y_se_lista_de_el_mas_nuevo_al_mas_viejo() {
+    let _g = entorno_aislado();
+    let a = crear_ingreso_informal("01/10/2026".into(), "Primero".into(), importe("100")).unwrap();
+    let b = crear_ingreso_informal("02/10/2026".into(), "Segundo".into(), importe("200")).unwrap();
+    let lista = crate::obtener_ingresos_informales().unwrap();
+    assert_eq!(lista.iter().map(|i| i.id).collect::<Vec<_>>(), vec![b, a]);
+    let primero = informal_por_id(a);
+    assert_eq!((primero.fecha.as_str(), primero.descripcion.as_str(), primero.estatus.as_str()), ("01/10/2026", "Primero", "pendiente"));
+    assert_importe(primero.monto, 100.0, "monto");
+    assert!(primero.institucion_deposito.is_none() && primero.fecha_pago.is_none() && primero.monto_recibido.is_none());
+}
+
+#[test]
+fn p2_hallazgo_un_informal_acepta_monto_cero_o_negativo_y_datos_vacios() {
+    // **HALLAZGO, sin corregir** (protocolo: documentar y fijar; el cambio se consulta). `crear_ingreso_informal`
+    // no valida que el monto sea positivo ni que fecha y descripción no estén vacías (el formulario sí). Esta
+    // prueba describe el comportamiento ACTUAL: si se decide rechazarlos, se invierte.
+    let _g = entorno_aislado();
+    let cero = crear_ingreso_informal("01/10/2026".into(), "Cero".into(), importe("0")).unwrap();
+    let negativo = crear_ingreso_informal("01/10/2026".into(), "Negativo".into(), importe("-50")).unwrap();
+    let vacio = crear_ingreso_informal("".into(), "".into(), importe("1")).unwrap();
+    assert_importe(informal_por_id(cero).monto, 0.0, "cero aceptado");
+    assert_importe(informal_por_id(negativo).monto, -50.0, "un ingreso negativo aceptado");
+    assert_eq!(informal_por_id(vacio).descripcion, "", "descripción vacía aceptada");
+}
+
+#[test]
+fn p3_cobrar_un_informal_deja_la_fila_pagada_con_la_cuenta_la_fecha_y_el_importe() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Cuenta Informal", "DOP", 50.0);
+    let id = crear_ingreso_informal("01/10/2026".into(), "Trabajo".into(), importe("300")).unwrap();
+    marcar_informal_pagado(id, cuenta, "03/10/2026".into(), importe("275.50")).unwrap();
+    let f = informal_por_id(id);
+    assert_eq!((f.estatus.as_str(), f.institucion_deposito.as_deref(), f.fecha_pago.as_deref()), ("pagado", Some("Cuenta Informal"), Some("03/10/2026")));
+    assert_importe(f.monto_recibido.unwrap(), 275.5, "recibido");
+    assert_importe(saldo_cuenta_id(cuenta), 325.5, "la cuenta recibe lo mismo que la fila guarda");
+}
+
+#[test]
+fn p4_los_rechazos_del_cobro_informal_dicen_su_causa_y_no_dejan_nada_a_medias() {
+    let _g = entorno_aislado();
+    let dop = crear_cuenta("Cuenta DOP", "DOP", 100.0);
+    let usd = crear_cuenta("Cuenta USD", "USD", 100.0);
+    let id = crear_ingreso_informal("01/10/2026".into(), "Trabajo".into(), importe("300")).unwrap();
+    let cobrar = |informal: i64, cuenta: i64, monto: &str| marcar_informal_pagado(informal, cuenta, "03/10/2026".into(), importe(monto));
+
+    assert_eq!(cobrar(id, 9_999, "10").unwrap_err(), "No se encontró la cuenta 9999.");
+    assert_eq!(cobrar(404, dop, "10").unwrap_err(), "No se encontró un ingreso 404 pendiente de cobro.");
+    assert_eq!(
+        cobrar(id, usd, "10").unwrap_err(),
+        "No se pueden combinar montos en USD y DOP: indique una tasa de cambio para convertirlos."
+    );
+    assert_eq!(cobrar(id, dop, "-10").unwrap_err(), "El monto -10 no es un número válido.");
+    assert_eq!(informal_por_id(id).estatus, "pendiente");
+    assert_importe(saldo_cuenta_id(dop), 100.0, "ningún saldo se movió");
+
+    cobrar(id, dop, "10").unwrap();
+    assert_eq!(cobrar(id, dop, "10").unwrap_err(), format!("No se encontró un ingreso {id} pendiente de cobro."));
+    assert_importe(saldo_cuenta_id(dop), 110.0, "solo se acreditó una vez");
+}
+
+#[test]
+fn p5_el_cobro_en_efectivo_deja_el_ingreso_pagado_en_la_caja_y_toda_divisa_que_no_es_usd_va_a_pesos() {
+    let _g = entorno_aislado();
+    let (dop, usd) = (balance_cuenta("Efectivo DOP"), balance_cuenta("Efectivo USD"));
+    let a = crear_cobro_efectivo_informal("04/10/2026".into(), "En pesos".into(), importe("40"), "DOP".into()).unwrap();
+    let b = crear_cobro_efectivo_informal("04/10/2026".into(), "En dólares".into(), importe("5"), "USD".into()).unwrap();
+    let c = crear_cobro_efectivo_informal("04/10/2026".into(), "Divisa rara".into(), importe("7"), "EUR".into()).unwrap();
+
+    let fa = informal_por_id(a);
+    assert_eq!((fa.estatus.as_str(), fa.institucion_deposito.as_deref(), fa.fecha_pago.as_deref()), ("pagado", Some("Efectivo DOP"), Some("04/10/2026")));
+    assert_importe(fa.monto, 40.0, "monto");
+    assert_importe(fa.monto_recibido.unwrap(), 40.0, "recibido");
+    assert_eq!(informal_por_id(b).institucion_deposito.as_deref(), Some("Efectivo USD"));
+    assert_eq!(informal_por_id(c).institucion_deposito.as_deref(), Some("Efectivo DOP"), "otra divisa cae en pesos");
+    assert_importe(balance_cuenta("Efectivo DOP"), dop + 47.0, "pesos: 40 + 7");
+    assert_importe(balance_cuenta("Efectivo USD"), usd + 5.0, "dólares: 5");
+}
+
+#[test]
+fn p6_hallazgo_sin_caja_de_efectivo_el_cobro_se_registra_igual_y_no_mueve_ningun_saldo() {
+    // **HALLAZGO, sin corregir** (el mismo hueco que H3 resolvió para los gastos en efectivo): este comando sigue
+    // localizando la caja **por su nombre** y, si no la encuentra, el ingreso queda «pagado» sin que ningún saldo
+    // se mueva ni nadie se entere. Esta prueba describe el comportamiento ACTUAL.
+    let _g = entorno_aislado();
+    conexion().execute("UPDATE cuentas_ahorro SET nombre = 'Caja renombrada' WHERE nombre = 'Efectivo DOP';", []).unwrap();
+    let total_antes: f64 = conexion().query_row("SELECT SUM(balance_actual) FROM cuentas_ahorro;", [], |r| r.get(0)).unwrap();
+
+    let id = crear_cobro_efectivo_informal("04/10/2026".into(), "Sin caja".into(), importe("90"), "DOP".into()).unwrap();
+
+    assert_eq!(informal_por_id(id).estatus, "pagado", "el ingreso consta como cobrado");
+    let total_despues: f64 = conexion().query_row("SELECT SUM(balance_actual) FROM cuentas_ahorro;", [], |r| r.get(0)).unwrap();
+    assert_importe(total_despues, total_antes, "pero ninguna cuenta recibió nada");
+}
+
+#[test]
+fn p7_eliminar_un_informal_dice_su_causa_y_deja_un_caso_con_su_descripcion_y_monto() {
+    let _g = entorno_aislado();
+    assert_eq!(
+        eliminar_ingreso_informal(404, motivo_de_prueba()).unwrap_err(),
+        "No se encontró ingreso informal con identificador 404."
+    );
+    let id = crear_ingreso_informal("01/10/2026".into(), "Clase suelta".into(), importe("120")).unwrap();
+    let e = eliminar_ingreso_informal(id, " corto ".into()).unwrap_err();
+    assert!(e.starts_with("Explica la corrección en al menos 15 caracteres.") && e.contains("«corto»"), "{e}");
+    assert_eq!(crate::obtener_ingresos_informales().unwrap().len(), 1, "no se borró nada");
+
+    let caso = eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
+    let casos = casos_de_correccion();
+    let (numero, tipo, referencia, descripcion, importe_caso, divisa) = &casos[0];
+    assert_eq!(&caso, numero);
+    assert_eq!((tipo.as_str(), *referencia, descripcion.as_str(), divisa.as_deref()), ("ingreso informal", id, "Clase suelta", Some("DOP")));
+    assert_importe(importe_caso.unwrap(), 120.0, "monto del ingreso");
+    assert!(crate::obtener_ingresos_informales().unwrap().is_empty());
+}
+
+#[test]
+fn p8_eliminar_un_cobro_en_efectivo_revierte_la_caja_y_con_la_cuenta_desaparecida_borra_igual() {
+    let _g = entorno_aislado();
+    let antes = balance_cuenta("Efectivo DOP");
+    let id = crear_cobro_efectivo_informal("04/10/2026".into(), "En caja".into(), importe("60"), "DOP".into()).unwrap();
+    eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
+    assert_importe(balance_cuenta("Efectivo DOP"), antes, "la caja vuelve donde estaba");
+
+    // Con la cuenta renombrada el borrado no encuentra adónde revertir: borra igual y no mueve saldos.
+    let otro = crear_cobro_efectivo_informal("04/10/2026".into(), "Otra".into(), importe("30"), "DOP".into()).unwrap();
+    conexion().execute("UPDATE cuentas_ahorro SET nombre = 'Caja renombrada' WHERE nombre = 'Efectivo DOP';", []).unwrap();
+    let con_cobro: f64 = conexion().query_row("SELECT balance_actual FROM cuentas_ahorro WHERE nombre = 'Caja renombrada';", [], |r| r.get(0)).unwrap();
+    eliminar_ingreso_informal(otro, motivo_de_prueba()).unwrap();
+    let despues: f64 = conexion().query_row("SELECT balance_actual FROM cuentas_ahorro WHERE nombre = 'Caja renombrada';", [], |r| r.get(0)).unwrap();
+    assert_importe(despues, con_cobro, "ninguna cuenta se tocó");
+}
+
+#[test]
+fn p9_eliminar_un_cobro_en_efectivo_en_dolares_revierte_la_caja_de_dolares() {
+    let _g = entorno_aislado();
+    let (dop, usd) = (balance_cuenta("Efectivo DOP"), balance_cuenta("Efectivo USD"));
+    let id = crear_cobro_efectivo_informal("04/10/2026".into(), "En dólares".into(), importe("5"), "USD".into()).unwrap();
+    assert_importe(balance_cuenta("Efectivo USD"), usd + 5.0, "entró en la caja de dólares");
+
+    eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
+
+    assert_importe(balance_cuenta("Efectivo USD"), usd, "la caja de dólares vuelve donde estaba");
+    assert_importe(balance_cuenta("Efectivo DOP"), dop, "la de pesos no se toca");
+}
+

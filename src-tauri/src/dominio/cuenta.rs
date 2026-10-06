@@ -163,6 +163,15 @@ fn exigir_divisa(esperada: Divisa, importe: Dinero) -> Result<(), ErrorDominio> 
     Ok(())
 }
 
+/// La caja de efectivo en la que entra un cobro: la de dólares si el cobro es en dólares y, **cualquier otra divisa**,
+/// la de pesos (así lo ha hecho siempre este camino; ver `p5`).
+pub fn nombre_de_caja_de_cobro(divisa: Divisa) -> &'static str {
+    match divisa {
+        Divisa::Usd => "Efectivo USD",
+        Divisa::Dop => "Efectivo DOP",
+    }
+}
+
 // --- Datos declarativos de una cuenta -----------------------------------------------------------
 //
 // Salen de `crear_cuenta` y `actualizar_cuenta` (A-03) sin cambiar ninguna regla ni mensaje.
