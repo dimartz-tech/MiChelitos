@@ -1,0 +1,107 @@
+//! Adaptador SQLite del puerto de facturas (ingresos formales).
+//!
+//! Se implementa sobre `AlmacenSqlite`, que ya envuelve la transacción y el puerto de cuentas: el cobro de una
+//! factura toca las dos cosas y debe ocurrir en la misma transacción.
+
+use super::gastos::AlmacenSqlite;
+use crate::puertos::repositorios::*;
+use rusqlite::OptionalExtension;
+
+fn fallo(e: rusqlite::Error) -> ErrorAlmacen {
+    ErrorAlmacen::Fallo(e.to_string())
+}
+
+impl AlmacenIngresos for AlmacenSqlite<'_> {
+    fn ingresos(&self) -> Result<Vec<IngresoLeido>, ErrorAlmacen> {
+        let mut stmt = self
+            .tx
+            .prepare(
+                "SELECT i.id, i.numero_factura, i.cliente_id, c.nombre, c.rnc, i.fecha_emision, i.estatus,
+                        i.monto_total, i.porcentaje_retencion, i.monto_retenido, i.institucion_deposito,
+                        i.fecha_pago, i.monto_recibido
+                 FROM ingresos i
+                 JOIN clientes c ON i.cliente_id = c.id
+                 ORDER BY i.id DESC;",
+            )
+            .map_err(fallo)?;
+        let filas = stmt
+            .query_map([], |r| {
+                Ok(IngresoLeido {
+                    id: r.get(0)?,
+                    numero_factura: r.get(1)?,
+                    cliente_id: r.get(2)?,
+                    cliente_nombre: r.get(3)?,
+                    cliente_rnc: r.get(4)?,
+                    fecha_emision: r.get(5)?,
+                    estatus: r.get(6)?,
+                    monto_total: r.get(7)?,
+                    porcentaje_retencion: r.get(8)?,
+                    monto_retenido: r.get(9)?,
+                    institucion_deposito: r.get(10)?,
+                    fecha_pago: r.get(11)?,
+                    monto_recibido: r.get(12)?,
+                })
+            })
+            .map_err(fallo)?;
+        filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
+    }
+
+    fn factura_existe(&self, numero: &str) -> Result<bool, ErrorAlmacen> {
+        let n: i64 = self
+            .tx
+            .query_row("SELECT COUNT(*) FROM ingresos WHERE LOWER(numero_factura) = LOWER(?);", [numero], |r| r.get(0))
+            .map_err(fallo)?;
+        Ok(n > 0)
+    }
+
+    fn cliente_por_rnc(&self, rnc: &str) -> Result<Option<i64>, ErrorAlmacen> {
+        self.tx
+            .query_row("SELECT id FROM clientes WHERE rnc = ?;", [rnc], |r| r.get(0))
+            .optional()
+            .map_err(fallo)
+    }
+
+    fn registrar_cliente(&mut self, rnc: &str, nombre: &str) -> Result<i64, ErrorAlmacen> {
+        self.tx.execute("INSERT INTO clientes (rnc, nombre) VALUES (?, ?);", [rnc, nombre]).map_err(fallo)?;
+        Ok(self.tx.last_insert_rowid())
+    }
+
+    fn insertar_factura(&mut self, f: &FacturaNueva) -> Result<i64, ErrorAlmacen> {
+        self.tx
+            .execute(
+                "INSERT INTO ingresos (numero_factura, cliente_id, fecha_emision, monto_total, porcentaje_retencion, monto_retenido, estatus)
+                 VALUES (?, ?, ?, ?, ?, ?, 'emitida');",
+                (&f.numero_factura, f.cliente_id, &f.fecha_emision, f.monto_total, f.porcentaje_retencion, f.monto_retenido),
+            )
+            .map_err(fallo)?;
+        Ok(self.tx.last_insert_rowid())
+    }
+
+    fn nombre_de_cuenta(&self, cuenta_id: i64) -> Result<String, ErrorAlmacen> {
+        self.tx
+            .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_id], |r| r.get::<_, String>(0))
+            .optional()
+            .map_err(fallo)?
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
+    }
+
+    fn marcar_cobrada(
+        &mut self,
+        id: i64,
+        cuenta_id: i64,
+        nombre_cuenta: &str,
+        fecha: &str,
+        monto_recibido: f64,
+    ) -> Result<bool, ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute(
+                "UPDATE ingresos SET estatus = 'pagada', institucion_deposito = ?,
+                                     cuenta_ahorro_id = ?, fecha_pago = ?, monto_recibido = ?
+                 WHERE id = ? AND estatus <> 'pagada';",
+                (nombre_cuenta, cuenta_id, fecha, monto_recibido, id),
+            )
+            .map_err(fallo)?;
+        Ok(filas > 0)
+    }
+}
