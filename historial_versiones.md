@@ -4,7 +4,25 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.81.0 (Versión Actual) - 2026-10-06
+## 🚀 Versión 1.82.0 (Versión Actual) - 2026-10-06
+**Auditoría A-03, tercer vertical (parte 2): corregir y eliminar facturas salen de `main.rs`, y la regla del motivo de una corrección pasa al dominio.** Sin cambios de reglas ni de mensajes.
+
+### 🔧 Qué se hace
+* **Orden de trabajo:** primero 7 pruebas de caracterización (`o1`–`o7`, en su propio commit, contra el código de antes; completan `c79`, `c80` y `c85`–`c94`) y después la extracción, con todas intactas.
+* **Dominio** (`dominio::correccion`): la regla «el motivo debe explicar» (mínimo 15 **caracteres**, recortado) deja de vivir mezclada con el SQL de `correcciones.rs`; el mensaje es el de siempre. `correcciones::registrar` (que usan los demás borrados) la toma de ahí: **una sola regla**.
+* **Puerto nuevo** `RegistroDeCorrecciones` (anotar el caso y devolver su número), implementado sobre `AlmacenSqlite`, y métodos nuevos en `AlmacenIngresos` (estado de la factura, reescribirla, fijar lo recibido, eliminarla, cuenta por nombre).
+* **Casos de uso** (`aplicacion::ingresos`): `actualizar_ingreso` (la factura, el cálculo, la fila y, **solo si hay dinero que mover**, el caso, lo recibido y el saldo de la cuenta de depósito) y `eliminar_ingreso` (abre el caso antes de borrar y revierte el abono sin recortar a cero). El comando solo da formato al texto del resultado.
+* **`main.rs`:** los dos comandos quedan delgados. Comandos con SQL directo: **44 → 42**. Siguen usando `abrir_caso` y `correcciones::registrar` los borrados de gastos, abonos, traspasos, informales y avances (se irán con sus verticales).
+* **Un borde documentado, no corregido (`o6`):** eliminar una factura cobrada en una cuenta que ya no existe la borra igual y no mueve saldos, mientras que corregirla se niega con un mensaje. Son los comportamientos de siempre. Y, como el ajuste ahora pasa por el saldo exacto de la cuenta, si la cuenta de depósito estuviera en otra divisa el ajuste se rechaza en vez de aplicarse a ciegas (cobrar en otra divisa ya estaba prohibido, H19).
+
+### 🧪 Pruebas
+* 7 de caracterización, 2 del dominio y 10 del caso de uso con el doble. Quince mutaciones (factura inexistente sin error, caso siempre o nunca, motivo sin validar, lo recibido sin fijar, ajuste al revés, cuenta desaparecida tolerada, eliminar sin revertir o sin borrar o revirtiendo lo no cobrado, umbral del motivo, bytes en vez de caracteres, motivo sin recortar, cuenta por nombre): todas detectadas (una, la guarda de estatus al eliminar, solo tras añadir una prueba con datos incoherentes). **Rust 712 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): corregir inexistente, con motivo corto, sin cobrar y al alza (se ajusta la cuenta en 850.00 y queda el caso), sin diferencia (no abre caso), eliminar inexistente, con motivo corto, cobrada (revierte el abono: la cuenta vuelve a 100) y pendiente, con sus casos de corrección.
+* **Un cambio visible, en un caso que sí puede ocurrir:** si al corregir una factura se le pone un número que ya usa otra, el esquema lo rechaza como siempre, pero el mensaje ahora empieza por «Error de almacenamiento: » (antes era el texto crudo de SQLite). Mismo caso que en Cuentas.
+
+---
+
+## 🚀 Versión 1.81.0 - 2026-10-06
 **Auditoría A-03, tercer vertical (primera parte): ingresos formales — listar, emitir y cobrar facturas — salen de `main.rs`.** Sin cambios de reglas ni de mensajes. Quedan para un segundo PR corregir y eliminar facturas, que además abren casos de corrección.
 
 ### 🔧 Qué se hace

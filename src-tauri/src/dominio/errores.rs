@@ -38,6 +38,10 @@ pub enum ErrorDominio {
     AbonoSinImporte,
     /// Catálogos (categorías y clientes). Los textos son los de siempre: la interfaz los muestra tal cual.
     FacturaDuplicada,
+    FacturaNoEncontrada { id: i64 },
+    /// Una factura cobrada en una cuenta que ya no existe no se puede corregir: el ajuste no tendría adónde ir.
+    CuentaDeDepositoInexistente { cuenta: String },
+    MotivoInsuficiente { motivo: String },
     FacturaNoPendiente { id: i64 },
     CuentaSinNombre,
     ComisionNegativa,
@@ -82,6 +86,18 @@ impl fmt::Display for ErrorDominio {
             ErrorDominio::SuscripcionSinImporte => write!(
                 f,
                 "Una suscripción debe cobrar un importe mayor que cero: con cero o menos no cobraría, abonaría a la tarjeta cada período."
+            ),
+            ErrorDominio::FacturaNoEncontrada { id } => write!(f, "No se encontró la factura {}.", id),
+            ErrorDominio::CuentaDeDepositoInexistente { cuenta } => write!(
+                f,
+                "La factura se cobró en «{}», que ya no existe. Corrige o recrea esa cuenta antes de modificar la factura.",
+                cuenta
+            ),
+            ErrorDominio::MotivoInsuficiente { motivo } => write!(
+                f,
+                "Explica la corrección en al menos {} caracteres. Dentro de seis meses, «{}» no dirá qué pasó.",
+                super::correccion::MINIMO_DEL_MOTIVO,
+                motivo
             ),
             ErrorDominio::FacturaDuplicada => write!(f, "El número de factura ya está registrado."),
             ErrorDominio::FacturaNoPendiente { id } => {

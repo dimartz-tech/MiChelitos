@@ -93,6 +93,48 @@ impl GastoGuardado {
     }
 }
 
+/// Lo que se anota de una corrección. El motivo llega **ya validado** por el caso de uso.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CasoAAnotar {
+    /// Qué clase de movimiento se corrige: «factura», «gasto», «abono»…
+    pub tipo: String,
+    pub referencia_id: i64,
+    /// Cómo se identificaba, para reconocerlo después.
+    pub descripcion: String,
+    pub importe: Option<f64>,
+    pub divisa: Option<String>,
+    pub motivo: String,
+}
+
+/// El rastro de las correcciones: cada una deja un caso con número propio.
+pub trait RegistroDeCorrecciones {
+    /// Anota el caso y devuelve su número (`COR-2026-0001`). Se llama **antes** de borrar o mover dinero: si
+    /// lo que sigue falla, quien abrió la transacción la deshace entera y no queda un caso huérfano.
+    fn anotar_caso(&mut self, caso: &CasoAAnotar) -> Result<String, ErrorAlmacen>;
+}
+
+/// Lo que hay que saber de una factura para corregirla o eliminarla.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EstadoDeFactura {
+    pub numero_factura: String,
+    pub estatus: String,
+    pub monto_total: f64,
+    pub institucion_deposito: Option<String>,
+    pub monto_recibido: Option<f64>,
+}
+
+/// Las cifras con las que se reescribe una factura corregida.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FacturaCorregida {
+    pub id: i64,
+    pub numero_factura: String,
+    pub cliente_id: i64,
+    pub fecha_emision: String,
+    pub monto_total: f64,
+    pub porcentaje_retencion: f64,
+    pub monto_retenido: f64,
+}
+
 /// Una factura tal como la muestra el listado: con los datos de su cliente.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IngresoLeido {
@@ -134,6 +176,13 @@ pub trait AlmacenIngresos {
     fn insertar_factura(&mut self, factura: &FacturaNueva) -> Result<i64, ErrorAlmacen>;
     /// `NoEncontrado` si la cuenta no existe.
     fn nombre_de_cuenta(&self, cuenta_id: i64) -> Result<String, ErrorAlmacen>;
+    /// `None` si no hay ninguna factura con ese identificador.
+    fn estado_de_factura(&self, id: i64) -> Result<Option<EstadoDeFactura>, ErrorAlmacen>;
+    fn corregir_factura(&mut self, factura: &FacturaCorregida) -> Result<(), ErrorAlmacen>;
+    fn fijar_recibido(&mut self, id: i64, monto_recibido: f64) -> Result<(), ErrorAlmacen>;
+    fn eliminar_factura(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+    /// El depósito de una factura se guarda **por el nombre** de la cuenta; esto lo traduce a su identificador.
+    fn cuenta_por_nombre(&self, nombre: &str) -> Result<Option<i64>, ErrorAlmacen>;
     /// La da por cobrada **solo si estaba pendiente**. `false` si no hay tal factura pendiente.
     fn marcar_cobrada(
         &mut self,

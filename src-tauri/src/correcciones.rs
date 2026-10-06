@@ -13,14 +13,6 @@
 use chrono::{Datelike, Local};
 use rusqlite::Transaction;
 
-/// Longitud mínima de un motivo para que cuente como explicación.
-///
-/// No es una cifra mágica sino un umbral contra el motivo de trámite: «error»
-/// o «ok» pasan cualquier comprobación de «no vacío» y no explican nada. Se
-/// pide una frase, que es lo que dentro de seis meses permitirá entender qué
-/// pasó.
-const MINIMO_DEL_MOTIVO: usize = 15;
-
 /// Lo que se anota de una corrección.
 pub struct Correccion<'a> {
     /// Qué clase de movimiento se borra: «gasto», «factura», «abono»…
@@ -39,14 +31,14 @@ pub struct Correccion<'a> {
 /// deshace entera y no queda un caso huérfano; si el registro falla, no se
 /// borra nada.
 pub fn registrar(tx: &Transaction, c: Correccion<'_>) -> Result<String, String> {
-    let motivo = c.motivo.trim();
-    if motivo.chars().count() < MINIMO_DEL_MOTIVO {
-        return Err(format!(
-            "Explica la corrección en al menos {} caracteres. Dentro de seis meses, «{}» no dirá qué pasó.",
-            MINIMO_DEL_MOTIVO, motivo
-        ));
-    }
+    // La regla del motivo es del dominio; aquí solo se anota.
+    let motivo = crate::dominio::correccion::motivo_de_correccion(c.motivo).map_err(|e| e.to_string())?;
+    insertar(tx, &c, &motivo)
+}
 
+/// Anota el caso con un motivo **ya validado** y devuelve su número. Lo usa el adaptador del puerto de
+/// correcciones, cuyo caso de uso valida el motivo antes de llamar.
+pub fn insertar(tx: &Transaction, c: &Correccion<'_>, motivo: &str) -> Result<String, String> {
     let numero = siguiente_numero(tx)?;
     let hoy = Local::now().format("%d/%m/%Y").to_string();
 

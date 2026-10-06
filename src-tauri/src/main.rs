@@ -27,7 +27,7 @@ use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use chrono::{NaiveDate, Local, Datelike};
 
-use dominio::dinero::{Dinero, Divisa, Porcentaje, TasaCambio};
+use dominio::dinero::{Dinero, Divisa, TasaCambio};
 use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::catalogos::CatalogosSqlite;
 use adaptadores::sqlite::cuentas::CuentasSqlite;
@@ -2314,110 +2314,35 @@ fn actualizar_ingreso(
     // pensar.
     motivo: Option<String>,
 ) -> Result<String, String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    // Lo que la factura decía antes. Hace falta para saber cuánto mover, no
-    // solo qué escribir: si ya se cobró, hay dinero en una cuenta que dependía
-    // de estas cifras.
-    let (estatus, total_ant, retenido_ant, deposito, recibido_ant):
-        (String, f64, f64, Option<String>, Option<f64>) = tx
-        .query_row(
-            "SELECT estatus, monto_total, monto_retenido, institucion_deposito, monto_recibido
-             FROM ingresos WHERE id = ?;",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-        )
-        .map_err(|_| format!("No se encontró la factura {}.", id))?;
-
-    // Lo que estaba cobrado. Una factura sin cobrar parte de cero, de modo
-    // que corregirla y darla por cobrada sería un ajuste por el neto entero.
-    let recibido_anterior = Dinero::nuevo(recibido_ant.unwrap_or(0.0), MONEDA_LOCAL)?;
-    let _ = retenido_ant;
-
-    let cobro = match cobro_parcial {
-        Some(parte) => dominio::ingreso::Cobro::Parcial(parte.con_divisa(MONEDA_LOCAL)),
-        None => dominio::ingreso::Cobro::Completo,
-    };
-
-    // El total llega como se escribió; una sola conversión sirve al cálculo, a la fila y al caso.
-    let monto_total = monto_total.con_divisa(MONEDA_LOCAL);
-    let correccion = dominio::ingreso::corregir(
-        monto_total,
-        Porcentaje::desde_porcentaje(porcentaje_retencion)?,
-        recibido_anterior,
-        cobro,
-    )?;
-
-    tx.execute(
-        "UPDATE ingresos SET numero_factura = ?, cliente_id = ?, fecha_emision = ?,
-                             monto_total = ?, porcentaje_retencion = ?, monto_retenido = ?
-         WHERE id = ?;",
-        (&numero_factura, cliente_id, &fecha_emision, monto_total.unidades(), porcentaje_retencion,
-         correccion.retencion.unidades(), id),
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Una factura sin cobrar no tiene dinero que reajustar: basta con
-    // reescribir sus cifras.
-    let resumen = if estatus != "pagada" || correccion.ajuste.es_cero() {
-        "Factura corregida.".to_string()
-    } else {
-        // Aquí sí se mueve un saldo, de modo que queda constancia. Es la misma
-        // clase de corrección que un borrado, y merece el mismo rastro.
-        let caso = correcciones::registrar(
-            &tx,
-            correcciones::Correccion {
-                tipo: "corrección de factura",
-                referencia_id: id,
-                descripcion: format!(
-                    "Factura {}: {:.2} → {:.2}",
-                    numero_factura, total_ant, monto_total.unidades()
-                ),
-                importe: Some(correccion.ajuste.unidades()),
-                divisa: Some(MONEDA_LOCAL.codigo().to_string()),
-                motivo: motivo.as_deref().unwrap_or(""),
+    con_almacen(|a| {
+        let r = aplicacion::ingresos::actualizar_ingreso(
+            aplicacion::ingresos::DatosCorreccionDeFactura {
+                id,
+                numero_factura,
+                cliente_id,
+                fecha_emision,
+                // El total y el cobro parcial llegan como se escribieron; el céntimo lo deciden esos dígitos.
+                monto_total: monto_total.con_divisa(MONEDA_LOCAL),
+                porcentaje_retencion,
+                cobro_parcial: cobro_parcial.map(|c| c.con_divisa(MONEDA_LOCAL)),
+                motivo,
             },
+            a,
         )?;
-        let _ = &caso;
-        tx.execute(
-            "UPDATE ingresos SET monto_recibido = ? WHERE id = ?;",
-            (correccion.recibido.unidades(), id),
-        )
-        .map_err(|e| e.to_string())?;
-
-        match deposito.as_deref().filter(|d| !d.is_empty()) {
-            Some(cuenta) => {
-                let filas = tx
-                    .execute(
-                        "UPDATE cuentas_ahorro SET balance_actual = ROUND(balance_actual + ?, 2)
-                         WHERE nombre = ?;",
-                        (correccion.ajuste.unidades(), cuenta),
-                    )
-                    .map_err(|e| e.to_string())?;
-
-                if filas == 0 {
-                    return Err(format!(
-                        "La factura se cobró en «{}», que ya no existe. Corrige o recrea esa cuenta antes de modificar la factura.",
-                        cuenta
-                    ));
-                }
-                format!(
-                    "Factura corregida. Se ajustó «{}» en DOP {:.2}. Caso {}.",
-                    cuenta,
-                    correccion.ajuste.unidades(),
-                    caso
-                )
-            }
-            None => format!(
-                "Factura corregida. No tenía cuenta de depósito que ajustar. Caso {}.",
+        use aplicacion::ingresos::ResultadoDeCorreccion::*;
+        Ok(match r {
+            Corregida => "Factura corregida.".to_string(),
+            Ajustada { cuenta, ajuste, caso } => format!(
+                "Factura corregida. Se ajustó «{}» en DOP {:.2}. Caso {}.",
+                cuenta,
+                ajuste.unidades(),
                 caso
             ),
-        }
-    };
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(resumen)
+            SinCuentaDeDeposito { caso } => {
+                format!("Factura corregida. No tenía cuenta de depósito que ajustar. Caso {}.", caso)
+            }
+        })
+    })
 }
 
 #[tauri::command]
@@ -2685,37 +2610,7 @@ fn eliminar_ingreso_informal(id: i64, motivo: String) -> Result<String, String> 
 
 #[tauri::command]
 fn eliminar_ingreso(id: i64, motivo: String) -> Result<String, String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    let caso = abrir_caso(&tx, "factura", id, "SELECT 'Factura ' || numero_factura, monto_total, 'DOP' FROM ingresos WHERE id = ?;", &motivo)?;
-    
-    let (estatus, institucion_deposito, monto_recibido): (String, Option<String>, Option<f64>) = tx.query_row(
-        "SELECT estatus, institucion_deposito, monto_recibido FROM ingresos WHERE id = ?;",
-        [id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-    ).map_err(|e| e.to_string())?;
-    
-    if estatus == "pagada" {
-        if let Some(ref inst) = institucion_deposito {
-            if !inst.is_empty() {
-                tx.execute(
-                    // Sin recorte a cero (resolución de H20, en las mismas
-                    // condiciones que H5 y H10). Si lo cobrado ya se gastó,
-                    // deshacer el cobro deja la cuenta en negativo, y eso es
-                    // el estado verdadero: el dinero salió. Recortarlo hacía
-                    // desaparecer la diferencia sin registro.
-                    "UPDATE cuentas_ahorro SET balance_actual = ROUND(balance_actual - ?, 2) WHERE nombre = ?;",
-                    (monto_recibido.unwrap_or(0.0), inst)
-                ).map_err(|e| e.to_string())?;
-            }
-        }
-    }
-    
-    tx.execute("DELETE FROM ingresos WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
-    
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(caso)
+    con_almacen(|a| Ok(aplicacion::ingresos::eliminar_ingreso(id, &motivo, a)?))
 }
 
 // --- PUNTO DE ENTRADA PRINCIPAL ---
