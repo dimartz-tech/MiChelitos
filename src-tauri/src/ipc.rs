@@ -64,14 +64,6 @@ impl ImporteDecimal {
     pub fn con_divisa(&self, divisa: Divisa) -> Dinero {
         Dinero::de_centavos(self.centavos, divisa)
     }
-
-    /// Para los sitios que todavía persisten un `f64`.
-    ///
-    /// Es una salida, no una entrada: el céntimo ya está decidido y este
-    /// número lo representa exactamente.
-    pub fn unidades(&self) -> f64 {
-        self.con_divisa(Divisa::Dop).unidades()
-    }
 }
 
 /// Acepta **solo texto**: los dígitos tal cual se escribieron.

@@ -93,6 +93,70 @@ impl GastoGuardado {
     }
 }
 
+/// Una tarjeta tal como se lee.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TarjetaLeida {
+    pub id: i64,
+    pub entidad: String,
+    pub nombre_tarjeta: String,
+    pub limite_pesos: f64,
+    pub limite_dolares: f64,
+    pub limite_sobregiro_pesos: f64,
+    pub limite_sobregiro_dolares: f64,
+    pub balance_pesos: f64,
+    pub balance_dolares: f64,
+    pub balance_corte_pesos: f64,
+    pub balance_corte_dolares: f64,
+    pub fecha_corte: i32,
+    pub fecha_limite_pago: i32,
+    pub limite_ajustado_pesos: Option<f64>,
+    pub limite_ajustado_dolares: Option<f64>,
+    pub politica_liquidacion: Option<String>,
+}
+
+/// Una tarjeta nueva. Los balances de arranque son lo que ya debe al darla de alta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TarjetaNueva {
+    pub entidad: String,
+    pub nombre_tarjeta: String,
+    pub limite_pesos: f64,
+    pub limite_dolares: f64,
+    pub limite_sobregiro_pesos: f64,
+    pub limite_sobregiro_dolares: f64,
+    pub balance_pesos: f64,
+    pub balance_dolares: f64,
+    pub balance_corte_pesos: f64,
+    pub balance_corte_dolares: f64,
+    pub fecha_corte: i32,
+    pub fecha_limite_pago: i32,
+}
+
+/// Los límites y el corte que se pueden corregir de una tarjeta. **No** el balance ni las fechas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LimitesDeTarjeta {
+    pub id: i64,
+    pub limite_pesos: f64,
+    pub limite_dolares: f64,
+    pub limite_sobregiro_pesos: f64,
+    pub limite_sobregiro_dolares: f64,
+    pub balance_corte_pesos: f64,
+    pub balance_corte_dolares: f64,
+    /// `None` es «sin ajuste»; cero es un tope deliberado.
+    pub limite_ajustado_pesos: Option<f64>,
+    pub limite_ajustado_dolares: Option<f64>,
+    /// El código de la política, ya normalizado.
+    pub politica_liquidacion: String,
+}
+
+/// Alta, corrección de límites y consulta de tarjetas. (La deuda se mueve por `RepositorioTarjetas`.)
+pub trait CatalogoDeTarjetas {
+    /// En el orden en que se crearon.
+    fn tarjetas(&self) -> Result<Vec<TarjetaLeida>, ErrorAlmacen>;
+    fn insertar_tarjeta(&mut self, tarjeta: &TarjetaNueva) -> Result<i64, ErrorAlmacen>;
+    /// No avisa si la tarjeta no existe (comportamiento actual; ver `r4`).
+    fn actualizar_limites(&mut self, limites: &LimitesDeTarjeta) -> Result<(), ErrorAlmacen>;
+}
+
 /// Un financiamiento tal como se lee, con los datos de su tarjeta si cuelga de una.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrestamoLeido {

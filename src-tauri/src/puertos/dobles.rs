@@ -1212,3 +1212,62 @@ impl AlmacenPrestamos for PrestamosEnMemoria {
     }
 }
 
+/// Doble en memoria del puerto de tarjetas: guarda las filas.
+#[derive(Default)]
+pub struct TarjetasEnMemoria {
+    pub tarjetas: Vec<TarjetaLeida>,
+    siguiente_id: i64,
+}
+
+impl TarjetasEnMemoria {
+    pub fn nuevo() -> Self {
+        TarjetasEnMemoria { siguiente_id: 1, ..Default::default() }
+    }
+}
+
+impl CatalogoDeTarjetas for TarjetasEnMemoria {
+    fn tarjetas(&self) -> Result<Vec<TarjetaLeida>, ErrorAlmacen> {
+        Ok(self.tarjetas.clone())
+    }
+    fn insertar_tarjeta(&mut self, t: &TarjetaNueva) -> Result<i64, ErrorAlmacen> {
+        if !(1..=31).contains(&t.fecha_corte) || !(1..=31).contains(&t.fecha_limite_pago) {
+            return Err(ErrorAlmacen::Fallo("CHECK constraint failed: fecha BETWEEN 1 AND 31".into()));
+        }
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.tarjetas.push(TarjetaLeida {
+            id,
+            entidad: t.entidad.clone(),
+            nombre_tarjeta: t.nombre_tarjeta.clone(),
+            limite_pesos: t.limite_pesos,
+            limite_dolares: t.limite_dolares,
+            limite_sobregiro_pesos: t.limite_sobregiro_pesos,
+            limite_sobregiro_dolares: t.limite_sobregiro_dolares,
+            balance_pesos: t.balance_pesos,
+            balance_dolares: t.balance_dolares,
+            balance_corte_pesos: t.balance_corte_pesos,
+            balance_corte_dolares: t.balance_corte_dolares,
+            fecha_corte: t.fecha_corte,
+            fecha_limite_pago: t.fecha_limite_pago,
+            limite_ajustado_pesos: None,
+            limite_ajustado_dolares: None,
+            politica_liquidacion: None,
+        });
+        Ok(id)
+    }
+    fn actualizar_limites(&mut self, l: &LimitesDeTarjeta) -> Result<(), ErrorAlmacen> {
+        if let Some(t) = self.tarjetas.iter_mut().find(|t| t.id == l.id) {
+            t.limite_pesos = l.limite_pesos;
+            t.limite_dolares = l.limite_dolares;
+            t.limite_sobregiro_pesos = l.limite_sobregiro_pesos;
+            t.limite_sobregiro_dolares = l.limite_sobregiro_dolares;
+            t.balance_corte_pesos = l.balance_corte_pesos;
+            t.balance_corte_dolares = l.balance_corte_dolares;
+            t.limite_ajustado_pesos = l.limite_ajustado_pesos;
+            t.limite_ajustado_dolares = l.limite_ajustado_dolares;
+            t.politica_liquidacion = Some(l.politica_liquidacion.clone());
+        }
+        Ok(())
+    }
+}
+
