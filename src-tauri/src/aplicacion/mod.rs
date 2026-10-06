@@ -7,6 +7,7 @@ pub mod cobrar_suscripcion;
 pub mod informales;
 pub mod ingresos;
 pub mod prestamos;
+pub mod tarjetas;
 pub mod guardar_capital;
 pub mod liquidar_gasto;
 pub mod registrar_avance_de_efectivo;
