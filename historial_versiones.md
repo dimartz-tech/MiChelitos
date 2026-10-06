@@ -4,7 +4,29 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.82.0 (Versión Actual) - 2026-10-06
+## 🚀 Versión 1.83.0 (Versión Actual) - 2026-10-06
+**Auditoría A-03, tercer vertical (parte 3): los ingresos informales — listar, crear, cobrar, cobrar en efectivo y eliminar — salen de `main.rs`.** Sin cambios de reglas ni de mensajes.
+
+### 🔧 Qué se hace
+* **Orden de trabajo:** primero 8 pruebas de caracterización (`p1`–`p8`, en su propio commit, contra el código de antes; completan `c81`–`c84b`) y después la extracción, con todas intactas.
+* **Caso de uso** (`aplicacion::informales`): `crear_ingreso_informal`, `crear_cobro_efectivo_informal` (el importe se convierte una sola vez para el ingreso y la caja; solo «USD» va a la caja de dólares, cualquier otra divisa a la de pesos), `marcar_informal_pagado` y `eliminar_ingreso_informal` (caso antes de borrar; revierte el abono sin recortar a cero). Comparte con las facturas la comprobación del depósito (`resolver_deposito`, que sale de `main.rs`).
+* **Puertos:** `AlmacenInformales` (con su adaptador sobre `AlmacenSqlite` y su doble) y `BusquedaDeCuentas` (cuenta por nombre o por identificador), que sale de `AlmacenIngresos` porque ahora lo comparten las dos.
+* **`main.rs`:** los cinco comandos quedan delgados; se eliminan `resolver_deposito` y `acreditar`, que ya no usa nadie. Comandos con SQL directo: **42 → 37** (de 54 al empezar A-03).
+
+### 🔎 Hallazgos (sin corregir, a consultar; fijados por `p2` y `p6`)
+* **Crear un informal acepta monto cero o negativo y datos vacíos** (fecha, descripción): el formulario los exige, el comando no. Mismo hueco que la factura.
+* **Un cobro en efectivo sin caja registrada** (la cuenta «Efectivo DOP» o «Efectivo USD» renombrada o ausente) **queda registrado como cobrado y no mueve ningún saldo**, sin avisar: es el hueco que H3 cerró para los gastos en efectivo, y este comando sigue localizando la caja por nombre.
+
+### 🐛 Una regresión cazada antes de publicar
+* La comprobación en la app empaquetada reveló que, en mi primera versión de la extracción, **eliminar un cobro en efectivo en dólares fallaba** («No se pueden combinar montos en USD y DOP»): la reversión se expresaba en pesos y el saldo exacto de una caja en dólares la rechaza. Las pruebas de caracterización solo cubrían el caso en pesos. Corregido: los ajustes por nombre de cuenta (eliminar un informal o una factura, corregir una factura, el cobro en efectivo) se expresan **en la divisa de la propia cuenta**, como hacía el SQL de antes. Se añaden `p9` y una prueba del caso de uso.
+
+### 🧪 Pruebas
+* 9 de caracterización y 9 del caso de uso con el doble. Dieciséis mutaciones (monto cambiado, caja equivocada, efectivo sin acreditar o que exige caja, depósito sin comprobar, ingreso inexistente sin aviso, cobro sin acreditar, motivo sin validar, eliminar sin revertir o revirtiendo lo pendiente o sin borrar, caso sin descripción, cobro sin filtro de pendiente, listado ascendente, efectivo que nace pendiente) y la de «no convierte a la divisa de la cuenta»: todas detectadas. **Rust 731 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): crear con el céntimo decidido (300.005 → 300.01), cuenta e ingreso inexistentes, cuenta en dólares, cobrar y cobrar de nuevo, cobros en efectivo en pesos y en dólares, y eliminar todo con sus casos; al final **todos los saldos vuelven al inicio** (100, 0, 0).
+
+---
+
+## 🚀 Versión 1.82.0 - 2026-10-06
 **Auditoría A-03, tercer vertical (parte 2): corregir y eliminar facturas salen de `main.rs`, y la regla del motivo de una corrección pasa al dominio.** Sin cambios de reglas ni de mensajes.
 
 ### 🔧 Qué se hace

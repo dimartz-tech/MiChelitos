@@ -14,6 +14,34 @@ use crate::dominio::ingreso::{corregir, retencion, Cobro, Deposito};
 use crate::dominio::tarjeta::MONEDA_LOCAL;
 use crate::puertos::repositorios::*;
 
+/// Comprueba que la cuenta existe y que puede recibir ese importe (H17, H19): su divisa es la del importe y no es
+/// negativo. Es lo que comparten el cobro de una factura y el de un ingreso informal.
+pub(super) fn resolver_deposito(
+    almacen: &impl RepositorioCuentas,
+    cuenta_id: i64,
+    importe: Dinero,
+) -> Result<Deposito, ErrorAplicacion> {
+    let divisa_cuenta = match almacen.divisa(cuenta_id) {
+        Ok(d) => d,
+        Err(ErrorAlmacen::NoEncontrado { .. }) => return Err(ErrorDominio::CuentaNoEncontrada { id: cuenta_id }.into()),
+        Err(otro) => return Err(otro.into()),
+    };
+    Ok(Deposito::nuevo(cuenta_id, divisa_cuenta, importe)?)
+}
+
+/// Reexpresa un importe en la divisa **de la cuenta** a la que va a sumarse o restarse.
+///
+/// Los cobros guardan el depósito por el nombre de la cuenta y los ajustes se aplican sobre lo que esa cuenta tenga
+/// (una caja de dólares recibe dólares). Antes el ajuste era un número sin divisa; el saldo exacto exige que coincida,
+/// y la de la cuenta es la que manda.
+pub(super) fn en_la_divisa_de_la_cuenta(
+    almacen: &impl RepositorioCuentas,
+    cuenta_id: i64,
+    importe: Dinero,
+) -> Result<Dinero, ErrorAplicacion> {
+    Ok(Dinero::nuevo(importe.unidades(), almacen.divisa(cuenta_id)?)?)
+}
+
 pub struct DatosFactura {
     pub numero_factura: String,
     pub rnc_cliente: String,
@@ -56,14 +84,9 @@ pub fn marcar_ingreso_pagado(
     cuenta_id: i64,
     fecha: &str,
     importe: Dinero,
-    almacen: &mut (impl AlmacenIngresos + RepositorioCuentas),
+    almacen: &mut (impl AlmacenIngresos + RepositorioCuentas + BusquedaDeCuentas),
 ) -> Result<(), ErrorAplicacion> {
-    let divisa_cuenta = match almacen.divisa(cuenta_id) {
-        Ok(d) => d,
-        Err(ErrorAlmacen::NoEncontrado { .. }) => return Err(ErrorDominio::CuentaNoEncontrada { id: cuenta_id }.into()),
-        Err(otro) => return Err(otro.into()),
-    };
-    let deposito = Deposito::nuevo(cuenta_id, divisa_cuenta, importe)?;
+    let deposito = resolver_deposito(almacen, cuenta_id, importe)?;
 
     let nombre = almacen.nombre_de_cuenta(cuenta_id)?;
     // La fila guarda exactamente el mismo importe que se acredita a la cuenta.
@@ -104,7 +127,7 @@ pub enum ResultadoDeCorreccion {
 /// el caso (que valida el motivo), lo recibido y el saldo de la cuenta de depósito.
 pub fn actualizar_ingreso(
     datos: DatosCorreccionDeFactura,
-    almacen: &mut (impl AlmacenIngresos + RepositorioCuentas + RegistroDeCorrecciones),
+    almacen: &mut (impl AlmacenIngresos + RepositorioCuentas + BusquedaDeCuentas + RegistroDeCorrecciones),
 ) -> Result<ResultadoDeCorreccion, ErrorAplicacion> {
     // Lo que la factura decía antes: hace falta para saber cuánto mover, no solo qué escribir.
     let antes = almacen
@@ -162,7 +185,8 @@ pub fn actualizar_ingreso(
     let Some(cuenta_id) = almacen.cuenta_por_nombre(&cuenta)? else {
         return Err(ErrorDominio::CuentaDeDepositoInexistente { cuenta }.into());
     };
-    almacen.ajustar_saldo(cuenta_id, correccion.ajuste)?;
+    let ajuste = en_la_divisa_de_la_cuenta(almacen, cuenta_id, correccion.ajuste)?;
+    almacen.ajustar_saldo(cuenta_id, ajuste)?;
     Ok(ResultadoDeCorreccion::Ajustada { cuenta, ajuste: correccion.ajuste, caso })
 }
 
@@ -172,7 +196,7 @@ pub fn actualizar_ingreso(
 pub fn eliminar_ingreso(
     id: i64,
     motivo: &str,
-    almacen: &mut (impl AlmacenIngresos + RepositorioCuentas + RegistroDeCorrecciones),
+    almacen: &mut (impl AlmacenIngresos + RepositorioCuentas + BusquedaDeCuentas + RegistroDeCorrecciones),
 ) -> Result<String, ErrorAplicacion> {
     let factura = almacen
         .estado_de_factura(id)?
@@ -193,6 +217,7 @@ pub fn eliminar_ingreso(
             // que es el estado verdadero: el dinero salió.
             if let Some(cuenta_id) = almacen.cuenta_por_nombre(&cuenta)? {
                 let recibido = Dinero::nuevo(factura.monto_recibido.unwrap_or(0.0), MONEDA_LOCAL)?;
+                let recibido = en_la_divisa_de_la_cuenta(almacen, cuenta_id, recibido)?;
                 almacen.ajustar_saldo(cuenta_id, recibido.negado())?;
             }
         }

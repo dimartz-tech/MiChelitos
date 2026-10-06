@@ -31,7 +31,7 @@ use dominio::dinero::{Dinero, Divisa, TasaCambio};
 use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::catalogos::CatalogosSqlite;
 use adaptadores::sqlite::cuentas::CuentasSqlite;
-use puertos::repositorios::{AlmacenIngresos, CatalogoDeCuentas};
+use puertos::repositorios::{AlmacenInformales, AlmacenIngresos, CatalogoDeCuentas};
 use adaptadores::sqlite::gastos::AlmacenSqlite;
 use puertos::repositorios::AlmacenCatalogos;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
@@ -484,66 +484,6 @@ fn crear_ingreso(input: IngresoInput) -> Result<i64, String> {
     })
 }
 
-/// Resuelve la cuenta que recibe un cobro y comprueba que puede recibirlo.
-///
-/// Comprueba **tres** cosas, y conviene enumerarlas porque la primera versión
-/// de esta función solo hacía dos y parecía hacer las tres:
-///
-/// 1. **Que la cuenta exista** (H17). Antes se localizaba por su nombre y el
-///    fallo se descartaba con `let _ =`.
-/// 2. **Que el importe no sea negativo**, dentro de `Deposito`.
-/// 3. **Que la divisa de lo cobrado sea la de la cuenta** (H19).
-///
-/// La tercera es la que faltaba, y faltaba de una forma difícil de ver: el
-/// importe se denominaba **con la divisa de la cuenta**, de modo que
-/// `Deposito::nuevo` comparaba esa divisa consigo misma y no podía fallar
-/// nunca. La comprobación existía en el tipo y era vacua en la llamada.
-///
-/// Por eso `divisa_cobrada` llega desde fuera: una factura se emite en moneda
-/// local —`ingresos` no tiene columna de divisa— y cobrarla en una cuenta en
-/// otra divisa exigiría una conversión que nadie ha declarado. Reinterpretar
-/// 8 500 pesos como 8 500 dólares es precisamente el daño que H19 describía.
-fn resolver_deposito(
-    tx: &rusqlite::Transaction,
-    cuenta_id: i64,
-    divisa_cobrada: Divisa,
-    importe: ipc::ImporteDecimal,
-) -> Result<dominio::ingreso::Deposito, String> {
-    let divisa_cuenta: String = tx
-        .query_row("SELECT divisa FROM cuentas_ahorro WHERE id = ?;", [cuenta_id], |r| r.get(0))
-        .map_err(|_| format!("No se encontró la cuenta {}.", cuenta_id))?;
-
-    let deposito = dominio::ingreso::Deposito::nuevo(
-        cuenta_id,
-        Divisa::desde_codigo(&divisa_cuenta)?,
-        // El céntimo lo deciden los dígitos escritos, y es el mismo que se guarda en la fila.
-        importe.con_divisa(divisa_cobrada),
-    )?;
-    Ok(deposito)
-}
-
-/// Aplica un cobro a su cuenta.
-///
-/// No vuelve a comprobar que la cuenta exista: eso lo garantiza
-/// `resolver_deposito`, que ya la leyó dentro de esta misma transacción y sin
-/// el cual no existiría el `Deposito` que se recibe aquí.
-///
-/// La versión anterior repetía la comprobación «por si acaso». Se retira
-/// porque **no podía fallar**, y una comprobación que no puede fallar no
-/// protege: aparenta una garantía que ninguna prueba sostiene, y anima a
-/// confiar en ella. La garantía vive en un solo sitio, donde sí se ejercita.
-fn acreditar(
-    tx: &rusqlite::Transaction,
-    deposito: &dominio::ingreso::Deposito,
-) -> Result<(), String> {
-    tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = ROUND(balance_actual + ?, 2) WHERE id = ?;",
-        (deposito.importe().unidades(), deposito.cuenta_id()),
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 #[tauri::command]
 fn marcar_ingreso_pagado(
     id: i64,
@@ -566,43 +506,29 @@ fn marcar_ingreso_pagado(
 // --- COMANDOS: INGRESOS INFORMALES ---
 #[tauri::command]
 fn obtener_ingresos_informales() -> Result<Vec<IngresoInformal>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT id, fecha, descripcion, monto, estatus, institucion_deposito, fecha_pago, monto_recibido
-         FROM ingresos_informales ORDER BY id DESC;"
-    ).map_err(|e| e.to_string())?;
-
-    let rows = stmt.query_map([], |row| {
-        Ok(IngresoInformal {
-            id: row.get(0)?,
-            fecha: row.get(1)?,
-            descripcion: row.get(2)?,
-            monto: row.get(3)?,
-            estatus: row.get(4)?,
-            institucion_deposito: row.get(5)?,
-            fecha_pago: row.get(6)?,
-            monto_recibido: row.get(7)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+    con_almacen(|a| {
+        Ok(AlmacenInformales::informales(a)?
+            .into_iter()
+            .map(|i| IngresoInformal {
+                id: i.id,
+                fecha: i.fecha,
+                descripcion: i.descripcion,
+                monto: i.monto,
+                estatus: i.estatus,
+                institucion_deposito: i.institucion_deposito,
+                fecha_pago: i.fecha_pago,
+                monto_recibido: i.monto_recibido,
+            })
+            .collect())
+    })
 }
 
 #[tauri::command]
 fn crear_ingreso_informal(fecha: String, descripcion: String, monto: ipc::ImporteDecimal) -> Result<i64, String> {
-    // El importe llega como se escribió y el núcleo decide el céntimo con esos dígitos
-    // (`1.005` sube a 1.01); `unidades()` es solo la salida a la columna `REAL`.
-    let monto = monto.unidades();
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT INTO ingresos_informales (fecha, descripcion, monto, estatus) VALUES (?, ?, ?, 'pendiente');",
-        (&fecha, &descripcion, monto)
-    ).map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+    // El importe llega como se escribió y el núcleo decide el céntimo con esos dígitos (`1.005` sube a 1.01).
+    con_almacen(|a| {
+        Ok(aplicacion::informales::crear_ingreso_informal(&fecha, &descripcion, monto.con_divisa(MONEDA_LOCAL), a)?)
+    })
 }
 
 #[tauri::command]
@@ -612,34 +538,16 @@ fn marcar_informal_pagado(
     fecha: String,
     monto_recibido: ipc::ImporteDecimal,
 ) -> Result<(), String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    // Una factura se emite en moneda local, de modo que su cobro también.
-    let deposito = resolver_deposito(&tx, cuenta_ahorro_id, MONEDA_LOCAL, monto_recibido)?;
-    // La fila guarda exactamente el mismo importe que se acredita a la cuenta.
-    let monto_recibido = monto_recibido.unidades();
-    let nombre: String = tx
-        .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_ahorro_id], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-
-    let filas = tx
-        .execute(
-            "UPDATE ingresos_informales SET estatus = 'pagado', institucion_deposito = ?,
-                                            cuenta_ahorro_id = ?, fecha_pago = ?, monto_recibido = ?
-             WHERE id = ? AND estatus <> 'pagado';",
-            (&nombre, cuenta_ahorro_id, &fecha, monto_recibido, id),
-        )
-        .map_err(|e| e.to_string())?;
-
-    if filas == 0 {
-        return Err(format!("No se encontró un ingreso {} pendiente de cobro.", id));
-    }
-
-    acreditar(&tx, &deposito)?;
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+    con_almacen(|a| {
+        // Un ingreso informal es en moneda local, de modo que su cobro también.
+        Ok(aplicacion::informales::marcar_informal_pagado(
+            id,
+            cuenta_ahorro_id,
+            &fecha,
+            monto_recibido.con_divisa(MONEDA_LOCAL),
+            a,
+        )?)
+    })
 }
 
 // --- COMANDOS: TARJETAS ---
@@ -2347,30 +2255,13 @@ fn actualizar_ingreso(
 
 #[tauri::command]
 fn crear_cobro_efectivo_informal(fecha: String, descripcion: String, monto: ipc::ImporteDecimal, divisa: String) -> Result<i64, String> {
-    // El importe llega como se escribió y el núcleo decide el céntimo con esos dígitos. Se usa
-    // **dos veces** (el ingreso y el saldo de la caja): una sola conversión garantiza que ambos
-    // reciben exactamente el mismo valor.
-    let monto = monto.unidades();
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    
-    let cuenta_efectivo = if divisa == "USD" { "Efectivo USD" } else { "Efectivo DOP" };
-    
-    tx.execute(
-        "INSERT INTO ingresos_informales (fecha, descripcion, monto, estatus, institucion_deposito, fecha_pago, monto_recibido)
-         VALUES (?, ?, ?, 'pagado', ?, ?, ?);",
-        (&fecha, &descripcion, monto, cuenta_efectivo, &fecha, monto)
-    ).map_err(|e| e.to_string())?;
-    
-    let id = tx.last_insert_rowid();
-    
-    tx.execute(
-        "UPDATE cuentas_ahorro SET balance_actual = ROUND(balance_actual + ?, 2) WHERE nombre = ?;",
-        (monto, cuenta_efectivo)
-    ).map_err(|e| e.to_string())?;
-    
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(id)
+    con_almacen(|a| {
+        // El importe llega como se escribió y se usa **dos veces** (el ingreso y la caja): una sola conversión
+        // garantiza que ambos reciben el mismo valor. Solo «USD» va a la caja de dólares; cualquier otra divisa,
+        // a la de pesos (así ha sido siempre).
+        let divisa = if divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
+        Ok(aplicacion::informales::crear_cobro_efectivo_informal(&fecha, &descripcion, monto.con_divisa(divisa), a)?)
+    })
 }
 
 /// Cierra un consumo pendiente con el importe que el emisor cargó en moneda
@@ -2575,37 +2466,7 @@ fn eliminar_transaccion_cuenta(id: i64, motivo: String) -> Result<String, String
 
 #[tauri::command]
 fn eliminar_ingreso_informal(id: i64, motivo: String) -> Result<String, String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    let caso = abrir_caso(&tx, "ingreso informal", id, "SELECT descripcion, monto, 'DOP' FROM ingresos_informales WHERE id = ?;", &motivo)?;
-    
-    let (estatus, institucion_deposito, monto_recibido): (String, Option<String>, Option<f64>) = tx.query_row(
-        "SELECT estatus, institucion_deposito, monto_recibido FROM ingresos_informales WHERE id = ?;",
-        [id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-    ).map_err(|e| e.to_string())?;
-    
-    if estatus == "pagado" {
-        if let Some(ref inst) = institucion_deposito {
-            if !inst.is_empty() {
-                tx.execute(
-                    // Sin recorte a cero (resolución de H20, en las mismas
-                    // condiciones que H5 y H10). Si lo cobrado ya se gastó,
-                    // deshacer el cobro deja la cuenta en negativo, y eso es
-                    // el estado verdadero: el dinero salió. Recortarlo hacía
-                    // desaparecer la diferencia sin registro.
-                    "UPDATE cuentas_ahorro SET balance_actual = ROUND(balance_actual - ?, 2) WHERE nombre = ?;",
-                    (monto_recibido.unwrap_or(0.0), inst)
-                ).map_err(|e| e.to_string())?;
-            }
-        }
-    }
-    
-    tx.execute("DELETE FROM ingresos_informales WHERE id = ?;", [id]).map_err(|e| e.to_string())?;
-    
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(caso)
+    con_almacen(|a| Ok(aplicacion::informales::eliminar_ingreso_informal(id, &motivo, a)?))
 }
 
 #[tauri::command]

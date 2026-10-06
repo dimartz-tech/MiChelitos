@@ -38,6 +38,7 @@ pub enum ErrorDominio {
     AbonoSinImporte,
     /// Catálogos (categorías y clientes). Los textos son los de siempre: la interfaz los muestra tal cual.
     FacturaDuplicada,
+    IngresoNoPendiente { id: i64 },
     FacturaNoEncontrada { id: i64 },
     /// Una factura cobrada en una cuenta que ya no existe no se puede corregir: el ajuste no tendría adónde ir.
     CuentaDeDepositoInexistente { cuenta: String },
@@ -99,6 +100,9 @@ impl fmt::Display for ErrorDominio {
                 super::correccion::MINIMO_DEL_MOTIVO,
                 motivo
             ),
+            ErrorDominio::IngresoNoPendiente { id } => {
+                write!(f, "No se encontró un ingreso {} pendiente de cobro.", id)
+            }
             ErrorDominio::FacturaDuplicada => write!(f, "El número de factura ya está registrado."),
             ErrorDominio::FacturaNoPendiente { id } => {
                 write!(f, "No se encontró una factura {} pendiente de cobro.", id)

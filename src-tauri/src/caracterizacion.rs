@@ -5155,3 +5155,16 @@ fn p8_eliminar_un_cobro_en_efectivo_revierte_la_caja_y_con_la_cuenta_desaparecid
     assert_importe(despues, con_cobro, "ninguna cuenta se tocó");
 }
 
+#[test]
+fn p9_eliminar_un_cobro_en_efectivo_en_dolares_revierte_la_caja_de_dolares() {
+    let _g = entorno_aislado();
+    let (dop, usd) = (balance_cuenta("Efectivo DOP"), balance_cuenta("Efectivo USD"));
+    let id = crear_cobro_efectivo_informal("04/10/2026".into(), "En dólares".into(), importe("5"), "USD".into()).unwrap();
+    assert_importe(balance_cuenta("Efectivo USD"), usd + 5.0, "entró en la caja de dólares");
+
+    eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
+
+    assert_importe(balance_cuenta("Efectivo USD"), usd, "la caja de dólares vuelve donde estaba");
+    assert_importe(balance_cuenta("Efectivo DOP"), dop, "la de pesos no se toca");
+}
+
