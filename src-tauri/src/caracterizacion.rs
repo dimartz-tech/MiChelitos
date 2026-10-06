@@ -5346,3 +5346,147 @@ fn q9_eliminar_un_financiamiento_no_tiene_guardas_y_se_lleva_sus_movimientos() {
     assert!(crate::eliminar_prestamo(id).is_ok(), "borrar uno que ya no está no es un error");
 }
 
+// --- A-03, vertical «tarjetas» (parte 1: listar, crear y límites): caracterización antes de extraer ---
+//
+// Fijan lo que `obtener_tarjetas`, `crear_tarjeta` y `actualizar_limites_tarjeta` hacen HOY.
+
+fn alta_de_tarjeta(entidad: &str, nombre: &str, limite: &str, corte: i32, pago: i32) -> Result<i64, String> {
+    crate::crear_tarjeta(
+        entidad.into(), nombre.into(),
+        importe(limite), importe("2000"), importe("300"), importe("400"),
+        importe("500"), importe("600"), importe("700"), importe("800"),
+        corte, pago,
+    )
+}
+
+type FilaDeTarjeta = (String, String, f64, f64, f64, f64, f64, f64, f64, f64, i32, i32, Option<f64>, Option<f64>, Option<String>);
+
+fn fila_de_tarjeta(id: i64) -> FilaDeTarjeta {
+    conexion()
+        .query_row(
+            "SELECT entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares,
+                    balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago,
+                    limite_ajustado_pesos, limite_ajustado_dolares, politica_liquidacion
+             FROM tarjetas WHERE id = ?;",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?, r.get(12)?, r.get(13)?, r.get(14)?)),
+        )
+        .expect("leer tarjeta")
+}
+
+#[test]
+fn r1_una_tarjeta_se_guarda_con_cada_importe_en_su_columna_y_sin_ajuste_ni_politica() {
+    let _g = entorno_aislado();
+    let id = alta_de_tarjeta("Banco Ejemplo", "Visa Ejemplo", "1000.50", 15, 5).unwrap();
+    let f = fila_de_tarjeta(id);
+    assert_eq!((f.0.as_str(), f.1.as_str(), f.10, f.11), ("Banco Ejemplo", "Visa Ejemplo", 15, 5));
+    for (esperado, obtenido, columna) in [
+        (1000.5, f.2, "límite DOP"), (2000.0, f.3, "límite USD"), (300.0, f.4, "sobregiro DOP"), (400.0, f.5, "sobregiro USD"),
+        (500.0, f.6, "balance DOP"), (600.0, f.7, "balance USD"), (700.0, f.8, "corte DOP"), (800.0, f.9, "corte USD"),
+    ] {
+        assert_importe(obtenido, esperado, columna);
+    }
+    assert_eq!((f.12, f.13), (None, None), "sin límite ajustado");
+}
+
+#[test]
+fn r2_hallazgo_crear_tarjeta_no_recorta_los_textos_ni_valida_los_importes_solo_los_dias_los_valida_el_esquema() {
+    // **HALLAZGO, sin corregir** (protocolo: documentar y fijar; el cambio se consulta). El comando no recorta ni valida
+    // entidad y nombre (acepta vacíos y con espacios) ni que los límites sean positivos (acepta un límite negativo). Los
+    // días de corte y de pago los rechaza el esquema, con el texto crudo de SQLite. Esta prueba describe el comportamiento
+    // ACTUAL.
+    let _g = entorno_aislado();
+    let id = alta_de_tarjeta("  ", "", "-100", 15, 5).unwrap();
+    let f = fila_de_tarjeta(id);
+    assert_eq!((f.0.as_str(), f.1.as_str()), ("  ", ""), "ni se recorta ni se exige");
+    assert_importe(f.2, -100.0, "límite negativo aceptado");
+
+    for (corte, pago) in [(0, 5), (32, 5), (15, 0), (15, 32)] {
+        let e = alta_de_tarjeta("B", "T", "100", corte, pago).unwrap_err();
+        assert!(e.contains("CHECK constraint failed"), "{corte}/{pago}: {e}");
+    }
+    let n: i64 = conexion().query_row("SELECT COUNT(*) FROM tarjetas;", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 1, "las rechazadas no dejaron nada");
+}
+
+#[test]
+fn r3_actualizar_limites_guarda_cada_importe_el_ajuste_que_se_borra_y_la_politica_se_normaliza() {
+    let _g = entorno_aislado();
+    let id = alta_de_tarjeta("B", "T", "100", 15, 5).unwrap();
+    crate::actualizar_limites_tarjeta(
+        id, importe("10"), importe("20"), importe("30"), importe("40"), importe("50"), importe("60"),
+        Some(importe("7")), Some(importe("0")), Some("traduce".into()),
+    )
+    .unwrap();
+    let f = fila_de_tarjeta(id);
+    for (esperado, obtenido, columna) in [(10.0, f.2, "límite DOP"), (20.0, f.3, "límite USD"), (30.0, f.4, "sobregiro DOP"), (40.0, f.5, "sobregiro USD"), (50.0, f.8, "corte DOP"), (60.0, f.9, "corte USD")] {
+        assert_importe(obtenido, esperado, columna);
+    }
+    assert_eq!((f.12, f.13), (Some(7.0), Some(0.0)), "el cero es un tope deliberado, distinto de «sin ajuste»");
+    assert_eq!(f.14.as_deref(), Some("traduce"));
+    assert_importe(f.6, 500.0, "el balance no se toca");
+
+    crate::actualizar_limites_tarjeta(id, importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), None, None, Some("cualquier cosa".into())).unwrap();
+    let f = fila_de_tarjeta(id);
+    assert_eq!((f.12, f.13), (None, None), "sin ajuste se borra el que hubiera");
+    assert_eq!(f.14.as_deref(), Some("origen"), "una política desconocida cae en «origen»");
+    crate::actualizar_limites_tarjeta(id, importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), None, None, None).unwrap();
+    assert_eq!(fila_de_tarjeta(id).14.as_deref(), Some("origen"), "ausente también");
+}
+
+#[test]
+fn r4_hallazgo_actualizar_los_limites_de_una_tarjeta_inexistente_no_dice_nada() {
+    // **HALLAZGO, sin corregir**: el `UPDATE` afecta a cero filas y el comando devuelve `Ok`, como pasaba con H18 en las
+    // facturas. Describe el comportamiento ACTUAL.
+    let _g = entorno_aislado();
+    assert!(crate::actualizar_limites_tarjeta(
+        987_654, importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), None, None, None,
+    )
+    .is_ok());
+}
+
+#[test]
+fn r5_el_listado_trae_el_cupo_la_politica_y_las_alertas_de_corte_y_pago() {
+    use chrono::Datelike;
+    let _g = entorno_aislado();
+    let hoy = chrono::Local::now().day() as i32;
+    // Corte hoy, pago dentro de 10 días (o su equivalente con el mes de 30 días).
+    let pago = if hoy + 10 <= 31 { hoy + 10 } else { hoy + 10 - 31 };
+    let id = alta_de_tarjeta("Banco Ejemplo", "Visa Ejemplo", "1000", hoy, pago.max(1)).unwrap();
+    crate::actualizar_limites_tarjeta(id, importe("1000"), importe("2000"), importe("300"), importe("400"), importe("700"), importe("800"), Some(importe("800")), None, Some("traduce".into())).unwrap();
+
+    let t = crate::obtener_tarjetas().unwrap().into_iter().find(|t| t.id == id).unwrap();
+    assert_eq!(t.politica_liquidacion, "traduce");
+    assert_importe(t.limite_efectivo_pesos, 800.0, "el límite ajustado manda");
+    assert_importe(t.limite_efectivo_dolares, 2000.0, "sin ajuste, el aprobado");
+    assert_importe(t.disponible_pesos, 800.0 + 300.0 - 500.0, "efectivo + sobregiro - balance");
+    assert_importe(t.disponible_dolares, 2000.0 + 400.0 - 600.0, "ídem en dólares");
+    assert!(t.alerta_corte);
+    assert_eq!(t.dias_corte_msg, "Hoy es la fecha de corte");
+    let dias_pago = if pago.max(1) >= hoy { pago.max(1) - hoy } else { (30 - hoy) + pago.max(1) };
+    assert_eq!(t.alerta_pago, dias_pago <= 3);
+    assert_eq!(t.dias_pago_msg, if dias_pago == 0 { "Hoy vence el pago".to_string() } else { format!("Faltan {} días para pagar", dias_pago) });
+}
+
+#[test]
+fn r6_un_limite_ajustado_mayor_que_el_aprobado_no_lo_supera_y_el_listado_no_falla() {
+    // El límite efectivo nunca supera al aprobado, aunque el ajustado guardado lo supere.
+    let _g = entorno_aislado();
+    let id = alta_de_tarjeta("B", "T", "1000", 15, 5).unwrap();
+    conexion().execute("UPDATE tarjetas SET limite_ajustado_pesos = 5000.0 WHERE id = ?;", params![id]).unwrap();
+    let t = crate::obtener_tarjetas().unwrap().into_iter().find(|t| t.id == id).unwrap();
+    assert_importe(t.limite_efectivo_pesos, 1000.0, "el aprobado en bruto");
+    assert_importe(t.disponible_pesos, 1000.0 + 300.0 - 500.0, "aprobado + sobregiro - balance");
+}
+
+#[test]
+fn r7_las_tarjetas_se_listan_en_el_orden_en_que_se_crearon_y_una_politica_ausente_es_origen() {
+    let _g = entorno_aislado();
+    let a = alta_de_tarjeta("B", "Primera", "100", 15, 5).unwrap();
+    let b = alta_de_tarjeta("B", "Segunda", "100", 15, 5).unwrap();
+    conexion().execute("UPDATE tarjetas SET politica_liquidacion = NULL WHERE id = ?;", params![a]).unwrap();
+    let lista = crate::obtener_tarjetas().unwrap();
+    assert_eq!(lista.iter().map(|t| t.id).collect::<Vec<_>>(), vec![a, b], "orden de creación, sin ORDER BY");
+    assert_eq!(lista[0].politica_liquidacion, "origen");
+}
+
