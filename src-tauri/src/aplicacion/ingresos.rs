@@ -7,9 +7,11 @@
 //! que número, RNC y nombre no estén vacíos (lo hace el formulario). Ver `n4`; el cambio se consulta.
 
 use super::ErrorAplicacion;
+use crate::dominio::correccion::motivo_de_correccion;
 use crate::dominio::dinero::{Dinero, Porcentaje};
 use crate::dominio::errores::ErrorDominio;
-use crate::dominio::ingreso::{retencion, Deposito};
+use crate::dominio::ingreso::{corregir, retencion, Cobro, Deposito};
+use crate::dominio::tarjeta::MONEDA_LOCAL;
 use crate::puertos::repositorios::*;
 
 pub struct DatosFactura {
@@ -71,6 +73,133 @@ pub fn marcar_ingreso_pagado(
 
     almacen.ajustar_saldo(deposito.cuenta_id(), deposito.importe())?;
     Ok(())
+}
+
+pub struct DatosCorreccionDeFactura {
+    pub id: i64,
+    pub numero_factura: String,
+    pub cliente_id: i64,
+    pub fecha_emision: String,
+    pub monto_total: Dinero,
+    pub porcentaje_retencion: f64,
+    /// Lo cobrado de verdad cuando no entró el neto entero. `None` es la regla: se da por cobrado el neto completo.
+    pub cobro_parcial: Option<Dinero>,
+    /// Obligatorio **solo cuando la corrección mueve dinero**: exigir explicación donde no hay riesgo enseña a
+    /// escribirla sin pensar.
+    pub motivo: Option<String>,
+}
+
+/// Cómo terminó una corrección; el comando lo convierte en el texto que ve el titular.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResultadoDeCorreccion {
+    /// Sin cobrar, o cobrada pero sin diferencia que mover: no se abre caso.
+    Corregida,
+    /// Se movió dinero: se ajustó esa cuenta y quedó ese caso.
+    Ajustada { cuenta: String, ajuste: Dinero, caso: String },
+    /// Cobrada y con ajuste, pero sin cuenta de depósito registrada: queda el caso y no se mueve ningún saldo.
+    SinCuentaDeDeposito { caso: String },
+}
+
+/// Corrige una factura. Orden (el de siempre): la factura, el cálculo, la fila y, solo si hay dinero que mover,
+/// el caso (que valida el motivo), lo recibido y el saldo de la cuenta de depósito.
+pub fn actualizar_ingreso(
+    datos: DatosCorreccionDeFactura,
+    almacen: &mut (impl AlmacenIngresos + RepositorioCuentas + RegistroDeCorrecciones),
+) -> Result<ResultadoDeCorreccion, ErrorAplicacion> {
+    // Lo que la factura decía antes: hace falta para saber cuánto mover, no solo qué escribir.
+    let antes = almacen
+        .estado_de_factura(datos.id)?
+        .ok_or(ErrorDominio::FacturaNoEncontrada { id: datos.id })?;
+    // Una factura sin cobrar parte de cero: corregirla y darla por cobrada sería un ajuste por el neto entero.
+    let recibido_anterior = Dinero::nuevo(antes.monto_recibido.unwrap_or(0.0), MONEDA_LOCAL)?;
+
+    let cobro = match datos.cobro_parcial {
+        Some(parte) => Cobro::Parcial(parte),
+        None => Cobro::Completo,
+    };
+    let correccion = corregir(
+        datos.monto_total,
+        Porcentaje::desde_porcentaje(datos.porcentaje_retencion)?,
+        recibido_anterior,
+        cobro,
+    )?;
+
+    almacen.corregir_factura(&FacturaCorregida {
+        id: datos.id,
+        numero_factura: datos.numero_factura.clone(),
+        cliente_id: datos.cliente_id,
+        fecha_emision: datos.fecha_emision,
+        monto_total: datos.monto_total.unidades(),
+        porcentaje_retencion: datos.porcentaje_retencion,
+        monto_retenido: correccion.retencion.unidades(),
+    })?;
+
+    // Una factura sin cobrar no tiene dinero que reajustar: basta con reescribir sus cifras.
+    if antes.estatus != "pagada" || correccion.ajuste.es_cero() {
+        return Ok(ResultadoDeCorreccion::Corregida);
+    }
+
+    // Aquí sí se mueve un saldo, de modo que queda constancia: la misma clase de corrección que un borrado.
+    let motivo = motivo_de_correccion(datos.motivo.as_deref().unwrap_or(""))?;
+    let caso = almacen.anotar_caso(&CasoAAnotar {
+        tipo: "corrección de factura".to_string(),
+        referencia_id: datos.id,
+        descripcion: format!(
+            "Factura {}: {:.2} → {:.2}",
+            datos.numero_factura,
+            antes.monto_total,
+            datos.monto_total.unidades()
+        ),
+        importe: Some(correccion.ajuste.unidades()),
+        divisa: Some(MONEDA_LOCAL.codigo().to_string()),
+        motivo,
+    })?;
+    almacen.fijar_recibido(datos.id, correccion.recibido.unidades())?;
+
+    let Some(cuenta) = antes.institucion_deposito.filter(|d| !d.is_empty()) else {
+        return Ok(ResultadoDeCorreccion::SinCuentaDeDeposito { caso });
+    };
+    let Some(cuenta_id) = almacen.cuenta_por_nombre(&cuenta)? else {
+        return Err(ErrorDominio::CuentaDeDepositoInexistente { cuenta }.into());
+    };
+    almacen.ajustar_saldo(cuenta_id, correccion.ajuste)?;
+    Ok(ResultadoDeCorreccion::Ajustada { cuenta, ajuste: correccion.ajuste, caso })
+}
+
+/// Elimina una factura. Abre el caso **antes** de borrar (con la factura todavía a la vista) y, si estaba cobrada,
+/// revierte el abono **por el nombre** de la cuenta; si esa cuenta ya no existe borra igual y no mueve ningún saldo
+/// (a diferencia de corregir, que se niega: comportamiento actual, fijado por `o6`).
+pub fn eliminar_ingreso(
+    id: i64,
+    motivo: &str,
+    almacen: &mut (impl AlmacenIngresos + RepositorioCuentas + RegistroDeCorrecciones),
+) -> Result<String, ErrorAplicacion> {
+    let factura = almacen
+        .estado_de_factura(id)?
+        .ok_or(ErrorAlmacen::NoEncontrado { entidad: "factura", id })?;
+    let motivo = motivo_de_correccion(motivo)?;
+    let caso = almacen.anotar_caso(&CasoAAnotar {
+        tipo: "factura".to_string(),
+        referencia_id: id,
+        descripcion: format!("Factura {}", factura.numero_factura),
+        importe: Some(factura.monto_total),
+        divisa: Some("DOP".to_string()),
+        motivo,
+    })?;
+
+    if factura.estatus == "pagada" {
+        if let Some(cuenta) = factura.institucion_deposito.filter(|d| !d.is_empty()) {
+            // Sin recorte a cero (H20): si lo cobrado ya se gastó, deshacer el cobro deja la cuenta en negativo,
+            // que es el estado verdadero: el dinero salió.
+            if let Some(cuenta_id) = almacen.cuenta_por_nombre(&cuenta)? {
+                let recibido = Dinero::nuevo(factura.monto_recibido.unwrap_or(0.0), MONEDA_LOCAL)?;
+                almacen.ajustar_saldo(cuenta_id, recibido.negado())?;
+            }
+        }
+    }
+
+    almacen.eliminar_factura(id)?;
+    Ok(caso)
 }
 
 #[cfg(test)]
@@ -189,5 +318,181 @@ mod tests {
         assert_eq!(lista.iter().map(|i| i.id).collect::<Vec<_>>(), vec![segunda, primera]);
         assert_eq!((lista[1].cliente_nombre.as_str(), lista[1].cliente_rnc.as_str(), lista[1].estatus.as_str()), ("Uno", "101", "pagada"));
         assert_eq!(lista[0].monto_recibido, None);
+    }
+}
+
+#[cfg(test)]
+mod tests_de_correccion {
+    use super::*;
+    use crate::dominio::dinero::Divisa;
+    use crate::puertos::dobles::AlmacenEnMemoria;
+
+    const MOTIVO: &str = "Corrección de prueba del sistema";
+
+    fn dop(u: f64) -> Dinero {
+        Dinero::nuevo(u, Divisa::Dop).unwrap()
+    }
+
+    fn almacen_con_factura_cobrada() -> (AlmacenEnMemoria, i64) {
+        let mut a = AlmacenEnMemoria::nuevo().con_cuenta(10, "Cuenta DOP", dop(100.0));
+        let id = crear_ingreso(
+            DatosFactura {
+                numero_factura: "F-1".into(),
+                rnc_cliente: "101".into(),
+                nombre_cliente: "C".into(),
+                fecha_emision: "05/10/2026".into(),
+                monto_total: dop(2000.0),
+                porcentaje_retencion: 15.0,
+            },
+            &mut a,
+        )
+        .unwrap();
+        marcar_ingreso_pagado(id, 10, "06/10/2026", dop(1700.0), &mut a).unwrap();
+        (a, id)
+    }
+
+    fn correccion(id: i64, total: f64, motivo: Option<&str>) -> DatosCorreccionDeFactura {
+        DatosCorreccionDeFactura {
+            id,
+            numero_factura: "F-1".into(),
+            cliente_id: 1,
+            fecha_emision: "05/10/2026".into(),
+            monto_total: dop(total),
+            porcentaje_retencion: 15.0,
+            cobro_parcial: None,
+            motivo: motivo.map(|m| m.to_string()),
+        }
+    }
+
+    fn dominio(e: ErrorAplicacion) -> ErrorDominio {
+        match e {
+            ErrorAplicacion::Dominio(d) => d,
+            otro => panic!("se esperaba un error de dominio y fue {otro:?}"),
+        }
+    }
+
+    #[test]
+    fn corregir_al_alza_acredita_la_diferencia_abre_un_caso_y_fija_lo_recibido() {
+        let (mut a, id) = almacen_con_factura_cobrada();
+        let r = actualizar_ingreso(correccion(id, 3000.0, Some(MOTIVO)), &mut a).unwrap();
+        assert_eq!(r, ResultadoDeCorreccion::Ajustada { cuenta: "Cuenta DOP".into(), ajuste: dop(850.0), caso: "CASO-0001".into() });
+        assert_eq!(a.saldo(10).unwrap(), dop(100.0 + 1700.0 + 850.0));
+        assert_eq!(a.facturas[0].monto_recibido, Some(2550.0));
+        assert!((a.facturas[0].monto_retenido - 450.0).abs() < 1e-9);
+        let caso = &a.casos[0];
+        assert_eq!((caso.tipo.as_str(), caso.referencia_id), ("corrección de factura", id));
+        assert_eq!(caso.descripcion, format!("Factura F-1: {:.2} → {:.2}", 2000.0, 3000.0));
+    }
+
+    #[test]
+    fn corregir_sin_diferencia_que_mover_no_abre_caso_ni_pide_motivo() {
+        let (mut a, id) = almacen_con_factura_cobrada();
+        let r = actualizar_ingreso(correccion(id, 2000.0, None), &mut a).unwrap();
+        assert_eq!(r, ResultadoDeCorreccion::Corregida);
+        assert!(a.casos.is_empty());
+        assert_eq!(a.saldo(10).unwrap(), dop(1800.0));
+    }
+
+    #[test]
+    fn corregir_una_factura_sin_cobrar_solo_reescribe_sus_cifras() {
+        let mut a = AlmacenEnMemoria::nuevo();
+        let id = crear_ingreso(
+            DatosFactura { numero_factura: "F-9".into(), rnc_cliente: "1".into(), nombre_cliente: "C".into(), fecha_emision: "x".into(), monto_total: dop(100.0), porcentaje_retencion: 0.0 },
+            &mut a,
+        )
+        .unwrap();
+        let r = actualizar_ingreso(correccion(id, 500.0, None), &mut a).unwrap();
+        assert_eq!(r, ResultadoDeCorreccion::Corregida);
+        assert_eq!(a.facturas[0].monto_total, 500.0);
+        assert!(a.casos.is_empty());
+    }
+
+    #[test]
+    fn mover_dinero_exige_un_motivo_que_explique_y_dice_cuanto_falta() {
+        let (mut a, id) = almacen_con_factura_cobrada();
+        for motivo in [None, Some("  ok ")] {
+            let e = actualizar_ingreso(correccion(id, 3000.0, motivo), &mut a).unwrap_err();
+            assert!(matches!(dominio(e), ErrorDominio::MotivoInsuficiente { .. }));
+        }
+        assert!(a.casos.is_empty());
+    }
+
+    #[test]
+    fn corregir_una_factura_inexistente_o_con_cuenta_desaparecida_falla_con_su_causa() {
+        let (mut a, id) = almacen_con_factura_cobrada();
+        let e = actualizar_ingreso(correccion(404, 10.0, None), &mut a).unwrap_err();
+        assert_eq!(dominio(e), ErrorDominio::FacturaNoEncontrada { id: 404 });
+
+        a.cuentas.get_mut(&10).unwrap().nombre = "Otro Nombre".into();
+        let e = actualizar_ingreso(correccion(id, 3000.0, Some(MOTIVO)), &mut a).unwrap_err();
+        assert_eq!(dominio(e), ErrorDominio::CuentaDeDepositoInexistente { cuenta: "Cuenta DOP".into() });
+    }
+
+    #[test]
+    fn sin_cuenta_de_deposito_registrada_queda_el_caso_y_no_se_mueve_ningun_saldo() {
+        let (mut a, id) = almacen_con_factura_cobrada();
+        a.facturas[0].institucion_deposito = None;
+        let r = actualizar_ingreso(correccion(id, 3000.0, Some(MOTIVO)), &mut a).unwrap();
+        assert_eq!(r, ResultadoDeCorreccion::SinCuentaDeDeposito { caso: "CASO-0001".into() });
+        assert_eq!(a.saldo(10).unwrap(), dop(1800.0));
+    }
+
+    #[test]
+    fn eliminar_una_factura_cobrada_revierte_el_abono_deja_un_caso_y_la_borra() {
+        let (mut a, id) = almacen_con_factura_cobrada();
+        let caso = eliminar_ingreso(id, MOTIVO, &mut a).unwrap();
+        assert_eq!(caso, "CASO-0001");
+        assert_eq!(a.saldo(10).unwrap(), dop(100.0));
+        assert!(a.facturas.is_empty());
+        assert_eq!((a.casos[0].tipo.as_str(), a.casos[0].descripcion.as_str(), a.casos[0].importe), ("factura", "Factura F-1", Some(2000.0)));
+    }
+
+    #[test]
+    fn eliminar_con_el_saldo_ya_gastado_deja_la_cuenta_en_negativo_sin_recorte() {
+        let (mut a, id) = almacen_con_factura_cobrada();
+        a.cuentas.get_mut(&10).unwrap().saldo = dop(50.0);
+        eliminar_ingreso(id, MOTIVO, &mut a).unwrap();
+        assert_eq!(a.saldo(10).unwrap(), dop(-1650.0));
+    }
+
+    #[test]
+    fn eliminar_rechaza_inexistente_y_motivo_corto_sin_borrar_nada() {
+        let (mut a, id) = almacen_con_factura_cobrada();
+        let e = eliminar_ingreso(404, MOTIVO, &mut a).unwrap_err();
+        assert_eq!(e.to_string(), "No se encontró factura con identificador 404.");
+        let e = eliminar_ingreso(id, "corto", &mut a).unwrap_err();
+        assert!(matches!(dominio(e), ErrorDominio::MotivoInsuficiente { .. }));
+        assert_eq!(a.facturas.len(), 1);
+        assert!(a.casos.is_empty());
+    }
+
+    #[test]
+    fn eliminar_con_la_cuenta_desaparecida_borra_igual_y_no_mueve_saldos() {
+        let (mut a, id) = almacen_con_factura_cobrada();
+        a.cuentas.get_mut(&10).unwrap().nombre = "Otro Nombre".into();
+        eliminar_ingreso(id, MOTIVO, &mut a).unwrap();
+        assert!(a.facturas.is_empty());
+        assert_eq!(a.saldo(10).unwrap(), dop(1800.0));
+    }
+
+    #[test]
+    fn solo_se_revierte_lo_cobrado_aunque_una_factura_pendiente_arrastre_un_deposito() {
+        // Datos incoherentes (pendiente pero con cuenta y recibido): la guarda de estatus manda, no el depósito.
+        let (mut a, id) = almacen_con_factura_cobrada();
+        a.facturas[0].estatus = "emitida".into();
+        eliminar_ingreso(id, MOTIVO, &mut a).unwrap();
+        assert_eq!(a.saldo(10).unwrap(), dop(1800.0), "no se revierte nada: no estaba cobrada");
+    }
+
+    #[test]
+    fn eliminar_una_factura_sin_cobrar_no_toca_ningun_saldo() {
+        let mut a = AlmacenEnMemoria::nuevo().con_cuenta(10, "Cuenta DOP", dop(321.0));
+        let id = crear_ingreso(
+            DatosFactura { numero_factura: "F-2".into(), rnc_cliente: "2".into(), nombre_cliente: "C".into(), fecha_emision: "x".into(), monto_total: dop(100.0), porcentaje_retencion: 0.0 },
+            &mut a,
+        )
+        .unwrap();
+        eliminar_ingreso(id, MOTIVO, &mut a).unwrap();
+        assert_eq!(a.saldo(10).unwrap(), dop(321.0));
     }
 }
