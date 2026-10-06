@@ -93,6 +93,65 @@ impl GastoGuardado {
     }
 }
 
+/// Un ingreso informal tal como se lee.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InformalLeido {
+    pub id: i64,
+    pub fecha: String,
+    pub descripcion: String,
+    pub monto: f64,
+    pub estatus: String,
+    pub institucion_deposito: Option<String>,
+    pub fecha_pago: Option<String>,
+    pub monto_recibido: Option<f64>,
+}
+
+/// Lo que hay que saber de un ingreso informal para eliminarlo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EstadoDeInformal {
+    pub descripcion: String,
+    pub estatus: String,
+    pub monto: f64,
+    pub institucion_deposito: Option<String>,
+    pub monto_recibido: Option<f64>,
+}
+
+/// Ingresos informales (los que no llevan factura): alta, cobro y consulta. El dinero que entra a la cuenta se
+/// mueve por `RepositorioCuentas`.
+pub trait AlmacenInformales {
+    /// Del más nuevo al más viejo.
+    fn informales(&self) -> Result<Vec<InformalLeido>, ErrorAlmacen>;
+    /// Nace «pendiente».
+    fn insertar_informal(&mut self, fecha: &str, descripcion: &str, monto: f64) -> Result<i64, ErrorAlmacen>;
+    /// Nace ya «pagado», con la caja y la fecha dadas.
+    fn insertar_cobro_en_efectivo(
+        &mut self,
+        fecha: &str,
+        descripcion: &str,
+        monto: f64,
+        caja: &str,
+    ) -> Result<i64, ErrorAlmacen>;
+    fn estado_de_informal(&self, id: i64) -> Result<Option<EstadoDeInformal>, ErrorAlmacen>;
+    /// Lo da por cobrado **solo si estaba pendiente**. `false` si no hay tal ingreso pendiente.
+    fn marcar_informal_cobrado(
+        &mut self,
+        id: i64,
+        cuenta_id: i64,
+        nombre_cuenta: &str,
+        fecha: &str,
+        monto_recibido: f64,
+    ) -> Result<bool, ErrorAlmacen>;
+    fn eliminar_informal(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+}
+
+/// Buscar cuentas por nombre o por identificador. Los cobros guardan el depósito **por el nombre** de la cuenta,
+/// de modo que revertirlos exige traducir ese nombre a su identificador.
+pub trait BusquedaDeCuentas {
+    /// `NoEncontrado` si la cuenta no existe.
+    fn nombre_de_cuenta(&self, cuenta_id: i64) -> Result<String, ErrorAlmacen>;
+    fn cuenta_por_nombre(&self, nombre: &str) -> Result<Option<i64>, ErrorAlmacen>;
+}
+
 /// Lo que se anota de una corrección. El motivo llega **ya validado** por el caso de uso.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CasoAAnotar {
@@ -174,15 +233,11 @@ pub trait AlmacenIngresos {
     fn cliente_por_rnc(&self, rnc: &str) -> Result<Option<i64>, ErrorAlmacen>;
     fn registrar_cliente(&mut self, rnc: &str, nombre: &str) -> Result<i64, ErrorAlmacen>;
     fn insertar_factura(&mut self, factura: &FacturaNueva) -> Result<i64, ErrorAlmacen>;
-    /// `NoEncontrado` si la cuenta no existe.
-    fn nombre_de_cuenta(&self, cuenta_id: i64) -> Result<String, ErrorAlmacen>;
     /// `None` si no hay ninguna factura con ese identificador.
     fn estado_de_factura(&self, id: i64) -> Result<Option<EstadoDeFactura>, ErrorAlmacen>;
     fn corregir_factura(&mut self, factura: &FacturaCorregida) -> Result<(), ErrorAlmacen>;
     fn fijar_recibido(&mut self, id: i64, monto_recibido: f64) -> Result<(), ErrorAlmacen>;
     fn eliminar_factura(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
-    /// El depósito de una factura se guarda **por el nombre** de la cuenta; esto lo traduce a su identificador.
-    fn cuenta_por_nombre(&self, nombre: &str) -> Result<Option<i64>, ErrorAlmacen>;
     /// La da por cobrada **solo si estaba pendiente**. `false` si no hay tal factura pendiente.
     fn marcar_cobrada(
         &mut self,

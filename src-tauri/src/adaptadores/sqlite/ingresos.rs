@@ -77,14 +77,6 @@ impl AlmacenIngresos for AlmacenSqlite<'_> {
         Ok(self.tx.last_insert_rowid())
     }
 
-    fn nombre_de_cuenta(&self, cuenta_id: i64) -> Result<String, ErrorAlmacen> {
-        self.tx
-            .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_id], |r| r.get::<_, String>(0))
-            .optional()
-            .map_err(fallo)?
-            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
-    }
-
     fn estado_de_factura(&self, id: i64) -> Result<Option<EstadoDeFactura>, ErrorAlmacen> {
         self.tx
             .query_row(
@@ -129,13 +121,6 @@ impl AlmacenIngresos for AlmacenSqlite<'_> {
         Ok(())
     }
 
-    fn cuenta_por_nombre(&self, nombre: &str) -> Result<Option<i64>, ErrorAlmacen> {
-        self.tx
-            .query_row("SELECT id FROM cuentas_ahorro WHERE nombre = ?;", [nombre], |r| r.get(0))
-            .optional()
-            .map_err(fallo)
-    }
-
     fn marcar_cobrada(
         &mut self,
         id: i64,
@@ -172,5 +157,121 @@ impl RegistroDeCorrecciones for AlmacenSqlite<'_> {
             &caso.motivo,
         )
         .map_err(ErrorAlmacen::Fallo)
+    }
+}
+
+impl BusquedaDeCuentas for AlmacenSqlite<'_> {
+    fn nombre_de_cuenta(&self, cuenta_id: i64) -> Result<String, ErrorAlmacen> {
+        self.tx
+            .query_row("SELECT nombre FROM cuentas_ahorro WHERE id = ?;", [cuenta_id], |r| r.get::<_, String>(0))
+            .optional()
+            .map_err(fallo)?
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
+    }
+
+    fn cuenta_por_nombre(&self, nombre: &str) -> Result<Option<i64>, ErrorAlmacen> {
+        self.tx
+            .query_row("SELECT id FROM cuentas_ahorro WHERE nombre = ?;", [nombre], |r| r.get(0))
+            .optional()
+            .map_err(fallo)
+    }
+}
+
+impl AlmacenInformales for AlmacenSqlite<'_> {
+    fn informales(&self) -> Result<Vec<InformalLeido>, ErrorAlmacen> {
+        let mut stmt = self
+            .tx
+            .prepare(
+                "SELECT id, fecha, descripcion, monto, estatus, institucion_deposito, fecha_pago, monto_recibido
+                 FROM ingresos_informales ORDER BY id DESC;",
+            )
+            .map_err(fallo)?;
+        let filas = stmt
+            .query_map([], |r| {
+                Ok(InformalLeido {
+                    id: r.get(0)?,
+                    fecha: r.get(1)?,
+                    descripcion: r.get(2)?,
+                    monto: r.get(3)?,
+                    estatus: r.get(4)?,
+                    institucion_deposito: r.get(5)?,
+                    fecha_pago: r.get(6)?,
+                    monto_recibido: r.get(7)?,
+                })
+            })
+            .map_err(fallo)?;
+        filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
+    }
+
+    fn insertar_informal(&mut self, fecha: &str, descripcion: &str, monto: f64) -> Result<i64, ErrorAlmacen> {
+        self.tx
+            .execute(
+                "INSERT INTO ingresos_informales (fecha, descripcion, monto, estatus) VALUES (?, ?, ?, 'pendiente');",
+                (fecha, descripcion, monto),
+            )
+            .map_err(fallo)?;
+        Ok(self.tx.last_insert_rowid())
+    }
+
+    fn insertar_cobro_en_efectivo(
+        &mut self,
+        fecha: &str,
+        descripcion: &str,
+        monto: f64,
+        caja: &str,
+    ) -> Result<i64, ErrorAlmacen> {
+        self.tx
+            .execute(
+                "INSERT INTO ingresos_informales (fecha, descripcion, monto, estatus, institucion_deposito, fecha_pago, monto_recibido)
+                 VALUES (?, ?, ?, 'pagado', ?, ?, ?);",
+                (fecha, descripcion, monto, caja, fecha, monto),
+            )
+            .map_err(fallo)?;
+        Ok(self.tx.last_insert_rowid())
+    }
+
+    fn estado_de_informal(&self, id: i64) -> Result<Option<EstadoDeInformal>, ErrorAlmacen> {
+        self.tx
+            .query_row(
+                "SELECT descripcion, estatus, monto, institucion_deposito, monto_recibido
+                 FROM ingresos_informales WHERE id = ?;",
+                [id],
+                |r| {
+                    Ok(EstadoDeInformal {
+                        descripcion: r.get(0)?,
+                        estatus: r.get(1)?,
+                        monto: r.get(2)?,
+                        institucion_deposito: r.get(3)?,
+                        monto_recibido: r.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(fallo)
+    }
+
+    fn marcar_informal_cobrado(
+        &mut self,
+        id: i64,
+        cuenta_id: i64,
+        nombre_cuenta: &str,
+        fecha: &str,
+        monto_recibido: f64,
+    ) -> Result<bool, ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute(
+                "UPDATE ingresos_informales SET estatus = 'pagado', institucion_deposito = ?,
+                                                cuenta_ahorro_id = ?, fecha_pago = ?, monto_recibido = ?
+                 WHERE id = ? AND estatus <> 'pagado';",
+                (nombre_cuenta, cuenta_id, fecha, monto_recibido, id),
+            )
+            .map_err(fallo)?;
+        Ok(filas > 0)
+    }
+
+    fn eliminar_informal(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.tx.execute("DELETE FROM ingresos_informales WHERE id = ?;", [id]).map_err(fallo)?;
+        Ok(())
     }
 }
