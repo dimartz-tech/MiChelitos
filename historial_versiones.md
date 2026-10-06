@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.79.0 (Versión Actual) - 2026-10-05
+## 🚀 Versión 1.80.0 (Versión Actual) - 2026-10-05
+**Auditoría A-03, segundo vertical: las cuentas salen de `main.rs`.** Alta, corrección, listado y el historial de transferencias pasan a dominio, caso de uso y adaptador. Sin cambios de reglas.
+
+### 🔧 Qué se hace
+* **Orden de trabajo:** primero 8 pruebas de caracterización (`m1`–`m8`, en su propio commit, contra el código de antes) y después la extracción, con esas pruebas intactas. Transferir y eliminar cuentas ya pasaban por casos de uso.
+* **Dominio** (`dominio::cuenta`): nombre recortado y no vacío; entidad en blanco = ausente; comisión **ninguna ≠ cero**, y la negativa se rechaza. Los mensajes son los de siempre.
+* **Caso de uso** (`aplicacion::cuentas`): crear y corregir cuenta, con el mismo orden de comprobaciones (nombre, luego comisión). El saldo **no** se corrige por aquí.
+* **Puerto y adaptadores:** `CatalogoDeCuentas`, `CuentasSqlite` y el doble `CuentasEnMemoria`.
+* **`main.rs`:** cuatro comandos delgados sobre `con_cuentas`. Comandos con SQL directo: **49 → 46** (de 54 al empezar A-03).
+* **Un cambio visible, en casos que la interfaz casi no produce:** un nombre repetido o una divisa ilegal los rechaza el esquema como siempre, pero el mensaje ahora empieza por «Error de almacenamiento: » (antes era el texto crudo de SQLite). Cada comando corre ahora en una transacción.
+
+### 🧪 Pruebas
+* 8 de caracterización, 3 del dominio y 6 del caso de uso con el doble. Trece mutaciones (nombre sin recortar, entidad en blanco, comisión negativa o cero tratada como ninguna, comprobaciones en otro orden, inexistente sin aviso, saldo o entidad perdidos, orden de las listas, columnas cruzadas, comisión sin divisa local): todas detectadas. **Rust 677 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): alta con recorte y céntimo decidido (250.005 → 250.01; 75.005 → 75.01), vacío, negativa, repetida, divisa ilegal, corrección, inexistente y el historial de una transferencia con los nombres.
+
+---
+
+## 🚀 Versión 1.79.0 - 2026-10-05
 **Auditoría A-03, primer vertical: categorías y clientes salen de `main.rs` y pasan a dominio, caso de uso y adaptador.** Sin cambios de reglas ni de mensajes.
 
 ### 🔧 Qué se hace

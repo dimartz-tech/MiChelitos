@@ -163,6 +163,34 @@ fn exigir_divisa(esperada: Divisa, importe: Dinero) -> Result<(), ErrorDominio> 
     Ok(())
 }
 
+// --- Datos declarativos de una cuenta -----------------------------------------------------------
+//
+// Salen de `crear_cuenta` y `actualizar_cuenta` (A-03) sin cambiar ninguna regla ni mensaje.
+
+/// El nombre de una cuenta, recortado; vacío no es un nombre.
+pub fn nombre_de_cuenta(entrada: &str) -> Result<String, ErrorDominio> {
+    let limpio = entrada.trim();
+    if limpio.is_empty() {
+        return Err(ErrorDominio::CuentaSinNombre);
+    }
+    Ok(limpio.to_string())
+}
+
+/// La entidad de una cuenta. Una cadena en blanco y un campo sin rellenar significan lo mismo —no la ha
+/// declarado— y ambos son `None`, para que la ausencia tenga una sola representación.
+pub fn entidad_declarada(entidad: Option<String>) -> Option<String> {
+    entidad.map(|e| e.trim().to_string()).filter(|e| !e.is_empty())
+}
+
+/// La tarifa fija por pago de impuestos. **`None` y cero no son lo mismo**: ninguna tarifa pactada frente
+/// a «el banco no cobra». Una tarifa negativa se rechaza: sería un banco que paga por cobrar.
+pub fn comision_declarada(comision: Option<Dinero>) -> Result<Option<Dinero>, ErrorDominio> {
+    match comision {
+        Some(c) if c.es_negativo() => Err(ErrorDominio::ComisionNegativa),
+        otra => Ok(otra),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,5 +398,35 @@ mod tests {
             cuenta_dop(1), cuenta_usd(2), dop(6_000.0), usd(100.0), dop(0.0)
         )
         .is_ok());
+    }
+}
+
+#[cfg(test)]
+mod tests_declarativos {
+    use super::*;
+
+    fn dop(u: f64) -> Dinero {
+        Dinero::nuevo(u, Divisa::Dop).unwrap()
+    }
+
+    #[test]
+    fn el_nombre_se_recorta_y_no_puede_ser_vacio() {
+        assert_eq!(nombre_de_cuenta("  Ahorros ").unwrap(), "Ahorros");
+        assert_eq!(nombre_de_cuenta("   "), Err(ErrorDominio::CuentaSinNombre));
+    }
+
+    #[test]
+    fn una_entidad_en_blanco_es_lo_mismo_que_ninguna() {
+        assert_eq!(entidad_declarada(None), None);
+        assert_eq!(entidad_declarada(Some("   ".into())), None);
+        assert_eq!(entidad_declarada(Some(" Banco ".into())), Some("Banco".into()));
+    }
+
+    #[test]
+    fn la_comision_distingue_ninguna_de_cero_y_rechaza_la_negativa() {
+        assert_eq!(comision_declarada(None), Ok(None));
+        assert_eq!(comision_declarada(Some(dop(0.0))), Ok(Some(dop(0.0))));
+        assert_eq!(comision_declarada(Some(dop(75.01))), Ok(Some(dop(75.01))));
+        assert_eq!(comision_declarada(Some(dop(-0.01))), Err(ErrorDominio::ComisionNegativa));
     }
 }

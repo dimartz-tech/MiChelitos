@@ -1,2 +1,3 @@
 pub mod catalogos;
+pub mod cuentas;
 pub mod gastos;
