@@ -37,6 +37,8 @@ pub enum ErrorDominio {
     /// negativo **subiría** la deuda.
     AbonoSinImporte,
     /// Catálogos (categorías y clientes). Los textos son los de siempre: la interfaz los muestra tal cual.
+    FacturaDuplicada,
+    FacturaNoPendiente { id: i64 },
     CuentaSinNombre,
     ComisionNegativa,
     CuentaNoEncontrada { id: i64 },
@@ -81,6 +83,10 @@ impl fmt::Display for ErrorDominio {
                 f,
                 "Una suscripción debe cobrar un importe mayor que cero: con cero o menos no cobraría, abonaría a la tarjeta cada período."
             ),
+            ErrorDominio::FacturaDuplicada => write!(f, "El número de factura ya está registrado."),
+            ErrorDominio::FacturaNoPendiente { id } => {
+                write!(f, "No se encontró una factura {} pendiente de cobro.", id)
+            }
             ErrorDominio::CuentaSinNombre => write!(f, "El nombre de la cuenta no puede estar vacío."),
             ErrorDominio::ComisionNegativa => write!(f, "La comisión por pago de impuestos no puede ser negativa."),
             ErrorDominio::CuentaNoEncontrada { id } => write!(f, "No se encontró la cuenta {}.", id),

@@ -93,6 +93,58 @@ impl GastoGuardado {
     }
 }
 
+/// Una factura tal como la muestra el listado: con los datos de su cliente.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IngresoLeido {
+    pub id: i64,
+    pub numero_factura: String,
+    pub cliente_id: i64,
+    pub cliente_nombre: String,
+    pub cliente_rnc: String,
+    pub fecha_emision: String,
+    pub estatus: String,
+    pub monto_total: f64,
+    pub porcentaje_retencion: f64,
+    pub monto_retenido: f64,
+    pub institucion_deposito: Option<String>,
+    pub fecha_pago: Option<String>,
+    pub monto_recibido: Option<f64>,
+}
+
+/// Una factura nueva, con todo ya decidido (el céntimo y la retención). Nace «emitida».
+#[derive(Debug, Clone, PartialEq)]
+pub struct FacturaNueva {
+    pub numero_factura: String,
+    pub cliente_id: i64,
+    pub fecha_emision: String,
+    pub monto_total: f64,
+    pub porcentaje_retencion: f64,
+    pub monto_retenido: f64,
+}
+
+/// Facturas (ingresos formales): alta, cobro y consulta. El dinero que entra a la cuenta se mueve por
+/// `RepositorioCuentas`; aquí solo queda lo propio de la factura y de su cliente.
+pub trait AlmacenIngresos {
+    /// De la más nueva a la más vieja.
+    fn ingresos(&self) -> Result<Vec<IngresoLeido>, ErrorAlmacen>;
+    /// Si ya hay una factura con ese número, **sin distinguir mayúsculas**.
+    fn factura_existe(&self, numero: &str) -> Result<bool, ErrorAlmacen>;
+    fn cliente_por_rnc(&self, rnc: &str) -> Result<Option<i64>, ErrorAlmacen>;
+    fn registrar_cliente(&mut self, rnc: &str, nombre: &str) -> Result<i64, ErrorAlmacen>;
+    fn insertar_factura(&mut self, factura: &FacturaNueva) -> Result<i64, ErrorAlmacen>;
+    /// `NoEncontrado` si la cuenta no existe.
+    fn nombre_de_cuenta(&self, cuenta_id: i64) -> Result<String, ErrorAlmacen>;
+    /// La da por cobrada **solo si estaba pendiente**. `false` si no hay tal factura pendiente.
+    fn marcar_cobrada(
+        &mut self,
+        id: i64,
+        cuenta_id: i64,
+        nombre_cuenta: &str,
+        fecha: &str,
+        monto_recibido: f64,
+    ) -> Result<bool, ErrorAlmacen>;
+}
+
 /// Una cuenta de ahorro tal como se lee. Importes en `f64`: es un modelo de lectura, igual que las columnas.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CuentaLeida {
