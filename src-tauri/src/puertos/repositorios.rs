@@ -93,6 +93,36 @@ impl GastoGuardado {
     }
 }
 
+/// Un abono tal como lo muestra el historial: con el nombre de la cuenta de la que salió, si la hubo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AbonoLeido {
+    pub id: i64,
+    pub fecha_pago: String,
+    pub monto_pagado: f64,
+    pub divisa: String,
+    pub cuenta_ahorro_id: Option<i64>,
+    pub cuenta_nombre: Option<String>,
+    pub tasa_cambio: Option<f64>,
+}
+
+/// Lo que hace falta de un abono para abrir el caso de corrección al revertirlo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResumenDeAbono {
+    pub fecha_pago: String,
+    pub monto_pagado: f64,
+    pub divisa: String,
+}
+
+/// Consultas de los abonos a tarjeta que no son del registro ni de la reversión.
+pub trait ConsultaDeAbonos {
+    /// Del más nuevo al más viejo. Una tarjeta sin abonos (o inexistente) da una lista vacía.
+    fn abonos_de_tarjeta(&self, tarjeta_id: i64) -> Result<Vec<AbonoLeido>, ErrorAlmacen>;
+    /// `None` si no hay ningún abono con ese identificador.
+    fn resumen_de_abono(&self, id: i64) -> Result<Option<ResumenDeAbono>, ErrorAlmacen>;
+    /// La categoría «Otros», a la que va la comisión de un abono.
+    fn categoria_de_sistema(&self) -> Result<i64, ErrorAlmacen>;
+}
+
 /// Una tarjeta tal como se lee.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TarjetaLeida {

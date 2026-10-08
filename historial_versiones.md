@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.85.0 (Versión Actual) - 2026-10-06
+## 🚀 Versión 1.86.0 (Versión Actual) - 2026-10-08
+**Auditoría A-03, quinto vertical (parte 2 de Tarjetas): los abonos.** Registrar, listar y revertir un abono a tarjeta dejan de llevar SQL en `main.rs`. Sin cambios de reglas ni de mensajes.
+
+### 🔧 Qué se hace
+* **Orden de trabajo:** primero 5 pruebas de caracterización (`ab1`–`ab5`, en su propio commit, contra el código de antes; completan `c17`–`c20` y `c63`–`c67`) y después la extracción, con todas intactas. El registro y la reversión ya vivían en casos de uso (`registrar_pago_tarjeta`, `revertir_pago_tarjeta`); lo que seguía en `main.rs` era la categoría de la comisión, el historial y el caso de corrección de la reversión.
+* **Caso de uso** (`aplicacion::abonos`): `registrar_abono` (la comisión se asienta como gasto de la categoría de sistema «Otros»), `listar_abonos` (del más nuevo al más viejo) y `revertir_abono` (el abono, el motivo, el caso de corrección y, **al final**, la reversión: si algo falla antes no queda un caso huérfano). El texto del resumen sigue formándose en el comando.
+* **Puerto y adaptadores:** `ConsultaDeAbonos` (historial, resumen del abono y categoría de sistema), implementado sobre `AlmacenSqlite` y su doble.
+* **`main.rs`:** los tres comandos delgados sobre `con_almacen`. Comandos con SQL directo: **29 → 26** (de 54 al empezar A-03).
+* **Sin cambios visibles.**
+
+### 🧪 Pruebas
+* 5 de caracterización y 6 del caso de uso con el doble. Doce mutaciones (comisión sin categoría, motivo sin validar, revertir antes de abrir el caso, caso sin fecha o importe o divisa, reversión que no revierte, orden y filtro del historial, abono sin cuenta que desaparece, columna equivocada, categoría equivocada): todas detectadas. **Rust 785 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): un abono con cuenta (5432.005 → 5432.01, con su comisión), uno sin cuenta, uno en dólares con tasa, uno en cero rechazado, el historial, y revertir los tres (inexistente y motivo corto rechazados): la deuda y la cuenta **vuelven exactamente al inicio** y quedan tres casos de corrección.
+
+---
+
+## 🚀 Versión 1.85.0 - 2026-10-06
 **Auditoría A-03, quinto vertical (parte 1 de Tarjetas): listar, crear y corregir los límites de las tarjetas salen de `main.rs`.** Sin cambios de reglas ni de mensajes. Quedan para las siguientes partes los abonos, los avances de efectivo y las bonificaciones.
 
 ### 🔧 Qué se hace
