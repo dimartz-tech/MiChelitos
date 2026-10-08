@@ -38,8 +38,7 @@ use adaptadores::sqlite::gastos::AlmacenSqlite;
 use puertos::repositorios::AlmacenCatalogos;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
 use aplicacion::revertir_gasto::revertir_gasto;
-use aplicacion::registrar_pago_tarjeta::{registrar_pago_tarjeta as registrar_pago_tarjeta_caso, DatosPago};
-use aplicacion::revertir_pago_tarjeta::revertir_pago_tarjeta;
+use aplicacion::registrar_pago_tarjeta::DatosPago;
 use aplicacion::registrar_avance_de_efectivo::{registrar_avance_de_efectivo, DatosAvance};
 use aplicacion::revertir_avance_de_efectivo::revertir_avance_de_efectivo;
 use aplicacion::cobrar_suscripcion::{cobrar_suscripcion, DatosCobro};
@@ -658,19 +657,8 @@ fn registrar_pago_tarjeta(
     cuenta_ahorro_id: Option<i64>,
     tasa_cambio: f64
 ) -> Result<(), String> {
-    // Traducción pura, igual que crear_gasto. Toda la regla —cuándo hace falta
-    // la tasa, qué sale de la cuenta, cómo se enlaza la comisión— vive en el
-    // caso de uso y en el dominio, no en esta función.
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    let categoria = tx
-        .query_row("SELECT id FROM categorias WHERE nombre = 'Otros' LIMIT 1;", [], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-
-    {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
-        registrar_pago_tarjeta_caso(
+    con_almacen(|a| {
+        Ok(aplicacion::abonos::registrar_abono(
             DatosPago {
                 tarjeta_id: id,
                 fecha,
@@ -684,13 +672,9 @@ fn registrar_pago_tarjeta(
                     None
                 },
             },
-            categoria,
-            &mut almacen,
-        )?;
-    }
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+            a,
+        )?)
+    })
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -707,37 +691,20 @@ pub struct AbonoTarjeta {
 /// Abonos registrados a una tarjeta, del más reciente al más antiguo.
 #[tauri::command]
 fn obtener_abonos_tarjeta(tarjeta_id: i64) -> Result<Vec<AbonoTarjeta>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT p.id, p.fecha_pago, p.monto_pagado, p.divisa, p.cuenta_ahorro_id,
-                    c.nombre, p.tasa_cambio
-             FROM pagos_tarjeta p
-             LEFT JOIN cuentas_ahorro c ON c.id = p.cuenta_ahorro_id
-             WHERE p.tarjeta_id = ?
-             ORDER BY p.id DESC;",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let rows = stmt
-        .query_map([tarjeta_id], |row| {
-            Ok(AbonoTarjeta {
-                id: row.get(0)?,
-                fecha_pago: row.get(1)?,
-                monto_pagado: row.get(2)?,
-                divisa: row.get(3)?,
-                cuenta_ahorro_id: row.get(4)?,
-                cuenta_nombre: row.get(5)?,
-                tasa_cambio: row.get(6)?,
+    con_almacen(|a| {
+        Ok(aplicacion::abonos::listar_abonos(tarjeta_id, a)?
+            .into_iter()
+            .map(|p| AbonoTarjeta {
+                id: p.id,
+                fecha_pago: p.fecha_pago,
+                monto_pagado: p.monto_pagado,
+                divisa: p.divisa,
+                cuenta_ahorro_id: p.cuenta_ahorro_id,
+                cuenta_nombre: p.cuenta_nombre,
+                tasa_cambio: p.tasa_cambio,
             })
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+            .collect())
+    })
 }
 
 /// Deshace un abono a tarjeta.
@@ -747,32 +714,24 @@ fn obtener_abonos_tarjeta(tarjeta_id: i64) -> Result<Vec<AbonoTarjeta>, String> 
 /// vez de limitarse a confirmar que algo pasó.
 #[tauri::command]
 fn revertir_abono_tarjeta(id: i64, motivo: String) -> Result<String, String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    let caso = abrir_caso(&tx, "abono", id, "SELECT 'Abono del ' || fecha_pago, monto_pagado, divisa FROM pagos_tarjeta WHERE id = ?;", &motivo)?;
-
-    let resumen = {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
-        let r = revertir_pago_tarjeta(id, &mut almacen)?;
-        match r.devuelto_a_la_cuenta {
+    con_almacen(|a| {
+        let r = aplicacion::abonos::revertir_abono(id, &motivo, a)?;
+        let resumen = match r.revertido.devuelto_a_la_cuenta {
             Some(d) => format!(
                 "Se repusieron {} {:.2} a la deuda y volvieron {} {:.2} a la cuenta.",
-                r.deuda_restituida.divisa().codigo(),
-                r.deuda_restituida.unidades(),
+                r.revertido.deuda_restituida.divisa().codigo(),
+                r.revertido.deuda_restituida.unidades(),
                 d.divisa().codigo(),
                 d.unidades()
             ),
             None => format!(
                 "Se repusieron {} {:.2} a la deuda. El abono no tenía cuenta asociada.",
-                r.deuda_restituida.divisa().codigo(),
-                r.deuda_restituida.unidades()
+                r.revertido.deuda_restituida.divisa().codigo(),
+                r.revertido.deuda_restituida.unidades()
             ),
-        }
-    };
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(format!("{} Caso {}.", resumen, caso))
+        };
+        Ok(format!("{} Caso {}.", resumen, r.caso))
+    })
 }
 
 // --- COMANDOS: AVANCES DE EFECTIVO ---
