@@ -93,6 +93,26 @@ impl GastoGuardado {
     }
 }
 
+/// Una bonificación tal como la muestra el historial: con los datos de su tarjeta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BonificacionLeida {
+    pub id: i64,
+    pub fecha: String,
+    pub tarjeta_id: i64,
+    pub entidad: String,
+    pub nombre_tarjeta: String,
+    pub monto: f64,
+    pub divisa: String,
+    pub concepto: String,
+    pub gasto_id: Option<i64>,
+}
+
+/// Consulta de las bonificaciones (registrar y revertir ya viven en casos de uso).
+pub trait ConsultaDeBonificaciones {
+    /// Del más nuevo al más viejo.
+    fn bonificaciones(&self) -> Result<Vec<BonificacionLeida>, ErrorAlmacen>;
+}
+
 /// Un abono tal como lo muestra el historial: con el nombre de la cuenta de la que salió, si la hubo.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AbonoLeido {
