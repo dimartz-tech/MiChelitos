@@ -4,7 +4,28 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.84.0 (Versión Actual) - 2026-10-06
+## 🚀 Versión 1.85.0 (Versión Actual) - 2026-10-06
+**Auditoría A-03, quinto vertical (parte 1 de Tarjetas): listar, crear y corregir los límites de las tarjetas salen de `main.rs`.** Sin cambios de reglas ni de mensajes. Quedan para las siguientes partes los abonos, los avances de efectivo y las bonificaciones.
+
+### 🔧 Qué se hace
+* **Orden de trabajo:** primero 7 pruebas de caracterización (`r1`–`r7`, en su propio commit, contra el código de antes) y después la extracción, con todas intactas.
+* **Dominio** (`dominio::tarjeta`): el cupo por divisa que muestra el listado (efectivo y disponible, con su degradación a la cuenta en bruto ante datos raros) y los recordatorios de corte y de pago (alerta a 3 días o menos; el mes se aproxima con 30 días, como siempre) salen de la consulta.
+* **Caso de uso** (`aplicacion::tarjetas`): listar (con la política normalizada, el cupo y los avisos), crear y corregir los límites (el cero es un tope deliberado, distinto de «sin ajuste»; una política ausente o desconocida es «origen»; el balance no se toca).
+* **Puerto y adaptadores:** `CatalogoDeTarjetas`, `TarjetasSqlite` y el doble `TarjetasEnMemoria`.
+* **`main.rs`:** los tres comandos quedan delgados sobre `con_tarjetas`; sale el ayudante `cupo`. Y `ImporteDecimal::unidades()`, que ya no usa nadie, se retira: todos los importes entran por `con_divisa(...)`. Comandos con SQL directo: **31 → 29** (de 54 al empezar A-03).
+* **Un cambio visible, en un caso que sí puede ocurrir:** un día de corte o de pago fuera de 1–31 lo rechaza el esquema como siempre, pero el mensaje ahora empieza por «Error de almacenamiento: » (antes era el texto crudo de SQLite).
+
+### 🔎 Hallazgos (sin corregir, a consultar; fijados por `r2` y `r4`)
+* **Crear una tarjeta no recorta ni valida** entidad y nombre (acepta vacíos y con espacios) **ni que los límites sean positivos** (acepta uno negativo). Solo los días los valida el esquema.
+* **Corregir los límites de una tarjeta que no existe no dice nada**: el `UPDATE` afecta a cero filas y el comando devuelve éxito (como pasaba con H18 en las facturas).
+
+### 🧪 Pruebas
+* 7 de caracterización, 3 del dominio y 6 del caso de uso con el doble. Dieciséis mutaciones (mes de 30 días, umbral de alerta, mensajes, cupo con y sin ajuste y con y sin balance, divisas cruzadas, política sin normalizar, corte con la fecha de pago, límites y fechas cruzados, cero como «sin ajuste», `UPDATE` sin `WHERE`, columnas cruzadas, orden del listado): todas detectadas (una, la de la cuenta en bruto, solo tras añadir un caso con un balance imposible). **Rust 774 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): alta con el céntimo decidido (1000.005 → 1000.01), días fuera de rango, el listado con cupo y recordatorio, corregir los límites (el ajuste en cero deja el efectivo en dólares en 0) y corregir una tarjeta inexistente.
+
+---
+
+## 🚀 Versión 1.84.0 - 2026-10-06
 **Auditoría A-03, cuarto vertical: los préstamos y líneas de crédito salen de `main.rs`.** Los siete comandos (listar, crear, corregir condiciones, pagar cuota, declarar saldo, movimientos y eliminar) pasan a dominio, caso de uso y adaptador. Sin cambios de reglas ni de mensajes.
 
 ### 🔧 Qué se hace
