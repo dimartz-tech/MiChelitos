@@ -38,6 +38,13 @@ pub enum ErrorDominio {
     AbonoSinImporte,
     /// Catálogos (categorías y clientes). Los textos son los de siempre: la interfaz los muestra tal cual.
     FacturaDuplicada,
+    FechaDeCobroNoEntendida { fecha: String },
+    FechaDeCorreccionNoEntendida { fecha: String },
+    SuscripcionNoEncontrada,
+    SuscripcionNoEncontradaParaEditar,
+    SuscripcionNoEncontradaParaCorregir,
+    FrecuenciaNoReconocida,
+    SinPeriodosPendientes,
     /// Un gasto que creó otra operación no se borra solo; el texto dice qué operación revertir.
     GastoDerivado { motivo: String },
     PorcentajeDeCargoRequerido,
@@ -141,6 +148,27 @@ impl fmt::Display for ErrorDominio {
                 write!(f, "La fecha «{}» no se entiende. Se espera dd/mm/aaaa.", fecha)
             }
             ErrorDominio::GastoDerivado { motivo } => write!(f, "{}", motivo),
+            ErrorDominio::FechaDeCobroNoEntendida { fecha } => write!(
+                f,
+                "La fecha del próximo cobro «{}» no se entiende. Se espera dd/mm/aaaa.",
+                fecha
+            ),
+            ErrorDominio::FechaDeCorreccionNoEntendida { fecha } => {
+                write!(f, "«{}» no se entiende como fecha. Se espera dd/mm/aaaa.", fecha)
+            }
+            ErrorDominio::SuscripcionNoEncontrada => write!(f, "No se encontró la suscripción."),
+            ErrorDominio::SuscripcionNoEncontradaParaEditar => {
+                write!(f, "No se encontró la suscripción que se intenta editar.")
+            }
+            ErrorDominio::SuscripcionNoEncontradaParaCorregir => {
+                write!(f, "No se encontró la suscripción que se intenta corregir.")
+            }
+            ErrorDominio::FrecuenciaNoReconocida => {
+                write!(f, "La suscripción tiene una frecuencia que no se reconoce.")
+            }
+            ErrorDominio::SinPeriodosPendientes => {
+                write!(f, "Esta suscripción no tiene períodos pendientes de confirmar.")
+            }
             ErrorDominio::FacturaDuplicada => write!(f, "El número de factura ya está registrado."),
             ErrorDominio::FacturaNoPendiente { id } => {
                 write!(f, "No se encontró una factura {} pendiente de cobro.", id)

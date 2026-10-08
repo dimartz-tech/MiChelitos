@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.89.0 (Versión Actual) - 2026-10-08
+## 🚀 Versión 1.90.0 (Versión Actual) - 2026-10-08
+**Auditoría A-03, séptimo vertical: las suscripciones (el más pesado).** Alta, edición, listado, cobro automático y confirmación de períodos pendientes dejan de llevar SQL y reglas en `main.rs`. Sin cambios de reglas; un único cambio visible conocido (abajo).
+
+### 🔧 Qué se hace
+* **Orden de trabajo:** primero 4 pruebas de caracterización (`su1`–`su4`, en su propio commit y contra el código de antes; completan `s1`–`s25`), después la extracción. Dos más (`su5`, `su6`) nacieron de las mutaciones: los mensajes exactos del cobro y de confirmar, el importe y la divisa del caso de un período descartado, que editar no reinicia `fecha_ultimo_pago` y que la fecha se rechaza antes que la divisa.
+* **Dominio** (`dominio::suscripcion`): `regla_de_un_registro`, `condiciones_de_suscripcion` (importe → frecuencia → día), `proximo_cobro_declarado` y `fecha_de_correccion`; siete errores nuevos con el texto exacto de siempre.
+* **Caso de uso** (`aplicacion::suscripciones`): crear, editar, corregir el próximo cobro, eliminar, listar con aviso/impedimento/pendientes, categoría de las suscripciones, cobros automáticos, `asentar_cargo` y `confirmar_pendiente` (asentar o descartar con caso de corrección).
+* **Puerto y adaptadores:** `AlmacenSuscripciones`, sobre `AlmacenSqlite` y su doble en memoria.
+* **`main.rs`:** los comandos pasan por `con_almacen`; se conservan `suscripciones_con_aviso`, `procesar_suscripciones_con` y `confirmar_pendiente`. El cobro automático resuelve la categoría una vez y asienta **cada cobro en su propia transacción**. Llamadas directas a la base: **16 → 9** (de 54 al empezar A-03).
+* **Cambio visible conocido:** los errores del esquema (restricciones de la base) llevan ahora el prefijo «Error de almacenamiento: »; los mensajes de dominio no cambian.
+
+### 🧪 Pruebas
+* 6 de caracterización y 9 del caso de uso con el doble. Veinticinco mutaciones (reglas de condiciones, orden fecha/divisa, categoría de respaldo, un solo período automático, fecha de hoy en lugar del vencimiento, puntero y marca, descartar que cobra o que no avanza, motivo sin exigir, orden del listado, editar que pisa el último pago, mensajes…): todas detectadas tras añadir `su5` y `su6`. **Rust 832 pasan.**
+* No se repitió la comprobación en la app empaquetada: la cubren las pruebas de caracterización contra SQLite real.
+
+---
+
+## 🚀 Versión 1.89.0 - 2026-10-08
 **Auditoría A-03, sexto vertical: los gastos.** Listar, crear y eliminar un gasto dejan de llevar SQL y reglas en `main.rs`. Sin cambios de reglas ni de mensajes.
 
 ### 🔧 Qué se hace

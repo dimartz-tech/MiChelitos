@@ -93,6 +93,68 @@ impl GastoGuardado {
     }
 }
 
+/// Una suscripción tal como la muestra el listado: con los datos de la tarjeta que la cobra.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SuscripcionLeida {
+    pub id: i64,
+    pub plataforma: String,
+    pub monto: f64,
+    pub tarjeta_id: i64,
+    pub frecuencia: String,
+    pub dia_facturacion: i32,
+    pub fecha_ultimo_pago: Option<String>,
+    pub divisa: String,
+    pub entidad: String,
+    pub nombre_tarjeta: String,
+    pub fecha_proximo_cobro: Option<String>,
+}
+
+/// Una suscripción tal como la necesita el cobro: lo guardado, sin los datos de la tarjeta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SuscripcionRegistrada {
+    pub id: i64,
+    pub plataforma: String,
+    pub monto: f64,
+    pub tarjeta_id: i64,
+    pub frecuencia: String,
+    pub dia_facturacion: i32,
+    pub divisa: String,
+    pub fecha_proximo_cobro: Option<String>,
+}
+
+/// Las condiciones de una suscripción, ya validadas, para guardarlas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SuscripcionAGuardar {
+    pub plataforma: String,
+    pub monto: f64,
+    pub tarjeta_id: i64,
+    pub frecuencia: String,
+    pub dia_facturacion: i32,
+    pub divisa: String,
+    pub fecha_proximo_cobro: Option<String>,
+}
+
+/// Suscripciones: alta, edición, consulta y el avance de su fecha de cobro. (El cargo en sí es un gasto con tarjeta y
+/// pasa por `AlmacenGastos`.)
+pub trait AlmacenSuscripciones {
+    /// Por nombre de plataforma, ascendente.
+    fn suscripciones_con_tarjeta(&self) -> Result<Vec<SuscripcionLeida>, ErrorAlmacen>;
+    /// Por identificador, ascendente: el orden en que se cobran.
+    fn suscripciones_registradas(&self) -> Result<Vec<SuscripcionRegistrada>, ErrorAlmacen>;
+    fn insertar_suscripcion(&mut self, s: &SuscripcionAGuardar) -> Result<i64, ErrorAlmacen>;
+    /// Conserva `fecha_ultimo_pago`. `false` si no hay ninguna con ese identificador.
+    fn editar_suscripcion(&mut self, id: i64, s: &SuscripcionAGuardar) -> Result<bool, ErrorAlmacen>;
+    /// `false` si no hay ninguna con ese identificador.
+    fn fijar_proximo_cobro(&mut self, id: i64, fecha: &str) -> Result<bool, ErrorAlmacen>;
+    /// Sin guardas; borrar una que no está no es un error.
+    fn eliminar_suscripcion(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+    /// Mueve la fecha del próximo cobro (`None` si ya no hay) y, si se cobró, anota la marca del último pago.
+    fn mover_puntero(&mut self, id: i64, siguiente: Option<&str>, marca_de_cobro: Option<&str>) -> Result<(), ErrorAlmacen>;
+    /// El identificador de la categoría con ese nombre (en minúsculas, sin distinguir mayúsculas), si existe.
+    fn categoria_por_nombre(&self, nombre_en_minusculas: &str) -> Result<Option<i64>, ErrorAlmacen>;
+    fn crear_categoria(&mut self, nombre: &str) -> Result<i64, ErrorAlmacen>;
+}
+
 /// Un gasto tal como lo muestra el listado: con el nombre de su categoría y su estado de conversión.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GastoLeido {
