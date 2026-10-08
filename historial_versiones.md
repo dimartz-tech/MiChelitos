@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.90.0 (Versión Actual) - 2026-10-08
+## 🚀 Versión 1.91.0 (Versión Actual) - 2026-10-08
+**Endurecimiento de validaciones.** Cierra los cuatro hallazgos que la auditoría A-03 dejó documentados en pruebas «hallazgo» (`n4`, `p2`, `r2`, `r4`): el comando aceptaba lo que solo el formulario impedía. Es el único PR de A-03 que **cambia reglas**, y solo para rechazar entradas que no tienen sentido; nada de lo que ya funcionaba cambia.
+
+### 🔧 Qué se hace
+* **Facturas** (`crear_ingreso`): rechazan una retención fuera de 0–100 (los extremos valen) y número de factura, RNC o nombre vacíos o solo espacios. Antes se guardaba una retención del 150 % (mayor que el total) o negativa.
+* **Ingresos informales** (`crear_ingreso_informal` y el cobro en efectivo): exigen un monto mayor que cero y fecha y descripción no vacías.
+* **Tarjetas, alta:** recorta entidad y nombre, los exige y rechaza límites o sobregiros negativos (cero vale: es un tope deliberado o una divisa que la tarjeta no usa).
+* **Tarjetas, límites:** rechaza límites negativos (incluido el ajustado; su cero sigue siendo «tope deliberado») y **dice que la tarjeta no existe** en vez de devolver éxito (el puerto devuelve ahora `bool`).
+* Cada rechazo ocurre **antes** de tocar nada: no queda cliente, factura, ingreso ni tarjeta a medias. Los mensajes son nuevos y en español («Falta el número de factura.», «El porcentaje de retención debe estar entre 0 y 100.», «Un ingreso debe tener un monto mayor que cero.», «Los límites de una tarjeta no pueden ser negativos.», «No se encontró la tarjeta N.»).
+* **Fuera de este PR, a la espera de decisión:** `p6` (un cobro en efectivo sin caja registrada queda cobrado sin mover saldo), porque rechazarlo o crear la caja es una decisión de dominio.
+
+### 🧪 Pruebas
+* Las cuatro pruebas «hallazgo» se invierten (`n4`, `p2`, `r2`, `r4`) y se añaden `p2b` y `r2b`; una unitaria del caso de uso se invierte. Diecinueve mutaciones (extremos 0 y 100, validar o no cada campo, espacios, cero y negativo, recortar, sobregiros, ajustado, inexistente, adaptador): todas detectadas tras añadir `p2b` y `r2b`. **Rust 834 pasan.**
+* No se repitió en la app empaquetada.
+
+---
+
+## 🚀 Versión 1.90.0 - 2026-10-08
 **Auditoría A-03, séptimo vertical: las suscripciones (el más pesado).** Alta, edición, listado, cobro automático y confirmación de períodos pendientes dejan de llevar SQL y reglas en `main.rs`. Sin cambios de reglas; un único cambio visible conocido (abajo).
 
 ### 🔧 Qué se hace
