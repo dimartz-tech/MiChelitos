@@ -5715,3 +5715,99 @@ fn bo2_eliminar_una_bonificacion_inexistente_y_liquidar_lo_que_no_se_puede_dicen
     assert!(e.contains("no está pendiente de liquidación"), "{e}");
 }
 
+// --- A-03, vertical «gastos»: caracterización antes de extraer ---
+//
+// Completan `c1`–`c14`, `c22`–`c24` y `c136`–`c137` con el listado, los mensajes de eliminar y el caso de corrección.
+
+fn gasto_de_prueba(descripcion: &str, monto: &str, divisa: &str, metodo: &str) -> GastoInput {
+    let otros: i64 = conexion().query_row("SELECT id FROM categorias WHERE nombre = 'Otros';", [], |r| r.get(0)).unwrap();
+    GastoInput {
+        fecha: "05/10/2026".to_string(),
+        monto: importe(monto),
+        divisa: divisa.to_string(),
+        descripcion: descripcion.to_string(),
+        categoria_id: otros,
+        metodo_pago: metodo.to_string(),
+        es_lbtr: false,
+        tarjeta_id: None,
+        cuenta_ahorro_id: None,
+        tasa_cambio: None,
+    }
+}
+
+#[test]
+fn gt1_los_gastos_salen_del_mas_nuevo_al_mas_viejo_con_el_nombre_de_su_categoria() {
+    let _g = entorno_aislado();
+    fijar_balance_cuenta("Efectivo DOP", 1_000.0);
+    let a = crear_gasto(gasto_de_prueba("Primero", "40.25", "DOP", "efectivo")).unwrap();
+    let b = crear_gasto(gasto_de_prueba("Segundo", "10", "DOP", "efectivo")).unwrap();
+    let lista = crate::obtener_gastos().unwrap();
+    assert_eq!(lista.iter().map(|g| g.id).collect::<Vec<_>>(), vec![b, a], "el más nuevo primero");
+    let primero = lista.iter().find(|g| g.id == a).unwrap();
+    assert_eq!((primero.descripcion.as_str(), primero.categoria_nombre.as_str(), primero.metodo_pago.as_str(), primero.fecha.as_str()), ("Primero", "Otros", "efectivo", "05/10/2026"));
+    assert_importe(primero.monto, 40.25, "monto");
+    assert_eq!(primero.tarjeta_id, None);
+    assert!(primero.cuenta_ahorro_id.is_some(), "un gasto en efectivo queda ligado a la caja que lo pagó");
+    assert!(primero.estado_conversion.is_none() && primero.monto_liquidado.is_none() && primero.tasa_conversion.is_none());
+}
+
+#[test]
+fn gt2_un_consumo_pendiente_lista_su_estado_de_conversion_y_uno_liquidado_su_importe_y_tasa() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    conexion().execute("UPDATE tarjetas SET politica_liquidacion = 'traduce' WHERE id = ?;", params![tarjeta]).unwrap();
+    let mut entrada = gasto_de_prueba("Compra en dólares", "100", "USD", "tarjeta");
+    entrada.tarjeta_id = Some(tarjeta);
+    let id = crear_gasto(entrada).unwrap();
+    let pendiente = crate::obtener_gastos().unwrap().into_iter().find(|g| g.id == id).unwrap();
+    assert_eq!(pendiente.estado_conversion.as_deref(), Some("pendiente"));
+    assert!(pendiente.monto_liquidado.is_none());
+
+    crate::liquidar_consumo_pendiente(id, importe("6050")).unwrap();
+    let liquidado = crate::obtener_gastos().unwrap().into_iter().find(|g| g.id == id).unwrap();
+    assert_eq!(liquidado.estado_conversion.as_deref(), Some("liquidado"));
+    assert_importe(liquidado.monto_liquidado.unwrap(), 6050.0, "importe liquidado");
+    assert_importe(liquidado.tasa_conversion.unwrap(), 60.5, "tasa deducida");
+}
+
+#[test]
+fn gt3_eliminar_un_gasto_dice_su_causa_y_el_motivo_corto_no_borra_nada() {
+    let _g = entorno_aislado();
+    assert_eq!(eliminar_gasto(404, motivo_de_prueba()).unwrap_err(), "No se encontró gasto con identificador 404.");
+    fijar_balance_cuenta("Efectivo DOP", 500.0);
+    let id = crear_gasto(gasto_de_prueba("Almuerzo", "60", "DOP", "efectivo")).unwrap();
+    let e = eliminar_gasto(id, "corto".into()).unwrap_err();
+    assert!(e.starts_with("Explica la corrección en al menos 15 caracteres.") && e.contains("«corto»"), "{e}");
+    assert_eq!(total_gastos(), 1, "no se borró nada");
+    assert_importe(balance_cuenta("Efectivo DOP"), 440.0, "la caja no se movió");
+}
+
+#[test]
+fn gt4_un_gasto_derivado_se_rechaza_antes_de_pedir_el_motivo_y_con_su_mensaje() {
+    // El rechazo por «lo creó otra operación» va ANTES que la comprobación del motivo: aunque el motivo sea corto,
+    // el mensaje es el del vínculo.
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(30_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Gastos", "DOP", 100_000.0);
+    registrar_pago_tarjeta(tarjeta, "14/09/2026".to_string(), monto(12_000.0), "DOP".to_string(), Some(cuenta), 0.0).unwrap();
+    let comision: i64 = conexion().query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0)).unwrap();
+    assert_eq!(
+        eliminar_gasto(comision, "corto".into()).unwrap_err(),
+        "Este gasto es la comisión de un abono a tarjeta. Revierte el abono completo: es la única forma de que la cuenta y la deuda de la tarjeta sigan cuadrando."
+    );
+}
+
+#[test]
+fn gt5_eliminar_deja_un_caso_con_la_descripcion_el_monto_y_la_divisa_y_devuelve_su_numero() {
+    let _g = entorno_aislado();
+    fijar_balance_cuenta("Efectivo DOP", 500.0);
+    let id = crear_gasto(gasto_de_prueba("Almuerzo con cliente", "60.50", "DOP", "efectivo")).unwrap();
+    let caso = eliminar_gasto(id, motivo_de_prueba()).unwrap();
+    let casos = casos_de_correccion();
+    let (numero, tipo, referencia, descripcion, importe_caso, divisa) = &casos[0];
+    assert_eq!(&caso, numero);
+    assert_eq!((tipo.as_str(), *referencia, descripcion.as_str(), divisa.as_deref()), ("gasto", id, "Almuerzo con cliente", Some("DOP")));
+    assert_importe(importe_caso.unwrap(), 60.5, "monto del gasto");
+    assert_importe(balance_cuenta("Efectivo DOP"), 500.0, "la caja recupera lo gastado");
+}
+
