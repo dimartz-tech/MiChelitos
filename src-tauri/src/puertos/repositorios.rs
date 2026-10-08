@@ -93,6 +93,44 @@ impl GastoGuardado {
     }
 }
 
+/// Un gasto tal como lo muestra el listado: con el nombre de su categoría y su estado de conversión.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GastoLeido {
+    pub id: i64,
+    pub fecha: String,
+    pub monto: f64,
+    pub divisa: String,
+    pub descripcion: String,
+    pub categoria_id: i64,
+    pub categoria_nombre: String,
+    pub metodo_pago: String,
+    pub costo_adicional: f64,
+    pub tarjeta_id: Option<i64>,
+    pub cuenta_ahorro_id: Option<i64>,
+    /// `None` cuando la conversión de divisa no aplica; «pendiente» o «liquidado» si sí.
+    pub estado_conversion: Option<String>,
+    pub monto_liquidado: Option<f64>,
+    pub tasa_conversion: Option<f64>,
+}
+
+/// Lo que hace falta de un gasto para abrir el caso de corrección al eliminarlo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResumenDeGasto {
+    pub descripcion: String,
+    pub monto: f64,
+    pub divisa: String,
+}
+
+/// Consultas de los gastos que no son del registro ni de la reversión.
+pub trait ConsultaDeGastos {
+    /// Del más nuevo al más viejo.
+    fn gastos(&self) -> Result<Vec<GastoLeido>, ErrorAlmacen>;
+    /// `None` si no hay ningún gasto con ese identificador.
+    fn resumen_de_gasto(&self, id: i64) -> Result<Option<ResumenDeGasto>, ErrorAlmacen>;
+    /// Si otra operación creó este gasto (el cargo de un avance, la comisión de un abono), por qué no se borra solo.
+    fn motivo_de_no_borrar(&self, id: i64) -> Result<Option<String>, ErrorAlmacen>;
+}
+
 /// Una bonificación tal como la muestra el historial: con los datos de su tarjeta.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BonificacionLeida {

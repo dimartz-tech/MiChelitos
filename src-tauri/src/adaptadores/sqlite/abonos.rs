@@ -129,3 +129,55 @@ impl ConsultaDeBonificaciones for AlmacenSqlite<'_> {
         filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
     }
 }
+
+impl ConsultaDeGastos for AlmacenSqlite<'_> {
+    fn gastos(&self) -> Result<Vec<GastoLeido>, ErrorAlmacen> {
+        let mut stmt = self
+            .tx
+            .prepare(
+                "SELECT g.id, g.fecha, g.monto, g.divisa, g.descripcion, g.categoria_id, c.nombre, g.metodo_pago, g.costo_adicional, g.tarjeta_id, g.cuenta_ahorro_id, g.estado_conversion, g.monto_liquidado, g.tasa_conversion
+                 FROM gastos g
+                 JOIN categorias c ON g.categoria_id = c.id
+                 ORDER BY g.id DESC;",
+            )
+            .map_err(fallo)?;
+        let filas = stmt
+            .query_map([], |r| {
+                Ok(GastoLeido {
+                    id: r.get(0)?,
+                    fecha: r.get(1)?,
+                    monto: r.get(2)?,
+                    divisa: r.get(3)?,
+                    descripcion: r.get(4)?,
+                    categoria_id: r.get(5)?,
+                    categoria_nombre: r.get(6)?,
+                    metodo_pago: r.get(7)?,
+                    costo_adicional: r.get(8)?,
+                    tarjeta_id: r.get(9)?,
+                    cuenta_ahorro_id: r.get(10)?,
+                    estado_conversion: r.get(11)?,
+                    monto_liquidado: r.get(12)?,
+                    tasa_conversion: r.get(13)?,
+                })
+            })
+            .map_err(fallo)?;
+        filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
+    }
+
+    fn resumen_de_gasto(&self, id: i64) -> Result<Option<ResumenDeGasto>, ErrorAlmacen> {
+        self.tx
+            .query_row(
+                "SELECT descripcion, monto, divisa FROM gastos WHERE id = ?;",
+                [id],
+                |r| Ok(ResumenDeGasto { descripcion: r.get(0)?, monto: r.get(1)?, divisa: r.get(2)? }),
+            )
+            .optional()
+            .map_err(fallo)
+    }
+
+    fn motivo_de_no_borrar(&self, id: i64) -> Result<Option<String>, ErrorAlmacen> {
+        // La lista de operaciones que crean gastos (y el porqué) vive en `db_sql::GASTOS_DERIVADOS`, vigilada por una
+        // prueba contra las claves ajenas reales.
+        crate::db_sql::motivo_de_no_borrar_gasto(self.tx, id).map(|m| m.map(str::to_string)).map_err(fallo)
+    }
+}
