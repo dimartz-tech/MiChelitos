@@ -5811,3 +5811,67 @@ fn gt5_eliminar_deja_un_caso_con_la_descripcion_el_monto_y_la_divisa_y_devuelve_
     assert_importe(balance_cuenta("Efectivo DOP"), 500.0, "la caja recupera lo gastado");
 }
 
+// --- A-03, vertical «suscripciones»: caracterización antes de extraer ---
+//
+// Completan `s1`–`s25`: los mensajes exactos que aún se comprobaban con `is_err`, el listado y los errores de confirmar.
+
+#[test]
+fn su1_los_mensajes_de_crear_corregir_y_editar_son_los_de_siempre() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let crear = |fecha: Option<&str>| {
+        crear_suscripcion("X".into(), importe("15"), tarjeta, "mensual".into(), 5, "DOP".into(), fecha.map(|f| f.to_string()))
+    };
+    assert_eq!(crear(Some("  ayer ")).unwrap_err(), "La fecha del próximo cobro «ayer» no se entiende. Se espera dd/mm/aaaa.");
+    assert!(crear(Some("   ")).is_ok(), "una fecha en blanco es una suscripción sin fecha");
+    assert!(crear(None).is_ok());
+
+    let sub = crear(Some("05/03/2026")).unwrap();
+    assert_eq!(crate::corregir_proximo_cobro(sub, " ayer ".into()).unwrap_err(), "«ayer» no se entiende como fecha. Se espera dd/mm/aaaa.");
+    assert_eq!(crate::corregir_proximo_cobro(9_999, "15/03/2026".into()).unwrap_err(), "No se encontró la suscripción que se intenta corregir.");
+    assert_eq!(
+        crate::actualizar_suscripcion(9_999, "X".into(), importe("15"), tarjeta, "mensual".into(), 5, "DOP".into(), None).unwrap_err(),
+        "No se encontró la suscripción que se intenta editar."
+    );
+    assert_eq!(
+        crate::actualizar_suscripcion(sub, "X".into(), importe("15"), tarjeta, "mensual".into(), 5, "DOP".into(), Some("ayer".into())).unwrap_err(),
+        "La fecha del próximo cobro «ayer» no se entiende. Se espera dd/mm/aaaa."
+    );
+    assert!(crate::eliminar_suscripcion(9_999).is_ok(), "borrar una que no está no es un error");
+}
+
+#[test]
+fn su2_las_suscripciones_se_listan_por_nombre_con_los_datos_de_su_tarjeta() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    for nombre in ["Zeta", "Alfa", "Medio"] {
+        crear_suscripcion(nombre.into(), importe("10"), tarjeta, "mensual".into(), 5, "USD".into(), Some("05/03/2026".into())).unwrap();
+    }
+    let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 1);
+    let lista = crate::suscripciones_con_aviso(&reloj).unwrap();
+    assert_eq!(lista.iter().map(|s| s.plataforma_para_pruebas()).collect::<Vec<_>>(), vec!["Alfa", "Medio", "Zeta"]);
+}
+
+#[test]
+fn su3_confirmar_dice_su_causa_cuando_no_hay_suscripcion_o_no_hay_nada_que_confirmar() {
+    let _g = entorno_aislado();
+    let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 20);
+    assert_eq!(crate::confirmar_pendiente(9_999, &reloj, None).unwrap_err(), "No se encontró la suscripción.");
+    let (sub, _) = suscripcion_mensual(15, "15/03/2026");
+    assert_eq!(
+        crate::confirmar_pendiente(sub, &reloj, None).unwrap_err(),
+        "Esta suscripción no tiene períodos pendientes de confirmar."
+    );
+}
+
+#[test]
+fn su4_descartar_sin_motivo_que_explique_dice_cuanto_falta_y_no_avanza_nada() {
+    let _g = entorno_aislado();
+    let (sub, _) = suscripcion_mensual(15, "15/01/2026");
+    let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 20);
+    let antes = proximo_cobro_de(sub);
+    let e = crate::confirmar_pendiente(sub, &reloj, Some("  corto ".into())).unwrap_err();
+    assert!(e.starts_with("Explica la corrección en al menos 15 caracteres.") && e.contains("«corto»"), "{e}");
+    assert_eq!(proximo_cobro_de(sub), antes, "el puntero no se movió");
+}
+
