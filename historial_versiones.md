@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.88.0 (Versión Actual) - 2026-10-08
+## 🚀 Versión 1.89.0 (Versión Actual) - 2026-10-08
+**Auditoría A-03, sexto vertical: los gastos.** Listar, crear y eliminar un gasto dejan de llevar SQL y reglas en `main.rs`. Sin cambios de reglas ni de mensajes.
+
+### 🔧 Qué se hace
+* **Orden de trabajo:** primero 5 pruebas de caracterización (`gt1`–`gt5`, en su propio commit, contra el código de antes; completan `c1`–`c14`, `c22`–`c24` y `c136`–`c137`) y después la extracción, con todas intactas. El registro y la reversión ya vivían en casos de uso; lo que seguía en `main.rs` era el listado y todo lo que rodea a eliminar.
+* **Caso de uso** (`aplicacion::gastos`): `listar_gastos` y `eliminar_gasto`, con el orden de siempre: **primero** si lo creó otra operación (el cargo de un avance, la comisión de un abono: ese no se borra solo y su mensaje manda aunque el motivo sea corto), después el gasto, el motivo, el caso de corrección y, **al final**, la reversión.
+* **Puerto y adaptadores:** `ConsultaDeGastos` (listado, resumen del gasto y «por qué no se borra solo»), implementado sobre `AlmacenSqlite` y su doble. La lista de operaciones que crean gastos sigue en `db_sql::GASTOS_DERIVADOS`, vigilada por su prueba contra las claves ajenas reales; el adaptador solo la consulta.
+* **`main.rs`:** los tres comandos pasan por `con_almacen`. Comandos con SQL directo: **19 → 16** (de 54 al empezar A-03).
+* **Sin cambios visibles.**
+
+### 🧪 Pruebas
+* 5 de caracterización y 4 del caso de uso con el doble. Doce mutaciones (el derivado que no se rechaza o que se rechaza después del motivo, motivo sin validar, revertir antes de abrir el caso, caso sin descripción o con importe cero o sin divisa, reversión que no revierte, orden del listado, columna del resumen, derivados sin vigilar, columnas cruzadas): todas detectadas. **Rust 813 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): gastos en efectivo (60.505 → 60.51, la caja queda en negativo si no tenía), por transferencia (con su comisión del 0.20 %) y con tarjeta, el rechazo de la tarjeta sin indicar, el listado, eliminar los tres (inexistente y motivo corto rechazados): la caja, la cuenta y la tarjeta **vuelven exactamente al inicio** y quedan tres casos; y el gasto derivado (la comisión de un abono) se rechaza con su mensaje aunque el motivo sea corto.
+
+---
+
+## 🚀 Versión 1.88.0 - 2026-10-08
 **Auditoría A-03, quinto vertical (parte 4 de Tarjetas, la última): las bonificaciones. Con ella queda cerrado el vertical de Tarjetas.** Sin cambios de reglas ni de mensajes.
 
 ### 🔧 Qué se hace

@@ -37,7 +37,6 @@ use puertos::repositorios::{AlmacenInformales, AlmacenIngresos, AlmacenPrestamos
 use adaptadores::sqlite::gastos::AlmacenSqlite;
 use puertos::repositorios::AlmacenCatalogos;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
-use aplicacion::revertir_gasto::revertir_gasto;
 use aplicacion::registrar_pago_tarjeta::DatosPago;
 use aplicacion::registrar_avance_de_efectivo::DatosAvance;
 use aplicacion::cobrar_suscripcion::{cobrar_suscripcion, DatosCobro};
@@ -307,38 +306,27 @@ fn eliminar_categoria(id: i64) -> Result<(), String> {
 // --- COMANDOS: GASTOS ---
 #[tauri::command]
 fn obtener_gastos() -> Result<Vec<Gasto>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT g.id, g.fecha, g.monto, g.divisa, g.descripcion, g.categoria_id, c.nombre, g.metodo_pago, g.costo_adicional, g.tarjeta_id, g.cuenta_ahorro_id, g.estado_conversion, g.monto_liquidado, g.tasa_conversion
-         FROM gastos g
-         JOIN categorias c ON g.categoria_id = c.id
-         ORDER BY g.id DESC;"
-    ).map_err(|e| e.to_string())?;
-
-    let rows = stmt.query_map([], |row| {
-        Ok(Gasto {
-            id: row.get(0)?,
-            fecha: row.get(1)?,
-            monto: row.get(2)?,
-            divisa: row.get(3)?,
-            descripcion: row.get(4)?,
-            categoria_id: row.get(5)?,
-            categoria_nombre: row.get(6)?,
-            metodo_pago: row.get(7)?,
-            costo_adicional: row.get(8)?,
-            tarjeta_id: row.get(9)?,
-            cuenta_ahorro_id: row.get(10)?,
-            estado_conversion: row.get(11)?,
-            monto_liquidado: row.get(12)?,
-            tasa_conversion: row.get(13)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+    con_almacen(|a| {
+        Ok(aplicacion::gastos::listar_gastos(a)?
+            .into_iter()
+            .map(|g| Gasto {
+                id: g.id,
+                fecha: g.fecha,
+                monto: g.monto,
+                divisa: g.divisa,
+                descripcion: g.descripcion,
+                categoria_id: g.categoria_id,
+                categoria_nombre: g.categoria_nombre,
+                metodo_pago: g.metodo_pago,
+                costo_adicional: g.costo_adicional,
+                tarjeta_id: g.tarjeta_id,
+                cuenta_ahorro_id: g.cuenta_ahorro_id,
+                estado_conversion: g.estado_conversion,
+                monto_liquidado: g.monto_liquidado,
+                tasa_conversion: g.tasa_conversion,
+            })
+            .collect())
+    })
 }
 
 #[derive(Deserialize)]
@@ -361,8 +349,6 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
     // El comando queda reducido a traducción: interpreta la entrada, abre la
     // transacción, delega en el caso de uso y confirma. Ninguna regla vive ya
     // aquí.
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-
     // Se conserva la interpretación vigente de la divisa: la columna
     // gastos.divisa no tiene CHECK y el código solo distingue "USD".
     let divisa = if input.divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
@@ -387,13 +373,7 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
         },
     };
 
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let id = {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
-        registrar_gasto(datos, &mut almacen)?
-    };
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(id)
+    con_almacen(|a| Ok(registrar_gasto(datos, a)?))
 }
 
 // --- COMANDOS: INGRESOS FORMALES ---
@@ -1996,25 +1976,7 @@ fn abrir_caso(
 
 #[tauri::command]
 fn eliminar_gasto(id: i64, motivo: String) -> Result<String, String> {
-    // Traducción pura, igual que crear_gasto. La reversión vive en el caso de
-    // uso y en el puerto, no en esta consulta.
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    // Un gasto que creó otra operación —el cargo de un avance, la comisión de
-    // un abono— no se borra por separado: se revierte la operación entera. La
-    // lista y el porqué viven en `db_sql::GASTOS_DERIVADOS`.
-    if let Some(motivo) = db_sql::motivo_de_no_borrar_gasto(&tx, id).map_err(|e| e.to_string())? {
-        return Err(motivo.to_string());
-    }
-
-    let caso = abrir_caso(&tx, "gasto", id, "SELECT descripcion, monto, divisa FROM gastos WHERE id = ?;", &motivo)?;
-    {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
-        revertir_gasto(id, &mut almacen)?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(caso)
+    con_almacen(|a| Ok(aplicacion::gastos::eliminar_gasto(id, &motivo, a)?))
 }
 
 #[tauri::command]
