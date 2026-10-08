@@ -56,6 +56,8 @@ pub struct InformalEnMemoria {
 
 #[derive(Default)]
 pub struct AlmacenEnMemoria {
+    /// La fecha de cada abono (el doble de `PagoGuardado` no la guarda).
+    pub fechas_de_pago: HashMap<i64, String>,
     pub informales: Vec<InformalEnMemoria>,
     pub facturas: Vec<FacturaEnMemoria>,
     pub casos: Vec<CasoAAnotar>,
@@ -1268,6 +1270,41 @@ impl CatalogoDeTarjetas for TarjetasEnMemoria {
             t.politica_liquidacion = Some(l.politica_liquidacion.clone());
         }
         Ok(())
+    }
+}
+
+impl ConsultaDeAbonos for AlmacenEnMemoria {
+    fn abonos_de_tarjeta(&self, tarjeta_id: i64) -> Result<Vec<AbonoLeido>, ErrorAlmacen> {
+        let mut v: Vec<AbonoLeido> = self
+            .pagos
+            .values()
+            .filter(|p| p.tarjeta_id == tarjeta_id)
+            .map(|p| AbonoLeido {
+                id: p.id,
+                fecha_pago: self.fechas_de_pago.get(&p.id).cloned().unwrap_or_default(),
+                monto_pagado: p.monto.unidades(),
+                divisa: p.monto.divisa().codigo().to_string(),
+                cuenta_ahorro_id: p.cuenta_ahorro_id,
+                cuenta_nombre: p.cuenta_ahorro_id.and_then(|c| self.cuentas.get(&c)).map(|c| c.nombre.clone()),
+                tasa_cambio: p.tasa_cambio,
+            })
+            .collect();
+        v.sort_by(|a, b| b.id.cmp(&a.id));
+        Ok(v)
+    }
+    fn resumen_de_abono(&self, id: i64) -> Result<Option<ResumenDeAbono>, ErrorAlmacen> {
+        Ok(self.pagos.get(&id).map(|p| ResumenDeAbono {
+            fecha_pago: self.fechas_de_pago.get(&id).cloned().unwrap_or_default(),
+            monto_pagado: p.monto.unidades(),
+            divisa: p.monto.divisa().codigo().to_string(),
+        }))
+    }
+    fn categoria_de_sistema(&self) -> Result<i64, ErrorAlmacen> {
+        self.categorias
+            .iter()
+            .find(|(_, n)| n.as_str() == "Otros")
+            .map(|(id, _)| *id)
+            .ok_or(ErrorAlmacen::Fallo("Query returned no rows".into()))
     }
 }
 
