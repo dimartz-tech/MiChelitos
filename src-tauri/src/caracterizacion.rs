@@ -5529,7 +5529,7 @@ fn ab3_la_comision_de_un_abono_se_asienta_como_gasto_de_la_categoria_otros() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Abonos", "DOP", 50_000.0);
-    registrar_pago_tarjeta(tarjeta, "01/10/2026".to_string(), monto(5_000.0), "DOP".to_string(), Some(cuenta), 0.0).unwrap();
+    registrar_pago_tarjeta(tarjeta, "01/10/2026".to_string(), monto(5_400.0), "DOP".to_string(), Some(cuenta), 0.0).unwrap();
     let (categoria, cuenta_gasto): (i64, Option<i64>) = conexion()
         .query_row("SELECT categoria_id, cuenta_ahorro_id FROM gastos ORDER BY id DESC LIMIT 1;", [], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap();
