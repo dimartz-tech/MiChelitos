@@ -56,6 +56,8 @@ pub struct InformalEnMemoria {
 
 #[derive(Default)]
 pub struct AlmacenEnMemoria {
+    /// La fecha de cada avance (el doble de `AvanceGuardado` no la guarda).
+    pub fechas_de_avance: HashMap<i64, String>,
     /// La fecha de cada abono (el doble de `PagoGuardado` no la guarda).
     pub fechas_de_pago: HashMap<i64, String>,
     pub informales: Vec<InformalEnMemoria>,
@@ -1299,12 +1301,50 @@ impl ConsultaDeAbonos for AlmacenEnMemoria {
             divisa: p.monto.divisa().codigo().to_string(),
         }))
     }
+}
+
+impl CategoriaDeSistema for AlmacenEnMemoria {
     fn categoria_de_sistema(&self) -> Result<i64, ErrorAlmacen> {
         self.categorias
             .iter()
             .find(|(_, n)| n.as_str() == "Otros")
             .map(|(id, _)| *id)
             .ok_or(ErrorAlmacen::Fallo("Query returned no rows".into()))
+    }
+}
+
+impl ConsultaDeAvances for AlmacenEnMemoria {
+    fn avances_de_tarjeta(&self, tarjeta_id: i64) -> Result<Vec<AvanceLeido>, ErrorAlmacen> {
+        let mut v: Vec<AvanceLeido> = self
+            .avances
+            .values()
+            .filter(|a| a.tarjeta_id == tarjeta_id)
+            .filter_map(|a| {
+                let cuenta = self.cuentas.get(&a.cuenta_ahorro_id)?;
+                Some(AvanceLeido {
+                    id: a.id,
+                    fecha: self.fechas_de_avance.get(&a.id).cloned().unwrap_or_default(),
+                    monto: a.monto.unidades(),
+                    divisa: a.monto.divisa().codigo().to_string(),
+                    // El doble de `AvanceGuardado` no guarda el tipo de cargo, la tasa ni la nota: lo cubre SQLite.
+                    tipo_cargo: String::new(),
+                    tasa: None,
+                    cargo: a.cargo.unidades(),
+                    cuenta_ahorro_id: a.cuenta_ahorro_id,
+                    cuenta_nombre: cuenta.nombre.clone(),
+                    nota: None,
+                })
+            })
+            .collect();
+        v.sort_by(|a, b| b.id.cmp(&a.id));
+        Ok(v)
+    }
+    fn resumen_de_avance(&self, id: i64) -> Result<Option<ResumenDeAvance>, ErrorAlmacen> {
+        Ok(self.avances.get(&id).map(|a| ResumenDeAvance {
+            fecha: self.fechas_de_avance.get(&id).cloned().unwrap_or_default(),
+            monto: a.monto.unidades(),
+            divisa: a.monto.divisa().codigo().to_string(),
+        }))
     }
 }
 

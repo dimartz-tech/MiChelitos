@@ -119,8 +119,42 @@ pub trait ConsultaDeAbonos {
     fn abonos_de_tarjeta(&self, tarjeta_id: i64) -> Result<Vec<AbonoLeido>, ErrorAlmacen>;
     /// `None` si no hay ningún abono con ese identificador.
     fn resumen_de_abono(&self, id: i64) -> Result<Option<ResumenDeAbono>, ErrorAlmacen>;
-    /// La categoría «Otros», a la que va la comisión de un abono.
+}
+
+/// La categoría de sistema «Otros», a la que van las comisiones y los cargos que se asientan solos.
+pub trait CategoriaDeSistema {
     fn categoria_de_sistema(&self) -> Result<i64, ErrorAlmacen>;
+}
+
+/// Un avance de efectivo tal como lo muestra el historial: con el nombre de la cuenta que lo recibió.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AvanceLeido {
+    pub id: i64,
+    pub fecha: String,
+    pub monto: f64,
+    pub divisa: String,
+    pub tipo_cargo: String,
+    pub tasa: Option<f64>,
+    pub cargo: f64,
+    pub cuenta_ahorro_id: i64,
+    pub cuenta_nombre: String,
+    pub nota: Option<String>,
+}
+
+/// Lo que hace falta de un avance para abrir el caso de corrección al revertirlo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResumenDeAvance {
+    pub fecha: String,
+    pub monto: f64,
+    pub divisa: String,
+}
+
+/// Consultas de los avances de efectivo que no son del registro ni de la reversión.
+pub trait ConsultaDeAvances {
+    /// Del más nuevo al más viejo. Una tarjeta sin avances (o inexistente) da una lista vacía.
+    fn avances_de_tarjeta(&self, tarjeta_id: i64) -> Result<Vec<AvanceLeido>, ErrorAlmacen>;
+    /// `None` si no hay ningún avance con ese identificador.
+    fn resumen_de_avance(&self, id: i64) -> Result<Option<ResumenDeAvance>, ErrorAlmacen>;
 }
 
 /// Una tarjeta tal como se lee.

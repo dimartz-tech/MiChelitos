@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.86.0 (Versión Actual) - 2026-10-08
+## 🚀 Versión 1.87.0 (Versión Actual) - 2026-10-08
+**Auditoría A-03, quinto vertical (parte 3 de Tarjetas): los avances de efectivo.** Registrar, listar y revertir un avance dejan de llevar SQL y reglas en `main.rs`. Sin cambios de reglas ni de mensajes.
+
+### 🔧 Qué se hace
+* **Orden de trabajo:** primero 5 pruebas de caracterización (`av1`–`av5`, en su propio commit, contra el código de antes; completan `c108`–`c127`) y después la extracción, con todas intactas.
+* **Dominio** (`dominio::avance`): lo que llegaba de la interfaz y se resolvía en `main.rs` pasa a reglas con prueba: el cargo a partir de su tipo (`porcentaje`, `fijo` o `exonerado`: cada tipo exige lo suyo y **solo** lo suyo; un valor de más es una contradicción), la fecha (recortada, `dd/mm/aaaa` de un día que existe) y la nota (recortada; en blanco es ausente). Los cinco mensajes son los de siempre.
+* **Caso de uso** (`aplicacion::avances`): `registrar_avance` (el cargo se asienta como gasto de la categoría de sistema «Otros»), `listar_avances` y `revertir_avance` (el avance, el motivo, el caso de corrección y, **al final**, la reversión).
+* **Puertos y adaptadores:** `ConsultaDeAvances` (historial y resumen), implementado sobre `AlmacenSqlite` y su doble; la categoría de sistema pasa a su propio puerto `CategoriaDeSistema`, que comparten abonos y avances.
+* **`main.rs`:** los cuatro comandos quedan delgados sobre `con_almacen`; se va `cargo_de_avance`. Comandos con SQL directo: **26 → 23** (de 54 al empezar A-03).
+* **Sin cambios visibles.** Un detalle que la extracción dejó a la vista: la comprobación de la fecha del comando es más permisiva que el esquema (acepta `1/10/2026`, con el día sin cero) y es el esquema, estricto, quien la rechaza al guardar; queda dicho en una prueba.
+
+### 🧪 Pruebas
+* 5 de caracterización, 5 del dominio y 5 del caso de uso con el doble. Diecisiete mutaciones (cada tipo de cargo que deja pasar lo que no debe, fecha sin recortar o sin validar, nota en blanco o sin recortar, comisión sin categoría, motivo sin validar, revertir antes de abrir el caso, caso sin fecha o con importe cero, reversión que no revierte, orden y filtro del historial, columna equivocada del resumen): todas detectadas. **Rust 800 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): simular, registrar con porcentaje, fijo y exonerado (con fecha y nota con espacios), los cinco rechazos con su mensaje, el historial y revertir los tres: la tarjeta, la cuenta y los gastos **vuelven exactamente al inicio** y quedan tres casos de corrección.
+
+---
+
+## 🚀 Versión 1.86.0 - 2026-10-08
 **Auditoría A-03, quinto vertical (parte 2 de Tarjetas): los abonos.** Registrar, listar y revertir un abono a tarjeta dejan de llevar SQL en `main.rs`. Sin cambios de reglas ni de mensajes.
 
 ### 🔧 Qué se hace
