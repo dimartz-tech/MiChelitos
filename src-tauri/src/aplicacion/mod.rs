@@ -3,6 +3,7 @@
 
 pub mod abonos;
 pub mod avances;
+pub mod bonificaciones;
 pub mod catalogos;
 pub mod cuentas;
 pub mod cobrar_suscripcion;
