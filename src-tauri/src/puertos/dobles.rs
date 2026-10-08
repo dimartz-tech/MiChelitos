@@ -54,8 +54,16 @@ pub struct InformalEnMemoria {
     pub monto_recibido: Option<f64>,
 }
 
+/// Una suscripción en el doble: la fila (con la fecha del último pago y la tarjeta como identificador).
+#[derive(Debug, Clone)]
+pub struct SuscripcionEnMemoria {
+    pub datos: SuscripcionRegistrada,
+    pub fecha_ultimo_pago: Option<String>,
+}
+
 #[derive(Default)]
 pub struct AlmacenEnMemoria {
+    pub suscripciones: Vec<SuscripcionEnMemoria>,
     /// La descripción de cada gasto y el motivo por el que no se borra solo (el doble de `GastoGuardado` no los guarda).
     pub descripciones_de_gasto: HashMap<i64, String>,
     pub motivos_de_no_borrar: HashMap<i64, String>,
@@ -1409,6 +1417,100 @@ impl ConsultaDeGastos for AlmacenEnMemoria {
     }
     fn motivo_de_no_borrar(&self, id: i64) -> Result<Option<String>, ErrorAlmacen> {
         Ok(self.motivos_de_no_borrar.get(&id).cloned())
+    }
+}
+
+impl AlmacenSuscripciones for AlmacenEnMemoria {
+    fn suscripciones_con_tarjeta(&self) -> Result<Vec<SuscripcionLeida>, ErrorAlmacen> {
+        let mut v: Vec<SuscripcionLeida> = self
+            .suscripciones
+            .iter()
+            .map(|s| SuscripcionLeida {
+                id: s.datos.id,
+                plataforma: s.datos.plataforma.clone(),
+                monto: s.datos.monto,
+                tarjeta_id: s.datos.tarjeta_id,
+                frecuencia: s.datos.frecuencia.clone(),
+                dia_facturacion: s.datos.dia_facturacion,
+                fecha_ultimo_pago: s.fecha_ultimo_pago.clone(),
+                divisa: s.datos.divisa.clone(),
+                // El doble no guarda los datos de la tarjeta: lo cubre SQLite.
+                entidad: String::new(),
+                nombre_tarjeta: String::new(),
+                fecha_proximo_cobro: s.datos.fecha_proximo_cobro.clone(),
+            })
+            .collect();
+        v.sort_by(|a, b| a.plataforma.cmp(&b.plataforma));
+        Ok(v)
+    }
+    fn suscripciones_registradas(&self) -> Result<Vec<SuscripcionRegistrada>, ErrorAlmacen> {
+        let mut v: Vec<SuscripcionRegistrada> = self.suscripciones.iter().map(|s| s.datos.clone()).collect();
+        v.sort_by_key(|s| s.id);
+        Ok(v)
+    }
+    fn insertar_suscripcion(&mut self, s: &SuscripcionAGuardar) -> Result<i64, ErrorAlmacen> {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.suscripciones.push(SuscripcionEnMemoria {
+            datos: SuscripcionRegistrada {
+                id,
+                plataforma: s.plataforma.clone(),
+                monto: s.monto,
+                tarjeta_id: s.tarjeta_id,
+                frecuencia: s.frecuencia.clone(),
+                dia_facturacion: s.dia_facturacion,
+                divisa: s.divisa.clone(),
+                fecha_proximo_cobro: s.fecha_proximo_cobro.clone(),
+            },
+            fecha_ultimo_pago: None,
+        });
+        Ok(id)
+    }
+    fn editar_suscripcion(&mut self, id: i64, s: &SuscripcionAGuardar) -> Result<bool, ErrorAlmacen> {
+        match self.suscripciones.iter_mut().find(|x| x.datos.id == id) {
+            None => Ok(false),
+            Some(x) => {
+                x.datos.plataforma = s.plataforma.clone();
+                x.datos.monto = s.monto;
+                x.datos.tarjeta_id = s.tarjeta_id;
+                x.datos.frecuencia = s.frecuencia.clone();
+                x.datos.dia_facturacion = s.dia_facturacion;
+                x.datos.divisa = s.divisa.clone();
+                x.datos.fecha_proximo_cobro = s.fecha_proximo_cobro.clone();
+                Ok(true)
+            }
+        }
+    }
+    fn fijar_proximo_cobro(&mut self, id: i64, fecha: &str) -> Result<bool, ErrorAlmacen> {
+        match self.suscripciones.iter_mut().find(|x| x.datos.id == id) {
+            None => Ok(false),
+            Some(x) => {
+                x.datos.fecha_proximo_cobro = Some(fecha.to_string());
+                Ok(true)
+            }
+        }
+    }
+    fn eliminar_suscripcion(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.suscripciones.retain(|x| x.datos.id != id);
+        Ok(())
+    }
+    fn mover_puntero(&mut self, id: i64, siguiente: Option<&str>, marca_de_cobro: Option<&str>) -> Result<(), ErrorAlmacen> {
+        if let Some(x) = self.suscripciones.iter_mut().find(|x| x.datos.id == id) {
+            x.datos.fecha_proximo_cobro = siguiente.map(str::to_string);
+            if let Some(m) = marca_de_cobro {
+                x.fecha_ultimo_pago = Some(m.to_string());
+            }
+        }
+        Ok(())
+    }
+    fn categoria_por_nombre(&self, nombre_en_minusculas: &str) -> Result<Option<i64>, ErrorAlmacen> {
+        Ok(self.categorias.iter().find(|(_, n)| n.to_lowercase() == nombre_en_minusculas).map(|(id, _)| *id))
+    }
+    fn crear_categoria(&mut self, nombre: &str) -> Result<i64, ErrorAlmacen> {
+        let id = self.siguiente_id;
+        self.siguiente_id += 1;
+        self.categorias.insert(id, nombre.to_string());
+        Ok(id)
     }
 }
 

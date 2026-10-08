@@ -213,6 +213,122 @@ pub fn dias_del_mes(anio: i32, mes: u32) -> u32 {
     }
 }
 
+// --- Reglas de alta y consulta (A-03: salen de `main.rs`) ----------------------------------------------
+
+use super::dinero::Dinero;
+use super::errores::ErrorDominio;
+
+/// `dd/mm/aaaa` — el formato de la aplicación.
+pub fn fecha_desde_texto(texto: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(texto, "%d/%m/%Y").ok()
+}
+
+/// La regla de una suscripción a partir de lo que guarda la fila.
+///
+/// Un solo sitio donde se traduce lo almacenado a la regla, para que el cobro, el aviso y la confirmación no puedan
+/// discrepar sobre qué día vence una suscripción. Una frecuencia que el `CHECK` no admite no debería existir; si
+/// existiera, no cobrar es lo correcto (`None`).
+pub fn regla_de_un_registro(frecuencia: &str, proximo_cobro: Option<&str>, dia_facturacion: i32) -> Option<Suscripcion> {
+    Some(Suscripcion {
+        frecuencia: Frecuencia::desde_codigo(frecuencia)?,
+        proximo_cobro: proximo_cobro.and_then(fecha_desde_texto),
+        dia_ancla: dia_facturacion.max(1) as u32,
+    })
+}
+
+/// Las condiciones de una suscripción: cuánto, cada cuánto y qué día (la divisa ya vino validada con el importe).
+///
+/// Antes solo el `CHECK` del esquema atajaba algo, con su mensaje crudo, y atajaba poco: un importe **negativo o cero**
+/// entraba, y cobrarlo abonaba a la tarjeta cada período; un día de facturación fuera de 1 a 31 también. Orden: el
+/// importe, la frecuencia y el día.
+pub fn condiciones_de_suscripcion(importe: Dinero, frecuencia: &str, dia_facturacion: i32) -> Result<(), ErrorDominio> {
+    if importe.es_cero() || importe.es_negativo() {
+        return Err(ErrorDominio::SuscripcionSinImporte);
+    }
+    if Frecuencia::desde_codigo(frecuencia).is_none() {
+        return Err(ErrorDominio::FrecuenciaDesconocida { codigo: frecuencia.to_string() });
+    }
+    if !(1..=31).contains(&dia_facturacion) {
+        return Err(ErrorDominio::DiaDeFacturacionInvalido { dia: dia_facturacion });
+    }
+    Ok(())
+}
+
+/// La fecha del próximo cobro, si la dan, tiene que entenderse. En blanco es lo mismo que ausente.
+///
+/// Se rechaza una fecha ilegible en vez de guardarla: una suscripción con una fecha que no se puede leer no cobra, pero
+/// **aparenta estar configurada**, y eso es peor que el hueco visible.
+pub fn proximo_cobro_declarado(fecha: Option<String>) -> Result<Option<String>, ErrorDominio> {
+    match fecha.as_deref().map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(texto) => match fecha_desde_texto(texto) {
+            Some(_) => Ok(Some(texto.to_string())),
+            None => Err(ErrorDominio::FechaDeCobroNoEntendida { fecha: texto.to_string() }),
+        },
+    }
+}
+
+/// La fecha que se pone a mano para sacar una suscripción de la parada: recortada y legible.
+pub fn fecha_de_correccion(texto: &str) -> Result<String, ErrorDominio> {
+    let fecha = texto.trim();
+    if fecha_desde_texto(fecha).is_none() {
+        return Err(ErrorDominio::FechaDeCorreccionNoEntendida { fecha: fecha.to_string() });
+    }
+    Ok(fecha.to_string())
+}
+
+#[cfg(test)]
+mod tests_de_alta {
+    use super::*;
+    use crate::dominio::dinero::Divisa;
+
+    fn dop(u: f64) -> Dinero {
+        Dinero::nuevo(u, Divisa::Dop).unwrap()
+    }
+
+    #[test]
+    fn las_condiciones_se_comprueban_en_orden_importe_frecuencia_dia() {
+        assert_eq!(condiciones_de_suscripcion(dop(0.0), "semanal", 0), Err(ErrorDominio::SuscripcionSinImporte));
+        assert_eq!(condiciones_de_suscripcion(dop(-1.0), "mensual", 5), Err(ErrorDominio::SuscripcionSinImporte));
+        assert_eq!(
+            condiciones_de_suscripcion(dop(5.0), "semanal", 0),
+            Err(ErrorDominio::FrecuenciaDesconocida { codigo: "semanal".into() })
+        );
+        assert_eq!(condiciones_de_suscripcion(dop(5.0), "mensual", 0), Err(ErrorDominio::DiaDeFacturacionInvalido { dia: 0 }));
+        assert_eq!(condiciones_de_suscripcion(dop(5.0), "anual", 32), Err(ErrorDominio::DiaDeFacturacionInvalido { dia: 32 }));
+        assert_eq!(condiciones_de_suscripcion(dop(5.0), "mensual", 31), Ok(()));
+        assert_eq!(condiciones_de_suscripcion(dop(5.0), "anual", 1), Ok(()));
+    }
+
+    #[test]
+    fn el_proximo_cobro_en_blanco_es_ausente_y_uno_ilegible_se_rechaza_recortado() {
+        assert_eq!(proximo_cobro_declarado(None), Ok(None));
+        assert_eq!(proximo_cobro_declarado(Some("   ".into())), Ok(None));
+        assert_eq!(proximo_cobro_declarado(Some(" 05/03/2026 ".into())), Ok(Some("05/03/2026".into())));
+        assert_eq!(
+            proximo_cobro_declarado(Some("  ayer ".into())),
+            Err(ErrorDominio::FechaDeCobroNoEntendida { fecha: "ayer".into() })
+        );
+    }
+
+    #[test]
+    fn la_fecha_de_correccion_se_recorta_y_debe_entenderse() {
+        assert_eq!(fecha_de_correccion(" 15/03/2026 "), Ok("15/03/2026".into()));
+        assert_eq!(fecha_de_correccion(" ayer "), Err(ErrorDominio::FechaDeCorreccionNoEntendida { fecha: "ayer".into() }));
+        assert_eq!(fecha_de_correccion(""), Err(ErrorDominio::FechaDeCorreccionNoEntendida { fecha: "".into() }));
+    }
+
+    #[test]
+    fn la_regla_de_un_registro_traduce_lo_guardado_y_una_frecuencia_rara_no_cobra() {
+        let r = regla_de_un_registro("mensual", Some("15/03/2026"), 15).unwrap();
+        assert_eq!((r.frecuencia, r.dia_ancla), (Frecuencia::Mensual, 15));
+        assert!(r.proximo_cobro.is_some());
+        assert!(regla_de_un_registro("anual", Some("basura"), 0).unwrap().proximo_cobro.is_none(), "una fecha ilegible es «sin fecha»");
+        assert_eq!(regla_de_un_registro("anual", None, 0).unwrap().dia_ancla, 1, "el ancla nunca baja de 1");
+        assert!(regla_de_un_registro("semanal", Some("15/03/2026"), 15).is_none());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
