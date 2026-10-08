@@ -1,6 +1,7 @@
 //! Casos de uso: orquestan el dominio y los puertos, sin SQL ni Tauri.
 #![allow(dead_code)]
 
+pub mod abonos;
 pub mod catalogos;
 pub mod cuentas;
 pub mod cobrar_suscripcion;

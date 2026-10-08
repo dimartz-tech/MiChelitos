@@ -5490,3 +5490,86 @@ fn r7_las_tarjetas_se_listan_en_el_orden_en_que_se_crearon_y_una_politica_ausent
     assert_eq!(lista[0].politica_liquidacion, "origen");
 }
 
+// --- A-03, vertical «tarjetas» (parte 2: abonos): caracterización antes de extraer ---
+//
+// Completan c17–c20 y c63–c67 (el registro y la reversión ya viven en casos de uso) con lo que sigue en `main.rs`:
+// el listado, la categoría de la comisión, el caso de corrección y los textos del resumen.
+
+#[test]
+fn ab1_los_abonos_de_una_tarjeta_salen_del_mas_nuevo_al_mas_viejo_con_su_cuenta_y_su_tasa() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 500.0);
+    let cuenta = crear_cuenta("Cuenta Abonos", "DOP", 100_000.0);
+    registrar_pago_tarjeta(tarjeta, "01/10/2026".to_string(), monto(100.0), "USD".to_string(), Some(cuenta), 60.0).unwrap();
+    registrar_pago_tarjeta(tarjeta, "02/10/2026".to_string(), monto(200.0), "USD".to_string(), None, 0.0).unwrap();
+
+    let abonos = crate::obtener_abonos_tarjeta(tarjeta).unwrap();
+    assert_eq!(abonos.len(), 2);
+    let (nuevo, viejo) = (&abonos[0], &abonos[1]);
+    assert_eq!((nuevo.fecha_pago.as_str(), nuevo.divisa.as_str(), nuevo.cuenta_ahorro_id, nuevo.cuenta_nombre.as_deref()), ("02/10/2026", "USD", None, None));
+    assert_importe(nuevo.monto_pagado, 200.0, "monto del más nuevo");
+    assert!(nuevo.tasa_cambio.is_none(), "sin cuenta no hay tasa");
+    assert_eq!((viejo.fecha_pago.as_str(), viejo.cuenta_ahorro_id, viejo.cuenta_nombre.as_deref()), ("01/10/2026", Some(cuenta), Some("Cuenta Abonos")));
+    assert_importe(viejo.tasa_cambio.unwrap(), 60.0, "la tasa del abono multidivisa");
+}
+
+#[test]
+fn ab2_solo_se_listan_los_abonos_de_la_tarjeta_pedida() {
+    let _g = entorno_aislado();
+    let a = crear_tarjeta(1_000.0, 0.0);
+    let b = crear_tarjeta(1_000.0, 0.0);
+    registrar_pago_tarjeta(a, "01/10/2026".to_string(), monto(10.0), "DOP".to_string(), None, 0.0).unwrap();
+    assert_eq!(crate::obtener_abonos_tarjeta(a).unwrap().len(), 1);
+    assert!(crate::obtener_abonos_tarjeta(b).unwrap().is_empty());
+    assert!(crate::obtener_abonos_tarjeta(987_654).unwrap().is_empty(), "una tarjeta inexistente no es un error");
+}
+
+#[test]
+fn ab3_la_comision_de_un_abono_se_asienta_como_gasto_de_la_categoria_otros() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Abonos", "DOP", 50_000.0);
+    registrar_pago_tarjeta(tarjeta, "01/10/2026".to_string(), monto(5_400.0), "DOP".to_string(), Some(cuenta), 0.0).unwrap();
+    let (categoria, cuenta_gasto): (i64, Option<i64>) = conexion()
+        .query_row("SELECT categoria_id, cuenta_ahorro_id FROM gastos ORDER BY id DESC LIMIT 1;", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    let otros: i64 = conexion().query_row("SELECT id FROM categorias WHERE nombre = 'Otros';", [], |r| r.get(0)).unwrap();
+    assert_eq!(categoria, otros, "la comisión va a «Otros»");
+    assert_eq!(cuenta_gasto, Some(cuenta));
+}
+
+#[test]
+fn ab4_revertir_un_abono_inexistente_o_con_motivo_corto_dice_su_mensaje_y_no_toca_nada() {
+    let _g = entorno_aislado();
+    assert_eq!(
+        revertir_abono_tarjeta(404, motivo_de_prueba()).unwrap_err(),
+        "No se encontró abono con identificador 404."
+    );
+    let tarjeta = crear_tarjeta(10_000.0, 0.0);
+    registrar_pago_tarjeta(tarjeta, "01/10/2026".to_string(), monto(1_000.0), "DOP".to_string(), None, 0.0).unwrap();
+    let e = revertir_abono_tarjeta(ultimo_abono(), "corto".into()).unwrap_err();
+    assert!(e.starts_with("Explica la corrección en al menos 15 caracteres.") && e.contains("«corto»"), "{e}");
+    assert_importe(balances_tarjeta(tarjeta).0, 9_000.0, "la deuda no se movió");
+    assert!(casos_de_correccion().is_empty(), "ni se abrió un caso");
+}
+
+#[test]
+fn ab5_revertir_deja_un_caso_con_el_abono_y_cuenta_lo_devuelto_con_los_textos_de_siempre() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Abonos", "DOP", 50_000.0);
+    registrar_pago_tarjeta(tarjeta, "03/10/2026".to_string(), monto(5_432.0), "DOP".to_string(), Some(cuenta), 0.0).unwrap();
+    let con_cuenta = revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
+    let anio = chrono::Local::now().format("%Y").to_string();
+    assert_eq!(con_cuenta, format!("Se repusieron DOP 5432.00 a la deuda y volvieron DOP 5442.86 a la cuenta. Caso COR-{anio}-0001."));
+
+    registrar_pago_tarjeta(tarjeta, "04/10/2026".to_string(), monto(700.0), "DOP".to_string(), None, 0.0).unwrap();
+    let sin_cuenta = revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
+    assert_eq!(sin_cuenta, format!("Se repusieron DOP 700.00 a la deuda. El abono no tenía cuenta asociada. Caso COR-{anio}-0002."));
+
+    let casos = casos_de_correccion();
+    let (_, tipo, _, descripcion, importe_caso, divisa) = &casos[0];
+    assert_eq!((tipo.as_str(), descripcion.as_str(), divisa.as_deref()), ("abono", "Abono del 03/10/2026", Some("DOP")));
+    assert_importe(importe_caso.unwrap(), 5_432.0, "monto del abono");
+}
+
