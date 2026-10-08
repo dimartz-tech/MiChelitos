@@ -20,6 +20,7 @@ pub mod registrar_gasto;
 pub mod registrar_pago_tarjeta;
 pub mod revertir_avance_de_efectivo;
 pub mod revertir_gasto;
+pub mod suscripciones;
 pub mod revertir_pago_tarjeta;
 pub mod transferir;
 

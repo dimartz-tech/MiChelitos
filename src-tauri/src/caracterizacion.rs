@@ -5875,3 +5875,39 @@ fn su4_descartar_sin_motivo_que_explique_dice_cuanto_falta_y_no_avanza_nada() {
     assert_eq!(proximo_cobro_de(sub), antes, "el puntero no se movió");
 }
 
+#[test]
+fn su5_los_mensajes_del_cobro_y_de_confirmar_son_los_de_siempre() {
+    let _g = entorno_aislado();
+    let (_sub, _) = suscripcion_mensual(15, "15/03/2026");
+    let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 20);
+    assert_eq!(
+        crate::procesar_suscripciones_con(&reloj).unwrap(),
+        vec!["Cargo automático realizado para Plataforma (DOP 500.00) con fecha 15/03/2026".to_string()]
+    );
+    let (varios, _) = suscripcion_mensual(15, "15/01/2026");
+    let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 20);
+    assert_eq!(
+        crate::confirmar_pendiente(varios, &reloj, None).unwrap(),
+        "Asentado el cargo de Plataforma con fecha 15/01/2026."
+    );
+    let descartado = crate::confirmar_pendiente(varios, &reloj, Some("El proveedor no lo cobró este mes".into())).unwrap();
+    assert!(descartado.starts_with("Período del 15/02/2026 descartado. Caso "), "{descartado}");
+    let (importe_caso, divisa): (Option<f64>, Option<String>) = conexion()
+        .query_row("SELECT importe, divisa FROM correcciones WHERE tipo = 'período de suscripción' ORDER BY id DESC LIMIT 1;", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((importe_caso, divisa.as_deref()), (Some(500.0), Some("DOP")), "el caso lleva el importe y la divisa del período");
+}
+
+#[test]
+fn su6_editar_conserva_el_ultimo_pago_y_la_fecha_se_rechaza_antes_que_la_divisa() {
+    let _g = entorno_aislado();
+    let (sub, tarjeta) = suscripcion_mensual(15, "15/03/2026");
+    crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
+    assert_eq!(ultimo_pago(sub).as_deref(), Some("15/03/2026"));
+    crate::actualizar_suscripcion(sub, "Otra".into(), importe("15"), tarjeta, "mensual".into(), 16, "DOP".into(), Some("16/04/2026".into())).unwrap();
+    assert_eq!(ultimo_pago(sub).as_deref(), Some("15/03/2026"), "editar no reinicia el marcador");
+
+    let e = crear_suscripcion("X".into(), importe("15"), tarjeta, "mensual".into(), 5, "XYZ".into(), Some("ayer".into())).unwrap_err();
+    assert!(e.starts_with("La fecha del próximo cobro «ayer»"), "primero la fecha: {e}");
+}
+
