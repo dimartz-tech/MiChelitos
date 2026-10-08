@@ -1,12 +1,13 @@
 //! Casos de uso de las tarjetas (parte 1): listarlas con su cupo y sus recordatorios, darlas de alta y corregir sus
 //! límites.
 //!
-//! Lo fijan las pruebas de caracterización `r1`–`r7`. **Hallazgos documentados, sin corregir** (el cambio se consulta):
-//! el alta no recorta ni valida entidad y nombre ni que los límites sean positivos (`r2`; los días de corte y de pago
-//! los valida el esquema), y corregir los límites de una tarjeta que no existe no dice nada (`r4`).
+//! Lo fijan las pruebas de caracterización `r1`–`r7`. El alta recorta y exige entidad y nombre y rechaza límites
+//! negativos (`r2`; los días de corte y de pago los valida el esquema), y corregir los límites de una tarjeta que no
+//! existe lo dice (`r4`).
 
 use super::ErrorAplicacion;
 use crate::dominio::dinero::Dinero;
+use crate::dominio::errores::ErrorDominio;
 use crate::dominio::tarjeta::{aviso_de_corte, aviso_de_pago, cupo_para_mostrar, PoliticaLiquidacion};
 use crate::dominio::dinero::Divisa;
 use crate::puertos::repositorios::*;
@@ -97,10 +98,33 @@ pub fn listar_tarjetas(
         .collect())
 }
 
+/// Los límites y topes no son negativos. Cero se admite: un límite en una divisa que la tarjeta no usa, o un tope
+/// deliberado en cero.
+fn limites_no_negativos(importes: &[Option<Dinero>]) -> Result<(), ErrorAplicacion> {
+    if importes.iter().flatten().any(|d| d.es_negativo()) {
+        return Err(ErrorDominio::LimiteNegativo.into());
+    }
+    Ok(())
+}
+
 pub fn crear_tarjeta(datos: DatosTarjetaNueva, almacen: &mut impl CatalogoDeTarjetas) -> Result<i64, ErrorAplicacion> {
+    let entidad = datos.entidad.trim().to_string();
+    let nombre_tarjeta = datos.nombre_tarjeta.trim().to_string();
+    if entidad.is_empty() {
+        return Err(ErrorDominio::DatoObligatorioVacio { campo: "la entidad de la tarjeta" }.into());
+    }
+    if nombre_tarjeta.is_empty() {
+        return Err(ErrorDominio::DatoObligatorioVacio { campo: "el nombre de la tarjeta" }.into());
+    }
+    limites_no_negativos(&[
+        Some(datos.limite_pesos),
+        Some(datos.limite_dolares),
+        Some(datos.sobregiro_pesos),
+        Some(datos.sobregiro_dolares),
+    ])?;
     Ok(almacen.insertar_tarjeta(&TarjetaNueva {
-        entidad: datos.entidad,
-        nombre_tarjeta: datos.nombre_tarjeta,
+        entidad,
+        nombre_tarjeta,
         limite_pesos: datos.limite_pesos.unidades(),
         limite_dolares: datos.limite_dolares.unidades(),
         limite_sobregiro_pesos: datos.sobregiro_pesos.unidades(),
@@ -115,7 +139,16 @@ pub fn crear_tarjeta(datos: DatosTarjetaNueva, almacen: &mut impl CatalogoDeTarj
 }
 
 pub fn actualizar_limites(datos: DatosLimites, almacen: &mut impl CatalogoDeTarjetas) -> Result<(), ErrorAplicacion> {
-    Ok(almacen.actualizar_limites(&LimitesDeTarjeta {
+    limites_no_negativos(&[
+        Some(datos.limite_pesos),
+        Some(datos.limite_dolares),
+        Some(datos.sobregiro_pesos),
+        Some(datos.sobregiro_dolares),
+        datos.limite_ajustado_pesos,
+        datos.limite_ajustado_dolares,
+    ])?;
+    let id = datos.id;
+    if !almacen.actualizar_limites(&LimitesDeTarjeta {
         id: datos.id,
         limite_pesos: datos.limite_pesos.unidades(),
         limite_dolares: datos.limite_dolares.unidades(),
@@ -126,7 +159,10 @@ pub fn actualizar_limites(datos: DatosLimites, almacen: &mut impl CatalogoDeTarj
         limite_ajustado_pesos: datos.limite_ajustado_pesos.map(|d| d.unidades()),
         limite_ajustado_dolares: datos.limite_ajustado_dolares.map(|d| d.unidades()),
         politica_liquidacion: PoliticaLiquidacion::desde_codigo(datos.politica_liquidacion.as_deref()).codigo().to_string(),
-    })?)
+    })? {
+        return Err(ErrorDominio::TarjetaNoEncontrada { id }.into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -209,9 +245,10 @@ mod tests {
     }
 
     #[test]
-    fn actualizar_los_limites_de_una_tarjeta_inexistente_no_dice_nada() {
+    fn actualizar_los_limites_de_una_tarjeta_inexistente_lo_dice() {
         let mut a = TarjetasEnMemoria::nuevo();
-        assert!(actualizar_limites(limites(404, None, None), &mut a).is_ok());
+        let e = actualizar_limites(limites(404, None, None), &mut a).unwrap_err();
+        assert_eq!(e.to_string(), "No se encontró la tarjeta 404.");
     }
 
     #[test]

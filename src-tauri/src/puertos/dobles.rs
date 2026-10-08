@@ -1270,8 +1270,9 @@ impl CatalogoDeTarjetas for TarjetasEnMemoria {
         });
         Ok(id)
     }
-    fn actualizar_limites(&mut self, l: &LimitesDeTarjeta) -> Result<(), ErrorAlmacen> {
-        if let Some(t) = self.tarjetas.iter_mut().find(|t| t.id == l.id) {
+    fn actualizar_limites(&mut self, l: &LimitesDeTarjeta) -> Result<bool, ErrorAlmacen> {
+        let Some(t) = self.tarjetas.iter_mut().find(|t| t.id == l.id) else { return Ok(false) };
+        {
             t.limite_pesos = l.limite_pesos;
             t.limite_dolares = l.limite_dolares;
             t.limite_sobregiro_pesos = l.limite_sobregiro_pesos;
@@ -1282,7 +1283,7 @@ impl CatalogoDeTarjetas for TarjetasEnMemoria {
             t.limite_ajustado_dolares = l.limite_ajustado_dolares;
             t.politica_liquidacion = Some(l.politica_liquidacion.clone());
         }
-        Ok(())
+        Ok(true)
     }
 }
 
