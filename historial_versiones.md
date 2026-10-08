@@ -4,7 +4,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.87.0 (Versión Actual) - 2026-10-08
+## 🚀 Versión 1.88.0 (Versión Actual) - 2026-10-08
+**Auditoría A-03, quinto vertical (parte 4 de Tarjetas, la última): las bonificaciones. Con ella queda cerrado el vertical de Tarjetas.** Sin cambios de reglas ni de mensajes.
+
+### 🔧 Qué se hace
+* **Lo que quedaba era poco:** registrar y revertir una bonificación y liquidar un consumo pendiente ya vivían en casos de uso; en `main.rs` solo seguía el SQL del listado. Pasa al puerto `ConsultaDeBonificaciones` (con su adaptador sobre `AlmacenSqlite` y su doble) y al caso de uso `listar_bonificaciones`.
+* **Orden de trabajo:** primero 2 pruebas de caracterización (`bo1`: el listado con los datos de la tarjeta, del más nuevo al más viejo; `bo2`: los mensajes de eliminar una bonificación inexistente y de liquidar lo que no se puede), en su propio commit y contra el código de antes; después la extracción.
+* **`main.rs`:** los cuatro comandos (`obtener_bonificaciones`, `crear_bonificacion`, `eliminar_bonificacion`, `liquidar_consumo_pendiente`) pasan por `con_almacen`, que abre y confirma la transacción. Comandos con SQL directo: **23 → 19** (de 54 al empezar A-03).
+* **Sin cambios visibles.**
+
+### 🧪 Pruebas
+* 2 de caracterización y 2 del caso de uso con el doble. Siete mutaciones (listado ascendente, columnas cruzadas, la divisa de la bonificación invertida, eliminar que no revierte, liquidar con otra divisa): todas detectadas. **Rust 804 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal): una bonificación de 120.505 se guarda como 120.51 y baja la deuda en esa cifra, se rechazan el concepto vacío y el monto que redondea a cero, eliminarla repone la deuda exactamente, y se liquida un consumo pendiente en dólares (6050.005 → 6050.01, tasa deducida 60.5001) y liquidarlo de nuevo se rechaza.
+
+---
+
+## 🚀 Versión 1.87.0 - 2026-10-08
 **Auditoría A-03, quinto vertical (parte 3 de Tarjetas): los avances de efectivo.** Registrar, listar y revertir un avance dejan de llevar SQL y reglas en `main.rs`. Sin cambios de reglas ni de mensajes.
 
 ### 🔧 Qué se hace

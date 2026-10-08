@@ -5663,3 +5663,55 @@ fn av5_revertir_un_avance_dice_su_causa_deja_un_caso_y_su_resumen_es_el_de_siemp
     assert_importe(importe_caso.unwrap(), 800.0, "monto del avance");
 }
 
+// --- A-03, vertical «tarjetas» (parte 4: bonificaciones): caracterización antes de extraer ---
+//
+// Completan c33–c33c: el listado y los mensajes de eliminar una bonificación y de liquidar un consumo. (Registrar,
+// revertir y liquidar ya viven en casos de uso; lo único que seguía en `main.rs` era el listado.)
+
+#[test]
+fn bo1_las_bonificaciones_salen_de_la_mas_nueva_a_la_mas_vieja_con_los_datos_de_su_tarjeta() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10_000.0, 0.0);
+    let otra = crear_tarjeta(10_000.0, 50.0);
+    crate::crear_bonificacion("01/10/2026".into(), tarjeta, importe("120.50"), "DOP".into(), "Primera".into(), None).unwrap();
+    crate::crear_bonificacion("02/10/2026".into(), otra, importe("5"), "USD".into(), "Segunda".into(), None).unwrap();
+
+    let lista = crate::obtener_bonificaciones().unwrap();
+    assert_eq!(lista.len(), 2);
+    let (nueva, vieja) = (&lista[0], &lista[1]);
+    assert_eq!((nueva.concepto.as_str(), nueva.divisa.as_str(), nueva.tarjeta_id, nueva.fecha.as_str()), ("Segunda", "USD", otra, "02/10/2026"));
+    assert_importe(nueva.monto, 5.0, "monto de la segunda");
+    assert_eq!((nueva.entidad.as_str(), nueva.nombre_tarjeta.as_str(), nueva.gasto_id), ("Banco Ejemplo", "Tarjeta Ejemplo", None));
+    assert_eq!((vieja.concepto.as_str(), vieja.divisa.as_str()), ("Primera", "DOP"));
+    assert_importe(vieja.monto, 120.5, "monto de la primera");
+}
+
+#[test]
+fn bo2_eliminar_una_bonificacion_inexistente_y_liquidar_lo_que_no_se_puede_dicen_su_mensaje() {
+    let _g = entorno_aislado();
+    let e = crate::eliminar_bonificacion(404).unwrap_err();
+    assert!(e.contains("404"), "debe nombrar la bonificación que falta: {e}");
+
+    let e = crate::liquidar_consumo_pendiente(404, importe("10")).unwrap_err();
+    assert!(e.contains("404"), "debe nombrar el consumo que falta: {e}");
+
+    // Un gasto en efectivo (no pendiente) no se liquida.
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let otros: i64 = conexion().query_row("SELECT id FROM categorias WHERE nombre = 'Otros';", [], |r| r.get(0)).unwrap();
+    let gasto = crate::crear_gasto(GastoInput {
+        fecha: "01/10/2026".to_string(),
+        monto: importe("100"),
+        divisa: "DOP".to_string(),
+        descripcion: "Compra".to_string(),
+        categoria_id: otros,
+        metodo_pago: "tarjeta".to_string(),
+        es_lbtr: false,
+        tarjeta_id: Some(tarjeta),
+        cuenta_ahorro_id: None,
+        tasa_cambio: None,
+    })
+    .unwrap();
+    let e = crate::liquidar_consumo_pendiente(gasto, importe("100")).unwrap_err();
+    assert!(e.contains("no está pendiente de liquidación"), "{e}");
+}
+

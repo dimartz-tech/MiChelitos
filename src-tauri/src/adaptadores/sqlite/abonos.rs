@@ -100,3 +100,32 @@ impl ConsultaDeAvances for AlmacenSqlite<'_> {
             .map_err(fallo)
     }
 }
+
+impl ConsultaDeBonificaciones for AlmacenSqlite<'_> {
+    fn bonificaciones(&self) -> Result<Vec<BonificacionLeida>, ErrorAlmacen> {
+        let mut stmt = self
+            .tx
+            .prepare(
+                "SELECT b.id, b.fecha, b.tarjeta_id, t.entidad, t.nombre_tarjeta, b.monto, b.divisa, b.concepto, b.gasto_id
+                 FROM bonificaciones b JOIN tarjetas t ON t.id = b.tarjeta_id
+                 ORDER BY b.id DESC;",
+            )
+            .map_err(fallo)?;
+        let filas = stmt
+            .query_map([], |r| {
+                Ok(BonificacionLeida {
+                    id: r.get(0)?,
+                    fecha: r.get(1)?,
+                    tarjeta_id: r.get(2)?,
+                    entidad: r.get(3)?,
+                    nombre_tarjeta: r.get(4)?,
+                    monto: r.get(5)?,
+                    divisa: r.get(6)?,
+                    concepto: r.get(7)?,
+                    gasto_id: r.get(8)?,
+                })
+            })
+            .map_err(fallo)?;
+        filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
+    }
+}

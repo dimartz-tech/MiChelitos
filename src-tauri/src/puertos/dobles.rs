@@ -1348,3 +1348,26 @@ impl ConsultaDeAvances for AlmacenEnMemoria {
     }
 }
 
+impl ConsultaDeBonificaciones for AlmacenEnMemoria {
+    fn bonificaciones(&self) -> Result<Vec<BonificacionLeida>, ErrorAlmacen> {
+        let mut v: Vec<BonificacionLeida> = self
+            .bonificaciones
+            .values()
+            .map(|b| BonificacionLeida {
+                id: b.id,
+                // El doble no guarda la fecha ni los datos de la tarjeta: lo cubre SQLite.
+                fecha: String::new(),
+                tarjeta_id: b.tarjeta_id,
+                entidad: String::new(),
+                nombre_tarjeta: String::new(),
+                monto: b.bonificacion.monto().unidades(),
+                divisa: b.bonificacion.monto().divisa().codigo().to_string(),
+                concepto: b.bonificacion.concepto().to_string(),
+                gasto_id: None,
+            })
+            .collect();
+        v.sort_by(|a, b| b.id.cmp(&a.id));
+        Ok(v)
+    }
+}
+

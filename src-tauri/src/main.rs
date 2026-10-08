@@ -1873,34 +1873,22 @@ fn crear_cobro_efectivo_informal(fecha: String, descripcion: String, monto: ipc:
 /// local. Devuelve la tasa que se dedujo, para poder mostrarla.
 #[tauri::command]
 fn obtener_bonificaciones() -> Result<Vec<BonificacionDto>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT b.id, b.fecha, b.tarjeta_id, t.entidad, t.nombre_tarjeta, b.monto, b.divisa, b.concepto, b.gasto_id
-             FROM bonificaciones b JOIN tarjetas t ON t.id = b.tarjeta_id
-             ORDER BY b.id DESC;",
-        )
-        .map_err(|e| e.to_string())?;
-    let filas = stmt
-        .query_map([], |r| {
-            Ok(BonificacionDto {
-                id: r.get(0)?,
-                fecha: r.get(1)?,
-                tarjeta_id: r.get(2)?,
-                entidad: r.get(3)?,
-                nombre_tarjeta: r.get(4)?,
-                monto: r.get(5)?,
-                divisa: r.get(6)?,
-                concepto: r.get(7)?,
-                gasto_id: r.get(8)?,
+    con_almacen(|a| {
+        Ok(aplicacion::bonificaciones::listar_bonificaciones(a)?
+            .into_iter()
+            .map(|b| BonificacionDto {
+                id: b.id,
+                fecha: b.fecha,
+                tarjeta_id: b.tarjeta_id,
+                entidad: b.entidad,
+                nombre_tarjeta: b.nombre_tarjeta,
+                monto: b.monto,
+                divisa: b.divisa,
+                concepto: b.concepto,
+                gasto_id: b.gasto_id,
             })
-        })
-        .map_err(|e| e.to_string())?;
-    let mut lista = Vec::new();
-    for f in filas {
-        lista.push(f.map_err(|e| e.to_string())?);
-    }
-    Ok(lista)
+            .collect())
+    })
 }
 
 /// Registra un crédito del emisor sobre una tarjeta. Reduce su deuda sin
@@ -1914,48 +1902,26 @@ fn crear_bonificacion(
     concepto: String,
     gasto_id: Option<i64>,
 ) -> Result<i64, String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
     let divisa = if divisa == "USD" { Divisa::Usd } else { Divisa::Dop };
     // El importe llega como se escribió: el céntimo lo decide el núcleo con esos dígitos, y se casa
     // con la divisa declarada (la de la bonificación, que es del titular y no de una fila).
     let bonificacion = Bonificacion::nueva(monto.con_divisa(divisa), &concepto)?;
 
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let id = {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
-        registrar_bonificacion(
-            DatosBonificacion { fecha, tarjeta_id, bonificacion, gasto_id },
-            &mut almacen,
-        )?
-    };
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(id)
+    con_almacen(|a| Ok(registrar_bonificacion(DatosBonificacion { fecha, tarjeta_id, bonificacion, gasto_id }, a)?))
 }
 
 #[tauri::command]
 fn eliminar_bonificacion(id: i64) -> Result<(), String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
-        revertir_bonificacion(id, &mut almacen)?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+    con_almacen(|a| Ok(revertir_bonificacion(id, a)?))
 }
 
 #[tauri::command]
 fn liquidar_consumo_pendiente(id: i64, monto_liquidado: ipc::ImporteDecimal) -> Result<f64, String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let tasa = {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
+    con_almacen(|a| {
         // El importe llega como se escribió: el céntimo (y con él la tasa que se deduce) sale de esos dígitos.
         let importe = monto_liquidado.con_divisa(MONEDA_LOCAL);
-        liquidar_gasto(id, importe, &mut almacen)?.tasa().valor()
-    };
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(tasa)
+        Ok(liquidar_gasto(id, importe, a)?.tasa().valor())
+    })
 }
 
 #[derive(Serialize, Deserialize, Debug)]
