@@ -5558,10 +5558,10 @@ fn ab5_revertir_deja_un_caso_con_el_abono_y_cuenta_lo_devuelto_con_los_textos_de
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Abonos", "DOP", 50_000.0);
-    registrar_pago_tarjeta(tarjeta, "03/10/2026".to_string(), monto(5_000.0), "DOP".to_string(), Some(cuenta), 0.0).unwrap();
+    registrar_pago_tarjeta(tarjeta, "03/10/2026".to_string(), monto(5_432.0), "DOP".to_string(), Some(cuenta), 0.0).unwrap();
     let con_cuenta = revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
     let anio = chrono::Local::now().format("%Y").to_string();
-    assert_eq!(con_cuenta, format!("Se repusieron DOP 5000.00 a la deuda y volvieron DOP 5010.00 a la cuenta. Caso COR-{anio}-0001."));
+    assert_eq!(con_cuenta, format!("Se repusieron DOP 5432.00 a la deuda y volvieron DOP 5442.86 a la cuenta. Caso COR-{anio}-0001."));
 
     registrar_pago_tarjeta(tarjeta, "04/10/2026".to_string(), monto(700.0), "DOP".to_string(), None, 0.0).unwrap();
     let sin_cuenta = revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
@@ -5570,6 +5570,6 @@ fn ab5_revertir_deja_un_caso_con_el_abono_y_cuenta_lo_devuelto_con_los_textos_de
     let casos = casos_de_correccion();
     let (_, tipo, _, descripcion, importe_caso, divisa) = &casos[0];
     assert_eq!((tipo.as_str(), descripcion.as_str(), divisa.as_deref()), ("abono", "Abono del 03/10/2026", Some("DOP")));
-    assert_importe(importe_caso.unwrap(), 5_000.0, "monto del abono");
+    assert_importe(importe_caso.unwrap(), 5_432.0, "monto del abono");
 }
 
