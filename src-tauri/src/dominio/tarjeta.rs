@@ -121,6 +121,90 @@ impl LimitesDivisa {
     }
 }
 
+// --- Lo que el listado de tarjetas calcula (A-03: sale de `obtener_tarjetas`) --------------------------
+
+/// Límite efectivo y disponible de una divisa, en unidades y listos para mostrar: `(efectivo, disponible)`.
+///
+/// Ante datos incoherentes se degrada a la cuenta en bruto (`aprobado + sobregiro - balance`) en lugar de tumbar la
+/// consulta entera: una tarjeta rara no puede dejar sin lista a las demás.
+pub fn cupo_para_mostrar(
+    divisa: Divisa,
+    aprobado: f64,
+    ajustado: Option<f64>,
+    sobregiro: f64,
+    balance: f64,
+) -> (f64, f64) {
+    let construir = || -> Result<(f64, f64), ErrorDominio> {
+        let limites = LimitesDivisa::nuevos(
+            Dinero::nuevo(aprobado, divisa)?,
+            ajustado.map(|a| Dinero::nuevo(a, divisa)).transpose()?,
+            Dinero::nuevo(sobregiro, divisa)?,
+        )?;
+        let saldo = Dinero::nuevo(balance, divisa)?;
+        Ok((limites.efectivo().unidades(), limites.disponible(saldo)?.unidades()))
+    };
+    construir().unwrap_or((aprobado, aprobado + sobregiro - balance))
+}
+
+/// Días que faltan para una fecha del mes. El mes se aproxima con 30 días (`(30 - hoy) + fecha`), tal como se ha
+/// hecho siempre: es un recordatorio aproximado, no un cálculo de calendario.
+pub fn dias_hasta_la_fecha(fecha: i32, dia_actual: i32) -> i32 {
+    if fecha >= dia_actual { fecha - dia_actual } else { (30 - dia_actual) + fecha }
+}
+
+/// Hay alerta cuando faltan 3 días o menos.
+pub const DIAS_DE_ALERTA: i32 = 3;
+
+/// El recordatorio del corte: `(alerta, mensaje)`.
+pub fn aviso_de_corte(fecha_corte: i32, dia_actual: i32) -> (bool, String) {
+    let dias = dias_hasta_la_fecha(fecha_corte, dia_actual);
+    let mensaje = if dias == 0 { "Hoy es la fecha de corte".to_string() } else { format!("Faltan {} días para corte", dias) };
+    (dias <= DIAS_DE_ALERTA, mensaje)
+}
+
+/// El recordatorio del pago: `(alerta, mensaje)`.
+pub fn aviso_de_pago(fecha_limite_pago: i32, dia_actual: i32) -> (bool, String) {
+    let dias = dias_hasta_la_fecha(fecha_limite_pago, dia_actual);
+    let mensaje = if dias == 0 { "Hoy vence el pago".to_string() } else { format!("Faltan {} días para pagar", dias) };
+    (dias <= DIAS_DE_ALERTA, mensaje)
+}
+
+#[cfg(test)]
+mod tests_del_listado {
+    use super::*;
+
+    #[test]
+    fn los_dias_se_cuentan_con_un_mes_de_30() {
+        assert_eq!(dias_hasta_la_fecha(10, 10), 0);
+        assert_eq!(dias_hasta_la_fecha(15, 10), 5);
+        assert_eq!(dias_hasta_la_fecha(2, 28), 4, "(30 - 28) + 2");
+        assert_eq!(dias_hasta_la_fecha(1, 31), 0, "(30 - 31) + 1: el mes de 30 días no cuadra con el 31, y así ha sido siempre");
+    }
+
+    #[test]
+    fn la_alerta_salta_a_tres_dias_o_menos_y_el_mensaje_distingue_hoy() {
+        assert_eq!(aviso_de_corte(10, 10), (true, "Hoy es la fecha de corte".into()));
+        assert_eq!(aviso_de_corte(13, 10), (true, "Faltan 3 días para corte".into()));
+        assert_eq!(aviso_de_corte(14, 10), (false, "Faltan 4 días para corte".into()));
+        assert_eq!(aviso_de_pago(10, 10), (true, "Hoy vence el pago".into()));
+        assert_eq!(aviso_de_pago(13, 10), (true, "Faltan 3 días para pagar".into()));
+        assert_eq!(aviso_de_pago(14, 10), (false, "Faltan 4 días para pagar".into()));
+    }
+
+    #[test]
+    fn el_cupo_resuelve_el_efectivo_y_el_disponible_y_ante_datos_raros_cae_a_la_cuenta_en_bruto() {
+        assert_eq!(cupo_para_mostrar(Divisa::Dop, 1000.0, Some(800.0), 300.0, 500.0), (800.0, 600.0));
+        assert_eq!(cupo_para_mostrar(Divisa::Usd, 2000.0, None, 400.0, 600.0), (2000.0, 1800.0));
+        // Un importe imposible (NaN) no se puede construir: se degrada a la cuenta en bruto.
+        let (efectivo, _) = cupo_para_mostrar(Divisa::Dop, f64::NAN, None, 0.0, 0.0);
+        assert!(efectivo.is_nan());
+        // Un balance que no cabe en centavos enteros tampoco: la cuenta en bruto se hace con los números tal cual.
+        let (efectivo, disponible) = cupo_para_mostrar(Divisa::Dop, 1000.0, None, 300.0, 1e300);
+        assert_eq!(efectivo, 1000.0);
+        assert_eq!(disponible, 1000.0 + 300.0 - 1e300, "aprobado + sobregiro - balance, sin dominio");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::dinero::Divisa;

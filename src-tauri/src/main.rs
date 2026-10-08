@@ -32,6 +32,7 @@ use dominio::gasto::MetodoPago;
 use adaptadores::sqlite::catalogos::CatalogosSqlite;
 use adaptadores::sqlite::cuentas::CuentasSqlite;
 use adaptadores::sqlite::prestamos::PrestamosSqlite;
+use adaptadores::sqlite::tarjetas::TarjetasSqlite;
 use puertos::repositorios::{AlmacenInformales, AlmacenIngresos, AlmacenPrestamos, CatalogoDeCuentas};
 use adaptadores::sqlite::gastos::AlmacenSqlite;
 use puertos::repositorios::AlmacenCatalogos;
@@ -45,7 +46,7 @@ use aplicacion::cobrar_suscripcion::{cobrar_suscripcion, DatosCobro};
 use dominio::avance::CargoDeAvance;
 use aplicacion::transferir::{revertir_transferencia, transferir, DatosTransferencia};
 use puertos::repositorios::RepositorioCuentas;
-use dominio::tarjeta::{LimitesDivisa, PoliticaLiquidacion, MONEDA_LOCAL};
+use dominio::tarjeta::MONEDA_LOCAL;
 use aplicacion::liquidar_gasto::liquidar_gasto;
 use aplicacion::registrar_bonificacion::{registrar_bonificacion, revertir_bonificacion, DatosBonificacion};
 use dominio::bonificacion::Bonificacion;
@@ -266,27 +267,6 @@ pub struct Prestamo {
     es_revolvente: bool,
     alerta_pago: bool,
     dias_pago_msg: String,
-}
-
-/// Límite efectivo y disponible de una divisa, resueltos por el dominio.
-/// Devuelve `(efectivo, disponible)` en unidades, listos para el DTO.
-fn cupo(
-    divisa: Divisa,
-    aprobado: f64,
-    ajustado: Option<f64>,
-    sobregiro: f64,
-    balance: f64,
-) -> (f64, f64) {
-    let construir = || -> Result<(f64, f64), dominio::errores::ErrorDominio> {
-        let limites = LimitesDivisa::nuevos(
-            Dinero::nuevo(aprobado, divisa)?,
-            ajustado.map(|a| Dinero::nuevo(a, divisa)).transpose()?,
-            Dinero::nuevo(sobregiro, divisa)?,
-        )?;
-        let saldo = Dinero::nuevo(balance, divisa)?;
-        Ok((limites.efectivo().unidades(), limites.disponible(saldo)?.unidades()))
-    };
-    construir().unwrap_or((aprobado, aprobado + sobregiro - balance))
 }
 
 // --- COMANDOS: CATEGORÍAS ---
@@ -551,106 +531,52 @@ fn marcar_informal_pagado(
 }
 
 // --- COMANDOS: TARJETAS ---
+/// Como `con_catalogos`, para las tarjetas.
+fn con_tarjetas<T>(f: impl FnOnce(&mut TarjetasSqlite) -> Result<T, String>) -> Result<T, String> {
+    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let resultado = {
+        let mut almacen = TarjetasSqlite::nuevo(&tx);
+        f(&mut almacen)?
+    };
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(resultado)
+}
+
 #[tauri::command]
 fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT id, entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago, limite_ajustado_pesos, limite_ajustado_dolares, politica_liquidacion FROM tarjetas;"
-    ).map_err(|e| e.to_string())?;
-    
-    let hoy = Local::now();
-    let dia_actual = hoy.day() as i32;
-
-    let rows = stmt.query_map([], |row| {
-        let id: i64 = row.get(0)?;
-        let entidad: String = row.get(1)?;
-        let nombre_tarjeta: String = row.get(2)?;
-        let limite_pesos: f64 = row.get(3)?;
-        let limite_dolares: f64 = row.get(4)?;
-        let limite_sobregiro_pesos: f64 = row.get(5)?;
-        let limite_sobregiro_dolares: f64 = row.get(6)?;
-        let balance_pesos: f64 = row.get(7)?;
-        let balance_dolares: f64 = row.get(8)?;
-        let balance_corte_pesos: f64 = row.get(9)?;
-        let balance_corte_dolares: f64 = row.get(10)?;
-        let fecha_corte: i32 = row.get(11)?;
-        let fecha_limite_pago: i32 = row.get(12)?;
-        let limite_ajustado_pesos: Option<f64> = row.get(13)?;
-        let limite_ajustado_dolares: Option<f64> = row.get(14)?;
-        let politica_liquidacion: Option<String> = row.get(15)?;
-
-        // Calcular alertas corte
-        let dias_corte = if fecha_corte >= dia_actual {
-            fecha_corte - dia_actual
-        } else {
-            // Asumir un mes promedio de 30 días para cálculo de recordatorio aproximado
-            (30 - dia_actual) + fecha_corte
-        };
-
-        // Calcular alertas pago
-        let dias_pago = if fecha_limite_pago >= dia_actual {
-            fecha_limite_pago - dia_actual
-        } else {
-            (30 - dia_actual) + fecha_limite_pago
-        };
-
-        let alerta_corte = dias_corte <= 3;
-        let alerta_pago = dias_pago <= 3;
-
-        let dias_corte_msg = if dias_corte == 0 {
-            "Hoy es la fecha de corte".to_string()
-        } else {
-            format!("Faltan {} días para corte", dias_corte)
-        };
-
-        let dias_pago_msg = if dias_pago == 0 {
-            "Hoy vence el pago".to_string()
-        } else {
-            format!("Faltan {} días para pagar", dias_pago)
-        };
-
-        // El cupo lo resuelve el dominio, no la vista. Ante datos corruptos
-        // se degrada al límite en bruto en lugar de tumbar la consulta.
-        let (efectivo_dop, disponible_dop) =
-            cupo(Divisa::Dop, limite_pesos, limite_ajustado_pesos, limite_sobregiro_pesos, balance_pesos);
-        let (efectivo_usd, disponible_usd) =
-            cupo(Divisa::Usd, limite_dolares, limite_ajustado_dolares, limite_sobregiro_dolares, balance_dolares);
-
-        Ok(Tarjeta {
-            id,
-            entidad,
-            nombre_tarjeta,
-            limite_pesos,
-            limite_dolares,
-            limite_ajustado_pesos,
-            limite_ajustado_dolares,
-            limite_sobregiro_pesos,
-            limite_sobregiro_dolares,
-            balance_pesos,
-            balance_dolares,
-            balance_corte_pesos,
-            balance_corte_dolares,
-            fecha_corte,
-            fecha_limite_pago,
-            politica_liquidacion: PoliticaLiquidacion::desde_codigo(politica_liquidacion.as_deref())
-                .codigo()
-                .to_string(),
-            limite_efectivo_pesos: efectivo_dop,
-            limite_efectivo_dolares: efectivo_usd,
-            disponible_pesos: disponible_dop,
-            disponible_dolares: disponible_usd,
-            alerta_corte,
-            alerta_pago,
-            dias_corte_msg,
-            dias_pago_msg,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+    let dia_actual = Local::now().day() as i32;
+    con_tarjetas(|a| {
+        Ok(aplicacion::tarjetas::listar_tarjetas(dia_actual, a)?
+            .into_iter()
+            .map(|t| Tarjeta {
+                id: t.leida.id,
+                entidad: t.leida.entidad,
+                nombre_tarjeta: t.leida.nombre_tarjeta,
+                limite_pesos: t.leida.limite_pesos,
+                limite_dolares: t.leida.limite_dolares,
+                limite_ajustado_pesos: t.leida.limite_ajustado_pesos,
+                limite_ajustado_dolares: t.leida.limite_ajustado_dolares,
+                limite_sobregiro_pesos: t.leida.limite_sobregiro_pesos,
+                limite_sobregiro_dolares: t.leida.limite_sobregiro_dolares,
+                balance_pesos: t.leida.balance_pesos,
+                balance_dolares: t.leida.balance_dolares,
+                balance_corte_pesos: t.leida.balance_corte_pesos,
+                balance_corte_dolares: t.leida.balance_corte_dolares,
+                fecha_corte: t.leida.fecha_corte,
+                fecha_limite_pago: t.leida.fecha_limite_pago,
+                politica_liquidacion: t.politica_liquidacion,
+                limite_efectivo_pesos: t.limite_efectivo_pesos,
+                limite_efectivo_dolares: t.limite_efectivo_dolares,
+                disponible_pesos: t.disponible_pesos,
+                disponible_dolares: t.disponible_dolares,
+                alerta_corte: t.alerta_corte,
+                alerta_pago: t.alerta_pago,
+                dias_corte_msg: t.dias_corte_msg,
+                dias_pago_msg: t.dias_pago_msg,
+            })
+            .collect())
+    })
 }
 
 #[tauri::command]
@@ -668,15 +594,26 @@ fn crear_tarjeta(
     corte: i32,
     pago: i32
 ) -> Result<i64, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT INTO tarjetas (entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+    con_tarjetas(|a| {
         // Cada importe llega como se escribió: el céntimo lo deciden esos dígitos, no un número ya redondeado.
-        (entidad, nombre, limite_pesos.unidades(), limite_dolares.unidades(), sobregiro_pesos.unidades(), sobregiro_dolares.unidades(),
-         balance_pesos.unidades(), balance_dolares.unidades(), balance_corte_pesos.unidades(), balance_corte_dolares.unidades(), corte, pago)
-    ).map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+        Ok(aplicacion::tarjetas::crear_tarjeta(
+            aplicacion::tarjetas::DatosTarjetaNueva {
+                entidad,
+                nombre_tarjeta: nombre,
+                limite_pesos: limite_pesos.con_divisa(Divisa::Dop),
+                limite_dolares: limite_dolares.con_divisa(Divisa::Usd),
+                sobregiro_pesos: sobregiro_pesos.con_divisa(Divisa::Dop),
+                sobregiro_dolares: sobregiro_dolares.con_divisa(Divisa::Usd),
+                balance_pesos: balance_pesos.con_divisa(Divisa::Dop),
+                balance_dolares: balance_dolares.con_divisa(Divisa::Usd),
+                balance_corte_pesos: balance_corte_pesos.con_divisa(Divisa::Dop),
+                balance_corte_dolares: balance_corte_dolares.con_divisa(Divisa::Usd),
+                fecha_corte: corte,
+                fecha_limite_pago: pago,
+            },
+            a,
+        )?)
+    })
 }
 
 #[tauri::command]
@@ -693,15 +630,23 @@ fn actualizar_limites_tarjeta(
     limite_ajustado_dolares: Option<ipc::ImporteDecimal>,
     politica_liquidacion: Option<String>
 ) -> Result<(), String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE tarjetas SET limite_pesos = ?, limite_dolares = ?, limite_sobregiro_pesos = ?, limite_sobregiro_dolares = ?, balance_corte_pesos = ?, balance_corte_dolares = ?, limite_ajustado_pesos = ?, limite_ajustado_dolares = ?, politica_liquidacion = ? WHERE id = ?;",
-        (limite_pesos.unidades(), limite_dolares.unidades(), sobregiro_pesos.unidades(), sobregiro_dolares.unidades(),
-         balance_corte_pesos.unidades(), balance_corte_dolares.unidades(),
-         limite_ajustado_pesos.map(|i| i.unidades()), limite_ajustado_dolares.map(|i| i.unidades()),
-         PoliticaLiquidacion::desde_codigo(politica_liquidacion.as_deref()).codigo(), id)
-    ).map_err(|e| e.to_string())?;
-    Ok(())
+    con_tarjetas(|a| {
+        Ok(aplicacion::tarjetas::actualizar_limites(
+            aplicacion::tarjetas::DatosLimites {
+                id,
+                limite_pesos: limite_pesos.con_divisa(Divisa::Dop),
+                limite_dolares: limite_dolares.con_divisa(Divisa::Usd),
+                sobregiro_pesos: sobregiro_pesos.con_divisa(Divisa::Dop),
+                sobregiro_dolares: sobregiro_dolares.con_divisa(Divisa::Usd),
+                balance_corte_pesos: balance_corte_pesos.con_divisa(Divisa::Dop),
+                balance_corte_dolares: balance_corte_dolares.con_divisa(Divisa::Usd),
+                limite_ajustado_pesos: limite_ajustado_pesos.map(|i| i.con_divisa(Divisa::Dop)),
+                limite_ajustado_dolares: limite_ajustado_dolares.map(|i| i.con_divisa(Divisa::Usd)),
+                politica_liquidacion,
+            },
+            a,
+        )?)
+    })
 }
 
 #[tauri::command]
