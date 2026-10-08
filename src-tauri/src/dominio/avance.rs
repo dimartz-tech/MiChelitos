@@ -117,6 +117,96 @@ impl Avance {
     }
 }
 
+// --- Lo que llega de la interfaz, ya como reglas (A-03: sale de `main.rs`) ----------------------------
+
+/// El cargo a partir de lo que pide la interfaz: el tipo (`porcentaje`, `fijo` o `exonerado`) y los valores que
+/// acompañan. Cada tipo exige lo suyo y **solo** lo suyo: un valor de más es una contradicción, no algo que se ignore.
+pub fn cargo_desde_la_peticion(
+    tipo: &str,
+    porcentaje: Option<f64>,
+    cargo_fijo: Option<Dinero>,
+) -> Result<CargoDeAvance, ErrorDominio> {
+    match (tipo, porcentaje, cargo_fijo) {
+        ("porcentaje", Some(p), None) => CargoDeAvance::porcentual(p),
+        ("porcentaje", None, _) => Err(ErrorDominio::PorcentajeDeCargoRequerido),
+        ("fijo", None, Some(f)) => CargoDeAvance::fijo(f),
+        ("fijo", _, None) => Err(ErrorDominio::ImporteDeCargoFijoRequerido),
+        ("exonerado", None, None) => Ok(CargoDeAvance::Exonerado),
+        ("porcentaje" | "fijo" | "exonerado", _, _) => Err(ErrorDominio::CargoContradictorio),
+        (otro, _, _) => Err(ErrorDominio::TipoDeCargoDesconocido { tipo: otro.to_string() }),
+    }
+}
+
+/// La fecha del avance, recortada, si tiene la forma `dd/mm/aaaa` de un día que existe.
+pub fn fecha_de_avance(texto: &str) -> Result<String, ErrorDominio> {
+    let fecha = texto.trim();
+    if chrono::NaiveDate::parse_from_str(fecha, "%d/%m/%Y").is_err() {
+        return Err(ErrorDominio::FechaNoEntendida { fecha: fecha.to_string() });
+    }
+    Ok(fecha.to_string())
+}
+
+/// La nota, recortada; en blanco es lo mismo que ausente.
+pub fn nota_de_avance(nota: Option<String>) -> Option<String> {
+    nota.map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
+}
+
+#[cfg(test)]
+mod tests_de_la_peticion {
+    use super::*;
+    use crate::dominio::dinero::Divisa;
+
+    fn dop(u: f64) -> Dinero {
+        Dinero::nuevo(u, Divisa::Dop).unwrap()
+    }
+
+    #[test]
+    fn cada_tipo_de_cargo_exige_lo_suyo_y_solo_lo_suyo() {
+        assert_eq!(cargo_desde_la_peticion("porcentaje", Some(8.0), None), CargoDeAvance::porcentual(8.0));
+        assert_eq!(cargo_desde_la_peticion("fijo", None, Some(dop(25.0))), CargoDeAvance::fijo(dop(25.0)));
+        assert_eq!(cargo_desde_la_peticion("exonerado", None, None), Ok(CargoDeAvance::Exonerado));
+    }
+
+    #[test]
+    fn lo_que_falta_y_lo_que_sobra_dicen_su_causa() {
+        assert_eq!(cargo_desde_la_peticion("porcentaje", None, None), Err(ErrorDominio::PorcentajeDeCargoRequerido));
+        assert_eq!(cargo_desde_la_peticion("porcentaje", None, Some(dop(5.0))), Err(ErrorDominio::PorcentajeDeCargoRequerido));
+        assert_eq!(cargo_desde_la_peticion("fijo", None, None), Err(ErrorDominio::ImporteDeCargoFijoRequerido));
+        assert_eq!(cargo_desde_la_peticion("fijo", Some(5.0), None), Err(ErrorDominio::ImporteDeCargoFijoRequerido));
+        for (tipo, pct, fijo) in [("porcentaje", Some(5.0), Some(dop(5.0))), ("fijo", Some(5.0), Some(dop(5.0))), ("exonerado", Some(5.0), None), ("exonerado", None, Some(dop(5.0)))] {
+            assert_eq!(cargo_desde_la_peticion(tipo, pct, fijo), Err(ErrorDominio::CargoContradictorio), "{tipo}");
+        }
+        assert_eq!(
+            cargo_desde_la_peticion("quincenal", None, None),
+            Err(ErrorDominio::TipoDeCargoDesconocido { tipo: "quincenal".into() })
+        );
+    }
+
+    #[test]
+    fn un_porcentaje_fuera_de_la_banda_o_un_fijo_no_positivo_los_rechaza_el_cargo() {
+        assert!(matches!(cargo_desde_la_peticion("porcentaje", Some(0.8), None), Err(ErrorDominio::CargoDeAvanceFueraDeRango { .. })));
+        assert_eq!(cargo_desde_la_peticion("fijo", None, Some(dop(0.0))), Err(ErrorDominio::CargoFijoNoPositivo));
+    }
+
+    #[test]
+    fn la_fecha_se_recorta_y_debe_existir_en_dd_mm_aaaa() {
+        assert_eq!(fecha_de_avance("  01/10/2026 "), Ok("01/10/2026".into()));
+        // «1/10/2026» sí pasa esta comprobación (el analizador acepta el día sin cero); el esquema, que es estricto, la
+        // rechaza al guardar. Se deja dicho para que nadie suponga que esta validación es la única.
+        assert_eq!(fecha_de_avance("1/10/2026"), Ok("1/10/2026".into()));
+        for mala in ["2026-10-01", "31/02/2026", "ayer", ""] {
+            assert_eq!(fecha_de_avance(mala), Err(ErrorDominio::FechaNoEntendida { fecha: mala.trim().into() }), "«{mala}»");
+        }
+    }
+
+    #[test]
+    fn una_nota_en_blanco_es_una_nota_ausente() {
+        assert_eq!(nota_de_avance(Some("  para el taller ".into())), Some("para el taller".into()));
+        assert_eq!(nota_de_avance(Some("   ".into())), None);
+        assert_eq!(nota_de_avance(None), None);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

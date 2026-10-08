@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 pub mod abonos;
+pub mod avances;
 pub mod catalogos;
 pub mod cuentas;
 pub mod cobrar_suscripcion;

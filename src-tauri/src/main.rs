@@ -39,10 +39,8 @@ use puertos::repositorios::AlmacenCatalogos;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
 use aplicacion::revertir_gasto::revertir_gasto;
 use aplicacion::registrar_pago_tarjeta::DatosPago;
-use aplicacion::registrar_avance_de_efectivo::{registrar_avance_de_efectivo, DatosAvance};
-use aplicacion::revertir_avance_de_efectivo::revertir_avance_de_efectivo;
+use aplicacion::registrar_avance_de_efectivo::DatosAvance;
 use aplicacion::cobrar_suscripcion::{cobrar_suscripcion, DatosCobro};
-use dominio::avance::CargoDeAvance;
 use aplicacion::transferir::{revertir_transferencia, transferir, DatosTransferencia};
 use puertos::repositorios::RepositorioCuentas;
 use dominio::tarjeta::MONEDA_LOCAL;
@@ -746,27 +744,6 @@ fn revertir_abono_tarjeta(id: i64, motivo: String) -> Result<String, String> {
 /// porcentaje con un cargo fijo, o un valor con una exoneración— en vez de
 /// elegir una en silencio: un dato que se ignora sin avisar es el que después
 /// nadie sabe por qué no cuadra.
-fn cargo_de_avance(
-    tipo_cargo: &str,
-    porcentaje: Option<f64>,
-    cargo_fijo: Option<ipc::ImporteDecimal>,
-    divisa: Divisa,
-) -> Result<CargoDeAvance, String> {
-    match (tipo_cargo, porcentaje, cargo_fijo) {
-        ("porcentaje", Some(p), None) => Ok(CargoDeAvance::porcentual(p)?),
-        ("porcentaje", None, _) => Err("Indica el porcentaje del cargo.".to_string()),
-        ("fijo", None, Some(f)) => Ok(CargoDeAvance::fijo(f.con_divisa(divisa))?),
-        ("fijo", _, None) => Err("Indica el importe del cargo fijo.".to_string()),
-        ("exonerado", None, None) => Ok(CargoDeAvance::Exonerado),
-        ("porcentaje" | "fijo" | "exonerado", _, _) => {
-            Err("El tipo de cargo y los valores que se indican se contradicen.".to_string())
-        }
-        (otro, _, _) => Err(format!(
-            "Tipo de cargo «{}» desconocido. Los admitidos son porcentaje, fijo y exonerado.",
-            otro
-        )),
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SimulacionAvance {
@@ -791,7 +768,7 @@ fn simular_avance_efectivo(
     cargo_fijo: Option<ipc::ImporteDecimal>,
 ) -> Result<SimulacionAvance, String> {
     let divisa = Divisa::desde_codigo(&divisa)?;
-    let cargo = cargo_de_avance(&tipo_cargo, porcentaje, cargo_fijo, divisa)?;
+    let cargo = dominio::avance::cargo_desde_la_peticion(&tipo_cargo, porcentaje, cargo_fijo.map(|f| f.con_divisa(divisa)))?;
     let avance = dominio::avance::Avance::calcular(monto.con_divisa(divisa), cargo)?;
     Ok(SimulacionAvance {
         monto: avance.monto.unidades(),
@@ -818,39 +795,19 @@ fn registrar_avance_efectivo(
     cargo_fijo: Option<ipc::ImporteDecimal>,
     nota: Option<String>,
 ) -> Result<String, String> {
-    let fecha = fecha.trim().to_string();
-    if fecha_desde_texto(&fecha).is_none() {
-        return Err(format!("La fecha «{}» no se entiende. Se espera dd/mm/aaaa.", fecha));
-    }
+    // Todo lo que llega de la interfaz se valida antes de abrir la transacción: la fecha, la divisa, el cargo y la nota.
+    let fecha = dominio::avance::fecha_de_avance(&fecha)?;
     let divisa = Divisa::desde_codigo(&divisa)?;
+    let cargo = dominio::avance::cargo_desde_la_peticion(&tipo_cargo, porcentaje, cargo_fijo.map(|f| f.con_divisa(divisa)))?;
+    let nota = dominio::avance::nota_de_avance(nota);
 
-    let cargo = cargo_de_avance(&tipo_cargo, porcentaje, cargo_fijo, divisa)?;
-    let nota = nota.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+    let registrado = con_almacen(|a| {
+        Ok(aplicacion::avances::registrar_avance(
+            DatosAvance { tarjeta_id, cuenta_ahorro_id, fecha, monto: monto.con_divisa(divisa), cargo, nota },
+            a,
+        )?)
+    })?;
 
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    let categoria = tx
-        .query_row("SELECT id FROM categorias WHERE nombre = 'Otros' LIMIT 1;", [], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-
-    let registrado = {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
-        registrar_avance_de_efectivo(
-            DatosAvance {
-                tarjeta_id,
-                cuenta_ahorro_id,
-                fecha,
-                monto: monto.con_divisa(divisa),
-                cargo,
-                nota,
-            },
-            categoria,
-            &mut almacen,
-        )?
-    };
-
-    tx.commit().map_err(|e| e.to_string())?;
     Ok(format!(
         "Avance registrado. La cuenta recibe {} {:.2}; el cargo es {} {:.2} y la deuda de la tarjeta sube {} {:.2}.",
         divisa.codigo(),
@@ -879,68 +836,39 @@ pub struct AvanceEfectivo {
 /// Avances de una tarjeta, del más reciente al más antiguo.
 #[tauri::command]
 fn obtener_avances_tarjeta(tarjeta_id: i64) -> Result<Vec<AvanceEfectivo>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT a.id, a.fecha, a.monto, a.divisa, a.tipo_cargo, a.tasa, a.cargo,
-                    a.cuenta_ahorro_id, c.nombre, a.nota
-             FROM avances_efectivo a
-             JOIN cuentas_ahorro c ON c.id = a.cuenta_ahorro_id
-             WHERE a.tarjeta_id = ?
-             ORDER BY a.id DESC;",
-        )
-        .map_err(|e| e.to_string())?;
-    let filas = stmt
-        .query_map([tarjeta_id], |r| {
-            Ok(AvanceEfectivo {
-                id: r.get(0)?,
-                fecha: r.get(1)?,
-                monto: r.get(2)?,
-                divisa: r.get(3)?,
-                tipo_cargo: r.get(4)?,
-                tasa: r.get(5)?,
-                cargo: r.get(6)?,
-                cuenta_ahorro_id: r.get(7)?,
-                cuenta_nombre: r.get(8)?,
-                nota: r.get(9)?,
+    con_almacen(|a| {
+        Ok(aplicacion::avances::listar_avances(tarjeta_id, a)?
+            .into_iter()
+            .map(|v| AvanceEfectivo {
+                id: v.id,
+                fecha: v.fecha,
+                monto: v.monto,
+                divisa: v.divisa,
+                tipo_cargo: v.tipo_cargo,
+                tasa: v.tasa,
+                cargo: v.cargo,
+                cuenta_ahorro_id: v.cuenta_ahorro_id,
+                cuenta_nombre: v.cuenta_nombre,
+                nota: v.nota,
             })
-        })
-        .map_err(|e| e.to_string())?;
-    let mut lista = Vec::new();
-    for f in filas {
-        lista.push(f.map_err(|e| e.to_string())?);
-    }
-    Ok(lista)
+            .collect())
+    })
 }
 
 /// Deshace un avance de efectivo, con caso de auditoría.
 #[tauri::command]
 fn revertir_avance_efectivo(id: i64, motivo: String) -> Result<String, String> {
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    let caso = abrir_caso(
-        &tx,
-        "avance de efectivo",
-        id,
-        "SELECT 'Avance del ' || fecha, monto, divisa FROM avances_efectivo WHERE id = ?;",
-        &motivo,
-    )?;
-
-    let r = {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
-        revertir_avance_de_efectivo(id, &mut almacen)?
-    };
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(format!(
-        "La deuda de la tarjeta baja {} {:.2} y la cuenta devuelve {} {:.2}. Caso {}.",
-        r.deuda_restituida.divisa().codigo(),
-        r.deuda_restituida.unidades(),
-        r.devuelto_por_la_cuenta.divisa().codigo(),
-        r.devuelto_por_la_cuenta.unidades(),
-        caso
-    ))
+    con_almacen(|a| {
+        let r = aplicacion::avances::revertir_avance(id, &motivo, a)?;
+        Ok(format!(
+            "La deuda de la tarjeta baja {} {:.2} y la cuenta devuelve {} {:.2}. Caso {}.",
+            r.revertido.deuda_restituida.divisa().codigo(),
+            r.revertido.deuda_restituida.unidades(),
+            r.revertido.devuelto_por_la_cuenta.divisa().codigo(),
+            r.revertido.devuelto_por_la_cuenta.unidades(),
+            r.caso
+        ))
+    })
 }
 
 // --- COMANDOS: SUSCRIPCIONES ---

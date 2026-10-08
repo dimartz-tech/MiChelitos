@@ -13,7 +13,7 @@ use crate::puertos::repositorios::*;
 /// Registra un abono. La comisión (si lo paga una cuenta) se asienta como gasto de la categoría de sistema «Otros».
 pub fn registrar_abono(
     datos: DatosPago,
-    almacen: &mut (impl AlmacenAbonos + ConsultaDeAbonos),
+    almacen: &mut (impl AlmacenAbonos + CategoriaDeSistema),
 ) -> Result<(), ErrorAplicacion> {
     let categoria = almacen.categoria_de_sistema()?;
     registrar_pago_tarjeta(datos, categoria, almacen)?;
