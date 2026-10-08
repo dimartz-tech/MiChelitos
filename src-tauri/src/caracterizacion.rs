@@ -5573,3 +5573,93 @@ fn ab5_revertir_deja_un_caso_con_el_abono_y_cuenta_lo_devuelto_con_los_textos_de
     assert_importe(importe_caso.unwrap(), 5_432.0, "monto del abono");
 }
 
+// --- A-03, vertical «tarjetas» (parte 3: avances de efectivo): caracterización antes de extraer ---
+//
+// Completan c108–c127 con los mensajes exactos, los textos de los resúmenes, la nota y el caso de corrección.
+
+#[test]
+fn av1_el_tipo_y_los_valores_del_cargo_dicen_su_mensaje_y_en_su_orden() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Avance", "DOP", 0.0);
+    let e = |tipo: &str, pct: Option<f64>, fijo: Option<&str>| avance(tarjeta, cuenta, "100", tipo, pct, fijo).unwrap_err();
+
+    assert_eq!(e("porcentaje", None, None), "Indica el porcentaje del cargo.");
+    assert_eq!(e("porcentaje", None, Some("5")), "Indica el porcentaje del cargo.");
+    assert_eq!(e("fijo", None, None), "Indica el importe del cargo fijo.");
+    assert_eq!(e("fijo", Some(5.0), None), "Indica el importe del cargo fijo.");
+    for (tipo, pct, fijo) in [("porcentaje", Some(5.0), Some("5")), ("fijo", Some(5.0), Some("5")), ("exonerado", Some(5.0), None), ("exonerado", None, Some("5"))] {
+        assert_eq!(e(tipo, pct, fijo), "El tipo de cargo y los valores que se indican se contradicen.", "{tipo} {pct:?} {fijo:?}");
+    }
+    assert_eq!(e("quincenal", None, None), "Tipo de cargo «quincenal» desconocido. Los admitidos son porcentaje, fijo y exonerado.");
+    assert_eq!(filas_de_avances(), 0, "ningún rechazo dejó una fila");
+}
+
+#[test]
+fn av2_la_fecha_y_la_divisa_se_validan_antes_que_el_cargo_con_su_mensaje() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Avance", "DOP", 0.0);
+    let e = crate::registrar_avance_efectivo(tarjeta, cuenta, " ayer ".into(), importe("100"), "DOP".into(), "quincenal".into(), None, None, None).unwrap_err();
+    assert_eq!(e, "La fecha «ayer» no se entiende. Se espera dd/mm/aaaa.", "la fecha, recortada, va antes que el tipo de cargo");
+    let e = crate::registrar_avance_efectivo(tarjeta, cuenta, "01/10/2026".into(), importe("100"), "EUR".into(), "quincenal".into(), None, None, None).unwrap_err();
+    assert!(e.contains("EUR"), "la divisa va antes que el tipo de cargo: {e}");
+}
+
+#[test]
+fn av3_el_resumen_de_registrar_y_la_nota_son_los_de_siempre() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(5_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Avance", "DOP", 0.0);
+    let resumen = crate::registrar_avance_efectivo(
+        tarjeta, cuenta, "  01/10/2026 ".into(), importe("800.00"), "DOP".into(), "porcentaje".into(), Some(6.25), None, Some("  para el taller  ".into()),
+    )
+    .unwrap();
+    assert_eq!(resumen, "Avance registrado. La cuenta recibe DOP 800.00; el cargo es DOP 50.00 y la deuda de la tarjeta sube DOP 850.00.");
+    let (fecha, nota): (String, Option<String>) = conexion()
+        .query_row("SELECT fecha, nota FROM avances_efectivo;", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((fecha.as_str(), nota.as_deref()), ("01/10/2026", Some("para el taller")), "fecha y nota recortadas");
+
+    crate::registrar_avance_efectivo(tarjeta, cuenta, "02/10/2026".into(), importe("100"), "DOP".into(), "exonerado".into(), None, None, Some("   ".into())).unwrap();
+    let nota_en_blanco: Option<String> = conexion().query_row("SELECT nota FROM avances_efectivo ORDER BY id DESC LIMIT 1;", [], |r| r.get(0)).unwrap();
+    assert_eq!(nota_en_blanco, None, "una nota en blanco se guarda como ausente");
+}
+
+#[test]
+fn av4_el_listado_trae_el_tipo_de_cargo_la_cuenta_y_la_nota() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Avance", "DOP", 0.0);
+    crate::registrar_avance_efectivo(tarjeta, cuenta, "01/10/2026".into(), importe("300"), "DOP".into(), "fijo".into(), None, Some(importe("25")), Some("nota".into())).unwrap();
+    let a = &crate::obtener_avances_tarjeta(tarjeta).unwrap()[0];
+    assert_eq!((a.fecha.as_str(), a.divisa.as_str(), a.tipo_cargo.as_str(), a.cuenta_ahorro_id, a.cuenta_nombre.as_str(), a.nota.as_deref()), ("01/10/2026", "DOP", "fijo", cuenta, "Cuenta Avance", Some("nota")));
+    assert_eq!(a.tasa, None, "un cargo fijo no tiene tasa");
+    assert_importe(a.cargo, 25.0, "cargo");
+    assert!(crate::obtener_avances_tarjeta(987_654).unwrap().is_empty());
+}
+
+#[test]
+fn av5_revertir_un_avance_dice_su_causa_deja_un_caso_y_su_resumen_es_el_de_siempre() {
+    let _g = entorno_aislado();
+    assert_eq!(
+        crate::revertir_avance_efectivo(404, motivo_de_prueba()).unwrap_err(),
+        "No se encontró avance de efectivo con identificador 404."
+    );
+    let tarjeta = crear_tarjeta(5_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Avance", "DOP", 1_000.0);
+    avance(tarjeta, cuenta, "800.00", "porcentaje", Some(6.25), None).unwrap();
+    let id: i64 = conexion().query_row("SELECT id FROM avances_efectivo;", [], |r| r.get(0)).unwrap();
+    let e = crate::revertir_avance_efectivo(id, "corto".into()).unwrap_err();
+    assert!(e.starts_with("Explica la corrección en al menos 15 caracteres.") && e.contains("«corto»"), "{e}");
+    assert_eq!(filas_de_avances(), 1, "no se borró nada");
+
+    let resumen = crate::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
+    let anio = chrono::Local::now().format("%Y").to_string();
+    assert_eq!(resumen, format!("La deuda de la tarjeta baja DOP 850.00 y la cuenta devuelve DOP 800.00. Caso COR-{anio}-0001."));
+    let casos = casos_de_correccion();
+    let (_, tipo, referencia, descripcion, importe_caso, divisa) = &casos[0];
+    assert_eq!((tipo.as_str(), *referencia, descripcion.as_str(), divisa.as_deref()), ("avance de efectivo", id, "Avance del 01/10/2026", Some("DOP")));
+    assert_importe(importe_caso.unwrap(), 800.0, "monto del avance");
+}
+

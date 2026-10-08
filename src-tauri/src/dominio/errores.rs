@@ -38,6 +38,11 @@ pub enum ErrorDominio {
     AbonoSinImporte,
     /// Catálogos (categorías y clientes). Los textos son los de siempre: la interfaz los muestra tal cual.
     FacturaDuplicada,
+    PorcentajeDeCargoRequerido,
+    ImporteDeCargoFijoRequerido,
+    CargoContradictorio,
+    TipoDeCargoDesconocido { tipo: String },
+    FechaNoEntendida { fecha: String },
     IngresoNoPendiente { id: i64 },
     CuotasTotalesRequeridas,
     CuotasPendientesRequeridas,
@@ -119,6 +124,19 @@ impl fmt::Display for ErrorDominio {
             ErrorDominio::TarjetaNoEncontrada { id } => write!(f, "No se encontró la tarjeta {}.", id),
             ErrorDominio::IngresoNoPendiente { id } => {
                 write!(f, "No se encontró un ingreso {} pendiente de cobro.", id)
+            }
+            ErrorDominio::PorcentajeDeCargoRequerido => write!(f, "Indica el porcentaje del cargo."),
+            ErrorDominio::ImporteDeCargoFijoRequerido => write!(f, "Indica el importe del cargo fijo."),
+            ErrorDominio::CargoContradictorio => {
+                write!(f, "El tipo de cargo y los valores que se indican se contradicen.")
+            }
+            ErrorDominio::TipoDeCargoDesconocido { tipo } => write!(
+                f,
+                "Tipo de cargo «{}» desconocido. Los admitidos son porcentaje, fijo y exonerado.",
+                tipo
+            ),
+            ErrorDominio::FechaNoEntendida { fecha } => {
+                write!(f, "La fecha «{}» no se entiende. Se espera dd/mm/aaaa.", fecha)
             }
             ErrorDominio::FacturaDuplicada => write!(f, "El número de factura ya está registrado."),
             ErrorDominio::FacturaNoPendiente { id } => {
