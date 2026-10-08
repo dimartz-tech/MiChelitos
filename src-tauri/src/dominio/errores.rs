@@ -38,6 +38,8 @@ pub enum ErrorDominio {
     AbonoSinImporte,
     /// Catálogos (categorías y clientes). Los textos son los de siempre: la interfaz los muestra tal cual.
     FacturaDuplicada,
+    /// Un gasto que creó otra operación no se borra solo; el texto dice qué operación revertir.
+    GastoDerivado { motivo: String },
     PorcentajeDeCargoRequerido,
     ImporteDeCargoFijoRequerido,
     CargoContradictorio,
@@ -138,6 +140,7 @@ impl fmt::Display for ErrorDominio {
             ErrorDominio::FechaNoEntendida { fecha } => {
                 write!(f, "La fecha «{}» no se entiende. Se espera dd/mm/aaaa.", fecha)
             }
+            ErrorDominio::GastoDerivado { motivo } => write!(f, "{}", motivo),
             ErrorDominio::FacturaDuplicada => write!(f, "El número de factura ya está registrado."),
             ErrorDominio::FacturaNoPendiente { id } => {
                 write!(f, "No se encontró una factura {} pendiente de cobro.", id)

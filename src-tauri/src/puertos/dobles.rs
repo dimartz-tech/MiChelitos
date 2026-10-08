@@ -56,6 +56,9 @@ pub struct InformalEnMemoria {
 
 #[derive(Default)]
 pub struct AlmacenEnMemoria {
+    /// La descripción de cada gasto y el motivo por el que no se borra solo (el doble de `GastoGuardado` no los guarda).
+    pub descripciones_de_gasto: HashMap<i64, String>,
+    pub motivos_de_no_borrar: HashMap<i64, String>,
     /// La fecha de cada avance (el doble de `AvanceGuardado` no la guarda).
     pub fechas_de_avance: HashMap<i64, String>,
     /// La fecha de cada abono (el doble de `PagoGuardado` no la guarda).
@@ -1368,6 +1371,44 @@ impl ConsultaDeBonificaciones for AlmacenEnMemoria {
             .collect();
         v.sort_by(|a, b| b.id.cmp(&a.id));
         Ok(v)
+    }
+}
+
+impl ConsultaDeGastos for AlmacenEnMemoria {
+    fn gastos(&self) -> Result<Vec<GastoLeido>, ErrorAlmacen> {
+        let mut v: Vec<GastoLeido> = self
+            .gastos
+            .values()
+            .map(|g| GastoLeido {
+                id: g.id,
+                // El doble de `GastoGuardado` no guarda fecha, descripción ni categoría: lo cubre SQLite.
+                fecha: String::new(),
+                monto: g.monto.unidades(),
+                divisa: g.monto.divisa().codigo().to_string(),
+                descripcion: String::new(),
+                categoria_id: 0,
+                categoria_nombre: String::new(),
+                metodo_pago: g.metodo_pago.clone(),
+                costo_adicional: g.cargos.unidades(),
+                tarjeta_id: g.tarjeta_id,
+                cuenta_ahorro_id: g.cuenta_ahorro_id,
+                estado_conversion: g.estado_conversion.codigo().map(str::to_string),
+                monto_liquidado: None,
+                tasa_conversion: None,
+            })
+            .collect();
+        v.sort_by(|a, b| b.id.cmp(&a.id));
+        Ok(v)
+    }
+    fn resumen_de_gasto(&self, id: i64) -> Result<Option<ResumenDeGasto>, ErrorAlmacen> {
+        Ok(self.gastos.get(&id).map(|g| ResumenDeGasto {
+            descripcion: self.descripciones_de_gasto.get(&id).cloned().unwrap_or_default(),
+            monto: g.monto.unidades(),
+            divisa: g.monto.divisa().codigo().to_string(),
+        }))
+    }
+    fn motivo_de_no_borrar(&self, id: i64) -> Result<Option<String>, ErrorAlmacen> {
+        Ok(self.motivos_de_no_borrar.get(&id).cloned())
     }
 }
 
