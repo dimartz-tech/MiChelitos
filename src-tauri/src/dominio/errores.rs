@@ -33,6 +33,9 @@ pub enum ErrorDominio {
     /// Una suscripción cobra un importe mayor que cero: uno de cero o negativo
     /// no cobra, abonaría a la tarjeta cada período.
     SuscripcionSinImporte,
+    /// Un abono sin cuenta elegida se paga de la caja de efectivo de su divisa; si esa caja no existe no hay de dónde
+    /// sacar el dinero.
+    CajaDeAbonoNoEncontrada { nombre: String },
     /// Un abono a la tarjeta es mayor que cero: uno de cero no abona nada y uno
     /// negativo **subiría** la deuda.
     AbonoSinImporte,
@@ -104,6 +107,11 @@ impl fmt::Display for ErrorDominio {
             ErrorDominio::CargoFijoNoPositivo => write!(
                 f,
                 "Un cargo fijo debe ser mayor que cero. Si el avance no paga cargo, márcalo como exonerado."
+            ),
+            ErrorDominio::CajaDeAbonoNoEncontrada { nombre } => write!(
+                f,
+                "No hay cuenta elegida y no existe la caja «{}» de donde pagar el abono en efectivo. Elige una cuenta o crea esa caja.",
+                nombre
             ),
             ErrorDominio::SuscripcionSinImporte => write!(
                 f,

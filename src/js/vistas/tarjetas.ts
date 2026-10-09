@@ -258,7 +258,7 @@ export class VistaTarjetas implements Vista {
                                             <div style="flex:2;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Cuenta Débito (Opcional)</label>
                                                 <select id="pag_cuenta_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;">
-                                                    <option value="">-- Ninguna (Efectivo/Otro) --</option>
+                                                    <option value="">-- Efectivo (caja por defecto, sin comisión) --</option>
                                                     ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                                                 </select>
                                             </div>

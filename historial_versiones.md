@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.90.0 (Versión Actual) - 2026-10-08
+## 🚀 Versión 1.92.0 (Versión Actual) - 2026-10-09
+**Corrección de abonos a tarjeta: sin cuenta elegida, el abono se paga de la caja de efectivo.** Antes, un abono registrado sin elegir cuenta solo bajaba la deuda de la tarjeta y **no movía ningún saldo**: el dinero seguía figurando en la caja y los saldos se descuadraban. Es un cambio de regla pedido por el titular.
+
+### 🔧 Qué se hace
+* **Regla nueva:** si no se elige cuenta, el abono sale de la caja de efectivo de **su divisa** («Efectivo DOP» o «Efectivo USD»), por el importe exacto y **sin comisión** (no hay transferencia). Una tasa de cambio sobrante se ignora: en efectivo no hay conversión.
+* **Queda enlazado:** el abono guarda la caja y lo debitado, de modo que **revertirlo devuelve el efectivo a la caja** (antes devolvía solo la deuda: «El abono no tenía cuenta asociada»).
+* **Si la caja no existe**, el abono se rechaza sin tocar nada, con un mensaje que lo dice (antes se aceptaba). Las cajas ya existen en toda instalación.
+* **Formulario:** la opción vacía del selector pasa a llamarse «Efectivo (caja por defecto, sin comisión)».
+* **Abonos antiguos sin cuenta** quedan como estaban; solo cambia lo que se registre desde ahora.
+
+### 🧪 Pruebas
+* 4 nuevas del caso de uso (pesos, dólares con tasa sobrante, caja inexistente, reversión) y `ab6` de caracterización; se actualizan 6 que fijaban el comportamiento anterior. Seis mutaciones (no debitar, caja de pesos para todo, caja inexistente tolerada, abono sin enlazar a la caja, tasa conservada, comisión en efectivo): todas detectadas. **Rust 835 pasan.**
+* No se repitió en la app empaquetada.
+
+---
+
+## 🚀 Versión 1.90.0 - 2026-10-08
 **Auditoría A-03, séptimo vertical: las suscripciones (el más pesado).** Alta, edición, listado, cobro automático y confirmación de períodos pendientes dejan de llevar SQL y reglas en `main.rs`. Sin cambios de reglas; un único cambio visible conocido (abajo).
 
 ### 🔧 Qué se hace
