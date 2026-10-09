@@ -33,6 +33,15 @@ pub enum ErrorDominio {
     /// Una suscripción cobra un importe mayor que cero: uno de cero o negativo
     /// no cobra, abonaría a la tarjeta cada período.
     SuscripcionSinImporte,
+    /// Un dato obligatorio llegó vacío (o solo con espacios). `campo` es el nombre que lee el titular.
+    DatoObligatorioVacio { campo: &'static str },
+    /// La retención de una factura es un porcentaje de 0 a 100: más de 100 retendría más que el total y uno
+    /// negativo lo aumentaría.
+    RetencionFueraDeRango,
+    /// Un ingreso informal registra un importe mayor que cero.
+    IngresoSinImporte,
+    /// Un límite o un tope de una tarjeta no puede ser negativo.
+    LimiteNegativo,
     /// Un abono a la tarjeta es mayor que cero: uno de cero no abona nada y uno
     /// negativo **subiría** la deuda.
     AbonoSinImporte,
@@ -105,6 +114,14 @@ impl fmt::Display for ErrorDominio {
                 f,
                 "Un cargo fijo debe ser mayor que cero. Si el avance no paga cargo, márcalo como exonerado."
             ),
+            ErrorDominio::DatoObligatorioVacio { campo } => write!(f, "Falta {}.", campo),
+            ErrorDominio::RetencionFueraDeRango => {
+                write!(f, "El porcentaje de retención debe estar entre 0 y 100.")
+            }
+            ErrorDominio::IngresoSinImporte => write!(f, "Un ingreso debe tener un monto mayor que cero."),
+            ErrorDominio::LimiteNegativo => {
+                write!(f, "Los límites de una tarjeta no pueden ser negativos.")
+            }
             ErrorDominio::SuscripcionSinImporte => write!(
                 f,
                 "Una suscripción debe cobrar un importe mayor que cero: con cero o menos no cobraría, abonaría a la tarjeta cada período."

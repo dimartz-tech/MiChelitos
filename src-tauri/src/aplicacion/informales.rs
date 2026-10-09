@@ -3,10 +3,9 @@
 //! El orden de las comprobaciones es el de los comandos que sustituyen y lo fijan las pruebas de caracterización
 //! `p1`–`p8` y `c81`–`c84b`. La transacción la abre y confirma quien llama.
 //!
-//! **Hallazgos documentados, sin corregir** (el cambio se consulta): crear un informal no valida que el monto sea
-//! positivo ni que fecha y descripción no estén vacías (`p2`), y el cobro en efectivo sigue localizando la caja por
-//! su nombre y, si no existe, registra el ingreso como cobrado sin mover ningún saldo (`p6`, el mismo hueco que H3
-//! cerró para los gastos).
+//! Crear un informal exige un monto positivo y fecha y descripción no vacías (`p2`). **Hallazgo documentado, sin
+//! corregir** (el cambio se consulta): el cobro en efectivo localiza la caja por su nombre y, si no existe, registra el
+//! ingreso como cobrado sin mover ningún saldo (`p6`, el mismo hueco que H3 cerró para los gastos).
 
 use super::ErrorAplicacion;
 use super::ingresos::{en_la_divisa_de_la_cuenta, resolver_deposito};
@@ -17,6 +16,20 @@ use crate::dominio::errores::ErrorDominio;
 use crate::dominio::tarjeta::MONEDA_LOCAL;
 use crate::puertos::repositorios::*;
 
+/// Un ingreso informal lleva fecha, descripción y un monto mayor que cero; uno de cero o negativo no es un ingreso.
+fn validar_informal(fecha: &str, descripcion: &str, monto: Dinero) -> Result<(), ErrorAplicacion> {
+    if fecha.trim().is_empty() {
+        return Err(ErrorDominio::DatoObligatorioVacio { campo: "la fecha del ingreso" }.into());
+    }
+    if descripcion.trim().is_empty() {
+        return Err(ErrorDominio::DatoObligatorioVacio { campo: "la descripción del ingreso" }.into());
+    }
+    if monto.es_cero() || monto.es_negativo() {
+        return Err(ErrorDominio::IngresoSinImporte.into());
+    }
+    Ok(())
+}
+
 /// Registra un ingreso pendiente de cobro. Nace «pendiente».
 pub fn crear_ingreso_informal(
     fecha: &str,
@@ -24,6 +37,7 @@ pub fn crear_ingreso_informal(
     monto: Dinero,
     almacen: &mut impl AlmacenInformales,
 ) -> Result<i64, ErrorAplicacion> {
+    validar_informal(fecha, descripcion, monto)?;
     Ok(almacen.insertar_informal(fecha, descripcion, monto.unidades())?)
 }
 
@@ -36,6 +50,7 @@ pub fn crear_cobro_efectivo_informal(
     monto: Dinero,
     almacen: &mut (impl AlmacenInformales + RepositorioCuentas + BusquedaDeCuentas),
 ) -> Result<i64, ErrorAplicacion> {
+    validar_informal(fecha, descripcion, monto)?;
     let caja = nombre_de_caja_de_cobro(monto.divisa());
     let id = almacen.insertar_cobro_en_efectivo(fecha, descripcion, monto.unidades(), caja)?;
     if let Some(cuenta_id) = almacen.cuenta_por_nombre(caja)? {
