@@ -5506,9 +5506,9 @@ fn ab1_los_abonos_de_una_tarjeta_salen_del_mas_nuevo_al_mas_viejo_con_su_cuenta_
     let abonos = crate::obtener_abonos_tarjeta(tarjeta).unwrap();
     assert_eq!(abonos.len(), 2);
     let (nuevo, viejo) = (&abonos[0], &abonos[1]);
-    assert_eq!((nuevo.fecha_pago.as_str(), nuevo.divisa.as_str(), nuevo.cuenta_ahorro_id, nuevo.cuenta_nombre.as_deref()), ("02/10/2026", "USD", None, None));
+    assert_eq!((nuevo.fecha_pago.as_str(), nuevo.divisa.as_str(), nuevo.cuenta_nombre.as_deref()), ("02/10/2026", "USD", Some("Efectivo USD")), "sin cuenta se paga de la caja de dólares");
     assert_importe(nuevo.monto_pagado, 200.0, "monto del más nuevo");
-    assert!(nuevo.tasa_cambio.is_none(), "sin cuenta no hay tasa");
+    assert!(nuevo.tasa_cambio.is_none(), "en efectivo no hay tasa");
     assert_eq!((viejo.fecha_pago.as_str(), viejo.cuenta_ahorro_id, viejo.cuenta_nombre.as_deref()), ("01/10/2026", Some(cuenta), Some("Cuenta Abonos")));
     assert_importe(viejo.tasa_cambio.unwrap(), 60.0, "la tasa del abono multidivisa");
 }
@@ -5565,12 +5565,35 @@ fn ab5_revertir_deja_un_caso_con_el_abono_y_cuenta_lo_devuelto_con_los_textos_de
 
     registrar_pago_tarjeta(tarjeta, "04/10/2026".to_string(), monto(700.0), "DOP".to_string(), None, 0.0).unwrap();
     let sin_cuenta = revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
-    assert_eq!(sin_cuenta, format!("Se repusieron DOP 700.00 a la deuda. El abono no tenía cuenta asociada. Caso COR-{anio}-0002."));
+    assert_eq!(sin_cuenta, format!("Se repusieron DOP 700.00 a la deuda y volvieron DOP 700.00 a la cuenta. Caso COR-{anio}-0002."));
 
     let casos = casos_de_correccion();
     let (_, tipo, _, descripcion, importe_caso, divisa) = &casos[0];
     assert_eq!((tipo.as_str(), descripcion.as_str(), divisa.as_deref()), ("abono", "Abono del 03/10/2026", Some("DOP")));
     assert_importe(importe_caso.unwrap(), 5_432.0, "monto del abono");
+}
+
+#[test]
+fn ab6_un_abono_sin_cuenta_sale_de_la_caja_de_efectivo_sin_comision_y_al_revertirlo_vuelve() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(10_000.0, 0.0);
+    let pesos = balance_cuenta("Efectivo DOP");
+    let dolares = balance_cuenta("Efectivo USD");
+    let gastos = || -> i64 { conexion().query_row("SELECT COUNT(*) FROM gastos;", [], |r| r.get(0)).unwrap() };
+    let gastos_antes = gastos();
+
+    registrar_pago_tarjeta(tarjeta, "04/10/2026".to_string(), monto(700.0), "DOP".to_string(), None, 0.0).unwrap();
+    assert_importe(balance_cuenta("Efectivo DOP"), pesos - 700.0, "la caja de pesos pagó el abono completo");
+    assert_importe(balance_cuenta("Efectivo USD"), dolares, "la de dólares no se movió");
+    assert_eq!(gastos(), gastos_antes, "en efectivo no hay comisión que asentar");
+    let (monto_debitado, comision, cuenta): (f64, Option<f64>, Option<i64>) = conexion()
+        .query_row("SELECT monto_debitado, comision, cuenta_ahorro_id FROM pagos_tarjeta WHERE id = ?;", params![ultimo_abono()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap();
+    assert_importe(monto_debitado, 700.0, "lo debitado queda guardado");
+    assert!(comision.is_none() && cuenta.is_some(), "sin comisión y enlazado a la caja");
+
+    revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
+    assert_importe(balance_cuenta("Efectivo DOP"), pesos, "la caja recupera exactamente lo que salió");
 }
 
 // --- A-03, vertical «tarjetas» (parte 3: avances de efectivo): caracterización antes de extraer ---
