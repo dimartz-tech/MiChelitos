@@ -33,6 +33,9 @@ pub enum ErrorDominio {
     /// Una suscripción cobra un importe mayor que cero: uno de cero o negativo
     /// no cobra, abonaría a la tarjeta cada período.
     SuscripcionSinImporte,
+    /// Un abono sin cuenta elegida se paga de la caja de efectivo de su divisa; si esa caja no existe no hay de dónde
+    /// sacar el dinero.
+    CajaDeAbonoNoEncontrada { nombre: String },
     /// Un dato obligatorio llegó vacío (o solo con espacios). `campo` es el nombre que lee el titular.
     DatoObligatorioVacio { campo: &'static str },
     /// La retención de una factura es un porcentaje de 0 a 100: más de 100 retendría más que el total y uno
@@ -113,6 +116,11 @@ impl fmt::Display for ErrorDominio {
             ErrorDominio::CargoFijoNoPositivo => write!(
                 f,
                 "Un cargo fijo debe ser mayor que cero. Si el avance no paga cargo, márcalo como exonerado."
+            ),
+            ErrorDominio::CajaDeAbonoNoEncontrada { nombre } => write!(
+                f,
+                "No hay cuenta elegida y no existe la caja «{}» de donde pagar el abono en efectivo. Elige una cuenta o crea esa caja.",
+                nombre
             ),
             ErrorDominio::DatoObligatorioVacio { campo } => write!(f, "Falta {}.", campo),
             ErrorDominio::RetencionFueraDeRango => {
