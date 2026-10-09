@@ -32,6 +32,7 @@
 
 use super::ErrorAplicacion;
 use crate::dominio::cargos::TASA_RETENCION;
+use crate::dominio::cuenta::nombre_de_caja_de_cobro;
 use crate::dominio::dinero::{Dinero, TasaCambio};
 use crate::dominio::errores::ErrorDominio;
 use crate::puertos::repositorios::*;
@@ -42,9 +43,10 @@ pub struct DatosPago {
     pub tarjeta_id: i64,
     pub fecha: String,
     pub monto: Dinero,
-    /// Cuenta de la que sale el dinero. `None` cuando el abono se hizo por
-    /// una vía que la aplicación no lleva —efectivo en caja del banco, por
-    /// ejemplo—: entonces solo se reduce la deuda.
+    /// Cuenta de la que sale el dinero. `None` es que no se eligió ninguna: el
+    /// abono se da por pagado **en efectivo**, de la caja por defecto de su
+    /// divisa («Efectivo DOP» o «Efectivo USD»), sin comisión. Antes `None`
+    /// solo reducía la deuda y el dinero seguía figurando en la caja.
     pub cuenta_ahorro_id: Option<i64>,
     /// Tasa a la que el banco convirtió. Obligatoria si el abono va en una
     /// divisa distinta a la de la cuenta que paga.
@@ -63,7 +65,7 @@ pub struct PagoRegistrado {
 pub fn registrar_pago_tarjeta(
     datos: DatosPago,
     categoria_comision_id: i64,
-    almacen: &mut impl AlmacenAbonos,
+    almacen: &mut (impl AlmacenAbonos + BusquedaDeCuentas),
 ) -> Result<PagoRegistrado, ErrorAplicacion> {
     // Antes de tocar nada: un abono que no es positivo no abona (cero) o sube la deuda (negativo).
     if datos.monto.es_cero() || datos.monto.es_negativo() {
@@ -73,10 +75,17 @@ pub fn registrar_pago_tarjeta(
     // El orden importa: primero se resuelve todo lo que puede fallar por una
     // regla, y solo después se toca un saldo. Así una operación rechazada no
     // deja nada a medias ni siquiera antes de la transacción.
-    let conversion = match datos.cuenta_ahorro_id {
-        None => None,
-        Some(cuenta_id) => Some(resolver_conversion(&datos, almacen.divisa(cuenta_id)?)?),
+    let (cuenta_id, con_comision) = match datos.cuenta_ahorro_id {
+        Some(id) => (id, true),
+        None => {
+            let caja = nombre_de_caja_de_cobro(datos.monto.divisa());
+            let id = almacen
+                .cuenta_por_nombre(caja)?
+                .ok_or(ErrorDominio::CajaDeAbonoNoEncontrada { nombre: caja.to_string() })?;
+            (id, false)
+        }
     };
+    let debitado = resolver_conversion(&datos, almacen.divisa(cuenta_id)?)?;
 
     // 1. La deuda de la tarjeta baja. Sin recorte a cero: si el abono excede
     //    la deuda, el balance queda negativo, que es el saldo a favor que el
@@ -84,8 +93,13 @@ pub fn registrar_pago_tarjeta(
     almacen.ajustar_deuda(datos.tarjeta_id, datos.monto.negado())?;
 
     // 2. La cuenta paga el importe convertido más su comisión.
-    let (debitado, comision, gasto_id) = match (datos.cuenta_ahorro_id, conversion) {
-        (Some(cuenta_id), Some(debitado)) => {
+    let (debitado, comision, gasto_id) = match con_comision {
+        false => {
+            // En efectivo no hay transferencia ni comisión: sale exactamente el importe del abono.
+            almacen.ajustar_saldo(cuenta_id, debitado.negado())?;
+            (Some(debitado), None, None)
+        }
+        true => {
             let comision = debitado.porcentaje(TASA_RETENCION)?;
             let total = debitado.sumar(&comision)?;
             almacen.ajustar_saldo(cuenta_id, total.negado())?;
@@ -104,7 +118,6 @@ pub fn registrar_pago_tarjeta(
 
             (Some(debitado), Some(comision), Some(gasto_id))
         }
-        _ => (None, None, None),
     };
 
     // 3. El abono se guarda ya enlazado a todo lo que movió.
@@ -112,8 +125,8 @@ pub fn registrar_pago_tarjeta(
         tarjeta_id: datos.tarjeta_id,
         fecha: datos.fecha,
         monto: datos.monto,
-        cuenta_ahorro_id: datos.cuenta_ahorro_id,
-        tasa_cambio: datos.tasa_cambio.map(|t| t.valor()),
+        cuenta_ahorro_id: Some(cuenta_id),
+        tasa_cambio: if con_comision { datos.tasa_cambio.map(|t| t.valor()) } else { None },
         monto_debitado: debitado,
         comision,
         gasto_comision_id: gasto_id,
@@ -168,6 +181,8 @@ mod tests {
             .con_categoria(1, "Otros")
             .con_cuenta(10, "Cuenta Ahorros DOP", dop(500_000.0))
             .con_cuenta(11, "Cuenta Ahorros USD", usd(2_000.0))
+            .con_cuenta(12, "Efectivo DOP", dop(10_000.0))
+            .con_cuenta(13, "Efectivo USD", usd(500.0))
             .con_tarjeta(20, dop(0.0))
     }
 
@@ -236,15 +251,40 @@ mod tests {
     }
 
     #[test]
-    fn un_abono_sin_cuenta_solo_reduce_la_deuda() {
+    fn un_abono_sin_cuenta_se_paga_de_la_caja_de_efectivo_de_su_divisa_sin_comision() {
         let mut a = almacen();
         a.ajustar_deuda(20, dop(5_000.0)).unwrap();
 
         let r = registrar_pago_tarjeta(datos(dop(3_000.0), None, None), 1, &mut a).unwrap();
 
         assert_eq!(a.deuda_de(20), dop(2_000.0));
-        assert_eq!(r.debitado, None, "ninguna cuenta pagó");
+        assert_eq!(r.debitado, Some(dop(3_000.0)), "la caja pagó exactamente el abono");
+        assert_eq!(r.comision, None);
+        assert_eq!(a.saldo(12).unwrap(), dop(7_000.0), "Efectivo DOP");
+        assert_eq!(a.saldo(13).unwrap(), usd(500.0), "la caja en dólares no se toca");
         assert_eq!(a.total_gastos(), 0, "y no hay comisión que anotar");
+        assert_eq!(a.pagos.values().next().unwrap().cuenta_ahorro_id, Some(12), "el abono queda enlazado a la caja");
+    }
+
+    #[test]
+    fn un_abono_en_dolares_sin_cuenta_sale_de_efectivo_usd_y_una_tasa_sobrante_se_ignora() {
+        let mut a = almacen();
+        a.ajustar_deuda(20, usd(300.0)).unwrap();
+        registrar_pago_tarjeta(datos(usd(100.0), None, Some(60.0)), 1, &mut a).unwrap();
+        assert_eq!((a.saldo(13).unwrap(), a.saldo(12).unwrap()), (usd(400.0), dop(10_000.0)));
+        assert_eq!(a.pagos.values().next().unwrap().tasa_cambio, None, "en efectivo no hay conversión");
+    }
+
+    #[test]
+    fn sin_la_caja_de_efectivo_el_abono_sin_cuenta_se_rechaza_sin_tocar_nada() {
+        let mut a = AlmacenEnMemoria::nuevo().con_categoria(1, "Otros").con_tarjeta(20, dop(5_000.0));
+        let e = registrar_pago_tarjeta(datos(dop(100.0), None, None), 1, &mut a).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "No hay cuenta elegida y no existe la caja «Efectivo DOP» de donde pagar el abono en efectivo. Elige una cuenta o crea esa caja."
+        );
+        assert_eq!(a.deuda_de(20), dop(5_000.0));
+        assert!(a.pagos.is_empty());
     }
 
     #[test]

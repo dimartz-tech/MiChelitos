@@ -13,7 +13,7 @@ use crate::puertos::repositorios::*;
 /// Registra un abono. La comisión (si lo paga una cuenta) se asienta como gasto de la categoría de sistema «Otros».
 pub fn registrar_abono(
     datos: DatosPago,
-    almacen: &mut (impl AlmacenAbonos + CategoriaDeSistema),
+    almacen: &mut (impl AlmacenAbonos + CategoriaDeSistema + BusquedaDeCuentas),
 ) -> Result<(), ErrorAplicacion> {
     let categoria = almacen.categoria_de_sistema()?;
     registrar_pago_tarjeta(datos, categoria, almacen)?;
@@ -75,6 +75,8 @@ mod tests {
         AlmacenEnMemoria::nuevo()
             .con_categoria(7, "Otros")
             .con_cuenta(10, "Cuenta Abonos", dop(50_000.0))
+            .con_cuenta(11, "Efectivo DOP", dop(5_000.0))
+            .con_cuenta(12, "Efectivo USD", usd(1_000.0))
             .con_tarjeta(20, dop(10_000.0))
     }
 
@@ -113,7 +115,7 @@ mod tests {
         registrar_abono(pago(usd(200.0), None, None), &mut a).unwrap();
         let abonos = listar_abonos(20, &a).unwrap();
         assert_eq!(abonos.len(), 2);
-        assert_eq!((abonos[0].monto_pagado, abonos[0].cuenta_ahorro_id, abonos[0].cuenta_nombre.as_deref()), (200.0, None, None));
+        assert_eq!((abonos[0].monto_pagado, abonos[0].cuenta_ahorro_id, abonos[0].cuenta_nombre.as_deref()), (200.0, Some(12), Some("Efectivo USD")));
         assert_eq!((abonos[1].monto_pagado, abonos[1].cuenta_nombre.as_deref(), abonos[1].tasa_cambio), (100.0, Some("Cuenta Abonos"), Some(60.0)));
         assert!(listar_abonos(99, &a).unwrap().is_empty());
     }
@@ -134,12 +136,14 @@ mod tests {
     }
 
     #[test]
-    fn revertir_un_abono_sin_cuenta_no_devuelve_nada_a_ninguna() {
+    fn revertir_un_abono_sin_cuenta_devuelve_el_efectivo_a_la_caja() {
         let mut a = almacen();
         registrar_abono(pago(dop(700.0), None, None), &mut a).unwrap();
+        assert_eq!(a.saldo(11).unwrap(), dop(4_300.0), "salió de la caja");
         let id = *a.pagos.keys().next().unwrap();
         let r = revertir_abono(id, MOTIVO, &mut a).unwrap();
-        assert_eq!((r.revertido.deuda_restituida, r.revertido.devuelto_a_la_cuenta), (dop(700.0), None));
+        assert_eq!((r.revertido.deuda_restituida, r.revertido.devuelto_a_la_cuenta), (dop(700.0), Some(dop(700.0))));
+        assert_eq!(a.saldo(11).unwrap(), dop(5_000.0), "y vuelve a la caja");
     }
 
     #[test]
