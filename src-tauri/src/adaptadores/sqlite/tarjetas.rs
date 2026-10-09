@@ -76,8 +76,9 @@ impl CatalogoDeTarjetas for TarjetasSqlite<'_> {
         Ok(self.tx.last_insert_rowid())
     }
 
-    fn actualizar_limites(&mut self, l: &LimitesDeTarjeta) -> Result<(), ErrorAlmacen> {
-        self.tx
+    fn actualizar_limites(&mut self, l: &LimitesDeTarjeta) -> Result<bool, ErrorAlmacen> {
+        let filas = self
+            .tx
             .execute(
                 "UPDATE tarjetas SET limite_pesos = ?, limite_dolares = ?, limite_sobregiro_pesos = ?, limite_sobregiro_dolares = ?, balance_corte_pesos = ?, balance_corte_dolares = ?, limite_ajustado_pesos = ?, limite_ajustado_dolares = ?, politica_liquidacion = ? WHERE id = ?;",
                 (
@@ -94,6 +95,6 @@ impl CatalogoDeTarjetas for TarjetasSqlite<'_> {
                 ),
             )
             .map_err(fallo)?;
-        Ok(())
+        Ok(filas > 0)
     }
 }
