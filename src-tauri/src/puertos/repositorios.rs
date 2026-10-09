@@ -337,8 +337,8 @@ pub trait CatalogoDeTarjetas {
     /// En el orden en que se crearon.
     fn tarjetas(&self) -> Result<Vec<TarjetaLeida>, ErrorAlmacen>;
     fn insertar_tarjeta(&mut self, tarjeta: &TarjetaNueva) -> Result<i64, ErrorAlmacen>;
-    /// No avisa si la tarjeta no existe (comportamiento actual; ver `r4`).
-    fn actualizar_limites(&mut self, limites: &LimitesDeTarjeta) -> Result<(), ErrorAlmacen>;
+    /// `false` si la tarjeta no existe.
+    fn actualizar_limites(&mut self, limites: &LimitesDeTarjeta) -> Result<bool, ErrorAlmacen>;
 }
 
 /// Un financiamiento tal como se lee, con los datos de su tarjeta si cuelga de una.
