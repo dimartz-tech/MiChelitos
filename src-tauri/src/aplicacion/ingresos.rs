@@ -3,8 +3,7 @@
 //! El orden de las comprobaciones es el de los comandos que sustituyen y lo fijan las pruebas de
 //! caracterización `n1`–`n7` y `c70`–`c78b`. La transacción la abre y confirma quien llama.
 //!
-//! **Hallazgo documentado, sin corregir:** emitir no valida que el porcentaje de retención esté entre 0 y 100 ni
-//! que número, RNC y nombre no estén vacíos (lo hace el formulario). Ver `n4`; el cambio se consulta.
+//! Emitir exige número, RNC y nombre no vacíos y una retención de 0 a 100 (antes solo lo hacía el formulario; ver `n4`).
 
 use super::ErrorAplicacion;
 use crate::dominio::correccion::motivo_de_correccion;
@@ -55,6 +54,18 @@ pub struct DatosFactura {
 /// Emite una factura. El cliente se busca por RNC y, si no está, se crea con el nombre dado; si ya existe
 /// conserva el suyo. Un número repetido (sin distinguir mayúsculas) se rechaza **antes** de crear ningún cliente.
 pub fn crear_ingreso(datos: DatosFactura, almacen: &mut impl AlmacenIngresos) -> Result<i64, ErrorAplicacion> {
+    for (valor, campo) in [
+        (&datos.numero_factura, "el número de factura"),
+        (&datos.rnc_cliente, "el RNC del cliente"),
+        (&datos.nombre_cliente, "el nombre del cliente"),
+    ] {
+        if valor.trim().is_empty() {
+            return Err(ErrorDominio::DatoObligatorioVacio { campo }.into());
+        }
+    }
+    if !(0.0..=100.0).contains(&datos.porcentaje_retencion) {
+        return Err(ErrorDominio::RetencionFueraDeRango.into());
+    }
     if almacen.factura_existe(&datos.numero_factura)? {
         return Err(ErrorDominio::FacturaDuplicada.into());
     }

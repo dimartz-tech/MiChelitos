@@ -4814,18 +4814,23 @@ fn n3_una_factura_repetida_se_rechaza_con_su_mensaje_antes_de_crear_ningun_clien
 }
 
 #[test]
-fn n4_hallazgo_la_factura_acepta_un_porcentaje_fuera_de_rango_y_datos_vacios() {
-    // **HALLAZGOS, sin corregir** (protocolo del proyecto: documentar y fijar; el cambio se consulta).
-    // `crear_ingreso` no valida que el porcentaje de retención esté entre 0 y 100 —acepta 150 y -5, con una
-    // retención mayor que el total o negativa— ni que número de factura, RNC y nombre no estén vacíos (el
-    // formulario sí los exige, el comando no). Esta prueba describe el comportamiento ACTUAL: si se decide
-    // rechazarlos, se invierte.
+fn n4_la_factura_rechaza_una_retencion_fuera_de_0_a_100_y_los_datos_vacios_sin_dejar_nada() {
     let _g = entorno_aislado();
-    let alto = crear_ingreso(input_de_factura("N-005", "171717171", "Alto", "200", 150.0)).unwrap();
-    assert_importe(fila_de_factura(alto).5, 300.0, "150 % de 200: la retención supera el total");
-    let negativo = crear_ingreso(input_de_factura("N-006", "181818181", "Negativo", "200", -5.0)).unwrap();
-    assert_importe(fila_de_factura(negativo).5, -10.0, "-5 %: retención negativa");
-    assert!(crear_ingreso(input_de_factura("", "", "", "0", 0.0)).is_ok(), "datos vacíos aceptados");
+    let facturas = || -> i64 { conexion().query_row("SELECT COUNT(*) FROM ingresos;", [], |r| r.get(0)).unwrap() };
+    for porcentaje in [150.0, -5.0, 100.01, -0.01] {
+        let e = crear_ingreso(input_de_factura("N-005", "171717171", "Alto", "200", porcentaje)).unwrap_err();
+        assert_eq!(e, "El porcentaje de retención debe estar entre 0 y 100.", "{porcentaje}");
+    }
+    assert_eq!(crear_ingreso(input_de_factura("", "171717171", "Alto", "200", 0.0)).unwrap_err(), "Falta el número de factura.");
+    assert_eq!(crear_ingreso(input_de_factura("N-005", "  ", "Alto", "200", 0.0)).unwrap_err(), "Falta el RNC del cliente.");
+    assert_eq!(crear_ingreso(input_de_factura("N-005", "171717171", "", "200", 0.0)).unwrap_err(), "Falta el nombre del cliente.");
+    assert_eq!(facturas(), 0, "las rechazadas no dejaron nada");
+    assert_eq!(clientes_con_rnc("171717171"), 0, "ni el cliente");
+    // Los extremos del rango sí valen.
+    let cero = crear_ingreso(input_de_factura("N-006", "181818181", "Cero", "200", 0.0)).unwrap();
+    let cien = crear_ingreso(input_de_factura("N-007", "191919191", "Cien", "200", 100.0)).unwrap();
+    assert_importe(fila_de_factura(cero).5, 0.0, "0 %");
+    assert_importe(fila_de_factura(cien).5, 200.0, "100 %");
 }
 
 #[test]
@@ -5035,17 +5040,45 @@ fn p1_un_informal_se_crea_pendiente_y_se_lista_de_el_mas_nuevo_al_mas_viejo() {
 }
 
 #[test]
-fn p2_hallazgo_un_informal_acepta_monto_cero_o_negativo_y_datos_vacios() {
-    // **HALLAZGO, sin corregir** (protocolo: documentar y fijar; el cambio se consulta). `crear_ingreso_informal`
-    // no valida que el monto sea positivo ni que fecha y descripción no estén vacías (el formulario sí). Esta
-    // prueba describe el comportamiento ACTUAL: si se decide rechazarlos, se invierte.
+fn p2_un_informal_rechaza_monto_cero_o_negativo_y_datos_vacios_sin_dejar_nada() {
     let _g = entorno_aislado();
-    let cero = crear_ingreso_informal("01/10/2026".into(), "Cero".into(), importe("0")).unwrap();
-    let negativo = crear_ingreso_informal("01/10/2026".into(), "Negativo".into(), importe("-50")).unwrap();
-    let vacio = crear_ingreso_informal("".into(), "".into(), importe("1")).unwrap();
-    assert_importe(informal_por_id(cero).monto, 0.0, "cero aceptado");
-    assert_importe(informal_por_id(negativo).monto, -50.0, "un ingreso negativo aceptado");
-    assert_eq!(informal_por_id(vacio).descripcion, "", "descripción vacía aceptada");
+    let informales = || crate::obtener_ingresos_informales().unwrap().len();
+    let crear = |fecha: &str, descripcion: &str, monto: &str| crear_ingreso_informal(fecha.into(), descripcion.into(), importe(monto));
+    assert_eq!(crear("01/10/2026", "Cero", "0").unwrap_err(), "Un ingreso debe tener un monto mayor que cero.");
+    assert_eq!(crear("01/10/2026", "Negativo", "-50").unwrap_err(), "Un ingreso debe tener un monto mayor que cero.");
+    assert_eq!(crear("", "Sin fecha", "1").unwrap_err(), "Falta la fecha del ingreso.");
+    assert_eq!(crear("01/10/2026", "  ", "1").unwrap_err(), "Falta la descripción del ingreso.");
+    assert_eq!(informales(), 0, "las rechazadas no dejaron nada");
+    let centavo = crear("01/10/2026", "Centavo", "0.01").unwrap();
+    assert_importe(informal_por_id(centavo).monto, 0.01, "el menor importe positivo vale");
+}
+
+#[test]
+fn p2b_el_cobro_en_efectivo_informal_exige_lo_mismo_y_no_mueve_la_caja() {
+    let _g = entorno_aislado();
+    let antes = balance_cuenta("Efectivo DOP");
+    let cobrar = |fecha: &str, descripcion: &str, monto: &str| crear_cobro_efectivo_informal(fecha.into(), descripcion.into(), importe(monto), "DOP".into());
+    assert_eq!(cobrar("01/10/2026", "Cero", "0").unwrap_err(), "Un ingreso debe tener un monto mayor que cero.");
+    assert_eq!(cobrar("01/10/2026", "Negativo", "-5").unwrap_err(), "Un ingreso debe tener un monto mayor que cero.");
+    assert_eq!(cobrar("", "Sin fecha", "5").unwrap_err(), "Falta la fecha del ingreso.");
+    assert_eq!(cobrar("01/10/2026", " ", "5").unwrap_err(), "Falta la descripción del ingreso.");
+    assert_importe(balance_cuenta("Efectivo DOP"), antes, "la caja no se movió");
+    assert_eq!(crate::obtener_ingresos_informales().unwrap().len(), 0);
+}
+
+#[test]
+fn r2b_los_sobregiros_de_una_tarjeta_nueva_tampoco_pueden_ser_negativos() {
+    let _g = entorno_aislado();
+    let alta = |sobregiro_pesos: &str, sobregiro_dolares: &str| {
+        crate::crear_tarjeta(
+            "B".into(), "T".into(), importe("100"), importe("100"), importe(sobregiro_pesos), importe(sobregiro_dolares),
+            importe("0"), importe("0"), importe("0"), importe("0"), 15, 5,
+        )
+    };
+    for (pesos, dolares) in [("-1", "0"), ("0", "-1")] {
+        assert_eq!(alta(pesos, dolares).unwrap_err(), "Los límites de una tarjeta no pueden ser negativos.");
+    }
+    assert!(alta("0", "0").is_ok());
 }
 
 #[test]
@@ -5390,17 +5423,17 @@ fn r1_una_tarjeta_se_guarda_con_cada_importe_en_su_columna_y_sin_ajuste_ni_polit
 }
 
 #[test]
-fn r2_hallazgo_crear_tarjeta_no_recorta_los_textos_ni_valida_los_importes_solo_los_dias_los_valida_el_esquema() {
-    // **HALLAZGO, sin corregir** (protocolo: documentar y fijar; el cambio se consulta). El comando no recorta ni valida
-    // entidad y nombre (acepta vacíos y con espacios) ni que los límites sean positivos (acepta un límite negativo). Los
-    // días de corte y de pago los rechaza el esquema, con el texto crudo de SQLite. Esta prueba describe el comportamiento
-    // ACTUAL.
+fn r2_crear_tarjeta_recorta_y_exige_entidad_y_nombre_y_rechaza_limites_negativos() {
     let _g = entorno_aislado();
-    let id = alta_de_tarjeta("  ", "", "-100", 15, 5).unwrap();
+    let id = alta_de_tarjeta("  Banco  ", " Visa ", "0", 15, 5).unwrap();
     let f = fila_de_tarjeta(id);
-    assert_eq!((f.0.as_str(), f.1.as_str()), ("  ", ""), "ni se recorta ni se exige");
-    assert_importe(f.2, -100.0, "límite negativo aceptado");
+    assert_eq!((f.0.as_str(), f.1.as_str()), ("Banco", "Visa"), "se recortan");
+    assert_importe(f.2, 0.0, "un límite en cero vale");
 
+    assert_eq!(alta_de_tarjeta("  ", "T", "100", 15, 5).unwrap_err(), "Falta la entidad de la tarjeta.");
+    assert_eq!(alta_de_tarjeta("B", "", "100", 15, 5).unwrap_err(), "Falta el nombre de la tarjeta.");
+    assert_eq!(alta_de_tarjeta("B", "T", "-100", 15, 5).unwrap_err(), "Los límites de una tarjeta no pueden ser negativos.");
+    // Los días de corte y de pago los sigue validando el esquema, con el texto crudo de SQLite.
     for (corte, pago) in [(0, 5), (32, 5), (15, 0), (15, 32)] {
         let e = alta_de_tarjeta("B", "T", "100", corte, pago).unwrap_err();
         assert!(e.contains("CHECK constraint failed"), "{corte}/{pago}: {e}");
@@ -5435,14 +5468,25 @@ fn r3_actualizar_limites_guarda_cada_importe_el_ajuste_que_se_borra_y_la_politic
 }
 
 #[test]
-fn r4_hallazgo_actualizar_los_limites_de_una_tarjeta_inexistente_no_dice_nada() {
-    // **HALLAZGO, sin corregir**: el `UPDATE` afecta a cero filas y el comando devuelve `Ok`, como pasaba con H18 en las
-    // facturas. Describe el comportamiento ACTUAL.
+fn r4_actualizar_los_limites_de_una_tarjeta_inexistente_o_con_un_limite_negativo_se_rechaza() {
     let _g = entorno_aislado();
-    assert!(crate::actualizar_limites_tarjeta(
-        987_654, importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), None, None, None,
-    )
-    .is_ok());
+    assert_eq!(
+        crate::actualizar_limites_tarjeta(
+            987_654, importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), None, None, None,
+        )
+        .unwrap_err(),
+        "No se encontró la tarjeta 987654."
+    );
+    let id = alta_de_tarjeta("B", "T", "100", 15, 5).unwrap();
+    for (sobregiro, ajustado) in [("-1", None), ("1", Some("-1"))] {
+        let e = crate::actualizar_limites_tarjeta(
+            id, importe("1"), importe("1"), importe(sobregiro), importe("1"), importe("1"), importe("1"),
+            ajustado.map(importe), None, None,
+        )
+        .unwrap_err();
+        assert_eq!(e, "Los límites de una tarjeta no pueden ser negativos.");
+    }
+    assert_importe(fila_de_tarjeta(id).2, 100.0, "el rechazo no tocó el límite");
 }
 
 #[test]
