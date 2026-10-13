@@ -5135,19 +5135,22 @@ fn p5_el_cobro_en_efectivo_deja_el_ingreso_pagado_en_la_caja_y_toda_divisa_que_n
 }
 
 #[test]
-fn p6_hallazgo_sin_caja_de_efectivo_el_cobro_se_registra_igual_y_no_mueve_ningun_saldo() {
-    // **HALLAZGO, sin corregir** (el mismo hueco que H3 resolvió para los gastos en efectivo): este comando sigue
-    // localizando la caja **por su nombre** y, si no la encuentra, el ingreso queda «pagado» sin que ningún saldo
-    // se mueva ni nadie se entere. Esta prueba describe el comportamiento ACTUAL.
+fn p6_sin_caja_de_efectivo_el_cobro_se_rechaza_sin_registrar_nada_ni_mover_saldos() {
+    // El mismo hueco que H3 cerró para los gastos y que 1.92.0 cerró para los abonos: antes el ingreso quedaba
+    // «pagado» sin que ningún saldo se moviera ni nadie se enterara.
     let _g = entorno_aislado();
     conexion().execute("UPDATE cuentas_ahorro SET nombre = 'Caja renombrada' WHERE nombre = 'Efectivo DOP';", []).unwrap();
     let total_antes: f64 = conexion().query_row("SELECT SUM(balance_actual) FROM cuentas_ahorro;", [], |r| r.get(0)).unwrap();
+    let informales_antes = crate::obtener_ingresos_informales().unwrap().len();
 
-    let id = crear_cobro_efectivo_informal("04/10/2026".into(), "Sin caja".into(), importe("90"), "DOP".into()).unwrap();
+    let e = crear_cobro_efectivo_informal("04/10/2026".into(), "Sin caja".into(), importe("90"), "DOP".into()).unwrap_err();
+    assert_eq!(e, "No existe la caja «Efectivo DOP» donde entra el cobro en efectivo. Créala o registra el ingreso como pendiente y cóbralo en una cuenta.");
 
-    assert_eq!(informal_por_id(id).estatus, "pagado", "el ingreso consta como cobrado");
+    assert_eq!(crate::obtener_ingresos_informales().unwrap().len(), informales_antes, "no quedó ningún ingreso");
     let total_despues: f64 = conexion().query_row("SELECT SUM(balance_actual) FROM cuentas_ahorro;", [], |r| r.get(0)).unwrap();
-    assert_importe(total_despues, total_antes, "pero ninguna cuenta recibió nada");
+    assert_importe(total_despues, total_antes, "y ninguna cuenta se movió");
+    // La caja de dólares es otra: con la de pesos ausente, un cobro en dólares sigue entrando donde le corresponde.
+    assert!(crear_cobro_efectivo_informal("04/10/2026".into(), "En dólares".into(), importe("5"), "USD".into()).is_ok());
 }
 
 #[test]
