@@ -29,6 +29,7 @@ const el = (spec = {}) => ({ value: '', hidden: false, disabled: false, textCont
 const DATOS = () => ({
     categorias: CATEGORIAS, clientes: CLIENTES, cuentas: CUENTAS, gastos: [gasto(1), gasto(2)], informales: [informal(1)],
     ingresos: [ingreso(1)], transacciones: [transaccion(1)],
+    cuentasArchivadas: [{ id: 9, nombre: 'Cuenta <Vieja>', divisa: 'DOP', balance_actual: 0, entidad: 'Banco "Sin"', comision_pago_impuestos: null }],
     respaldos: ['michelitos_2026-09-29T19-03-25_antes-de-instalar.db', 'manual<viejo>.db'],
 });
 
@@ -54,7 +55,8 @@ function montar({ datos = DATOS(), campos = {}, falla = {}, confirmar = true, re
         obtenerCorrecciones: async () => { if (falla.obtenerCorrecciones) throw new Error(falla.obtenerCorrecciones); return correcciones; },
         crearCategoria: registrar('crearCategoria'), eliminarCategoria: registrar('eliminarCategoria'),
         crearCliente: registrar('crearCliente'), eliminarCliente: registrar('eliminarCliente'),
-        crearCuenta: registrar('crearCuenta'), actualizarCuenta: registrar('actualizarCuenta'), eliminarCuenta: registrar('eliminarCuenta'),
+        crearCuenta: registrar('crearCuenta'), actualizarCuenta: registrar('actualizarCuenta'), archivarCuenta: registrar('archivarCuenta'), reactivarCuenta: registrar('reactivarCuenta'),
+        obtenerCuentasArchivadas: async () => datos.cuentasArchivadas ?? [],
         crearTarjeta: registrar('crearTarjeta'),
         eliminarGasto: registrar('eliminarGasto', 'C-0001'), eliminarIngresoInformal: registrar('eliminarIngresoInformal'),
         eliminarIngreso: registrar('eliminarIngreso'), eliminarTransaccionCuenta: registrar('eliminarTransaccionCuenta'),
@@ -227,8 +229,8 @@ test('si Rust rechaza un alta se avisa el error y no se redibuja', async () => {
 
 // --- Bajas con confirmación ---
 
-test('las bajas de categoría, cliente y cuenta esperan la confirmación; Cancelar no borra', async () => {
-    for (const [metodo, api, id] of [['handleEliminarCategoria', 'eliminarCategoria', 3], ['handleEliminarCliente', 'eliminarCliente', 4], ['handleEliminarCuenta', 'eliminarCuenta', 5]]) {
+test('las bajas de categoría y cliente y el archivo de una cuenta esperan la confirmación; Cancelar no cambia nada', async () => {
+    for (const [metodo, api, id] of [['handleEliminarCategoria', 'eliminarCategoria', 3], ['handleEliminarCliente', 'eliminarCliente', 4], ['handleArchivarCuenta', 'archivarCuenta', 5]]) {
         const t = montar();
         const espera = t.vista[metodo](id);
         assert.deepEqual(t.llamadas, [], `${metodo}: no debe actuar antes de la respuesta`);
@@ -242,8 +244,8 @@ test('las bajas de categoría, cliente y cuenta esperan la confirmación; Cancel
 });
 
 test('si Rust rechaza una baja se avisa el error', async () => {
-    const t = montar({ falla: { eliminarCuenta: 'No' } });
-    await t.vista.handleEliminarCuenta(5);
+    const t = montar({ falla: { archivarCuenta: 'No' } });
+    await t.vista.handleArchivarCuenta(5);
     assert.equal(t.avisos[0].tipo, 'error');
     assert.deepEqual(t.rutas, []);
 });
@@ -486,4 +488,25 @@ test('todo appUI.x( que escribe la plantilla está en el puente, y todo el puent
     const llamados = new Set([...t.pantalla.contenido.innerHTML.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
     for (const nombre of llamados) assert.ok(MANEJADORES_AJUSTES.includes(nombre), `falta ${nombre} en el puente`);
     for (const nombre of MANEJADORES_AJUSTES) assert.ok(llamados.has(nombre), `${nombre} está en el puente pero la plantilla no lo usa`);
+});
+
+// --- Cuentas archivadas ---
+
+test('las archivadas se listan aparte, sin balance, con su estado en texto, y su nombre hostil se escapa', async () => {
+    const t = montar();
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.match(html, /Cuentas archivadas \(1\)/);
+    assert.match(html, /Archivada ·/, 'el estado va en texto, no solo en el estilo');
+    assert.match(html, /Cuenta &lt;Vieja&gt;/);
+    assert.match(html, /appUI\.handleReactivarCuenta\(9\)/);
+    assert.doesNotMatch(html, /Cuenta <Vieja>/);
+    const bloque = html.slice(html.indexOf('Cuentas archivadas'), html.indexOf('Tarjetas de Crédito'));
+    assert.doesNotMatch(bloque, /#0#/, 'las archivadas no muestran balance');
+});
+
+test('sin cuentas archivadas no hay bloque de archivadas', async () => {
+    const t = montar({ datos: { ...DATOS(), cuentasArchivadas: [] } });
+    await t.vista.render();
+    assert.doesNotMatch(t.pantalla.contenido.innerHTML, /Cuentas archivadas/);
 });

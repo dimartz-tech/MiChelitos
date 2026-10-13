@@ -1368,21 +1368,27 @@ fn lee_cuentas<T>(f: impl FnOnce(&mut CuentasSqlite) -> Result<T, String>) -> Re
     con_cuentas_como(false, f)
 }
 
+fn a_cuenta_ahorro(c: puertos::repositorios::CuentaLeida) -> CuentaAhorro {
+    CuentaAhorro {
+        id: c.id,
+        nombre: c.nombre,
+        divisa: c.divisa,
+        balance_actual: c.balance_actual,
+        entidad: c.entidad,
+        comision_pago_impuestos: c.comision_pago_impuestos,
+    }
+}
+
+/// Las cuentas **activas**: las que se ofrecen en selectores, saldos y operaciones nuevas.
 #[tauri::command]
 fn obtener_cuentas() -> Result<Vec<CuentaAhorro>, String> {
-    lee_cuentas(|a| {
-        Ok(a.cuentas()?
-            .into_iter()
-            .map(|c| CuentaAhorro {
-                id: c.id,
-                nombre: c.nombre,
-                divisa: c.divisa,
-                balance_actual: c.balance_actual,
-                entidad: c.entidad,
-                comision_pago_impuestos: c.comision_pago_impuestos,
-            })
-            .collect())
-    })
+    lee_cuentas(|a| Ok(a.cuentas()?.into_iter().map(a_cuenta_ahorro).collect()))
+}
+
+/// Las cuentas archivadas, solo para administrarlas (consultarlas y reactivarlas).
+#[tauri::command]
+fn obtener_cuentas_archivadas() -> Result<Vec<CuentaAhorro>, String> {
+    lee_cuentas(|a| Ok(aplicacion::cuentas::listar_archivadas(a)?.into_iter().map(a_cuenta_ahorro).collect()))
 }
 
 #[tauri::command]
@@ -1434,21 +1440,17 @@ fn actualizar_cuenta(
     })
 }
 
+/// Archiva una cuenta con saldo exactamente cero. No existe el borrado: el historial se conserva.
 #[tauri::command]
-fn eliminar_cuenta(id: i64) -> Result<(), String> {
-    // Traducción pura. La guarda —que hoy solo mira los gastos, H13— vive en
-    // el caso de uso.
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = db_sql::transaccion(&mut conn, true).map_err(|e| e.to_string())?;
-
-    {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
-        aplicacion::transferir::eliminar_cuenta(id, &mut almacen)?;
-    }
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+fn archivar_cuenta(id: i64) -> Result<(), String> {
+    con_almacen(|a| Ok(aplicacion::cuentas::archivar_cuenta(id, a)?))
 }
+
+#[tauri::command]
+fn reactivar_cuenta(id: i64) -> Result<(), String> {
+    con_almacen(|a| Ok(aplicacion::cuentas::reactivar_cuenta(id, a)?))
+}
+
 
 #[tauri::command]
 fn transferir_entre_cuentas(
@@ -1791,7 +1793,9 @@ fn main() {
             obtener_correcciones,
             crear_cuenta,
             actualizar_cuenta,
-            eliminar_cuenta,
+            archivar_cuenta,
+            reactivar_cuenta,
+            obtener_cuentas_archivadas,
             transferir_entre_cuentas,
             obtener_transacciones_cuentas,
             crear_cobro_efectivo_informal,

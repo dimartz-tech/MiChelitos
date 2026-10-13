@@ -30,7 +30,9 @@ type ApiAjustes = ApiDe<
     | 'eliminarCliente'
     | 'crearCuenta'
     | 'actualizarCuenta'
-    | 'eliminarCuenta'
+    | 'archivarCuenta'
+    | 'reactivarCuenta'
+    | 'obtenerCuentasArchivadas'
     | 'crearTarjeta'
     | 'eliminarGasto'
     | 'eliminarIngresoInformal'
@@ -55,7 +57,7 @@ export interface DependenciasAjustes {
 export const MANEJADORES_AJUSTES = [
     'handleAgregarCategoria', 'handleEliminarCategoria',
     'handleAgregarCliente', 'handleEliminarCliente',
-    'handleAgregarCuenta', 'abrirEdicionCuenta', 'handleEliminarCuenta',
+    'handleAgregarCuenta', 'abrirEdicionCuenta', 'handleArchivarCuenta', 'handleReactivarCuenta',
     'handleAgregarTarjeta',
     'handleCrearRespaldo', 'handleRestaurarRespaldo',
     'alternarCasosDeCorreccion',
@@ -84,6 +86,7 @@ export class VistaAjustes implements Vista {
         const categorias = await api.obtenerCategorias();
         const clientes = await api.obtenerClientes();
         const cuentas = await api.obtenerCuentas();
+        const cuentasArchivadas = await api.obtenerCuentasArchivadas();
         const gastos = await api.obtenerGastos();
         const informales = await api.obtenerIngresosInformales();
         const transacciones = await api.obtenerTransaccionesCuentas();
@@ -204,13 +207,31 @@ export class VistaAjustes implements Vista {
                                 </div>
                                 <div style="display:flex; gap:0.3rem;">
                                     <button onclick="appUI.abrirEdicionCuenta(${argumentoJs(c)})" class="btn" style="padding:0.2rem 0.4rem; font-size:0.75rem;">✏️</button>
-                                    <button onclick="appUI.handleEliminarCuenta(${c.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
+                                    <button onclick="appUI.handleArchivarCuenta(${c.id})" class="btn btn-secondary" style="padding:0.2rem 0.4rem; font-size:0.75rem;" title="Archivar: conserva el historial y solo se permite con saldo cero" aria-label="Archivar la cuenta ${escaparHtml(c.nombre)}">📦 Archivar</button>
                                 </div>
                             </div>
                         `).join('') : `
                             <p style="color:var(--text-muted); text-align:center; padding:1rem; font-size:0.75rem;">No hay cuentas registradas.</p>
                         `}
                     </div>
+
+                    ${cuentasArchivadas.length > 0 ? `
+                        <details style="margin-top:0.8rem;">
+                            <summary style="cursor:pointer; font-size:0.8rem; color:var(--text-secondary);">Cuentas archivadas (${cuentasArchivadas.length})</summary>
+                            <p style="font-size:0.7rem; color:var(--text-muted); margin:0.4rem 0;">No aparecen en selectores ni en saldos, y no reciben operaciones. Su historial se conserva.</p>
+                            <div style="display:flex; flex-direction:column; gap:0.4rem; font-size:0.85rem;">
+                                ${cuentasArchivadas.map(c => `
+                                    <div style="border:1px dashed var(--border-color); padding:0.5rem 0.8rem; border-radius:var(--radius-sm); display:flex; justify-content:space-between; align-items:center;">
+                                        <div>
+                                            <strong>${escaparHtml(c.nombre)}</strong>
+                                            <span style="font-size:0.7rem; color:var(--text-muted);"> · Archivada · ${escaparHtml(c.divisa)}${c.entidad ? ` · ${escaparHtml(c.entidad)}` : ''}</span>
+                                        </div>
+                                        <button onclick="appUI.handleReactivarCuenta(${c.id})" class="btn btn-secondary" style="padding:0.2rem 0.4rem; font-size:0.75rem;" aria-label="Reactivar la cuenta ${escaparHtml(c.nombre)}">♻️ Reactivar</button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </details>
+                    ` : ''}
                 </div>
 
                 <!-- Tarjetas de Crédito -->
@@ -592,16 +613,27 @@ export class VistaAjustes implements Vista {
         }
     }
 
-    async handleEliminarCuenta(id: number): Promise<void> {
+    async handleArchivarCuenta(id: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
-        if (await dialogos.confirmar("¿Deseas eliminar esta cuenta de ahorro?")) {
+        if (await dialogos.confirmar("¿Archivar esta cuenta? Conserva todo su historial, deja de aparecer en selectores y saldos, y puedes reactivarla. Solo se permite con saldo exactamente cero.")) {
             try {
-                await api.eliminarCuenta(id);
-                avisos.mostrar("Cuenta eliminada.");
+                await api.archivarCuenta(id);
+                avisos.mostrar("Cuenta archivada.");
                 await enrutador.mostrar('ajustes');
             } catch (err) {
                 avisos.mostrar(String(err), 'error');
             }
+        }
+    }
+
+    async handleReactivarCuenta(id: number): Promise<void> {
+        const { api, avisos, enrutador } = this.dep;
+        try {
+            await api.reactivarCuenta(id);
+            avisos.mostrar("Cuenta reactivada.");
+            await enrutador.mostrar('ajustes');
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
         }
     }
 
@@ -824,7 +856,8 @@ export function puenteAjustes(vista: VistaAjustes): {
     handleEliminarCliente: (id: number) => Promise<void>;
     handleAgregarCuenta: (e: EventoDeFormulario) => Promise<void>;
     abrirEdicionCuenta: (cuenta: CuentaAhorro) => Promise<void>;
-    handleEliminarCuenta: (id: number) => Promise<void>;
+    handleArchivarCuenta: (id: number) => Promise<void>;
+    handleReactivarCuenta: (id: number) => Promise<void>;
     handleAgregarTarjeta: (e: EventoDeFormulario) => Promise<void>;
     handleCrearRespaldo: (boton: BotonDeAccion) => Promise<void>;
     handleRestaurarRespaldo: (boton: BotonDeAccion) => Promise<void>;
@@ -841,7 +874,8 @@ export function puenteAjustes(vista: VistaAjustes): {
         handleEliminarCliente: id => vista.handleEliminarCliente(id),
         handleAgregarCuenta: e => vista.handleAgregarCuenta(e),
         abrirEdicionCuenta: cuenta => vista.abrirEdicionCuenta(cuenta),
-        handleEliminarCuenta: id => vista.handleEliminarCuenta(id),
+        handleArchivarCuenta: id => vista.handleArchivarCuenta(id),
+        handleReactivarCuenta: id => vista.handleReactivarCuenta(id),
         handleAgregarTarjeta: e => vista.handleAgregarTarjeta(e),
         handleCrearRespaldo: boton => vista.handleCrearRespaldo(boton),
         handleRestaurarRespaldo: boton => vista.handleRestaurarRespaldo(boton),
