@@ -4,7 +4,21 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.93.0 (Versión Actual) - 2026-10-13
+## 🚀 Versión 1.94.0 (Versión Actual) - 2026-10-13
+**El cobro en efectivo sin caja se rechaza.** Cierra el último hallazgo documentado de A-03 (`p6`): registrar un cobro en efectivo cuando la caja de esa divisa no existe dejaba el ingreso «pagado» sin mover ningún saldo y sin avisar. Es la misma regla que ya aplicaban los gastos (H3) y, desde 1.92.0, los abonos.
+
+### 🔧 Qué se hace
+* **Regla:** el cobro entra en «Efectivo DOP» o «Efectivo USD» según su divisa. Si esa caja no existe, se rechaza **antes de tocar nada**: no queda ingreso, no se mueve ningún saldo. Mensaje: «No existe la caja «Efectivo DOP» donde entra el cobro en efectivo. Créala o registra el ingreso como pendiente y cóbralo en una cuenta.»
+* **Orden:** primero se resuelve la caja y su divisa, después se registra el ingreso y se acredita la caja con **el mismo importe** (una sola conversión).
+* **No cambia nada si la caja existe.**
+
+### 🧪 Pruebas
+* `p6` se invierte (antes fijaba el hallazgo) y se invierte la prueba unitaria equivalente; `p6` comprueba además que un cobro en dólares sigue entrando en su caja aunque falte la de pesos. Tres mutaciones (caja ausente tolerada, caja sin acreditar, caja de pesos para todo): todas detectadas. **Rust 837 pasan.**
+* No se repitió en la app empaquetada.
+
+---
+
+## 🚀 Versión 1.93.0 - 2026-10-13
 **La aplicación pasa de Tauri 1.8 a Tauri 2.** Sin cambios de reglas, de esquema ni de datos: la base y el capital se siguen leyendo de `~/.michelitos`, que no depende de Tauri.
 
 ### 🔧 Qué se hace

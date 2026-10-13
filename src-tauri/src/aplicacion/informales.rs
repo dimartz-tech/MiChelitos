@@ -42,8 +42,9 @@ pub fn crear_ingreso_informal(
 }
 
 /// Registra un cobro que entró directo en efectivo. El importe se usa **dos veces** (el ingreso y la caja): una sola
-/// conversión garantiza que reciben exactamente lo mismo. Si la caja no existe, el ingreso se registra y no se mueve
-/// ningún saldo (comportamiento actual; ver `p6`).
+/// conversión garantiza que reciben exactamente lo mismo. Si la caja de esa divisa no existe se rechaza **antes de
+/// tocar nada**: antes el ingreso quedaba «pagado» sin que ningún saldo se moviera (`p6`; la misma regla que el abono
+/// sin cuenta y que H3 fijó para los gastos).
 pub fn crear_cobro_efectivo_informal(
     fecha: &str,
     descripcion: &str,
@@ -52,11 +53,12 @@ pub fn crear_cobro_efectivo_informal(
 ) -> Result<i64, ErrorAplicacion> {
     validar_informal(fecha, descripcion, monto)?;
     let caja = nombre_de_caja_de_cobro(monto.divisa());
+    let cuenta_id = almacen
+        .cuenta_por_nombre(caja)?
+        .ok_or(ErrorDominio::CajaDeCobroNoEncontrada { nombre: caja.to_string() })?;
+    let monto = en_la_divisa_de_la_cuenta(almacen, cuenta_id, monto)?;
     let id = almacen.insertar_cobro_en_efectivo(fecha, descripcion, monto.unidades(), caja)?;
-    if let Some(cuenta_id) = almacen.cuenta_por_nombre(caja)? {
-        let monto = en_la_divisa_de_la_cuenta(almacen, cuenta_id, monto)?;
-        almacen.ajustar_saldo(cuenta_id, monto)?;
-    }
+    almacen.ajustar_saldo(cuenta_id, monto)?;
     Ok(id)
 }
 
@@ -164,10 +166,14 @@ mod tests {
     }
 
     #[test]
-    fn sin_caja_de_efectivo_el_ingreso_se_registra_y_no_se_mueve_ningun_saldo() {
+    fn sin_caja_de_efectivo_el_cobro_se_rechaza_sin_registrar_nada_ni_mover_saldos() {
         let mut a = AlmacenEnMemoria::nuevo().con_cuenta(10, "Cuenta DOP", dop(100.0));
-        let id = crear_cobro_efectivo_informal("04/10/2026", "Sin caja", dop(90.0), &mut a).unwrap();
-        assert_eq!(a.informales[0].id, id);
+        let e = crear_cobro_efectivo_informal("04/10/2026", "Sin caja", dop(90.0), &mut a).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "No existe la caja «Efectivo DOP» donde entra el cobro en efectivo. Créala o registra el ingreso como pendiente y cóbralo en una cuenta."
+        );
+        assert!(a.informales.is_empty());
         assert_eq!(a.saldo(10).unwrap(), dop(100.0));
     }
 
