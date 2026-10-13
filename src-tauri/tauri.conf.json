@@ -1,52 +1,49 @@
 {
   "build": {
-    "distDir": "../src",
-    "beforeBuildCommand": "npm run compilar",
-    "devPath": "../src",
-    "withGlobalTauri": true
+    "frontendDist": "../src",
+    "beforeBuildCommand": "npm run compilar"
   },
-  "package": {
-    "productName": "MiChelitos",
-    "version": "1.92.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false
+  "bundle": {
+    "active": true,
+    "category": "Finance",
+    "copyright": "Copyright © 2026 dimartz-tech. All rights reserved.",
+    "targets": [
+      "dmg"
+    ],
+    "externalBin": [],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256"
     },
-    "bundle": {
-      "active": true,
-      "category": "Finance",
-      "copyright": "Copyright © 2026 dimartz-tech. All rights reserved.",
+    "longDescription": "",
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": "",
+      "frameworks": [],
+      "signingIdentity": null
+    },
+    "resources": [],
+    "shortDescription": "Gestor Financiero Personal y Corporativo",
+    "linux": {
       "deb": {
         "depends": []
-      },
-      "externalBin": [],
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ],
-      "identifier": "com.michelitos.desktop",
-      "longDescription": "",
-      "macOS": {
-        "entitlements": null,
-        "exceptionDomain": "",
-        "frameworks": [],
-        "signingIdentity": null
-      },
-      "resources": [],
-      "shortDescription": "Gestor Financiero Personal y Corporativo",
-      "targets": ["dmg"],
-      "windows": {
-        "certificateThumbprint": null,
-        "digestAlgorithm": "sha256"
       }
-    },
-    "security": {
-      "csp": "default-src 'self'; script-src 'self'; script-src-attr 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com; style-src-attr 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: asset: https://asset.localhost; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'"
-    },
+    }
+  },
+  "productName": "MiChelitos",
+  "mainBinaryName": "MiChelitos",
+  "version": "1.93.0",
+  "identifier": "com.michelitos.desktop",
+  "plugins": {},
+  "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "fullscreen": false,
@@ -57,6 +54,9 @@
         "decorations": true,
         "transparent": false
       }
-    ]
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; script-src-attr 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com; style-src-attr 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: asset: https://asset.localhost; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'"
+    }
   }
 }
