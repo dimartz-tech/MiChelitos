@@ -85,6 +85,7 @@ pub fn registrar_pago_tarjeta(
             (id, false)
         }
     };
+    super::cuentas::exigir_activa(almacen, cuenta_id)?;
     let debitado = resolver_conversion(&datos, almacen.divisa(cuenta_id)?)?;
 
     // 1. La deuda de la tarjeta baja. Sin recorte a cero: si el abono excede

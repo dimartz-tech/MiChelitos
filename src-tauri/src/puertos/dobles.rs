@@ -19,6 +19,7 @@ use std::collections::HashMap;
 pub struct CuentaEnMemoria {
     pub nombre: String,
     pub saldo: Dinero,
+    pub archivada: bool,
     /// Tarifa fija por pago de impuestos. `None` = ninguna pactada.
     pub comision_impuestos: Option<Dinero>,
 }
@@ -196,7 +197,7 @@ impl AlmacenEnMemoria {
     pub fn con_cuenta(mut self, id: i64, nombre: &str, saldo: Dinero) -> Self {
         self.cuentas.insert(
             id,
-            CuentaEnMemoria { nombre: nombre.to_string(), saldo, comision_impuestos: None },
+            CuentaEnMemoria { nombre: nombre.to_string(), saldo, archivada: false, comision_impuestos: None },
         );
         self
     }
@@ -217,6 +218,7 @@ impl AlmacenEnMemoria {
             CuentaEnMemoria {
                 nombre: format!("Efectivo {}", divisa.codigo()),
                 saldo,
+                archivada: false,
                 comision_impuestos: None,
             },
         );
@@ -477,6 +479,9 @@ impl RepositorioCuentas for AlmacenEnMemoria {
             .cuentas
             .get_mut(&cuenta_id)
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })?;
+        if cuenta.archivada && !delta.es_cero() {
+            return Err(ErrorAlmacen::CuentaArchivada { nombre: cuenta.nombre.clone() });
+        }
         cuenta.saldo =
             cuenta.saldo.sumar(&delta).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
         Ok(())
@@ -496,40 +501,37 @@ impl RepositorioCuentas for AlmacenEnMemoria {
         Ok(self.cajas.values().any(|&id| id == cuenta_id))
     }
 
-    fn referencias_a_la_cuenta(&self, cuenta_id: i64) -> Result<Vec<ReferenciaACuenta>, ErrorAlmacen> {
-        if !self.cuentas.contains_key(&cuenta_id) {
-            return Err(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id });
-        }
-        let contar = |ids: &[i64]| ids.iter().filter(|&&c| c == cuenta_id).count() as i64;
-        let cuentas_de_gastos: Vec<i64> =
-            self.gastos.values().filter_map(|g| g.cuenta_ahorro_id).collect();
-        let origenes: Vec<i64> = self.transferencias.values().map(|t| t.origen_id).collect();
-        let destinos: Vec<i64> = self.transferencias.values().map(|t| t.destino_id).collect();
-        let pagos: Vec<i64> = self.pagos.values().filter_map(|p| p.cuenta_ahorro_id).collect();
-        let avances: Vec<i64> = self.avances.values().map(|a| a.cuenta_ahorro_id).collect();
-
-        // El mismo orden y los mismos nombres que `RELACIONES_CON_CUENTAS`.
-        let todas: [(&'static str, &'static str, i64); 7] = [
-            ("gastos", "cuenta_ahorro_id", contar(&cuentas_de_gastos)),
-            ("transacciones_cuentas", "cuenta_origen_id", contar(&origenes)),
-            ("transacciones_cuentas", "cuenta_destino_id", contar(&destinos)),
-            ("ingresos", "cuenta_ahorro_id", contar(&self.ingresos_en_cuenta)),
-            ("ingresos_informales", "cuenta_ahorro_id", contar(&self.informales_en_cuenta)),
-            ("pagos_tarjeta", "cuenta_ahorro_id", contar(&pagos)),
-            ("avances_efectivo", "cuenta_ahorro_id", contar(&avances)),
-        ];
-        Ok(todas
-            .into_iter()
-            .filter(|(_, _, n)| *n > 0)
-            .map(|(tabla, columna, cantidad)| ReferenciaACuenta { tabla, columna, cantidad })
-            .collect())
+    fn estado_de_cuenta(&self, cuenta_id: i64) -> Result<EstadoDeCuenta, ErrorAlmacen> {
+        let c = self
+            .cuentas
+            .get(&cuenta_id)
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })?;
+        Ok(EstadoDeCuenta {
+            nombre: c.nombre.clone(),
+            saldo: c.saldo,
+            es_caja: self.cajas.values().any(|&id| id == cuenta_id),
+            archivada: c.archivada,
+        })
     }
 
-    fn eliminar_cuenta(&mut self, cuenta_id: i64) -> Result<(), ErrorAlmacen> {
-        self.cuentas
-            .remove(&cuenta_id)
-            .map(|_| ())
-            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })
+    fn archivar_cuenta(&mut self, cuenta_id: i64) -> Result<bool, ErrorAlmacen> {
+        let es_caja = self.cajas.values().any(|&id| id == cuenta_id);
+        let Some(c) = self.cuentas.get_mut(&cuenta_id) else { return Ok(false) };
+        if c.archivada || es_caja || !c.saldo.es_cero() {
+            return Ok(false);
+        }
+        c.archivada = true;
+        Ok(true)
+    }
+
+    fn reactivar_cuenta(&mut self, cuenta_id: i64) -> Result<bool, ErrorAlmacen> {
+        match self.cuentas.get_mut(&cuenta_id) {
+            Some(c) if c.archivada => {
+                c.archivada = false;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     fn comision_pago_impuestos(&self, cuenta_id: i64) -> Result<Option<Dinero>, ErrorAlmacen> {
@@ -725,6 +727,7 @@ mod contrato_del_doble {
         let mut a = AlmacenEnMemoria::nuevo()
             .con_categoria(1, "Alimentación")
             .con_cuenta(10, "Cuenta Contrato", dop(100000.0))
+            .con_cuenta(12, "Cuenta Vacía", dop(0.0))
             .con_caja(11, dop(0.0))
             .con_tarjeta(20, dop(500.0));
 
@@ -733,6 +736,7 @@ mod contrato_del_doble {
             categoria_nombre: "Alimentación".into(),
             cuenta_id: 10,
             cuenta_saldo: dop(100000.0),
+            cuenta_vacia_id: 12,
             caja_id: 11,
             caja_saldo: dop(0.0),
             tarjeta_id: 20,
@@ -868,6 +872,8 @@ impl AlmacenCatalogos for CatalogosEnMemoria {
 #[derive(Default)]
 pub struct CuentasEnMemoria {
     pub cuentas: Vec<CuentaLeida>,
+    /// Las cuentas archivadas: no salen en `cuentas()` pero siguen ocupando su nombre.
+    pub archivadas: Vec<CuentaLeida>,
     pub transacciones_guardadas: Vec<TransaccionLeida>,
     siguiente_id: i64,
 }
@@ -884,8 +890,13 @@ impl CatalogoDeCuentas for CuentasEnMemoria {
         v.sort_by(|a, b| a.nombre.cmp(&b.nombre));
         Ok(v)
     }
+    fn cuentas_archivadas(&self) -> Result<Vec<CuentaLeida>, ErrorAlmacen> {
+        let mut v = self.archivadas.clone();
+        v.sort_by(|a, b| a.nombre.cmp(&b.nombre));
+        Ok(v)
+    }
     fn insertar_cuenta(&mut self, c: &CuentaNueva) -> Result<i64, ErrorAlmacen> {
-        if self.cuentas.iter().any(|x| x.nombre == c.nombre) {
+        if self.cuentas.iter().chain(self.archivadas.iter()).any(|x| x.nombre == c.nombre) {
             return Err(ErrorAlmacen::Fallo("UNIQUE constraint failed: cuentas_ahorro.nombre".into()));
         }
         if c.divisa != "DOP" && c.divisa != "USD" {

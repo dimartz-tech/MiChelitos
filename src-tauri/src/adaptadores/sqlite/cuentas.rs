@@ -19,17 +19,17 @@ fn fallo(e: rusqlite::Error) -> ErrorAlmacen {
     ErrorAlmacen::Fallo(e.to_string())
 }
 
-impl CatalogoDeCuentas for CuentasSqlite<'_> {
-    fn cuentas(&self) -> Result<Vec<CuentaLeida>, ErrorAlmacen> {
+impl CuentasSqlite<'_> {
+    fn listar(&self, archivada: i64) -> Result<Vec<CuentaLeida>, ErrorAlmacen> {
         let mut stmt = self
             .tx
             .prepare(
                 "SELECT id, nombre, divisa, balance_actual, entidad, comision_pago_impuestos
-                 FROM cuentas_ahorro ORDER BY nombre ASC;",
+                 FROM cuentas_ahorro WHERE archivada = ? ORDER BY nombre ASC;",
             )
             .map_err(fallo)?;
         let filas = stmt
-            .query_map([], |r| {
+            .query_map([archivada], |r| {
                 Ok(CuentaLeida {
                     id: r.get(0)?,
                     nombre: r.get(1)?,
@@ -41,6 +41,16 @@ impl CatalogoDeCuentas for CuentasSqlite<'_> {
             })
             .map_err(fallo)?;
         filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
+    }
+}
+
+impl CatalogoDeCuentas for CuentasSqlite<'_> {
+    fn cuentas(&self) -> Result<Vec<CuentaLeida>, ErrorAlmacen> {
+        self.listar(0)
+    }
+
+    fn cuentas_archivadas(&self) -> Result<Vec<CuentaLeida>, ErrorAlmacen> {
+        self.listar(1)
     }
 
     fn insertar_cuenta(&mut self, c: &CuentaNueva) -> Result<i64, ErrorAlmacen> {

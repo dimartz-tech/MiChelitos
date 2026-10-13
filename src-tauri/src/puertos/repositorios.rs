@@ -27,6 +27,9 @@ pub enum ErrorAlmacen {
     /// papel, no una fila concreta. Antes esta situación no era un error sino
     /// un `Ok` que no movía ningún saldo, que es lo que describía **H3**.
     CajaDeEfectivoAusente { divisa: Divisa },
+    /// Se intentó mover dinero de una cuenta archivada. Una cuenta cerrada no recibe operaciones nuevas; para tocar un
+    /// movimiento histórico suyo hay que reactivarla antes.
+    CuentaArchivada { nombre: String },
     Fallo(String),
 }
 
@@ -40,6 +43,11 @@ impl fmt::Display for ErrorAlmacen {
                 f,
                 "No hay una caja de efectivo en {}. Crea la cuenta de efectivo antes de registrar un gasto en esa divisa.",
                 divisa.codigo()
+            ),
+            ErrorAlmacen::CuentaArchivada { nombre } => write!(
+                f,
+                "La cuenta «{}» está archivada: reactívala antes de usarla en una operación.",
+                nombre
             ),
             ErrorAlmacen::Fallo(detalle) => write!(f, "Error de almacenamiento: {}", detalle),
         }
@@ -648,8 +656,11 @@ pub struct TransaccionLeida {
 /// Alta, corrección y consulta de cuentas y de su historial de transferencias. (Mover dinero entre ellas
 /// vive en `RepositorioCuentas` y en los casos de uso de `transferir`.)
 pub trait CatalogoDeCuentas {
-    /// Ordenadas por nombre, ascendente (el orden binario de SQLite).
+    /// Las cuentas **activas** —las únicas que se ofrecen en selectores, saldos y operaciones nuevas— ordenadas por
+    /// nombre, ascendente (el orden binario de SQLite).
     fn cuentas(&self) -> Result<Vec<CuentaLeida>, ErrorAlmacen>;
+    /// Las archivadas, para administrarlas (consultar y reactivar). Nunca alimentan un selector.
+    fn cuentas_archivadas(&self) -> Result<Vec<CuentaLeida>, ErrorAlmacen>;
     fn insertar_cuenta(&mut self, cuenta: &CuentaNueva) -> Result<i64, ErrorAlmacen>;
     /// `false` si no hay ninguna cuenta con ese identificador (no se cambió nada).
     fn corregir_cuenta(&mut self, cuenta: &CuentaCorregida) -> Result<bool, ErrorAlmacen>;
@@ -898,12 +909,13 @@ impl<T> AlmacenAvances for T where
 {
 }
 
-/// Una relación que todavía apunta a una cuenta.
+/// Lo que hace falta saber de una cuenta para decidir si se archiva o se reactiva.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ReferenciaACuenta {
-    pub tabla: &'static str,
-    pub columna: &'static str,
-    pub cantidad: i64,
+pub struct EstadoDeCuenta {
+    pub nombre: String,
+    pub saldo: Dinero,
+    pub es_caja: bool,
+    pub archivada: bool,
 }
 
 pub trait RepositorioCuentas {
@@ -946,15 +958,16 @@ pub trait RepositorioCuentas {
     /// una guarda explícita, y por eso el puerto expone la pregunta.
     fn es_caja(&self, cuenta_id: i64) -> Result<bool, ErrorAlmacen>;
 
-    /// Qué relaciones apuntan todavía a esta cuenta, y cuántas filas cada una.
-    ///
-    /// Solo devuelve las que tienen filas. Recorre `RELACIONES_CON_CUENTAS`,
-    /// la lista que una prueba compara con las claves ajenas del esquema: así
-    /// la guarda de borrado cubre todas las relaciones que existen y no las
-    /// que alguien recordó escribir.
-    fn referencias_a_la_cuenta(&self, cuenta_id: i64) -> Result<Vec<ReferenciaACuenta>, ErrorAlmacen>;
+    /// Nombre, saldo, si es la caja de efectivo y si está archivada. Una cuenta que no existe es `NoEncontrado`.
+    fn estado_de_cuenta(&self, cuenta_id: i64) -> Result<EstadoDeCuenta, ErrorAlmacen>;
 
-    fn eliminar_cuenta(&mut self, cuenta_id: i64) -> Result<(), ErrorAlmacen>;
+    /// Archiva la cuenta **solo si** sigue activa, no es una caja de efectivo y su saldo es exactamente cero, todo en
+    /// la misma sentencia: devuelve `false` si alguna condición dejó de cumplirse entre la lectura que decidió y esta
+    /// escritura (la decisión autoritativa es esta, no la del caso de uso).
+    fn archivar_cuenta(&mut self, cuenta_id: i64) -> Result<bool, ErrorAlmacen>;
+
+    /// Reactiva una cuenta archivada. `false` si no estaba archivada.
+    fn reactivar_cuenta(&mut self, cuenta_id: i64) -> Result<bool, ErrorAlmacen>;
 }
 
 /// Datos de una transferencia tal como se guardan.

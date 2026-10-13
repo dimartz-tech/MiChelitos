@@ -372,6 +372,14 @@ impl RepositorioCuentas for AlmacenSqlite<'_> {
         // balance por cuenta, así que sin esta verificación se podrían restar
         // dólares de un saldo en pesos, que es exactamente H2.
         let actual = self.saldo(cuenta_id)?;
+        if !delta.es_cero() {
+            // Una cuenta archivada no mueve dinero: ni operaciones nuevas ni la reversión de una vieja, que primero
+            // exige reactivarla. Esta es la barrera de integridad; un selector oculto no lo es.
+            let estado = self.estado_de_cuenta(cuenta_id)?;
+            if estado.archivada {
+                return Err(ErrorAlmacen::CuentaArchivada { nombre: estado.nombre });
+            }
+        }
         let nuevo = actual.sumar(&delta).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
         self.tx
             .execute(
@@ -411,35 +419,47 @@ impl RepositorioCuentas for AlmacenSqlite<'_> {
         Ok(marca == 1)
     }
 
-    fn referencias_a_la_cuenta(&self, cuenta_id: i64) -> Result<Vec<ReferenciaACuenta>, ErrorAlmacen> {
-        let mut referencias = Vec::new();
-        for (tabla, columna) in crate::db_sql::RELACIONES_CON_CUENTAS {
-            // Los identificadores salen de una constante del propio código,
-            // nunca de la entrada: no hay nada que escapar.
-            let cantidad: i64 = self
-                .tx
-                .query_row(
-                    &format!("SELECT COUNT(*) FROM {tabla} WHERE {columna} = ?;"),
-                    [cuenta_id],
-                    |r| r.get(0),
-                )
-                .map_err(fallo)?;
-            if cantidad > 0 {
-                referencias.push(ReferenciaACuenta { tabla, columna, cantidad });
-            }
-        }
-        Ok(referencias)
+    fn estado_de_cuenta(&self, cuenta_id: i64) -> Result<EstadoDeCuenta, ErrorAlmacen> {
+        let fila: Option<(String, f64, String, i64, i64)> = self
+            .tx
+            .query_row(
+                "SELECT nombre, balance_actual, divisa, es_caja_efectivo, archivada FROM cuentas_ahorro WHERE id = ?;",
+                [cuenta_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .optional()
+            .map_err(fallo)?;
+        let (nombre, balance, divisa, caja, archivada) =
+            fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })?;
+        Ok(EstadoDeCuenta {
+            nombre,
+            saldo: Dinero::nuevo(balance, divisa_desde_texto(&divisa)).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?,
+            es_caja: caja == 1,
+            archivada: archivada == 1,
+        })
     }
 
-    fn eliminar_cuenta(&mut self, cuenta_id: i64) -> Result<(), ErrorAlmacen> {
+    fn archivar_cuenta(&mut self, cuenta_id: i64) -> Result<bool, ErrorAlmacen> {
+        // Una sola sentencia con las tres condiciones: activa, no caja y saldo exactamente cero. `ROUND(x * 100) = 0`
+        // compara en centavos y no por igualdad de `f64`; la transacción es `IMMEDIATE`, así que nadie escribe entre
+        // la decisión del caso de uso y esta escritura, y aun así la condición viaja en el `WHERE`.
         let filas = self
             .tx
-            .execute("DELETE FROM cuentas_ahorro WHERE id = ?;", [cuenta_id])
+            .execute(
+                "UPDATE cuentas_ahorro SET archivada = 1
+                 WHERE id = ? AND archivada = 0 AND es_caja_efectivo = 0 AND ROUND(balance_actual * 100) = 0;",
+                [cuenta_id],
+            )
             .map_err(fallo)?;
-        if filas == 0 {
-            return Err(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id });
-        }
-        Ok(())
+        Ok(filas == 1)
+    }
+
+    fn reactivar_cuenta(&mut self, cuenta_id: i64) -> Result<bool, ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute("UPDATE cuentas_ahorro SET archivada = 0 WHERE id = ? AND archivada = 1;", [cuenta_id])
+            .map_err(fallo)?;
+        Ok(filas == 1)
     }
 
     fn comision_pago_impuestos(&self, cuenta_id: i64) -> Result<Option<Dinero>, ErrorAlmacen> {
@@ -511,6 +531,12 @@ mod tests {
         )
         .unwrap();
         let cuenta_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES ('Cuenta Vacía', 'DOP', 0.0);",
+            [],
+        )
+        .unwrap();
+        let cuenta_vacia_id = conn.last_insert_rowid();
 
         conn.execute(
             "INSERT INTO tarjetas (entidad, nombre_tarjeta, fecha_corte, fecha_limite_pago, balance_pesos, limite_pesos)
@@ -538,6 +564,7 @@ mod tests {
             categoria_nombre: "Alimentación".into(),
             cuenta_id,
             cuenta_saldo: dop(100000.0),
+            cuenta_vacia_id,
             caja_id,
             caja_saldo: dop(0.0),
             tarjeta_id,
