@@ -781,7 +781,9 @@ fn c21_una_transferencia_sin_cuenta_calcula_la_retencion_pero_no_debita() {
 
 fn procesar_en(anio: i32, mes: u32, dia: u32) -> Vec<String> {
     let reloj = crate::puertos::reloj::RelojFijo::en(anio, mes, dia);
-    crate::procesar_suscripciones_con(&reloj).expect("procesar suscripciones")
+    let r = crate::procesar_suscripciones_con(&reloj).expect("procesar suscripciones");
+    assert!(r.fallos.is_empty(), "un cobro falló: {:?}", r.fallos);
+    r.cargos
 }
 
 /// Abre la aplicación todos los días del año y cuenta los cargos.
@@ -5956,7 +5958,7 @@ fn su5_los_mensajes_del_cobro_y_de_confirmar_son_los_de_siempre() {
     let (_sub, _) = suscripcion_mensual(15, "15/03/2026");
     let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 20);
     assert_eq!(
-        crate::procesar_suscripciones_con(&reloj).unwrap(),
+        crate::procesar_suscripciones_con(&reloj).unwrap().cargos,
         vec!["Cargo automático realizado para Plataforma (DOP 500.00) con fecha 15/03/2026".to_string()]
     );
     let (varios, _) = suscripcion_mensual(15, "15/01/2026");
@@ -5986,3 +5988,42 @@ fn su6_editar_conserva_el_ultimo_pago_y_la_fecha_se_rechaza_antes_que_la_divisa(
     assert!(e.starts_with("La fecha del próximo cobro «ayer»"), "primero la fecha: {e}");
 }
 
+#[test]
+fn su7_un_cobro_automatico_que_falla_no_corta_los_demas_se_deshace_y_se_informa_aparte() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let nueva = |nombre: &str| {
+        crear_suscripcion(nombre.into(), importe("100"), tarjeta, "mensual".into(), 15, "DOP".into(), Some("15/03/2026".into())).unwrap()
+    };
+    let primera = nueva("Primera");
+    let rota = nueva("Rota");
+    let tercera = nueva("Tercera");
+    // Un fallo real de la base en el cargo de «Rota»: el disparador aborta la inserción de su gasto.
+    conexion()
+        .execute_batch(
+            "CREATE TRIGGER falla_a_proposito BEFORE INSERT ON gastos WHEN NEW.descripcion LIKE '%Rota%'
+             BEGIN SELECT RAISE(ABORT, 'fallo sintético'); END;",
+        )
+        .unwrap();
+
+    let r = crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
+
+    assert_eq!(r.cargos.len(), 2, "las dos sanas se cobraron: {:?}", r.cargos);
+    assert!(r.cargos[0].contains("Primera") && r.cargos[1].contains("Tercera"));
+    assert_eq!(r.fallos.len(), 1);
+    assert!(r.fallos[0].starts_with("No se pudo cobrar «Rota»:") && r.fallos[0].contains("fallo sintético"), "{:?}", r.fallos);
+    assert!(r.fallos[0].ends_with("Se reintentará al abrir la aplicación."));
+
+    // La fallida se deshizo entera: sin gasto, sin deuda de más y con su fecha intacta para reintentarla.
+    assert_eq!(proximo_cobro_de(rota).as_deref(), Some("15/03/2026"));
+    assert_eq!(ultimo_pago(rota), None);
+    assert_eq!(proximo_cobro_de(primera).as_deref(), Some("15/04/2026"));
+    assert_eq!(proximo_cobro_de(tercera).as_deref(), Some("15/04/2026"));
+    assert_importe(balances_tarjeta(tarjeta).0, 200.0, "solo las dos sanas suben la deuda");
+
+    // Al arrancar de nuevo, con la causa resuelta, se reintenta y se cobra.
+    conexion().execute_batch("DROP TRIGGER falla_a_proposito;").unwrap();
+    let r = crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 21)).unwrap();
+    assert_eq!((r.cargos.len(), r.fallos.len()), (1, 0));
+    assert!(r.cargos[0].contains("Rota"));
+}

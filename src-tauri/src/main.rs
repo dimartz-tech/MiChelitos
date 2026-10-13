@@ -966,33 +966,51 @@ fn eliminar_suscripcion(id: i64) -> Result<(), String> {
     con_almacen(|a| Ok(aplicacion::suscripciones::eliminar_suscripcion(id, a)?))
 }
 
+/// Lo que dejó el cobro automático: los cargos asentados y los que **fallaron**, ya redactados. Se separan para que la
+/// interfaz muestre los segundos como errores y no como cargos.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CobrosAutomaticos {
+    pub cargos: Vec<String>,
+    pub fallos: Vec<String>,
+}
+
 #[tauri::command]
-fn procesar_suscripciones() -> Result<Vec<String>, String> {
+fn procesar_suscripciones() -> Result<CobrosAutomaticos, String> {
     procesar_suscripciones_con(&crate::adaptadores::reloj_sistema::RelojSistema)
 }
 
 /// El cobro automático, con el «hoy» que le den (para que las pruebas puedan fijar la fecha). La categoría se resuelve
-/// una vez, antes del bucle, y cada cobro se asienta en su propia transacción: uno que falle no arrastra a los demás.
-pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> Result<Vec<String>, String> {
+/// una vez, antes del bucle, y cada cobro se asienta en su propia transacción: **uno que falle no arrastra a los demás**
+/// (se deshace entero, su puntero no avanza y se reintenta al siguiente arranque) y se informa aparte.
+pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> Result<CobrosAutomaticos, String> {
     let hoy = reloj.hoy();
     let categoria = con_almacen(|a| Ok(aplicacion::suscripciones::categoria_de_suscripciones(a)?))?;
     // Solo candidatas: cada cargo vuelve a leer su suscripción dentro de su propia transacción.
     let candidatas = con_almacen(|a| Ok(aplicacion::suscripciones::cobros_automaticos(hoy, a)?))?;
 
-    let mut mensajes = Vec::new();
-    for id in candidatas {
-        let cargo = con_almacen(|a| Ok(aplicacion::suscripciones::cobrar_si_vence(id, hoy, categoria, a)?))?;
-        if let Some(cargo) = cargo {
-            mensajes.push(format!(
-                "Cargo automático realizado para {} ({} {:.2}) con fecha {}",
-                cargo.plataforma,
-                cargo.divisa,
-                cargo.monto,
-                cargo.vencimiento.format("%d/%m/%Y")
-            ));
-        }
-    }
-    Ok(mensajes)
+    let resultado = aplicacion::suscripciones::procesar_cobros(candidatas, |id| {
+        con_almacen(|a| Ok(aplicacion::suscripciones::cobrar_si_vence(id, hoy, categoria, a)?))
+    });
+    Ok(CobrosAutomaticos {
+        cargos: resultado
+            .cargos
+            .iter()
+            .map(|c| {
+                format!(
+                    "Cargo automático realizado para {} ({} {:.2}) con fecha {}",
+                    c.plataforma,
+                    c.divisa,
+                    c.monto,
+                    c.vencimiento.format("%d/%m/%Y")
+                )
+            })
+            .collect(),
+        fallos: resultado
+            .fallos
+            .iter()
+            .map(|f| format!("No se pudo cobrar «{}»: {}. Se reintentará al abrir la aplicación.", f.plataforma, f.motivo))
+            .collect(),
+    })
 }
 
 /// Asienta el período pendiente más antiguo, tras confirmarlo el titular.
