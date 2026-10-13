@@ -4,7 +4,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.96.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.97.0 (Versión Actual) - 2026-10-14
+**El cobro automático de suscripciones continúa tras un fallo y lo informa como error.** Antes, un solo cargo que fallara (por ejemplo, la base rechazaba su gasto) cortaba el recorrido con `?`: las suscripciones posteriores no se cobraban hasta el siguiente arranque y la interfaz no se enteraba de qué había pasado.
+
+### 🔧 Qué se hace
+* **Un fallo no corta el recorrido:** `procesar_cobros` intenta todas las candidatas. El cargo que falla se deshace entero (su transacción no se confirma, **no queda gasto, ni deuda de más, ni avanza su fecha**) y se reintenta en el siguiente arranque; las demás se cobran igual.
+* **Resultado separado:** `procesar_suscripciones` devuelve `{ cargos, fallos }` en lugar de una lista de mensajes. Los fallos se redactan «No se pudo cobrar «X»: causa. Se reintentará al abrir la aplicación.» y la interfaz los muestra como **errores**, no como cargos; solo se redibuja la pestaña si hubo cargos (si solo hubo fallos, ningún saldo cambió).
+* **Una suscripción que ya no vence no es un fallo** (borrada, ya cobrada o con varios períodos): se omite sin ruido, como antes.
+* **Contrato:** el tipo de retorno generado (`tipos-ipc.d.ts`) cambia a `CobrosAutomaticos`; `app.ts` y su prueba se adaptan. Sin cambios de reglas ni de esquema.
+
+### 🧪 Pruebas
+* 2 unitarias del recorrido (un fallo no corta y se informa con su causa y su nombre; sin fallos ni cargos no hay nada, y una que no vence no es un fallo), `su7` con un fallo **real** de la base provocado por un disparador (las dos sanas se cobran, la rota se deshace con su fecha intacta y se cobra al reintentar sin la causa) y 2 de la interfaz (los fallos salen como error sin impedir los cargos; solo fallos no redibuja). Seis mutaciones (cortar tras el fallo, tragárselo, nombre equivocado, tratar «no vence» como fallo, mensaje sin reintento, fallos mezclados con cargos): todas detectadas. **Rust 847 y frontend 589 pasan.**
+* No se repitió en la app empaquetada.
+
+---
+
+## 🚀 Versión 1.96.0 - 2026-10-14
 **Las operaciones que escriben abren su transacción `IMMEDIATE`; los listados, no.** Sin cambios de reglas ni de datos.
 
 ### 🔧 Qué se hace

@@ -37,9 +37,11 @@ export function iniciarAplicacion({ enrutador, avisos, dom, api }: EntornoDeInic
 
         // 2. Procesar cargos de suscripciones pendientes al iniciar
         setTimeout(() => {
-            api.procesarSuscripciones().then(mensajes => {
-                if (mensajes && mensajes.length > 0) {
-                    mensajes.forEach(msg => avisos.mostrar(msg, 'success'));
+            api.procesarSuscripciones().then(({ cargos, fallos }) => {
+                // Un cobro que falló no corta los demás: se avisa aparte, como error, y se reintenta al reabrir.
+                fallos.forEach(msg => avisos.mostrar(msg, 'error'));
+                if (cargos.length > 0) {
+                    cargos.forEach(msg => avisos.mostrar(msg, 'success'));
                     // Si hubo cargos, recargar la pantalla activa para reflejar los balances
                     const activeTab = document.querySelector('.sidebar-nav .nav-item.active');
                     if (activeTab) {
