@@ -4,7 +4,25 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.92.0 (Versión Actual) - 2026-10-09
+## 🚀 Versión 1.93.0 (Versión Actual) - 2026-10-13
+**La aplicación pasa de Tauri 1.8 a Tauri 2.** Sin cambios de reglas, de esquema ni de datos: la base y el capital se siguen leyendo de `~/.michelitos`, que no depende de Tauri.
+
+### 🔧 Qué se hace
+* **Migración con la herramienta oficial** (`tauri migrate`) y revisión a mano: `tauri` y `tauri-build` 2.x en Rust, CLI 2.x en Node, y la configuración reorganizada al formato nuevo (`app`, `bundle`, `frontendDist`; la versión y el identificador `com.michelitos.desktop` pasan al nivel superior y **no cambian**).
+* **De la «allowlist» a las capacidades:** `allowlist.all: false` deja de existir; su equivalente es `src-tauri/capabilities/main.json`, con la lista de permisos **vacía**. La herramienta generó `core:default`; se retiró porque concede ventana, eventos, rutas y menús que la interfaz no usa. Se comprobó en la app empaquetada que `plugin:window`, `plugin:app` y `plugin:path` responden «not allowed».
+* **Sin cambios en la interfaz:** `api.ts` ya aceptaba `window.__TAURI__.core.invoke`, la forma de Tauri 2. La API global sigue activa porque no hay empaquetador y es el único puente. La CSP se conserva (se quitó una repetición de `connect-src`).
+* **Esquema de capacidades generado** (`src-tauri/gen/`) fuera del control de versiones.
+* **Prueba de la superficie** (`tauri_superficie.test.js`) adaptada: ahora comprueba que hay una sola capacidad, sin permisos ni plugins; los de la CSP y de `Cargo.toml` siguen.
+
+### 🧪 Pruebas
+* **Rust 837 y frontend 587 pasan.**
+* **Comprobado en la app empaquetada** (HOME temporal, con una marca temporal que no se versiona): la ventana arranca, `invoke` responde, se crea una cuenta con su centavo exacto, se leen cuentas, tarjetas, suscripciones y capital, y los comandos de plugins quedan denegados.
+* **Contra una copia de la base real:** esquema 15, integridad ok y los listados leen las 12 cuentas, 7 tarjetas y 12 suscripciones. (Al abrirla, el cobro automático asentó los cargos vencidos de hoy, como hace siempre; solo en la copia.)
+* **Pendiente:** instalar y usar con la base real. No se reinstala sin que lo pidas.
+
+---
+
+## 🚀 Versión 1.92.0 - 2026-10-09
 **Corrección de abonos a tarjeta: sin cuenta elegida, el abono se paga de la caja de efectivo.** Antes, un abono registrado sin elegir cuenta solo bajaba la deuda de la tarjeta y **no movía ningún saldo**: el dinero seguía figurando en la caja y los saldos se descuadraban. Es un cambio de regla pedido por el titular.
 
 ### 🔧 Qué se hace
