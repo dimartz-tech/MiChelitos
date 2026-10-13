@@ -122,7 +122,7 @@ export class VistaTarjetas implements Vista {
             <div style="display:flex; flex-direction:column; gap:2rem; width:100%;">
                 <!-- Tarjeta Recomendada Hoy -->
                 ${mejorTarjeta ? `
-                    <div class="card" style="border-left: 5px solid #10b981; background: rgba(16, 185, 129, 0.02); padding: 1rem 1.2rem; width:100%;">
+                    <div class="card tarjeta-recomendada" style="padding: 1rem 1.2rem; width:100%;">
                         <div style="display:flex; justify-content:space-between; align-items:center; gap: 1rem;">
                             <div>
                                 <span style="font-size:0.75rem; text-transform:uppercase; color:#10b981; font-weight:bold; letter-spacing:0.05em; display:block; margin-bottom:0.15rem;">💡 Tarjeta Recomendada Hoy</span>
@@ -138,7 +138,7 @@ export class VistaTarjetas implements Vista {
 
                 <!-- Grilla de Tarjetas (Ancho Completo) -->
                 ${tarjetas.length > 0 ? `
-                    <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap:1.5rem; width:100%;">
+                    <div class="tarjetas-grid">
                         ${tarjetas.map(t => {
                             const limiteTotalDop = t.limite_efectivo_pesos + t.limite_sobregiro_pesos;
                             const disponibleDop = t.disponible_pesos;
@@ -161,7 +161,7 @@ export class VistaTarjetas implements Vista {
                             const facilidades = prestamos.filter(p => p.tarjeta_id === t.id);
 
                             return `
-                                <div class="card" style="display:flex; flex-direction:column; gap:0.8rem;">
+                                <article class="card tarjeta-operativa" aria-label="Tarjeta ${escaparHtml(t.entidad)} ${escaparHtml(t.nombre_tarjeta)}">
                                     <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem; align-items:center;">
                                         <div>
                                             <strong>${escaparHtml(t.entidad)}</strong>
@@ -191,7 +191,7 @@ export class VistaTarjetas implements Vista {
                                             <span>🇩🇴 DOP (Uso: ${pctDop.toFixed(1)}%)</span>
                                             <span style="color:${escaparHtml(balDop.color)};">${escaparHtml(balDop.texto)}</span>
                                         </div>
-                                        <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden; margin-bottom:0.3rem;">
+                                        <div class="tarjeta-progreso" role="meter" aria-label="Uso en pesos de ${escaparHtml(t.nombre_tarjeta)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctDop.toFixed(0)}">
                                             <div style="width: ${pctDop}%; height:100%; background: ${pctDop > 85 ? '#ff453a' : 'var(--accent-primary)'};"></div>
                                         </div>
                                         <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-muted);">
@@ -206,7 +206,7 @@ export class VistaTarjetas implements Vista {
                                             <span>🇺🇸 USD (Uso: ${pctUsd.toFixed(1)}%)</span>
                                             <span style="color:${escaparHtml(balUsd.color)};">${escaparHtml(balUsd.texto)}</span>
                                         </div>
-                                        <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden; margin-bottom:0.3rem;">
+                                        <div class="tarjeta-progreso" role="meter" aria-label="Uso en dólares de ${escaparHtml(t.nombre_tarjeta)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctUsd.toFixed(0)}">
                                             <div style="width: ${pctUsd}%; height:100%; background: ${pctUsd > 85 ? '#ff453a' : '#10b981'};"></div>
                                         </div>
                                         <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-muted);">
@@ -331,7 +331,7 @@ export class VistaTarjetas implements Vista {
 
                                     <!-- Configurar límites -->
                                     <button onclick="appUI.abrirEdicionLimitesTarjeta(${argumentoJs(JSON.stringify(t))})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">⚙️ Configurar Límites / Corte</button>
-                                </div>
+                                </article>
                             `;
                         }).join('')}
                     </div>

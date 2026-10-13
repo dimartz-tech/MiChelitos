@@ -199,6 +199,38 @@ body.light-theme .form-control { background: #ffffff; }
 .apertura-banner::before { background: #e8bf6b; }
 .invalid-feedback { color: var(--color-danger); }
 
+/* Tarjetas: mismo lenguaje visual del libro, con DOP y USD siempre separados. */
+.tarjetas-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+    gap: 1rem;
+    width: 100%;
+}
+.tarjeta-operativa {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    border-top: 3px solid #b79655;
+}
+.tarjeta-recomendada {
+    border-left: 5px solid var(--color-success);
+    background: var(--emerald-soft);
+}
+.tarjeta-progreso {
+    width: 100%;
+    height: 8px;
+    overflow: hidden;
+    margin-bottom: 0.3rem;
+    border-radius: 4px;
+    background: var(--border-color);
+}
+.tarjeta-operativa button:focus-visible,
+.tarjeta-operativa input:focus-visible,
+.tarjeta-operativa select:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
 /* Libro a la izquierda; decisiones y compromisos visibles a la derecha. */
 .operational-center { gap: 1.5rem; }
 .operational-header { align-items: center; }

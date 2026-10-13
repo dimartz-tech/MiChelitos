@@ -96,6 +96,16 @@ test('sin tarjetas no hay recomendación ni formulario de bonificaciones, y lo d
     assert.doesNotMatch(html, /id="bon_/);
 });
 
+test('el rediseño identifica cada tarjeta y el uso separado por divisa también sin color', async () => {
+    const t = montar();
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.match(html, /class="tarjetas-grid"/);
+    assert.match(html, /<article class="card tarjeta-operativa" aria-label="Tarjeta Banco Beta Oro"/);
+    assert.match(html, /role="meter" aria-label="Uso en pesos de Oro"[^>]*aria-valuenow="44"/);
+    assert.match(html, /role="meter" aria-label="Uso en dólares de Oro"[^>]*aria-valuenow="0"/);
+});
+
 test('un saldo a favor se rotula «A favor», no como un uso negativo', () => {
     const { vista } = montar();
     assert.deepEqual(vista.etiquetaBalanceTarjeta(-100, 'DOP'), { texto: 'A favor: DOP #100#', color: '#10b981' });
