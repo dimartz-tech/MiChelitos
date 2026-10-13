@@ -4,7 +4,27 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.98.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.99.0 (Versión Actual) - 2026-10-14
+**Las tarjetas se desactivan, no se borran, y sus suscripciones se trasladan antes.** Segundo tramo del cierre previsto para la RC (SPEC-RC-TAR). **Cambio de reglas decidido por el titular.**
+
+### 🔧 Qué se hace
+* **Migración 17:** `tarjetas.activa` (todas las existentes, activas) y la bitácora `traslados_de_suscripcion` (suscripción, tarjeta origen y destino, fecha). La bitácora no lleva clave ajena a la suscripción para sobrevivir a que se borre después. (Los disparadores `BEFORE DELETE` de tarjetas llegaron con la 1.98.0.)
+* **Desactivar:** exige los dos balances **exactamente en cero** (DOP y USD, en centavos) y distingue «debe» de «tiene a favor». El saldo a favor aún no tiene su vía de resolución (reembolso a una cuenta del mismo banco o gasto de cierre aprobado): hoy bloquea y el mensaje lo dice.
+* **Traslado de suscripciones, todo o nada, en una sola transacción:** la selección tiene que cubrir **exactamente** las suscripciones que la tarjeta tiene en ese momento; cada destino debe existir, estar activo y ser otra tarjeta; el cupo se valida **sumando lo asignado a cada destino, por divisa**. Solo cambia la referencia futura: importe, divisa, frecuencia, fechas y cargos ya asentados quedan como estaban; cada traslado se anota. Cualquier fallo lo deshace todo.
+* **Recomendación explicable, nunca automática:** margen sin depender del sobregiro → para un cargo en dólares, el destino que lo conserva en dólares (el que lo traduce se avisa) → más días entre el próximo cargo y su corte (con el día 29–31 limitado al último día real del mes) → mayor margen remanente → menor identificador. Reparte de mayor a menor importe y resta lo ya asignado, para no prometer dos veces el mismo cupo.
+* **Reactivar:** solo cambia el estado; ninguna suscripción vuelve sola.
+* **Barreras:** una tarjeta desactivada no recibe consumos, abonos, avances, bonificaciones ni suscripciones nuevas, ni la reversión de un movimiento viejo (que primero exige reactivarla); `ajustar_deuda` es la barrera de integridad y cada operación la rechaza antes con un mensaje.
+* **Lecturas:** `obtener_tarjetas` devuelve solo las activas (selectores, balances y avisos de corte y pago); `obtener_tarjetas_inactivas` solo su identidad. Los historiales siguen viéndolas por identificador.
+* **Interfaz (Tarjetas):** «📦 Desactivar tarjeta» abre un diálogo con los balances, las suscripciones con su divisa, el destino sugerido **y por qué**, un resumen «suscripción → destino» y «Confirmar» que solo se habilita sin bloqueos y con un destino por suscripción; las inactivas van en un bloque plegable «Tarjetas inactivas (N)», con su estado en texto, sin balances y con «Reactivar».
+* **Accesibilidad de todos los modales:** el foco entra en el diálogo, no sale con Tab, `Escape` lo cierra y al quitarse vuelve a quien lo abrió.
+
+### 🧪 Pruebas
+* 8 del dominio de la recomendación, 8 del caso de uso, 11 de caracterización con SQLite real (`ta1`–`ta11`, entre ellas un fallo real inyectado en el segundo traslado y el cobro automático tras el cierre), un bloque del contrato que ejecutan el doble y el adaptador, y 14 de la interfaz y del servicio de modales. 19 mutaciones: 14 detectadas de inicio, 3 más tras reforzar el contrato y 2 equivalentes (comprobaciones tempranas respaldadas por la sentencia de escritura). **Rust 869 y frontend 604 pasan.**
+* Migración ensayada sobre una copia de la base real (17, integridad ok, sin claves rotas). No se repitió en la app empaquetada.
+
+---
+
+## 🚀 Versión 1.98.0 - 2026-10-14
 **Las cuentas se archivan, no se borran.** Primer tramo del cierre previsto para la RC (las tarjetas siguen en el siguiente). Sustituye a «Eliminar cuenta», que terminaba en un `DELETE`. **Cambio de reglas decidido por el titular.**
 
 ### 🔧 Qué se hace

@@ -360,3 +360,33 @@ test('revertir bonificación: si Rust rechaza se muestra el error', async () => 
     ui.rechazar('eliminarBonificacion', 'Error simulado de Rust');
     await rechazoSeMuestra(ui, () => ui.appUI.handleEliminarBonificacion(9));
 });
+
+// --- desactivar y reactivar una tarjeta ---
+
+const previa = {
+    tarjeta_id: 3, nombre: 'Banco de Prueba Uno', activa: true, balance_pesos: 0, balance_dolares: 0, bloqueos: [],
+    lineas: [{ suscripcion_id: 40, plataforma: 'Plataforma', monto: 90, divisa: 'DOP', frecuencia: 'mensual', fecha_proximo_cobro: '15/04/2027', destino_sugerido: 5, elegibles: [5], motivo: 'Le quedan DOP 1.00 libres sin usar sobregiro.' }],
+    destinos: [{ id: 5, nombre: 'Banco de Prueba Dos', conserva_dolares: true, disponible_pesos: 1000, disponible_dolares: 100 }],
+};
+
+test('desactivar tarjeta: abre el diálogo con la vista previa y confirma con un traslado por suscripción', async () => {
+    const ui = cargarInterfaz({ api: { previsualizarCierreTarjeta: previa }, campos: { cierre_dest_3_40: { value: '5' }, cierre_resumen_3: {}, cierre_confirmar_3: { disabled: true }, 'modal-cierre-tar-3': {} } });
+    await ui.appUI.abrirCierreTarjeta(3);
+    llamoUnaVez(ui, 'previsualizarCierreTarjeta', [3]);
+    assert.equal(ui.modalesAbiertos[0].id, 'modal-cierre-tar-3');
+    ui.appUI.actualizarResumenCierre(3);
+    await ui.appUI.handleConfirmarCierreTarjeta(3);
+    llamoUnaVez(ui, 'cerrarTarjeta', [3, [{ suscripcion_id: 40, destino_id: 5 }]]);
+    redibujo(ui, 'tarjetas');
+});
+
+test('reactivar tarjeta: envía el id, avisa y redibuja; si Rust rechaza se muestra el error', async () => {
+    let ui = cargarInterfaz({});
+    await ui.appUI.handleReactivarTarjeta(9);
+    llamoUnaVez(ui, 'reactivarTarjeta', [9]);
+    avisoExito(ui, /Tarjeta reactivada/);
+    redibujo(ui, 'tarjetas');
+    ui = cargarInterfaz({});
+    ui.rechazar('reactivarTarjeta', 'Error simulado de Rust');
+    await rechazoSeMuestra(ui, () => ui.appUI.handleReactivarTarjeta(9));
+});

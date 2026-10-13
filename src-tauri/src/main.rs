@@ -590,6 +590,132 @@ fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
     })
 }
 
+/// Una tarjeta desactivada: solo lo necesario para reconocerla y reactivarla. Sin balances.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TarjetaInactiva {
+    id: i64,
+    entidad: String,
+    nombre_tarjeta: String,
+}
+
+/// Las tarjetas desactivadas, aparte de las activas.
+#[tauri::command]
+fn obtener_tarjetas_inactivas() -> Result<Vec<TarjetaInactiva>, String> {
+    lee_tarjetas(|a| {
+        Ok(aplicacion::tarjetas::listar_inactivas(a)?
+            .into_iter()
+            .map(|t| TarjetaInactiva { id: t.id, entidad: t.entidad, nombre_tarjeta: t.nombre_tarjeta })
+            .collect())
+    })
+}
+
+/// Una suscripción que hay que trasladar al cerrar la tarjeta, con lo que se sugiere para ella.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LineaDeTraslado {
+    suscripcion_id: i64,
+    plataforma: String,
+    monto: f64,
+    divisa: String,
+    frecuencia: String,
+    fecha_proximo_cobro: Option<String>,
+    destino_sugerido: Option<i64>,
+    /// Los destinos con cupo, del mejor al peor.
+    elegibles: Vec<i64>,
+    motivo: String,
+}
+
+/// Una tarjeta que puede recibir suscripciones, con lo que le queda de cupo en cada divisa.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DestinoDeCierre {
+    id: i64,
+    nombre: String,
+    conserva_dolares: bool,
+    disponible_pesos: f64,
+    disponible_dolares: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct VistaPreviaDeCierre {
+    tarjeta_id: i64,
+    nombre: String,
+    activa: bool,
+    balance_pesos: f64,
+    balance_dolares: f64,
+    /// Un mensaje por balance distinto de cero. Con alguno no se puede confirmar el cierre.
+    bloqueos: Vec<String>,
+    lineas: Vec<LineaDeTraslado>,
+    destinos: Vec<DestinoDeCierre>,
+}
+
+/// Qué se le muestra al usuario antes de confirmar «Desactivar tarjeta». Solo lectura.
+#[tauri::command]
+fn previsualizar_cierre_tarjeta(id: i64) -> Result<VistaPreviaDeCierre, String> {
+    lee_almacen(|a| {
+        let v = aplicacion::cierre_de_tarjetas::previsualizar_cierre(id, a)?;
+        Ok(VistaPreviaDeCierre {
+            tarjeta_id: v.tarjeta_id,
+            nombre: v.nombre,
+            activa: v.activa,
+            balance_pesos: v.balance_dop.unidades(),
+            balance_dolares: v.balance_usd.unidades(),
+            bloqueos: v.bloqueos,
+            lineas: v
+                .lineas
+                .into_iter()
+                .map(|l| LineaDeTraslado {
+                    suscripcion_id: l.suscripcion.id,
+                    plataforma: l.suscripcion.plataforma,
+                    monto: l.suscripcion.monto,
+                    divisa: l.suscripcion.divisa,
+                    frecuencia: l.suscripcion.frecuencia,
+                    fecha_proximo_cobro: l.suscripcion.fecha_proximo_cobro,
+                    destino_sugerido: l.sugerencia.destino_id,
+                    elegibles: l.sugerencia.elegibles,
+                    motivo: l.sugerencia.motivo,
+                })
+                .collect(),
+            destinos: v
+                .destinos
+                .into_iter()
+                .map(|d| DestinoDeCierre {
+                    id: d.id,
+                    nombre: d.nombre,
+                    conserva_dolares: d.conserva_dolares,
+                    disponible_pesos: d.disponible_dop.unidades(),
+                    disponible_dolares: d.disponible_usd.unidades(),
+                })
+                .collect(),
+        })
+    })
+}
+
+/// La tarjeta destino que el usuario eligió para una suscripción.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TrasladoElegido {
+    suscripcion_id: i64,
+    destino_id: i64,
+}
+
+/// Desactiva la tarjeta trasladando sus suscripciones. **Todo o nada**, en una sola transacción de escritura.
+#[tauri::command]
+fn cerrar_tarjeta(id: i64, traslados: Vec<TrasladoElegido>) -> Result<String, String> {
+    let elegidos: Vec<(i64, i64)> = traslados.iter().map(|t| (t.suscripcion_id, t.destino_id)).collect();
+    let hoy = hoy_dd_mm_aaaa();
+    con_almacen(|a| {
+        let r = aplicacion::cierre_de_tarjetas::cerrar_tarjeta(id, &elegidos, &hoy, a)?;
+        Ok(format!(
+            "Tarjeta {} desactivada. {} suscripción(es) trasladada(s).",
+            r.nombre, r.trasladadas
+        ))
+    })
+}
+
+/// Reactiva una tarjeta desactivada. Ninguna suscripción vuelve sola a ella.
+#[tauri::command]
+fn reactivar_tarjeta(id: i64) -> Result<(), String> {
+    con_almacen(|a| Ok(aplicacion::cierre_de_tarjetas::reactivar_tarjeta(id, a)?))
+}
+
 #[tauri::command]
 fn crear_tarjeta(
     entidad: String,
@@ -1794,6 +1920,10 @@ fn main() {
             crear_cuenta,
             actualizar_cuenta,
             archivar_cuenta,
+            obtener_tarjetas_inactivas,
+            previsualizar_cierre_tarjeta,
+            cerrar_tarjeta,
+            reactivar_tarjeta,
             reactivar_cuenta,
             obtener_cuentas_archivadas,
             transferir_entre_cuentas,

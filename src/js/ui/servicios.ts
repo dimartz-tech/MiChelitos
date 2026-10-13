@@ -184,14 +184,53 @@ export function crearDialogosDePagina(): Dialogos {
     };
 }
 
-/** Las ventanas modales reales: una capa que se añade al final de `<body>`. */
+const ENFOCABLES =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Las ventanas modales reales: una capa que se añade al final de `<body>`.
+ *
+ * Además del marcado, se ocupa de lo que un diálogo accesible necesita y que antes cada modal ignoraba: el foco entra
+ * en el diálogo (en su título si lleva `tabindex="-1"`, y si no en el primer control), **no sale** con Tab (da la
+ * vuelta), `Escape` lo cierra, y al quitarse la capa —por el botón que sea— el foco vuelve a quien la abrió.
+ */
 export const modalesDelNavegador: Modales = {
     abrir(id, html) {
+        const previo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
         overlay.id = id;
         overlay.innerHTML = html;
         document.body.appendChild(overlay);
+
+        const enfocables = (): HTMLElement[] => Array.from(overlay.querySelectorAll<HTMLElement>(ENFOCABLES));
+        (overlay.querySelector<HTMLElement>('[tabindex="-1"]') ?? enfocables()[0])?.focus();
+
+        overlay.addEventListener('keydown', evento => {
+            if (evento.key === 'Escape') {
+                overlay.remove();
+                return;
+            }
+            if (evento.key !== 'Tab') return;
+            const controles = enfocables();
+            if (controles.length === 0) return;
+            const primero = controles[0];
+            const ultimo = controles[controles.length - 1];
+            if (evento.shiftKey && document.activeElement === primero) {
+                evento.preventDefault();
+                ultimo.focus();
+            } else if (!evento.shiftKey && document.activeElement === ultimo) {
+                evento.preventDefault();
+                primero.focus();
+            }
+        });
+
+        const observador = new MutationObserver(() => {
+            if (overlay.isConnected) return;
+            observador.disconnect();
+            if (previo?.isConnected) previo.focus();
+        });
+        observador.observe(document.body, { childList: true });
     },
 };
 

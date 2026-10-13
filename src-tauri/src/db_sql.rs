@@ -1815,6 +1815,41 @@ pub fn migracion_16_archivo_de_cuentas(tx: &Transaction) -> Result<(), ErrorMigr
     )
 }
 
+const MIG17: &str = "las tarjetas se desactivan, no se borran";
+
+/// Desactivación reversible de tarjetas y bitácora de los traslados de suscripciones que la acompañan.
+///
+/// * **`activa`**: una tarjeta cerrada no se borra (el disparador de la migración 16 lo impide); se marca. Todas las
+///   existentes quedan activas. Conserva su historial: gastos, abonos, avances y bonificaciones siguen apuntándole.
+/// * **`traslados_de_suscripcion`**: cada suscripción que se mueve de una tarjeta a otra al cerrar la primera deja aquí
+///   su rastro (origen, destino, fecha). `suscripcion_id` **no** lleva clave ajena: es una bitácora, y debe sobrevivir
+///   a que el titular borre después esa suscripción. Las tarjetas sí son claves `RESTRICT`.
+pub fn migracion_17_desactivar_tarjetas(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::anadir_columna(
+        tx,
+        MIG17,
+        "tarjetas",
+        "activa",
+        "INTEGER NOT NULL DEFAULT 1 CHECK(activa IN (0, 1))",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG17,
+        "crear traslados_de_suscripcion",
+        "CREATE TABLE IF NOT EXISTS traslados_de_suscripcion (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             suscripcion_id INTEGER NOT NULL,
+             tarjeta_origen_id INTEGER NOT NULL,
+             tarjeta_destino_id INTEGER NOT NULL,
+             fecha TEXT NOT NULL,
+             FOREIGN KEY (tarjeta_origen_id) REFERENCES tarjetas(id) ON DELETE RESTRICT,
+             FOREIGN KEY (tarjeta_destino_id) REFERENCES tarjetas(id) ON DELETE RESTRICT,
+             CHECK (tarjeta_origen_id <> tarjeta_destino_id),
+             CHECK (fecha GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]')
+         );",
+    )
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
@@ -1936,7 +1971,7 @@ mod pruebas_de_transaccion {
             if nombre.starts_with("con_") || nombre.starts_with("lee_") {
                 continue;
             }
-            let es_listado = nombre.starts_with("obtener_") || nombre == "suscripciones_con_aviso";
+            let es_listado = nombre.starts_with("obtener_") || nombre.starts_with("previsualizar_") || nombre == "suscripciones_con_aviso";
             let usa_lectura = ["lee_almacen(", "lee_catalogos(", "lee_cuentas(", "lee_prestamos(", "lee_tarjetas("].iter().any(|h| cuerpo.contains(h));
             let usa_escritura = ["con_almacen(", "con_catalogos(", "con_cuentas(", "con_prestamos(", "con_tarjetas("].iter().any(|h| cuerpo.contains(h));
             if es_listado {

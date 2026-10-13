@@ -5,7 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { crearAvisos, formatoDelNavegador, crearMotivo, crearEnrutador, referenciasDelNavegador, TASA_USD_A_DOP } from '../../../src/js/ui/servicios.js';
+import { crearAvisos, formatoDelNavegador, crearMotivo, crearEnrutador, referenciasDelNavegador, modalesDelNavegador, TASA_USD_A_DOP } from '../../../src/js/ui/servicios.js';
 
 // --- Avisos ---
 
@@ -176,4 +176,68 @@ test('un fallo de una pestaña no impide dibujar la siguiente', async () => {
     await t.enrutador.mostrar('gastos');
     await t.enrutador.mostrar('ingresos');
     assert.equal(t.pantalla.contenido.innerHTML, '<h1>Ingresos</h1>');
+});
+
+// --- Ventanas modales: foco, Escape y devolución del foco ---
+
+/** Un DOM de juguete con foco: lo justo para ejercitar `modalesDelNavegador`. */
+function montarModales({ enfocables = ['cerrar', 'ultimo'], conTitulo = true } = {}) {
+    const previos = { document: globalThis.document, HTMLElement: globalThis.HTMLElement, MutationObserver: globalThis.MutationObserver };
+    class Elemento { constructor(nombre) { this.nombre = nombre; this.isConnected = true; } focus() { document.activeElement = this; } }
+    globalThis.HTMLElement = Elemento;
+    const opener = new Elemento('opener');
+    const hijosDelCuerpo = [];
+    const observadores = [];
+    globalThis.MutationObserver = class { constructor(f) { this.f = f; observadores.push(this); } observe() {} disconnect() { this.desconectado = true; } };
+    const controles = enfocables.map(n => new Elemento(n));
+    const titulo = new Elemento('titulo');
+    let alPulsar;
+    const overlay = Object.assign(new Elemento('overlay'), {
+        className: '', id: '', innerHTML: '',
+        querySelectorAll: () => controles,
+        querySelector: () => (conTitulo ? titulo : null),
+        addEventListener: (tipo, f) => { if (tipo === 'keydown') alPulsar = f; },
+        remove() { this.isConnected = false; observadores.forEach(o => o.f()); },
+    });
+    globalThis.document = { activeElement: opener, createElement: () => overlay, body: { appendChild: h => hijosDelCuerpo.push(h) } };
+    return { overlay, opener, controles, titulo, pulsar: evento => alPulsar({ preventDefault() { this.evitado = true; }, ...evento }), hijosDelCuerpo, observadores, restaurar: () => Object.assign(globalThis, previos) };
+}
+
+test('un modal recibe el foco en su título, lo mantiene dentro con Tab y lo devuelve a quien lo abrió', () => {
+    const m = montarModales();
+    try {
+        modalesDelNavegador.abrir('modal-prueba', '<h3 tabindex="-1">Título</h3>');
+        assert.equal(m.overlay.id, 'modal-prueba');
+        assert.equal(m.overlay.className, 'modal-overlay');
+        assert.equal(globalThis.document.activeElement, m.titulo, 'el foco entra en el título del diálogo');
+
+        // Tab desde el último control da la vuelta al primero; Mayús+Tab desde el primero va al último.
+        globalThis.document.activeElement = m.controles[1];
+        const tab = { key: 'Tab', shiftKey: false };
+        m.pulsar(tab);
+        assert.equal(globalThis.document.activeElement, m.controles[0]);
+        globalThis.document.activeElement = m.controles[0];
+        m.pulsar({ key: 'Tab', shiftKey: true });
+        assert.equal(globalThis.document.activeElement, m.controles[1]);
+        // Entre dos controles no se interviene.
+        globalThis.document.activeElement = m.controles[0];
+        const medio = { key: 'Tab', shiftKey: false };
+        m.pulsar(medio);
+        assert.ok(!medio.evitado, 'Tab normal');
+
+        m.pulsar({ key: 'Escape' });
+        assert.equal(m.overlay.isConnected, false, 'Escape cierra el diálogo');
+        assert.equal(globalThis.document.activeElement, m.opener, 'y el foco vuelve a quien lo abrió');
+        assert.ok(m.observadores[0].desconectado, 'sin dejar observadores');
+    } finally { m.restaurar(); }
+});
+
+test('sin título enfocable, el foco entra en el primer control; y un cierre por otro botón también devuelve el foco', () => {
+    const m = montarModales({ conTitulo: false });
+    try {
+        modalesDelNavegador.abrir('otro', '<button>Cerrar</button>');
+        assert.equal(globalThis.document.activeElement, m.controles[0]);
+        m.overlay.remove();
+        assert.equal(globalThis.document.activeElement, m.opener);
+    } finally { m.restaurar(); }
 });

@@ -30,6 +30,8 @@ pub enum ErrorAlmacen {
     /// Se intentó mover dinero de una cuenta archivada. Una cuenta cerrada no recibe operaciones nuevas; para tocar un
     /// movimiento histórico suyo hay que reactivarla antes.
     CuentaArchivada { nombre: String },
+    /// Se intentó mover deuda de una tarjeta desactivada. Una tarjeta cerrada no recibe operaciones nuevas.
+    TarjetaInactiva { nombre: String },
     Fallo(String),
 }
 
@@ -47,6 +49,11 @@ impl fmt::Display for ErrorAlmacen {
             ErrorAlmacen::CuentaArchivada { nombre } => write!(
                 f,
                 "La cuenta «{}» está archivada: reactívala antes de usarla en una operación.",
+                nombre
+            ),
+            ErrorAlmacen::TarjetaInactiva { nombre } => write!(
+                f,
+                "La tarjeta «{}» está desactivada: reactívala antes de usarla en una operación.",
                 nombre
             ),
             ErrorAlmacen::Fallo(detalle) => write!(f, "Error de almacenamiento: {}", detalle),
@@ -342,8 +349,10 @@ pub struct LimitesDeTarjeta {
 
 /// Alta, corrección de límites y consulta de tarjetas. (La deuda se mueve por `RepositorioTarjetas`.)
 pub trait CatalogoDeTarjetas {
-    /// En el orden en que se crearon.
+    /// Las tarjetas **activas** —las únicas que se ofrecen en selectores y muestran balances— en el orden en que se crearon.
     fn tarjetas(&self) -> Result<Vec<TarjetaLeida>, ErrorAlmacen>;
+    /// Las desactivadas, para consultarlas y reactivarlas. Nunca alimentan un selector.
+    fn tarjetas_inactivas(&self) -> Result<Vec<TarjetaLeida>, ErrorAlmacen>;
     fn insertar_tarjeta(&mut self, tarjeta: &TarjetaNueva) -> Result<i64, ErrorAlmacen>;
     /// `false` si la tarjeta no existe.
     fn actualizar_limites(&mut self, limites: &LimitesDeTarjeta) -> Result<bool, ErrorAlmacen>;
@@ -774,6 +783,53 @@ pub trait RepositorioTarjetas {
 
     /// Cómo liquida esta tarjeta los consumos en divisa extranjera.
     fn politica(&self, tarjeta_id: i64) -> Result<PoliticaLiquidacion, ErrorAlmacen>;
+
+    /// Nombre y si está activa. Una tarjeta que no existe es `NoEncontrado`.
+    fn estado_de_tarjeta(&self, tarjeta_id: i64) -> Result<EstadoDeTarjeta, ErrorAlmacen>;
+}
+
+/// Lo que hace falta saber de una tarjeta para decidir si admite una operación nueva.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EstadoDeTarjeta {
+    pub nombre: String,
+    pub activa: bool,
+}
+
+/// Una tarjeta con todo lo que el cierre necesita: estado, ciclo, límites y deuda por divisa.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TarjetaParaCierre {
+    pub id: i64,
+    pub entidad: String,
+    pub nombre_tarjeta: String,
+    pub activa: bool,
+    pub fecha_corte: i32,
+    pub politica: PoliticaLiquidacion,
+    pub cupo_dop: crate::dominio::cierre_tarjeta::CupoDeDivisa,
+    pub cupo_usd: crate::dominio::cierre_tarjeta::CupoDeDivisa,
+}
+
+/// Cierre y reapertura de tarjetas. Lo implementa el mismo almacén que las suscripciones y la deuda, porque el cierre
+/// toca las tres cosas en **una** transacción.
+pub trait TarjetasParaCierre {
+    /// Todas las tarjetas, activas e inactivas, por identificador.
+    fn tarjetas_para_cierre(&self) -> Result<Vec<TarjetaParaCierre>, ErrorAlmacen>;
+
+    /// Desactiva la tarjeta **solo si** sigue activa y sus dos balances son exactamente cero, todo en la misma
+    /// sentencia. `false` si alguna condición dejó de cumplirse (la decisión autoritativa es esta).
+    fn desactivar_tarjeta(&mut self, tarjeta_id: i64) -> Result<bool, ErrorAlmacen>;
+
+    /// Reactiva una tarjeta inactiva. `false` si no lo estaba. No devuelve las suscripciones que tuvo.
+    fn reactivar_tarjeta(&mut self, tarjeta_id: i64) -> Result<bool, ErrorAlmacen>;
+
+    /// Mueve **solo la referencia futura** de una suscripción de `desde` a `hasta` y lo anota en la bitácora. `false`
+    /// si la suscripción ya no estaba en `desde`. No toca monto, divisa, frecuencia, calendario ni historial.
+    fn trasladar_suscripcion(
+        &mut self,
+        suscripcion_id: i64,
+        desde: i64,
+        hasta: i64,
+        fecha: &str,
+    ) -> Result<bool, ErrorAlmacen>;
 }
 
 /// Persistencia que necesita una operación sobre gastos.

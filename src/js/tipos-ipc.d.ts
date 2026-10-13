@@ -14,6 +14,11 @@ export type Suscripcion = { id: number; plataforma: string; monto: number; tarje
 export type CuentaAhorro = { id: number; nombre: string; divisa: string; balance_actual: number; entidad: string | null; comision_pago_impuestos: number | null };
 export type TransaccionCuenta = { id: number; fecha: string; cuenta_origen_id: number; cuenta_origen_nombre: string; cuenta_destino_id: number; cuenta_destino_nombre: string; monto_origen: number; monto_destino: number; tasa_cambio: number; cargo: number; descripcion: string | null };
 export type Prestamo = { id: number; tipo_prestamo: string; monto_prestamo: number; institucion_financiera: string; tasa_actual: number; cuotas_totales: number | null; cuotas_pendientes: number | null; monto_cuota: number; dia_pago: number; saldo_actual: number; limite_credito: number | null; tarjeta_id: number | null; tarjeta_nombre: string | null; dia_corte: number | null; disponible: number | null; es_revolvente: boolean; alerta_pago: boolean; dias_pago_msg: string };
+export type TarjetaInactiva = { id: number; entidad: string; nombre_tarjeta: string };
+export type LineaDeTraslado = { suscripcion_id: number; plataforma: string; monto: number; divisa: string; frecuencia: string; fecha_proximo_cobro: string | null; destino_sugerido: number | null; elegibles: number[]; motivo: string };
+export type DestinoDeCierre = { id: number; nombre: string; conserva_dolares: boolean; disponible_pesos: number; disponible_dolares: number };
+export type VistaPreviaDeCierre = { tarjeta_id: number; nombre: string; activa: boolean; balance_pesos: number; balance_dolares: number; bloqueos: string[]; lineas: LineaDeTraslado[]; destinos: DestinoDeCierre[] };
+export type TrasladoElegido = { suscripcion_id: number; destino_id: number };
 export type AbonoTarjeta = { id: number; fecha_pago: string; monto_pagado: number; divisa: string; cuenta_ahorro_id: number | null; cuenta_nombre: string | null; tasa_cambio: number | null };
 export type SimulacionAvance = { monto: number; cargo: number; a_la_tarjeta: number; a_la_cuenta: number };
 export type AvanceEfectivo = { id: number; fecha: string; monto: number; divisa: string; tipo_cargo: string; tasa: number | null; cargo: number; cuenta_ahorro_id: number; cuenta_nombre: string; nota: string | null };
@@ -41,6 +46,10 @@ export type Comandos = {
     crear_ingreso_informal: { args: { fecha: string; descripcion: string; monto: string }; ret: number };
     marcar_informal_pagado: { args: { id: number; cuentaAhorroId: number; fecha: string; montoRecibido: string }; ret: null };
     obtener_tarjetas: { args: {  }; ret: Tarjeta[] };
+    obtener_tarjetas_inactivas: { args: {  }; ret: TarjetaInactiva[] };
+    previsualizar_cierre_tarjeta: { args: { id: number }; ret: VistaPreviaDeCierre };
+    cerrar_tarjeta: { args: { id: number; traslados: TrasladoElegido[] }; ret: string };
+    reactivar_tarjeta: { args: { id: number }; ret: null };
     crear_tarjeta: { args: { entidad: string; nombre: string; limitePesos: string; limiteDolares: string; sobregiroPesos: string; sobregiroDolares: string; balancePesos: string; balanceDolares: string; balanceCortePesos: string; balanceCorteDolares: string; corte: number; pago: number }; ret: number };
     actualizar_limites_tarjeta: { args: { id: number; limitePesos: string; limiteDolares: string; sobregiroPesos: string; sobregiroDolares: string; balanceCortePesos: string; balanceCorteDolares: string; limiteAjustadoPesos?: string | null; limiteAjustadoDolares?: string | null; politicaLiquidacion?: string | null }; ret: null };
     registrar_pago_tarjeta: { args: { id: number; fecha: string; monto: string; divisa: string; cuentaAhorroId?: number | null; tasaCambio: number }; ret: null };
