@@ -87,6 +87,11 @@ pub struct AlmacenEnMemoria {
     /// es la columna `es_caja_efectivo`; aquí basta el índice.
     pub cajas: HashMap<Divisa, i64>,
     pub tarjetas: std::collections::HashSet<i64>,
+    /// Las tarjetas desactivadas (siguen existiendo y conservan su historial).
+    pub inactivas: std::collections::HashSet<i64>,
+    /// Límites de cada tarjeta, por divisa: `(aprobado, sobregiro)` en centavos. Sin entrada, cupo cero.
+    pub cupos: HashMap<(i64, Divisa), (i64, i64)>,
+    pub dias_de_corte: HashMap<i64, i32>,
     pub politicas: HashMap<i64, PoliticaLiquidacion>,
     pub gastos: HashMap<i64, GastoGuardado>,
     siguiente_id: i64,
@@ -229,6 +234,23 @@ impl AlmacenEnMemoria {
     pub fn con_tarjeta(mut self, id: i64, deuda: Dinero) -> Self {
         self.tarjetas.insert(id);
         self.deudas.insert((id, deuda.divisa()), deuda);
+        self
+    }
+
+    /// Límite aprobado y sobregiro de una tarjeta en una divisa.
+    pub fn con_cupo(mut self, id: i64, divisa: Divisa, aprobado: f64, sobregiro: f64) -> Self {
+        let c = |u: f64| Dinero::nuevo(u, divisa).unwrap().centavos();
+        self.cupos.insert((id, divisa), (c(aprobado), c(sobregiro)));
+        self
+    }
+
+    pub fn con_dia_de_corte(mut self, id: i64, dia: i32) -> Self {
+        self.dias_de_corte.insert(id, dia);
+        self
+    }
+
+    pub fn con_tarjeta_inactiva(mut self, id: i64) -> Self {
+        self.inactivas.insert(id);
         self
     }
 
@@ -449,6 +471,9 @@ impl RepositorioTarjetas for AlmacenEnMemoria {
         if !self.tarjetas.contains(&tarjeta_id) {
             return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
         }
+        if self.inactivas.contains(&tarjeta_id) && !delta.es_cero() {
+            return Err(ErrorAlmacen::TarjetaInactiva { nombre: format!("Banco Tarjeta {tarjeta_id}") });
+        }
         let clave = (tarjeta_id, delta.divisa());
         let actual = self.deudas.entry(clave).or_insert_with(|| Dinero::cero(delta.divisa()));
         *actual = actual.sumar(&delta).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?;
@@ -470,6 +495,74 @@ impl RepositorioTarjetas for AlmacenEnMemoria {
             .politicas
             .get(&tarjeta_id)
             .unwrap_or(&PoliticaLiquidacion::EnDivisaDeOrigen))
+    }
+
+    fn estado_de_tarjeta(&self, tarjeta_id: i64) -> Result<EstadoDeTarjeta, ErrorAlmacen> {
+        if !self.tarjetas.contains(&tarjeta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
+        }
+        Ok(EstadoDeTarjeta { nombre: format!("Banco Tarjeta {tarjeta_id}"), activa: !self.inactivas.contains(&tarjeta_id) })
+    }
+}
+
+impl TarjetasParaCierre for AlmacenEnMemoria {
+    fn tarjetas_para_cierre(&self) -> Result<Vec<TarjetaParaCierre>, ErrorAlmacen> {
+        use crate::dominio::cierre_tarjeta::CupoDeDivisa;
+        use crate::dominio::tarjeta::LimitesDivisa;
+        let mut ids: Vec<i64> = self.tarjetas.iter().copied().collect();
+        ids.sort();
+        let cupo = |id: i64, divisa: Divisa| -> CupoDeDivisa {
+            let (aprobado, sobregiro) = self.cupos.get(&(id, divisa)).copied().unwrap_or((0, 0));
+            let balance = self.deudas.get(&(id, divisa)).copied().unwrap_or_else(|| Dinero::cero(divisa));
+            CupoDeDivisa {
+                limites: LimitesDivisa::nuevos(
+                    Dinero::de_centavos(aprobado, divisa),
+                    None,
+                    Dinero::de_centavos(sobregiro, divisa),
+                )
+                .unwrap(),
+                balance,
+            }
+        };
+        Ok(ids
+            .into_iter()
+            .map(|id| TarjetaParaCierre {
+                id,
+                entidad: "Banco".into(),
+                nombre_tarjeta: format!("Tarjeta {id}"),
+                activa: !self.inactivas.contains(&id),
+                fecha_corte: self.dias_de_corte.get(&id).copied().unwrap_or(15),
+                politica: *self.politicas.get(&id).unwrap_or(&PoliticaLiquidacion::EnDivisaDeOrigen),
+                cupo_dop: cupo(id, Divisa::Dop),
+                cupo_usd: cupo(id, Divisa::Usd),
+            })
+            .collect())
+    }
+
+    fn desactivar_tarjeta(&mut self, tarjeta_id: i64) -> Result<bool, ErrorAlmacen> {
+        if !self.tarjetas.contains(&tarjeta_id) || self.inactivas.contains(&tarjeta_id) {
+            return Ok(false);
+        }
+        let en_cero = |d: Divisa| self.deudas.get(&(tarjeta_id, d)).map_or(true, |x| x.es_cero());
+        if !(en_cero(Divisa::Dop) && en_cero(Divisa::Usd)) {
+            return Ok(false);
+        }
+        self.inactivas.insert(tarjeta_id);
+        Ok(true)
+    }
+
+    fn reactivar_tarjeta(&mut self, tarjeta_id: i64) -> Result<bool, ErrorAlmacen> {
+        Ok(self.inactivas.remove(&tarjeta_id))
+    }
+
+    fn trasladar_suscripcion(&mut self, suscripcion_id: i64, desde: i64, hasta: i64, _fecha: &str) -> Result<bool, ErrorAlmacen> {
+        match self.suscripciones.iter_mut().find(|s| s.datos.id == suscripcion_id && s.datos.tarjeta_id == desde) {
+            Some(s) => {
+                s.datos.tarjeta_id = hasta;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
     }
 }
 
@@ -729,7 +822,8 @@ mod contrato_del_doble {
             .con_cuenta(10, "Cuenta Contrato", dop(100000.0))
             .con_cuenta(12, "Cuenta Vacía", dop(0.0))
             .con_caja(11, dop(0.0))
-            .con_tarjeta(20, dop(500.0));
+            .con_tarjeta(20, dop(500.0))
+            .con_tarjeta(21, dop(0.0));
 
         let semilla = Semilla {
             categoria_id: 1,
@@ -741,6 +835,7 @@ mod contrato_del_doble {
             caja_saldo: dop(0.0),
             tarjeta_id: 20,
             tarjeta_deuda: dop(500.0),
+            tarjeta_vacia_id: 21,
         };
 
         verificar(&mut a, &semilla, "en memoria");
@@ -1242,6 +1337,8 @@ impl AlmacenPrestamos for PrestamosEnMemoria {
 #[derive(Default)]
 pub struct TarjetasEnMemoria {
     pub tarjetas: Vec<TarjetaLeida>,
+    /// Las desactivadas: no salen en `tarjetas()`.
+    pub inactivas: Vec<TarjetaLeida>,
     siguiente_id: i64,
 }
 
@@ -1254,6 +1351,9 @@ impl TarjetasEnMemoria {
 impl CatalogoDeTarjetas for TarjetasEnMemoria {
     fn tarjetas(&self) -> Result<Vec<TarjetaLeida>, ErrorAlmacen> {
         Ok(self.tarjetas.clone())
+    }
+    fn tarjetas_inactivas(&self) -> Result<Vec<TarjetaLeida>, ErrorAlmacen> {
+        Ok(self.inactivas.clone())
     }
     fn insertar_tarjeta(&mut self, t: &TarjetaNueva) -> Result<i64, ErrorAlmacen> {
         if !(1..=31).contains(&t.fecha_corte) || !(1..=31).contains(&t.fecha_limite_pago) {

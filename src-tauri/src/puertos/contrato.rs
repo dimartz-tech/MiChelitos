@@ -26,6 +26,8 @@ pub struct Semilla {
     pub caja_saldo: Dinero,
     pub tarjeta_id: i64,
     pub tarjeta_deuda: Dinero,
+    /// Una tarjeta activa con los dos balances en cero: la que el contrato desactiva y reactiva.
+    pub tarjeta_vacia_id: i64,
 }
 
 fn dop(u: f64) -> Dinero {
@@ -48,7 +50,7 @@ fn gasto_de(monto: Dinero, metodo: &str, semilla: &Semilla) -> GastoAPersistir {
 
 /// Ejecuta el contrato completo. Cada aserción lleva la etiqueta de la
 /// implementación para que un fallo diga cuál de las dos se desvió.
-pub fn verificar<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
+pub fn verificar<A: AlmacenGastos + TarjetasParaCierre + AlmacenSuscripciones>(a: &mut A, s: &Semilla, quien: &str) {
     categorias(a, s, quien);
     ida_y_vuelta_del_gasto(a, s, quien);
     eliminacion(a, s, quien);
@@ -58,6 +60,7 @@ pub fn verificar<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
     saldo_a_favor(a, s, quien);
     divisas_incompatibles(a, s, quien);
     archivo_de_cuentas(a, s, quien);
+    desactivacion_de_tarjetas(a, s, quien);
 }
 
 fn categorias<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
@@ -226,4 +229,68 @@ fn archivo_de_cuentas<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
     assert!(!a.reactivar_cuenta(s.cuenta_vacia_id).unwrap(), "[{quien}] reactivar una activa no hace nada");
     a.ajustar_saldo(s.cuenta_vacia_id, dop(5.0)).unwrap();
     a.ajustar_saldo(s.cuenta_vacia_id, dop(-5.0)).unwrap();
+}
+
+fn desactivacion_de_tarjetas<A: AlmacenGastos + TarjetasParaCierre + AlmacenSuscripciones>(a: &mut A, s: &Semilla, quien: &str) {
+    let tarjetas = a.tarjetas_para_cierre().unwrap();
+    let con_deuda = tarjetas.iter().find(|t| t.id == s.tarjeta_id).expect("la tarjeta con deuda");
+    let vacia = tarjetas.iter().find(|t| t.id == s.tarjeta_vacia_id).expect("la tarjeta vacía");
+    assert!(con_deuda.activa && vacia.activa, "[{quien}] las tarjetas nacen activas");
+    assert_eq!(con_deuda.cupo_dop.balance, s.tarjeta_deuda, "[{quien}] el balance vuelve igual");
+
+    // La condición viaja en la propia sentencia: con deuda, o inexistente, no se desactiva y nada cambia.
+    assert!(!a.desactivar_tarjeta(s.tarjeta_id).unwrap(), "[{quien}] con deuda no se desactiva");
+    assert!(!a.desactivar_tarjeta(999_999).unwrap(), "[{quien}] una inexistente tampoco");
+    assert!(a.estado_de_tarjeta(s.tarjeta_id).unwrap().activa);
+
+    // Los dos balances cuentan: un dólar de deuda, aunque los pesos estén en cero, impide desactivarla.
+    let un_dolar = Dinero::nuevo(1.0, Divisa::Usd).unwrap();
+    a.ajustar_deuda(s.tarjeta_vacia_id, un_dolar).unwrap();
+    assert!(!a.desactivar_tarjeta(s.tarjeta_vacia_id).unwrap(), "[{quien}] con deuda en dólares no se desactiva");
+    a.ajustar_deuda(s.tarjeta_vacia_id, un_dolar.negado()).unwrap();
+
+    // Un traslado solo procede si la suscripción sigue en la tarjeta de la que se mueve.
+    let sub = a
+        .insertar_suscripcion(&SuscripcionAGuardar {
+            plataforma: "Contrato".into(),
+            monto: 10.0,
+            tarjeta_id: s.tarjeta_id,
+            frecuencia: "mensual".into(),
+            dia_facturacion: 5,
+            divisa: "DOP".into(),
+            fecha_proximo_cobro: None,
+        })
+        .unwrap();
+    assert!(
+        !a.trasladar_suscripcion(sub, s.tarjeta_vacia_id, s.tarjeta_id, "14/10/2026").unwrap(),
+        "[{quien}] no se traslada desde una tarjeta que no la tiene"
+    );
+    assert!(a.trasladar_suscripcion(sub, s.tarjeta_id, s.tarjeta_vacia_id, "14/10/2026").unwrap(), "[{quien}] sí desde la suya");
+    assert!(
+        !a.trasladar_suscripcion(sub, s.tarjeta_id, s.tarjeta_vacia_id, "14/10/2026").unwrap(),
+        "[{quien}] y ya no puede volver a moverse desde la antigua"
+    );
+    assert_eq!(
+        a.suscripciones_registradas().unwrap().iter().find(|x| x.id == sub).unwrap().tarjeta_id,
+        s.tarjeta_vacia_id,
+        "[{quien}] queda donde se trasladó"
+    );
+    a.eliminar_suscripcion(sub).unwrap();
+
+    assert!(a.desactivar_tarjeta(s.tarjeta_vacia_id).unwrap(), "[{quien}] en cero se desactiva");
+    assert!(!a.desactivar_tarjeta(s.tarjeta_vacia_id).unwrap(), "[{quien}] desactivar dos veces no hace nada");
+    assert!(!a.estado_de_tarjeta(s.tarjeta_vacia_id).unwrap().activa);
+    assert!(
+        matches!(a.ajustar_deuda(s.tarjeta_vacia_id, dop(5.0)).unwrap_err(), ErrorAlmacen::TarjetaInactiva { .. }),
+        "[{quien}] una desactivada no recibe consumos"
+    );
+    assert!(
+        matches!(a.ajustar_deuda(s.tarjeta_vacia_id, dop(-5.0)).unwrap_err(), ErrorAlmacen::TarjetaInactiva { .. }),
+        "[{quien}] ni abonos"
+    );
+
+    assert!(a.reactivar_tarjeta(s.tarjeta_vacia_id).unwrap(), "[{quien}] se reactiva");
+    assert!(!a.reactivar_tarjeta(s.tarjeta_vacia_id).unwrap(), "[{quien}] reactivar una activa no hace nada");
+    a.ajustar_deuda(s.tarjeta_vacia_id, dop(5.0)).unwrap();
+    a.ajustar_deuda(s.tarjeta_vacia_id, dop(-5.0)).unwrap();
 }

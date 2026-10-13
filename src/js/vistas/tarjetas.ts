@@ -11,7 +11,7 @@
 // `confirm`, `prompt`, `document` ni `Date` globales: todo entra por el
 // constructor (`pruebas/js/vistas/tarjetas.test.js`). Los cuerpos son los de `ui.ts`.
 
-import type { Tarjeta } from '../tipos-ipc';
+import type { Tarjeta, VistaPreviaDeCierre } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Reloj, Vista } from '../ui/servicios';
 
 import { argumentoJs, escaparHtml } from '../nucleo/html.js';
@@ -31,6 +31,10 @@ type ApiTarjetas = ApiDe<
     | 'obtenerAvancesTarjeta'
     | 'revertirAvanceEfectivo'
     | 'actualizarLimitesTarjeta'
+    | 'obtenerTarjetasInactivas'
+    | 'previsualizarCierreTarjeta'
+    | 'cerrarTarjeta'
+    | 'reactivarTarjeta'
 >;
 
 export interface DependenciasTarjetas {
@@ -53,6 +57,7 @@ export const MANEJADORES_TARJETAS = [
     'alternarAbonos', 'handleRevertirAbono', 'alternarAvances', 'handleRevertirAvance',
     'handleAgregarBonificacion', 'handleEliminarBonificacion',
     'abrirEdicionLimitesTarjeta', 'handleEdicionLimitesTarjetaSubmit',
+    'abrirCierreTarjeta', 'actualizarResumenCierre', 'handleConfirmarCierreTarjeta', 'handleReactivarTarjeta',
 ] as const;
 export type ManejadorTarjetas = (typeof MANEJADORES_TARJETAS)[number];
 
@@ -68,12 +73,16 @@ interface EtiquetaDeBalance {
 }
 
 export class VistaTarjetas implements Vista {
+    /** La vista previa de cada cierre abierto: el resumen y la confirmación se calculan a partir de ella. */
+    private readonly cierres = new Map<number, VistaPreviaDeCierre>();
+
     constructor(private readonly dep: DependenciasTarjetas) {}
 
     // --- RENDER: TARJETAS ---
     async render(): Promise<void> {
         const { api, formato, pantalla, ahora } = this.dep;
         const tarjetas = await api.obtenerTarjetas();
+        const tarjetasInactivas = await api.obtenerTarjetasInactivas();
         const cuentas = await api.obtenerCuentas();
         const bonificaciones = await api.obtenerBonificaciones();
         const prestamos = await api.obtenerPrestamos();
@@ -331,6 +340,9 @@ export class VistaTarjetas implements Vista {
 
                                     <!-- Configurar límites -->
                                     <button onclick="appUI.abrirEdicionLimitesTarjeta(${argumentoJs(JSON.stringify(t))})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">⚙️ Configurar Límites / Corte</button>
+
+                                    <!-- Desactivar: nunca se borra; el diálogo pide trasladar las suscripciones -->
+                                    <button onclick="appUI.abrirCierreTarjeta(${t.id})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:transparent; border:1px solid var(--border-color); color:var(--text-secondary); width:100%;" aria-label="Desactivar la tarjeta ${escaparHtml(t.entidad)} ${escaparHtml(t.nombre_tarjeta)}">📦 Desactivar tarjeta</button>
                                 </div>
                             `;
                         }).join('')}
@@ -338,6 +350,24 @@ export class VistaTarjetas implements Vista {
                 ` : `
                     <p style="color:var(--text-muted); text-align:center; padding:2rem; background:var(--bg-surface); border:1px solid var(--border-color); border-radius:var(--radius-md);">No hay tarjetas registradas.</p>
                 `}
+
+                ${tarjetasInactivas.length > 0 ? `
+                    <details style="margin-top:1.2rem;">
+                        <summary style="cursor:pointer; font-size:0.9rem; color:var(--text-secondary);">Tarjetas inactivas (${tarjetasInactivas.length})</summary>
+                        <p style="font-size:0.72rem; color:var(--text-muted); margin:0.4rem 0;">No aparecen en selectores, ni en avisos de corte y pago, y no reciben operaciones. Su historial se conserva. Al reactivar una, ninguna suscripción vuelve sola.</p>
+                        <div style="display:flex; flex-direction:column; gap:0.5rem;">
+                            ${tarjetasInactivas.map(t => `
+                                <div style="border:1px dashed var(--border-color); padding:0.6rem 0.9rem; border-radius:var(--radius-sm); display:flex; justify-content:space-between; align-items:center;">
+                                    <div>
+                                        <strong>${escaparHtml(t.entidad)} - ${escaparHtml(t.nombre_tarjeta)}</strong>
+                                        <span style="font-size:0.72rem; color:var(--color-warning);"> · Inactiva</span>
+                                    </div>
+                                    <button onclick="appUI.handleReactivarTarjeta(${t.id})" class="btn btn-secondary" style="padding:0.3rem 0.6rem; font-size:0.75rem;" aria-label="Reactivar la tarjeta ${escaparHtml(t.entidad)} ${escaparHtml(t.nombre_tarjeta)}">♻️ Reactivar</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </details>
+                ` : ''}
 
                 ${tarjetas.length > 0 ? `
                 <div class="card" style="margin-top:1.2rem;">
@@ -798,6 +828,128 @@ export class VistaTarjetas implements Vista {
         }
     }
 
+    // --- DESACTIVAR UNA TARJETA ---
+
+    /**
+     * Abre el diálogo de cierre: balances, suscripciones vinculadas con su destino sugerido (y por qué), resumen y
+     * confirmación. Solo ayuda: «Confirmar» se habilita únicamente sin bloqueos y con un destino por suscripción, y el
+     * núcleo repite todas las comprobaciones al confirmar.
+     */
+    async abrirCierreTarjeta(id: number): Promise<void> {
+        const { api, avisos, modales } = this.dep;
+        let v: VistaPreviaDeCierre;
+        try {
+            v = await api.previsualizarCierreTarjeta(id);
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+            return;
+        }
+        this.cierres.set(id, v);
+        const nombreDestino = (d: number): string => v.destinos.find(x => x.id === d)?.nombre ?? String(d);
+        const filas = v.lineas.map(l => {
+            const ordenadas = [...l.elegibles, ...v.destinos.map(d => d.id).filter(d => !l.elegibles.includes(d))];
+            const opciones = ordenadas
+                .map(d => {
+                    const sugerida = d === l.destino_sugerido;
+                    const sinCupo = !l.elegibles.includes(d);
+                    return `<option value="${d}" ${sugerida ? 'selected' : ''}>${escaparHtml(nombreDestino(d))}${sugerida ? ' — sugerida' : ''}${sinCupo ? ' — sin cupo suficiente' : ''}</option>`;
+                })
+                .join('');
+            return `
+                <div style="border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:0.6rem 0.8rem; margin-bottom:0.6rem;">
+                    <label for="cierre_dest_${id}_${l.suscripcion_id}" style="display:block; font-weight:600;">
+                        ${escaparHtml(l.plataforma)}
+                        <span style="font-weight:400; color:var(--text-secondary);"> · ${escaparHtml(l.divisa)} ${escaparHtml(String(l.monto))} · ${escaparHtml(l.frecuencia)} · próximo cargo ${escaparHtml(l.fecha_proximo_cobro ?? 'sin fecha')}</span>
+                    </label>
+                    <select id="cierre_dest_${id}_${l.suscripcion_id}" class="form-control" onchange="appUI.actualizarResumenCierre(${id})" aria-describedby="cierre_motivo_${id}_${l.suscripcion_id}">
+                        ${l.destino_sugerido === null ? '<option value="">— Elige una tarjeta destino —</option>' : ''}${opciones}
+                    </select>
+                    <div id="cierre_motivo_${id}_${l.suscripcion_id}" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.25rem;">${escaparHtml(l.motivo)}</div>
+                </div>`;
+        }).join('');
+        const html = `
+            <div class="card" role="dialog" aria-modal="true" aria-labelledby="cierre_titulo_${id}" style="width: 560px; background: var(--bg-surface-opaque); max-height:90vh; overflow-y:auto;">
+                <h3 id="cierre_titulo_${id}" tabindex="-1" style="font-family: var(--font-heading); margin-bottom: 0.4rem;">📦 Desactivar tarjeta</h3>
+                <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.8rem;">
+                    ${escaparHtml(v.nombre)}. No se borra: conserva todo su historial y puedes reactivarla; las suscripciones que traslades no vuelven solas.
+                </p>
+                <p style="font-size:0.8rem; margin-bottom:0.8rem;">Balances: <strong>DOP ${escaparHtml(String(v.balance_pesos))}</strong> · <strong>USD ${escaparHtml(String(v.balance_dolares))}</strong> (deben ser exactamente cero)</p>
+                ${v.bloqueos.length > 0 ? `<div role="alert" style="border-left:4px solid var(--color-danger); background:rgba(239,68,68,0.08); padding:0.6rem 0.8rem; margin-bottom:0.8rem; font-size:0.8rem;">${v.bloqueos.map(b => `<p style="margin:0 0 0.3rem;">${escaparHtml(b)}</p>`).join('')}</div>` : ''}
+                ${v.lineas.length > 0 ? `<h4 style="font-size:0.9rem; margin-bottom:0.5rem;">Suscripciones vinculadas (${v.lineas.length})</h4>${filas}` : '<p style="font-size:0.8rem; color:var(--text-secondary);">No tiene suscripciones vinculadas.</p>'}
+                <div id="cierre_resumen_${id}" aria-live="polite" style="font-size:0.78rem; margin:0.6rem 0;"></div>
+                <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1rem;">
+                    <button type="button" onclick="elemento('modal-cierre-tar-${id}').remove()" class="btn btn-secondary">Cancelar</button>
+                    <button type="button" id="cierre_confirmar_${id}" onclick="appUI.handleConfirmarCierreTarjeta(${id})" class="btn btn-danger" disabled>Desactivar tarjeta</button>
+                </div>
+            </div>
+        `;
+        modales.abrir(`modal-cierre-tar-${id}`, html);
+        this.actualizarResumenCierre(id);
+    }
+
+    /** Recalcula el resumen «suscripción → destino» y habilita «Confirmar» solo si todo está elegido y no hay bloqueos. */
+    actualizarResumenCierre(id: number): void {
+        const { dom } = this.dep;
+        const v = this.cierres.get(id);
+        if (!v) return;
+        const elegidos = this.destinosElegidos(id);
+        const completo = v.bloqueos.length === 0 && elegidos.length === v.lineas.length;
+        const nombre = (d: number): string => v.destinos.find(x => x.id === d)?.nombre ?? String(d);
+        const resumen = v.lineas
+            .map(l => {
+                const e = elegidos.find(x => x.suscripcion_id === l.suscripcion_id);
+                return `${escaparHtml(l.plataforma)} (${escaparHtml(l.divisa)} ${escaparHtml(String(l.monto))}) → ${e ? escaparHtml(nombre(e.destino_id)) : '<em>sin destino</em>'}`;
+            })
+            .join('<br>');
+        const caja = dom.buscar(`cierre_resumen_${id}`);
+        if (caja) caja.innerHTML = v.lineas.length > 0 ? `<strong>Resumen</strong><br>${resumen}` : '';
+        const boton = dom.buscar<HTMLButtonElement>(`cierre_confirmar_${id}`);
+        if (boton) boton.disabled = !completo;
+    }
+
+    private destinosElegidos(id: number): { suscripcion_id: number; destino_id: number }[] {
+        const { dom } = this.dep;
+        const v = this.cierres.get(id);
+        if (!v) return [];
+        const elegidos: { suscripcion_id: number; destino_id: number }[] = [];
+        for (const l of v.lineas) {
+            const valor = dom.buscar<HTMLSelectElement>(`cierre_dest_${id}_${l.suscripcion_id}`)?.value ?? '';
+            if (valor !== '') elegidos.push({ suscripcion_id: l.suscripcion_id, destino_id: Number(valor) });
+        }
+        return elegidos;
+    }
+
+    async handleConfirmarCierreTarjeta(id: number): Promise<void> {
+        const { api, avisos, enrutador, dom } = this.dep;
+        const v = this.cierres.get(id);
+        if (!v) return;
+        const elegidos = this.destinosElegidos(id);
+        if (v.bloqueos.length > 0 || elegidos.length !== v.lineas.length) {
+            avisos.mostrar('Elige una tarjeta destino para cada suscripción y deja la tarjeta en cero antes de desactivarla.', 'error');
+            return;
+        }
+        try {
+            const resumen = await api.cerrarTarjeta(id, elegidos);
+            dom.buscar(`modal-cierre-tar-${id}`)?.remove();
+            this.cierres.delete(id);
+            avisos.mostrar(resumen);
+            await enrutador.mostrar('tarjetas');
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+        }
+    }
+
+    async handleReactivarTarjeta(id: number): Promise<void> {
+        const { api, avisos, enrutador } = this.dep;
+        try {
+            await api.reactivarTarjeta(id);
+            avisos.mostrar('Tarjeta reactivada. Sus suscripciones no vuelven solas: reasígnalas desde Suscripciones.');
+            await enrutador.mostrar('tarjetas');
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+        }
+    }
+
     abrirEdicionLimitesTarjeta(tJsonStr: string): void {
         const { modales } = this.dep;
         const t: Tarjeta = JSON.parse(tJsonStr);
@@ -939,6 +1091,10 @@ export function puenteTarjetas(vista: VistaTarjetas): {
     handleAgregarBonificacion: (e: EventoDeFormulario) => Promise<void>;
     handleEliminarBonificacion: (id: number) => Promise<void>;
     abrirEdicionLimitesTarjeta: (tJsonStr: string) => void;
+    abrirCierreTarjeta: (id: number) => Promise<void>;
+    actualizarResumenCierre: (id: number) => void;
+    handleConfirmarCierreTarjeta: (id: number) => Promise<void>;
+    handleReactivarTarjeta: (id: number) => Promise<void>;
     handleEdicionLimitesTarjetaSubmit: (e: EventoDeFormulario, id: number) => Promise<void>;
 } {
     return {
@@ -954,6 +1110,10 @@ export function puenteTarjetas(vista: VistaTarjetas): {
         handleAgregarBonificacion: e => vista.handleAgregarBonificacion(e),
         handleEliminarBonificacion: id => vista.handleEliminarBonificacion(id),
         abrirEdicionLimitesTarjeta: tJsonStr => vista.abrirEdicionLimitesTarjeta(tJsonStr),
+        abrirCierreTarjeta: id => vista.abrirCierreTarjeta(id),
+        actualizarResumenCierre: id => vista.actualizarResumenCierre(id),
+        handleConfirmarCierreTarjeta: id => vista.handleConfirmarCierreTarjeta(id),
+        handleReactivarTarjeta: id => vista.handleReactivarTarjeta(id),
         handleEdicionLimitesTarjetaSubmit: (e, id) => vista.handleEdicionLimitesTarjetaSubmit(e, id),
     };
 }

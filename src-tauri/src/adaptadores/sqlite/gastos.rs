@@ -231,6 +231,14 @@ impl RepositorioBonificaciones for AlmacenSqlite<'_> {
 
 impl RepositorioTarjetas for AlmacenSqlite<'_> {
     fn ajustar_deuda(&mut self, tarjeta_id: i64, delta: Dinero) -> Result<(), ErrorAlmacen> {
+        if !delta.es_cero() {
+            // Una tarjeta desactivada no recibe consumos, abonos, avances ni bonificaciones nuevos, ni la reversión de uno
+            // viejo (que primero exige reactivarla). Esta es la barrera de integridad; un selector oculto no lo es.
+            let estado = self.estado_de_tarjeta(tarjeta_id)?;
+            if !estado.activa {
+                return Err(ErrorAlmacen::TarjetaInactiva { nombre: estado.nombre });
+            }
+        }
         let sql = match delta.divisa() {
             Divisa::Usd => "UPDATE tarjetas SET balance_dolares = ROUND(balance_dolares + ?, 2) WHERE id = ?;",
             Divisa::Dop => "UPDATE tarjetas SET balance_pesos = ROUND(balance_pesos + ?, 2) WHERE id = ?;",
@@ -262,6 +270,16 @@ impl RepositorioTarjetas for AlmacenSqlite<'_> {
         Dinero::nuevo(balance, divisa).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))
     }
 
+    fn estado_de_tarjeta(&self, tarjeta_id: i64) -> Result<EstadoDeTarjeta, ErrorAlmacen> {
+        let fila: Option<(String, i64)> = self
+            .tx
+            .query_row("SELECT entidad || ' ' || nombre_tarjeta, activa FROM tarjetas WHERE id = ?;", [tarjeta_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()
+            .map_err(fallo)?;
+        let (nombre, activa) = fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id })?;
+        Ok(EstadoDeTarjeta { nombre, activa: activa == 1 })
+    }
+
     fn politica(&self, tarjeta_id: i64) -> Result<PoliticaLiquidacion, ErrorAlmacen> {
         let codigo: Option<String> = self
             .tx
@@ -274,6 +292,101 @@ impl RepositorioTarjetas for AlmacenSqlite<'_> {
             .map_err(fallo)?
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id })?;
         Ok(PoliticaLiquidacion::desde_codigo(codigo.as_deref()))
+    }
+}
+
+impl TarjetasParaCierre for AlmacenSqlite<'_> {
+    fn tarjetas_para_cierre(&self) -> Result<Vec<TarjetaParaCierre>, ErrorAlmacen> {
+        use crate::dominio::cierre_tarjeta::CupoDeDivisa;
+        use crate::dominio::tarjeta::LimitesDivisa;
+        let mut stmt = self
+            .tx
+            .prepare(
+                "SELECT id, entidad, nombre_tarjeta, activa, fecha_corte, politica_liquidacion,
+                        limite_pesos, limite_ajustado_pesos, limite_sobregiro_pesos, balance_pesos,
+                        limite_dolares, limite_ajustado_dolares, limite_sobregiro_dolares, balance_dolares
+                 FROM tarjetas ORDER BY id;",
+            )
+            .map_err(fallo)?;
+        let filas = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i32>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                    [r.get::<_, f64>(6)?, r.get::<_, Option<f64>>(7)?.unwrap_or(f64::NAN), r.get::<_, f64>(8)?, r.get::<_, f64>(9)?],
+                    [r.get::<_, f64>(10)?, r.get::<_, Option<f64>>(11)?.unwrap_or(f64::NAN), r.get::<_, f64>(12)?, r.get::<_, f64>(13)?],
+                ))
+            })
+            .map_err(fallo)?;
+        let cupo = |divisa: Divisa, v: [f64; 4]| -> Result<CupoDeDivisa, ErrorAlmacen> {
+            let d = |x: f64| Dinero::nuevo(x, divisa).map_err(|e| ErrorAlmacen::Fallo(e.to_string()));
+            let ajustado = if v[1].is_nan() { None } else { Some(d(v[1])?) };
+            Ok(CupoDeDivisa {
+                limites: LimitesDivisa::nuevos(d(v[0])?, ajustado, d(v[2])?).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))?,
+                balance: d(v[3])?,
+            })
+        };
+        let mut v = Vec::new();
+        for fila in filas {
+            let (id, entidad, nombre_tarjeta, activa, fecha_corte, politica, dop, usd) = fila.map_err(fallo)?;
+            v.push(TarjetaParaCierre {
+                id,
+                entidad,
+                nombre_tarjeta,
+                activa: activa == 1,
+                fecha_corte,
+                politica: PoliticaLiquidacion::desde_codigo(politica.as_deref()),
+                cupo_dop: cupo(Divisa::Dop, dop)?,
+                cupo_usd: cupo(Divisa::Usd, usd)?,
+            });
+        }
+        Ok(v)
+    }
+
+    fn desactivar_tarjeta(&mut self, tarjeta_id: i64) -> Result<bool, ErrorAlmacen> {
+        // Activa y con los dos balances en cero exacto, comparados en centavos, en la misma sentencia que la marca.
+        let filas = self
+            .tx
+            .execute(
+                "UPDATE tarjetas SET activa = 0
+                 WHERE id = ? AND activa = 1 AND ROUND(balance_pesos * 100) = 0 AND ROUND(balance_dolares * 100) = 0;",
+                [tarjeta_id],
+            )
+            .map_err(fallo)?;
+        Ok(filas == 1)
+    }
+
+    fn reactivar_tarjeta(&mut self, tarjeta_id: i64) -> Result<bool, ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute("UPDATE tarjetas SET activa = 1 WHERE id = ? AND activa = 0;", [tarjeta_id])
+            .map_err(fallo)?;
+        Ok(filas == 1)
+    }
+
+    fn trasladar_suscripcion(&mut self, suscripcion_id: i64, desde: i64, hasta: i64, fecha: &str) -> Result<bool, ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute(
+                "UPDATE suscripciones SET tarjeta_id = ? WHERE id = ? AND tarjeta_id = ?;",
+                params![hasta, suscripcion_id, desde],
+            )
+            .map_err(fallo)?;
+        if filas != 1 {
+            return Ok(false);
+        }
+        self.tx
+            .execute(
+                "INSERT INTO traslados_de_suscripcion (suscripcion_id, tarjeta_origen_id, tarjeta_destino_id, fecha)
+                 VALUES (?, ?, ?, ?);",
+                params![suscripcion_id, desde, hasta, fecha],
+            )
+            .map_err(fallo)?;
+        Ok(true)
     }
 }
 
@@ -545,6 +658,13 @@ mod tests {
         )
         .unwrap();
         let tarjeta_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO tarjetas (entidad, nombre_tarjeta, fecha_corte, fecha_limite_pago, balance_pesos, limite_pesos)
+             VALUES ('Banco Ejemplo', 'Tarjeta Vacía', 15, 5, 0.0, 100000.0);",
+            [],
+        )
+        .unwrap();
+        let tarjeta_vacia_id = conn.last_insert_rowid();
 
         let categoria_id: i64 = conn
             .query_row("SELECT id FROM categorias WHERE nombre = 'Alimentación';", [], |r| r.get(0))
@@ -569,6 +689,7 @@ mod tests {
             caja_saldo: dop(0.0),
             tarjeta_id,
             tarjeta_deuda: dop(500.0),
+            tarjeta_vacia_id,
         };
         (conn, semilla)
     }

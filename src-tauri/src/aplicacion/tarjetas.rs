@@ -107,6 +107,11 @@ fn limites_no_negativos(importes: &[Option<Dinero>]) -> Result<(), ErrorAplicaci
     Ok(())
 }
 
+/// Las tarjetas desactivadas, para consultarlas y reactivarlas. Nunca alimentan un selector ni muestran balances.
+pub fn listar_inactivas(almacen: &impl CatalogoDeTarjetas) -> Result<Vec<TarjetaLeida>, ErrorAplicacion> {
+    Ok(almacen.tarjetas_inactivas()?)
+}
+
 pub fn crear_tarjeta(datos: DatosTarjetaNueva, almacen: &mut impl CatalogoDeTarjetas) -> Result<i64, ErrorAplicacion> {
     let entidad = datos.entidad.trim().to_string();
     let nombre_tarjeta = datos.nombre_tarjeta.trim().to_string();

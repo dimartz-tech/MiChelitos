@@ -71,6 +71,7 @@ pub fn registrar_pago_tarjeta(
     if datos.monto.es_cero() || datos.monto.es_negativo() {
         return Err(ErrorDominio::AbonoSinImporte.into());
     }
+    super::cierre_de_tarjetas::exigir_tarjeta_activa(almacen, datos.tarjeta_id)?;
 
     // El orden importa: primero se resuelve todo lo que puede fallar por una
     // regla, y solo después se toca un saldo. Así una operación rechazada no
