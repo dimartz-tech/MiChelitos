@@ -20,6 +20,8 @@ pub struct Semilla {
     pub categoria_nombre: String,
     pub cuenta_id: i64,
     pub cuenta_saldo: Dinero,
+    /// Una cuenta activa, no caja, con saldo exactamente cero: la que el contrato archiva y reactiva.
+    pub cuenta_vacia_id: i64,
     pub caja_id: i64,
     pub caja_saldo: Dinero,
     pub tarjeta_id: i64,
@@ -55,6 +57,7 @@ pub fn verificar<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
     deuda_de_tarjeta(a, s, quien);
     saldo_a_favor(a, s, quien);
     divisas_incompatibles(a, s, quien);
+    archivo_de_cuentas(a, s, quien);
 }
 
 fn categorias<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
@@ -188,4 +191,39 @@ fn divisas_incompatibles<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) 
         "[{}] no se puede restar dólares de un saldo en pesos",
         quien
     );
+}
+
+fn archivo_de_cuentas<A: AlmacenGastos>(a: &mut A, s: &Semilla, quien: &str) {
+    let estado = a.estado_de_cuenta(s.cuenta_id).unwrap();
+    assert!(!estado.archivada && !estado.es_caja, "[{quien}] una cuenta normal nace activa y no es caja");
+    assert!(a.estado_de_cuenta(s.caja_id).unwrap().es_caja, "[{quien}] la caja lo dice");
+    assert!(
+        matches!(a.estado_de_cuenta(999_999).unwrap_err(), ErrorAlmacen::NoEncontrado { .. }),
+        "[{quien}] una cuenta inexistente es NoEncontrado"
+    );
+
+    // Las tres condiciones viajan en la propia sentencia: con saldo, o siendo caja, no se archiva y nada cambia.
+    assert!(!a.archivar_cuenta(s.cuenta_id).unwrap(), "[{quien}] con saldo no se archiva");
+    assert!(!a.archivar_cuenta(s.caja_id).unwrap(), "[{quien}] la caja no se archiva");
+    assert!(!a.archivar_cuenta(999_999).unwrap(), "[{quien}] una inexistente tampoco");
+    assert!(!a.estado_de_cuenta(s.cuenta_id).unwrap().archivada);
+
+    // Una cuenta en cero sí; archivada, no mueve dinero (ni nuevo ni de vuelta) pero sí admite un ajuste nulo.
+    assert!(a.archivar_cuenta(s.cuenta_vacia_id).unwrap(), "[{quien}] en cero se archiva");
+    assert!(!a.archivar_cuenta(s.cuenta_vacia_id).unwrap(), "[{quien}] archivar dos veces no hace nada");
+    assert!(a.estado_de_cuenta(s.cuenta_vacia_id).unwrap().archivada);
+    assert!(
+        matches!(a.ajustar_saldo(s.cuenta_vacia_id, dop(5.0)).unwrap_err(), ErrorAlmacen::CuentaArchivada { .. }),
+        "[{quien}] una archivada no recibe dinero"
+    );
+    assert!(
+        matches!(a.ajustar_saldo(s.cuenta_vacia_id, dop(-5.0)).unwrap_err(), ErrorAlmacen::CuentaArchivada { .. }),
+        "[{quien}] ni lo entrega"
+    );
+    assert_eq!(a.saldo(s.cuenta_vacia_id).unwrap(), dop(0.0), "[{quien}] y su saldo no cambió");
+
+    assert!(a.reactivar_cuenta(s.cuenta_vacia_id).unwrap(), "[{quien}] se reactiva");
+    assert!(!a.reactivar_cuenta(s.cuenta_vacia_id).unwrap(), "[{quien}] reactivar una activa no hace nada");
+    a.ajustar_saldo(s.cuenta_vacia_id, dop(5.0)).unwrap();
+    a.ajustar_saldo(s.cuenta_vacia_id, dop(-5.0)).unwrap();
 }

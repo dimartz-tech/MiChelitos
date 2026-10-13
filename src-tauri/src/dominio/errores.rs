@@ -80,6 +80,15 @@ pub enum ErrorDominio {
     MotivoInsuficiente { motivo: String },
     FacturaNoPendiente { id: i64 },
     CuentaSinNombre,
+    /// No se archiva la caja de efectivo: de ella depende todo gasto en efectivo de su divisa.
+    CajaNoSeArchiva,
+    /// Una cuenta se archiva con saldo exactamente cero. `importe` ya lleva el signo y los dos decimales.
+    CuentaConSaldo { nombre: String, divisa: &'static str, importe: String, a_favor: bool },
+    /// La cuenta ya estaba archivada (o no lo estaba, al reactivar).
+    CuentaYaArchivada { nombre: String },
+    CuentaNoArchivada { nombre: String },
+    /// El nombre de una cuenta archivada sigue ocupado: o se reactiva esa o se elige otro.
+    NombreDeCuentaArchivada { nombre: String },
     ComisionNegativa,
     CuentaNoEncontrada { id: i64 },
     CategoriaSinNombre,
@@ -206,6 +215,27 @@ impl fmt::Display for ErrorDominio {
                 write!(f, "No se encontró una factura {} pendiente de cobro.", id)
             }
             ErrorDominio::CuentaSinNombre => write!(f, "El nombre de la cuenta no puede estar vacío."),
+            ErrorDominio::CajaNoSeArchiva => write!(
+                f,
+                "No se puede archivar la caja de efectivo: es la cuenta donde se asientan todos los gastos en efectivo de su divisa."
+            ),
+            ErrorDominio::CuentaConSaldo { nombre, divisa, importe, a_favor: true } => write!(
+                f,
+                "No se puede archivar la cuenta «{}»: tiene {} {} a favor. Retira o transfiere ese dinero hasta dejarla en cero.",
+                nombre, divisa, importe
+            ),
+            ErrorDominio::CuentaConSaldo { nombre, divisa, importe, a_favor: false } => write!(
+                f,
+                "No se puede archivar la cuenta «{}»: tiene un saldo pendiente de {} {} por conciliar. Déjala en cero antes de archivarla.",
+                nombre, divisa, importe
+            ),
+            ErrorDominio::CuentaYaArchivada { nombre } => write!(f, "La cuenta «{}» ya está archivada.", nombre),
+            ErrorDominio::CuentaNoArchivada { nombre } => write!(f, "La cuenta «{}» no está archivada.", nombre),
+            ErrorDominio::NombreDeCuentaArchivada { nombre } => write!(
+                f,
+                "Ya existe una cuenta archivada llamada «{}». Reactívala o elige otro nombre.",
+                nombre
+            ),
             ErrorDominio::ComisionNegativa => write!(f, "La comisión por pago de impuestos no puede ser negativa."),
             ErrorDominio::CuentaNoEncontrada { id } => write!(f, "No se encontró la cuenta {}.", id),
             ErrorDominio::CategoriaSinNombre => write!(f, "El nombre de la categoría no puede estar vacío."),

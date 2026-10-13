@@ -84,24 +84,36 @@ test('editar cuenta: si Rust rechaza se muestra el error', async () => {
     await rechazoSeMuestra(ui, () => ui.appUI.abrirEdicionCuenta(existente));
 });
 
-// --- baja de cuenta ---
+// --- archivo de cuentas ---
 
-test('baja de cuenta: con confirmación envía el id y redibuja Ajustes', async () => {
+test('archivar una cuenta: con confirmación envía el id y redibuja Ajustes', async () => {
     const ui = cargarInterfaz({ confirm: true });
-    await ui.appUI.handleEliminarCuenta(4);
-    llamoUnaVez(ui, 'eliminarCuenta', [4]);
-    avisoExito(ui, /Cuenta eliminada/);
+    await ui.appUI.handleArchivarCuenta(4);
+    llamoUnaVez(ui, 'archivarCuenta', [4]);
+    avisoExito(ui, /Cuenta archivada/);
     redibujo(ui, 'ajustes');
 });
 
-test('baja de cuenta: sin confirmación no se envía nada; si Rust rechaza se muestra el error', async () => {
+test('archivar una cuenta: sin confirmación no se envía nada; si Rust rechaza se muestra el error', async () => {
     let ui = cargarInterfaz({ confirm: false });
-    await ui.appUI.handleEliminarCuenta(4);
+    await ui.appUI.handleArchivarCuenta(4);
     noLlamoANada(ui);
 
     ui = cargarInterfaz({ confirm: true });
-    ui.rechazar('eliminarCuenta', 'Error simulado de Rust');
-    await rechazoSeMuestra(ui, () => ui.appUI.handleEliminarCuenta(4));
+    ui.rechazar('archivarCuenta', 'Error simulado de Rust');
+    await rechazoSeMuestra(ui, () => ui.appUI.handleArchivarCuenta(4));
+});
+
+test('reactivar una cuenta: envía el id sin pedir confirmación y redibuja Ajustes; si Rust rechaza se muestra', async () => {
+    let ui = cargarInterfaz({});
+    await ui.appUI.handleReactivarCuenta(7);
+    llamoUnaVez(ui, 'reactivarCuenta', [7]);
+    avisoExito(ui, /Cuenta reactivada/);
+    redibujo(ui, 'ajustes');
+
+    ui = cargarInterfaz({});
+    ui.rechazar('reactivarCuenta', 'Error simulado de Rust');
+    await rechazoSeMuestra(ui, () => ui.appUI.handleReactivarCuenta(7));
 });
 
 // --- transferencia entre cuentas ---

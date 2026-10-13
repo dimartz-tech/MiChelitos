@@ -44,6 +44,8 @@ pub fn transferir(
 ) -> Result<i64, ErrorAplicacion> {
     // Las divisas se leen del almacén, no se reciben: son un hecho de cada
     // cuenta, y dejar que quien llama las declare reabriría H12 por otra vía.
+    super::cuentas::exigir_activa(almacen, datos.origen_id)?;
+    super::cuentas::exigir_activa(almacen, datos.destino_id)?;
     let origen = ExtremoCuenta::nuevo(datos.origen_id, almacen.divisa(datos.origen_id)?);
     let destino = ExtremoCuenta::nuevo(datos.destino_id, almacen.divisa(datos.destino_id)?);
 
@@ -96,74 +98,6 @@ pub fn revertir_transferencia(
     almacen.ajustar_saldo(t.destino_id, t.monto_destino.negado())?;
 
     almacen.eliminar_transferencia(id)?;
-    Ok(())
-}
-
-/// Elimina una cuenta si nada la referencia.
-///
-/// Dos guardas, y en este orden. La caja de efectivo no se borra nunca: es el
-/// papel del que depende todo gasto en efectivo de su divisa, y su clave
-/// foránea está declarada `ON DELETE SET NULL`, de modo que borrarla
-/// desvincularía los gastos en silencio en lugar de impedirlo. Se comprueba
-/// primero porque explica mejor el rechazo: una caja con gastos daría el
-/// mensaje genérico y dejaría creer que basta con borrar los gastos.
-///
-/// La tercera guarda cierra **H13**: una cuenta que participó en alguna
-/// transferencia tampoco se borra. Su clave foránea es `ON DELETE CASCADE`, de
-/// modo que borrarla se llevaba por delante esos asientos **y** dejaba a la
-/// contraparte con el dinero recibido sin constancia de dónde salió.
-/// Qué se perdería al borrar una cuenta, según la relación que la referencia.
-///
-/// Devuelve `None` para una tabla sin frase escrita, y una prueba exige que
-/// no ocurra con ninguna de `RELACIONES_CON_CUENTAS`: la frase genérica del
-/// caso de uso es una red, no un sustituto.
-pub fn motivo_de_no_eliminar(tabla: &str) -> Option<&'static str> {
-    Some(match tabla {
-        "gastos" => "tiene transferencias registradas en gastos.",
-        "transacciones_cuentas" => {
-            "participa en transferencias registradas: borrarla se llevaría ese historial."
-        }
-        "avances_efectivo" => {
-            "recibió avances de efectivo: borrarla se llevaría el rastro de la tarjeta de la que salió ese dinero. Revierte primero esos avances."
-        }
-        "ingresos" => {
-            "recibió el cobro de facturas: borrarla las dejaría como pagadas sin constancia de dónde entró el dinero."
-        }
-        "ingresos_informales" => {
-            "recibió cobros de ingresos informales: borrarla los dejaría como cobrados sin constancia de dónde entró el dinero."
-        }
-        "pagos_tarjeta" => {
-            "pagó abonos a tarjetas: borrarla dejaría esos abonos sin la cuenta de la que salió el dinero, y al revertirlos no habría a dónde devolverlo."
-        }
-        _ => return None,
-    })
-}
-
-pub fn eliminar_cuenta(
-    cuenta_id: i64,
-    almacen: &mut impl AlmacenTransferencias,
-) -> Result<(), ErrorAplicacion> {
-    if almacen.es_caja(cuenta_id)? {
-        return Err(ErrorAplicacion::Almacen(ErrorAlmacen::Fallo(
-            "No se puede eliminar la caja de efectivo: es la cuenta donde se asientan todos los gastos en efectivo de su divisa."
-                .into(),
-        )));
-    }
-
-    // Todas las relaciones a la vez, no una comprobación por relación: la
-    // lista es `RELACIONES_CON_CUENTAS`, y una prueba la compara con las claves
-    // ajenas reales del esquema.
-    if let Some(r) = almacen.referencias_a_la_cuenta(cuenta_id)?.first() {
-        let motivo = motivo_de_no_eliminar(r.tabla).unwrap_or(
-            "tiene movimientos registrados que se quedarían sin su cuenta.",
-        );
-        return Err(ErrorAplicacion::Almacen(ErrorAlmacen::Fallo(format!(
-            "No se puede eliminar la cuenta porque {}",
-            motivo
-        ))));
-    }
-
-    almacen.eliminar_cuenta(cuenta_id)?;
     Ok(())
 }
 
@@ -327,76 +261,5 @@ mod tests {
         assert!(error.contains("comisión"), "orienta hacia el cargo: {error}");
         assert_eq!(a.saldo_de(10), dop(50_000.0), "ningún saldo se movió");
         assert_eq!(a.saldo_de(11), dop(10_000.0));
-    }
-
-    #[test]
-    fn la_caja_de_efectivo_no_se_borra_nunca() {
-        // Su clave foránea es ON DELETE SET NULL: borrarla desvincularía los
-        // gastos en efectivo en silencio en lugar de impedir el borrado.
-        let mut a = almacen().con_caja(20, dop(500.0));
-
-        let error = eliminar_cuenta(20, &mut a).unwrap_err().to_string();
-
-        assert!(error.contains("caja de efectivo"), "explica por qué: {error}");
-    }
-
-    #[test]
-    fn h13_una_cuenta_con_transferencias_no_se_borra() {
-        // **H13 resuelto.** Antes se borraba: la clave foránea es
-        // ON DELETE CASCADE, así que el historial se iba en silencio y la
-        // contraparte conservaba el dinero recibido sin constancia de dónde
-        // había salido.
-        let mut a = almacen();
-        transferir(datos(dop(8_000.0), dop(8_000.0), dop(0.0)), &mut a).unwrap();
-
-        let error = eliminar_cuenta(10, &mut a).unwrap_err().to_string();
-
-        assert!(error.contains("transferencias"), "explica por qué: {error}");
-        assert!(error.contains("historial"), "y qué se perdería: {error}");
-    }
-
-    #[test]
-    fn cada_relacion_declarada_tiene_su_motivo_escrito() {
-        // La frase genérica es una red, no un sustituto: una relación nueva
-        // sin motivo propio dejaría al titular sin saber qué se perdería.
-        for (tabla, columna) in crate::db_sql::RELACIONES_CON_CUENTAS {
-            assert!(
-                motivo_de_no_eliminar(tabla).is_some(),
-                "{tabla}.{columna} no tiene motivo escrito en motivo_de_no_eliminar"
-            );
-        }
-    }
-
-    #[test]
-    fn una_cuenta_con_una_factura_cobrada_en_ella_no_se_borra() {
-        let mut a = almacen().con_factura_cobrada_en(10);
-        let error = eliminar_cuenta(10, &mut a).unwrap_err().to_string();
-        assert!(error.contains("facturas"), "explica por qué: {error}");
-        assert!(error.contains("dónde entró el dinero"), "y qué se perdería: {error}");
-    }
-
-    #[test]
-    fn una_cuenta_con_un_ingreso_informal_cobrado_en_ella_no_se_borra() {
-        let mut a = almacen().con_informal_cobrado_en(10);
-        let error = eliminar_cuenta(10, &mut a).unwrap_err().to_string();
-        assert!(error.contains("informales"), "explica por qué: {error}");
-    }
-
-    #[test]
-    fn una_cuenta_que_pago_un_abono_no_se_borra_aunque_su_gasto_de_comision_ya_no_exista() {
-        // Antes solo la frenaba, de rebote, el gasto de la comisión. Ese gasto
-        // se puede borrar por separado, y con él caía la única protección.
-        let mut a = almacen().con_tarjeta(30, dop(1_000.0));
-        a.con_pago(30, dop(500.0), Some(10), None, None); // sin gasto de comisión
-        let error = eliminar_cuenta(10, &mut a).unwrap_err().to_string();
-        assert!(error.contains("abonos"), "explica por qué: {error}");
-    }
-
-    #[test]
-    fn una_cuenta_sin_nada_que_la_referencie_si_se_borra() {
-        // La guarda no puede volverse un candado: una cuenta limpia se borra.
-        let mut a = almacen();
-
-        assert!(eliminar_cuenta(11, &mut a).is_ok());
     }
 }

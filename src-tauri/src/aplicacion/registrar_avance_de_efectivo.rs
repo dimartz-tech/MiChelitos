@@ -52,6 +52,7 @@ pub fn registrar_avance_de_efectivo(
     almacen: &mut impl AlmacenAvances,
 ) -> Result<AvanceRegistrado, ErrorAplicacion> {
     // 1. Todo lo que puede rechazarse, antes de mover nada.
+    super::cuentas::exigir_activa(almacen, datos.cuenta_ahorro_id)?;
     let divisa_cuenta = almacen.divisa(datos.cuenta_ahorro_id)?;
     if divisa_cuenta != datos.monto.divisa() {
         return Err(ErrorDominio::AvanceEnOtraDivisa {

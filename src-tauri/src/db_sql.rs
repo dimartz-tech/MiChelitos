@@ -539,6 +539,7 @@ pub const COLUMNAS_DE_DINERO: &[(&str, &str)] = &[
 /// Una prueba compara esta lista con las claves ajenas **reales** del
 /// esquema migrado. Añadir una relación nueva sin declararla aquí hace fallar
 /// las pruebas, en lugar de dejar la guarda para cuando alguien pierda algo.
+#[cfg(test)]
 pub const RELACIONES_CON_CUENTAS: &[(&str, &str)] = &[
     ("gastos", "cuenta_ahorro_id"),
     ("transacciones_cuentas", "cuenta_origen_id"),
@@ -1184,30 +1185,6 @@ fn reconstruir_con_restricciones(tx: &Transaction) -> Result<(), ErrorMigracion>
             continue;
         }
 
-        // Un índice o un disparador de usuario no sobreviviría a la
-        // reconstrucción. Hoy no los hay; si algún día los hubiera, esto para
-        // la migración en vez de perderlos sin decirlo.
-        let propios: i64 = tx
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master
-                 WHERE tbl_name = ? AND type IN ('index', 'trigger')
-                   AND name NOT LIKE 'sqlite_autoindex_%';",
-                [tabla],
-                |r| r.get(0),
-            )
-            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
-        if propios > 0 {
-            return Err(ErrorMigracion::Fallo {
-                version: 11,
-                migracion: MIG11,
-                etapa: format!("reconstruir {}", tabla),
-                causa: format!(
-                    "{} tiene {} índice(s) o disparador(es) propios;                      la reconstrucción los perdería. Recréalos aquí primero.",
-                    tabla, propios
-                ),
-            });
-        }
-
         let sql_actual: String = tx
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?;",
@@ -1228,6 +1205,31 @@ fn reconstruir_con_restricciones(tx: &Transaction) -> Result<(), ErrorMigracion>
         // Idempotente: si ya lleva sus restricciones, no se toca.
         if presentes.iter().all(|c| sql_actual.contains(&restriccion_de_centimo(c))) {
             continue;
+        }
+
+        // Un índice o un disparador de usuario no sobreviviría a la
+        // reconstrucción; si los hubiera, esto para la migración en vez de perderlos sin decirlo. Se mira
+        // **después** de la comprobación anterior: una tabla que ya lleva sus restricciones no se reconstruye,
+        // y por tanto no pierde los disparadores que migraciones posteriores le añadieron (16).
+        let propios: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE tbl_name = ? AND type IN ('index', 'trigger')
+                   AND name NOT LIKE 'sqlite_autoindex_%';",
+                [tabla],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErrorMigracion::Almacenamiento(e.to_string()))?;
+        if propios > 0 {
+            return Err(ErrorMigracion::Fallo {
+                version: 11,
+                migracion: MIG11,
+                etapa: format!("reconstruir {}", tabla),
+                causa: format!(
+                    "{} tiene {} índice(s) o disparador(es) propios;                      la reconstrucción los perdería. Recréalos aquí primero.",
+                    tabla, propios
+                ),
+            });
         }
 
         let de_centimo: Vec<String> =
@@ -1774,6 +1776,45 @@ pub fn migracion_15_avances_de_efectivo(tx: &Transaction) -> Result<(), ErrorMig
     )
 }
 
+const MIG16: &str = "las cuentas se archivan, no se borran";
+
+/// Archivo reversible de cuentas, y la red que impide borrarlas o borrar tarjetas.
+///
+/// * **`archivada`**: una cuenta cerrada no se borra; se marca. Conserva su identificador, su nombre y su historial, de
+///   modo que los movimientos pasados siguen resolviéndose por identificador. Nace en 0 para todas las existentes. El
+///   nombre sigue siendo único entre **todas** las cuentas, archivadas incluidas: reutilizar el de una archivada exige
+///   reactivarla o elegir otro (reconstruir la tabla para una unicidad parcial queda para cuando se decida).
+/// * **Disparadores `BEFORE DELETE`** en `cuentas_ahorro` y `tarjetas`: las claves ajenas de pagos, bonificaciones,
+///   suscripciones y transferencias son `ON DELETE CASCADE`, así que un `DELETE` directo —por cualquier vía— se llevaría
+///   el historial por delante. El disparador lo impide en la propia base; retirar el comando de la interfaz no basta.
+pub fn migracion_16_archivo_de_cuentas(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::anadir_columna(
+        tx,
+        MIG16,
+        "cuentas_ahorro",
+        "archivada",
+        "INTEGER NOT NULL DEFAULT 0 CHECK(archivada IN (0, 1))",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG16,
+        "disparador contra el borrado de cuentas",
+        "CREATE TRIGGER IF NOT EXISTS cuentas_no_se_borran BEFORE DELETE ON cuentas_ahorro
+         BEGIN
+             SELECT RAISE(ABORT, 'Las cuentas no se borran: se archivan.');
+         END;",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG16,
+        "disparador contra el borrado de tarjetas",
+        "CREATE TRIGGER IF NOT EXISTS tarjetas_no_se_borran BEFORE DELETE ON tarjetas
+         BEGIN
+             SELECT RAISE(ABORT, 'Las tarjetas no se borran: se desactivan.');
+         END;",
+    )
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
@@ -1886,7 +1927,7 @@ mod pruebas_de_transaccion {
         let fuente = include_str!("main.rs");
         assert!(!fuente.contains(".transaction()"), "usa db_sql::transaccion(&mut conn, escritura)");
         let escritura = fuente.matches("db_sql::transaccion(&mut conn, true)").count();
-        assert_eq!(escritura, 3, "las tres operaciones sueltas que escriben");
+        assert_eq!(escritura, 2, "las dos operaciones sueltas que escriben");
         // Cada función de main.rs: un listado usa solo `lee_*`, y nada que escriba usa `lee_*`.
         let mut revisadas = 0;
         for trozo in fuente.split("\nfn ").skip(1).chain(fuente.split("\npub fn ").skip(1)) {
