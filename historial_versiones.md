@@ -4,7 +4,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.94.0 (Versión Actual) - 2026-10-13
+## 🚀 Versión 1.95.0 (Versión Actual) - 2026-10-14
+**El cobro automático de una suscripción relee la suscripción dentro de su propia transacción.** Corrige un defecto de la extracción de 1.90.0: la lista de cobros se hacía una vez y cada cargo se asentaba con esa copia, de modo que una suscripción editada o borrada mientras tanto podía cargar la tarjeta o el importe antiguos. Sin cambios de reglas ni de mensajes.
+
+### 🔧 Qué se hace
+* **Candidatas, no cobros:** `cobros_automaticos` devuelve solo los identificadores de las suscripciones que parecen vencer hoy (exactamente un período vencido). Es de solo lectura y puede quedar vieja.
+* **`cobrar_si_vence`:** dentro de la transacción de cada cargo vuelve a leer la suscripción y decide con lo que hay en ese instante: si fue borrada, si ya no vence (otro camino ya avanzó el puntero) o si acumuló varios períodos, **no cobra**; si fue editada, cobra la tarjeta y el importe **actuales**. El mensaje cuenta lo que de verdad se cobró.
+* **Por qué importa ahora:** el cierre de tarjetas previsto para la RC traslada suscripciones de una tarjeta a otra; sin esta lectura, un cobro en marcha cargaría la tarjeta que se acaba de cerrar.
+* **Confirmar un período pendiente** ya leía la suscripción dentro de su transacción y no cambia.
+
+### 🧪 Pruebas
+* 3 unitarias nuevas del caso de uso (la lista vieja no carga la tarjeta antigua y el mensaje usa el importe nuevo; borrada, ya cobrada y con varios períodos no se cobran; no cobra dos veces con la misma lista) y 1 que se reescribe. Tres mutaciones efectivas (no comprobar que siga venciendo, mensaje con datos viejos, candidatas con varios períodos): todas detectadas. **Rust 839 pasan.**
+* No se repitió en la app empaquetada.
+
+---
+
+## 🚀 Versión 1.94.0 - 2026-10-13
 **El cobro en efectivo sin caja se rechaza.** Cierra el último hallazgo documentado de A-03 (`p6`): registrar un cobro en efectivo cuando la caja de esa divisa no existe dejaba el ingreso «pagado» sin mover ningún saldo y sin avisar. Es la misma regla que ya aplicaban los gastos (H3) y, desde 1.92.0, los abonos.
 
 ### 🔧 Qué se hace
