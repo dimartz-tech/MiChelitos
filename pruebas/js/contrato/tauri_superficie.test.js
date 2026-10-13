@@ -1,9 +1,10 @@
 // Contrato de la superficie de Tauri (A-02 de la auditoría del 2026-10-02).
 //
-// La interfaz solo necesita `invoke` hacia los comandos de Rust, que Tauri 1 deja disponible siempre. Todo lo demás
-// de la «allowlist» (sistema de archivos, shell, HTTP, diálogos, procesos…) es poder que la capa web no usa y que,
-// ante una inyección en la interfaz, sería poder del atacante. Estas pruebas fijan que se mantiene cerrado y que
-// la interfaz no empieza a depender de otra API sin que se decida.
+// La interfaz solo necesita `invoke` hacia los comandos propios de Rust, que Tauri 2 deja disponibles sin permisos.
+// Todo lo demás (sistema de archivos, shell, HTTP, diálogos, procesos, ventanas, eventos…) es poder que la capa web no
+// usa y que, ante una inyección en la interfaz, sería poder del atacante. Desde Tauri 2 ese poder se concede por
+// «capacidades» (`src-tauri/capabilities`), no por la «allowlist» de Tauri 1. Estas pruebas fijan que la capacidad
+// sigue vacía y que la interfaz no empieza a depender de otra API sin que se decida.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,18 +24,23 @@ function fuentesTs(dir, acumulado = []) {
     return acumulado;
 }
 
-test('la allowlist de Tauri está cerrada: ninguna API nativa queda expuesta a la interfaz', () => {
+test('las capacidades de Tauri están vacías: ninguna API nativa queda expuesta a la interfaz', () => {
+    const dir = join(RAIZ, 'src-tauri', 'capabilities');
+    const archivos = readdirSync(dir).filter(n => n.endsWith('.json'));
+    assert.deepEqual(archivos, ['main.json'], 'una capacidad nueva debe justificarse aquí y en la auditoría');
+    const capacidad = JSON.parse(readFileSync(join(dir, 'main.json'), 'utf8'));
+    assert.deepEqual(capacidad.permissions, [], 'la ventana principal no recibe permisos de la API nativa');
+    assert.deepEqual(capacidad.windows, ['main']);
     const conf = JSON.parse(leer('src-tauri/tauri.conf.json'));
-    assert.equal(conf.tauri.allowlist.all, false);
-    const abiertas = Object.entries(conf.tauri.allowlist).filter(([k, v]) => k !== 'all' && JSON.stringify(v).includes('true'));
-    assert.deepEqual(abiertas, [], 'una API de la allowlist está abierta: justifícala aquí y en la auditoría');
+    assert.deepEqual(conf.app.security?.capabilities ?? ['main'], ['main'], 'solo la capacidad vacía está activa');
+    assert.equal(conf.plugins && Object.keys(conf.plugins).length, 0, 'ningún plugin: cada uno ampliaría la superficie');
 });
 
 test('Cargo no activa `api-all` ni otras funciones de Tauri que la interfaz no usa', () => {
     const linea = leer('src-tauri/Cargo.toml').split('\n').find(l => /^tauri\s*=/.test(l));
     assert.ok(linea, 'no encuentro la dependencia tauri');
     assert.doesNotMatch(linea, /api-all/);
-    assert.match(linea, /features\s*=\s*\[\s*\]/, 'las funciones de Tauri activadas deben coincidir con la allowlist (vacía)');
+    assert.match(linea, /features\s*=\s*\[\s*\]/, 'no se activa ninguna función opcional de Tauri');
 });
 
 test('la interfaz solo usa `invoke` del puente de Tauri, nada de fs, shell, dialog, http, window o event', () => {
@@ -54,7 +60,7 @@ test('la interfaz solo usa `invoke` del puente de Tauri, nada de fs, shell, dial
 // --- La política de contenido (CSP), la otra mitad de A-02 ---
 
 function directivas() {
-    const csp = JSON.parse(leer('src-tauri/tauri.conf.json')).tauri.security.csp;
+    const csp = JSON.parse(leer('src-tauri/tauri.conf.json')).app.security.csp;
     assert.equal(typeof csp, 'string', 'la CSP no puede ser null: sin política, cualquier inyección carga lo que quiera');
     return Object.fromEntries(csp.split(';').map(d => d.trim()).filter(Boolean).map(d => {
         const [nombre, ...valores] = d.split(/\s+/);
