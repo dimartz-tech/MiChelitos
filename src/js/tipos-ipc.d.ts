@@ -17,6 +17,7 @@ export type Prestamo = { id: number; tipo_prestamo: string; monto_prestamo: numb
 export type AbonoTarjeta = { id: number; fecha_pago: string; monto_pagado: number; divisa: string; cuenta_ahorro_id: number | null; cuenta_nombre: string | null; tasa_cambio: number | null };
 export type SimulacionAvance = { monto: number; cargo: number; a_la_tarjeta: number; a_la_cuenta: number };
 export type AvanceEfectivo = { id: number; fecha: string; monto: number; divisa: string; tipo_cargo: string; tasa: number | null; cargo: number; cuenta_ahorro_id: number; cuenta_nombre: string; nota: string | null };
+export type CobrosAutomaticos = { cargos: string[]; fallos: string[] };
 export type MovimientoPrestamo = { id: number; fecha: string; tipo: string; monto: number; interes: number; capital: number; saldo_resultante: number };
 export type CasoCorreccion = { numero_caso: string; fecha: string; tipo: string; referencia_id: number; descripcion: string; importe: number | null; divisa: string | null; motivo: string };
 
@@ -54,7 +55,7 @@ export type Comandos = {
     actualizar_suscripcion: { args: { id: number; plataforma: string; monto: string; tarjetaId: number; frecuencia: string; diaFacturacion: number; divisa: string; fechaProximoCobro?: string | null }; ret: null };
     corregir_proximo_cobro: { args: { id: number; fecha: string }; ret: null };
     eliminar_suscripcion: { args: { id: number }; ret: null };
-    procesar_suscripciones: { args: {  }; ret: string[] };
+    procesar_suscripciones: { args: {  }; ret: CobrosAutomaticos };
     asentar_periodo_pendiente: { args: { id: number }; ret: string };
     descartar_periodo_pendiente: { args: { id: number; motivo: string }; ret: string };
     obtener_capital: { args: {  }; ret: any };

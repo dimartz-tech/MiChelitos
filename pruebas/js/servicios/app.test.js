@@ -22,7 +22,7 @@ const elemento = (extra = {}) => {
     };
 };
 
-function montar({ mensajes = [], falla = false, tema = null, colapsado = null, listo = true } = {}) {
+function montar({ cargos = [], fallos = [], falla = false, tema = null, colapsado = null, listo = true } = {}) {
     const navs = ['dashboard', 'gastos', 'ajustes'].map(r => elemento({ id: `nav-btn-${r}`, clases: r === 'ajustes' ? ['nav-item', 'active'] : ['nav-item'] }));
     const botones = { 'theme-toggle-btn': elemento(), 'sidebar-collapse-btn': elemento() };
     const sidebar = elemento();
@@ -45,7 +45,7 @@ function montar({ mensajes = [], falla = false, tema = null, colapsado = null, l
         enrutador: { mostrar: async ruta => { mostrados.push(ruta); } },
         avisos: { mostrar: (mensaje, tipo) => avisos.push({ mensaje, tipo }) },
         dom: { elemento: id => botones[id], buscar: id => botones[id] ?? navs.find(n => n.id === id) ?? null },
-        api: { procesarSuscripciones: () => (falla ? Promise.reject(new Error('sin red')) : Promise.resolve(mensajes)) },
+        api: { procesarSuscripciones: () => (falla ? Promise.reject(new Error('sin red')) : Promise.resolve({ cargos, fallos })) },
     });
     return {
         navs, botones, sidebar, cuerpo, almacen, programados, mostrados, avisos, escuchas, navigate: globalThis.window.navigate,
@@ -81,7 +81,7 @@ test('si el documento aún se está leyendo, espera a DOMContentLoaded para arra
     assert.deepEqual(t.mostrados, ['dashboard']);
 }));
 
-test('a los 1,5 s procesa las suscripciones: avisa cada cargo y redibuja la pestaña activa', () => conApp({ mensajes: ['Cargo de Netflix', 'Cargo de Spotify'] }, async t => {
+test('a los 1,5 s procesa las suscripciones: avisa cada cargo y redibuja la pestaña activa', () => conApp({ cargos: ['Cargo de Netflix', 'Cargo de Spotify'] }, async t => {
     assert.equal(t.programados[0].ms, 1500);
     t.navigate('ajustes');                  // el titular ya está en otra pestaña cuando llegan los cargos
     t.programados[0].fn();
@@ -90,7 +90,24 @@ test('a los 1,5 s procesa las suscripciones: avisa cada cargo y redibuja la pest
     assert.deepEqual(t.mostrados, ['dashboard', 'ajustes', 'ajustes'], 'recarga la pestaña activa para reflejar los balances');
 }));
 
-test('sin cargos pendientes no avisa ni redibuja; y si falla, no rompe nada', () => conApp({ mensajes: [] }, async t => {
+test('un cobro que falló se avisa como error, sin impedir los cargos de las demás ni redibujar por él', () => conApp({ cargos: ['Cargo de Netflix'], fallos: ['No se pudo cobrar «Rota»: boom. Se reintentará al abrir la aplicación.'] }, async t => {
+    t.programados[0].fn();
+    await asentar();
+    assert.deepEqual(t.avisos, [
+        { mensaje: 'No se pudo cobrar «Rota»: boom. Se reintentará al abrir la aplicación.', tipo: 'error' },
+        { mensaje: 'Cargo de Netflix', tipo: 'success' },
+    ]);
+    assert.deepEqual(t.mostrados, ['dashboard', 'dashboard'], 'hubo un cargo: se redibuja la pestaña activa');
+}));
+
+test('si solo hubo fallos se avisan, pero no se redibuja: ningún saldo cambió', () => conApp({ fallos: ['No se pudo cobrar «Rota»: boom.'] }, async t => {
+    t.programados[0].fn();
+    await asentar();
+    assert.deepEqual(t.avisos, [{ mensaje: 'No se pudo cobrar «Rota»: boom.', tipo: 'error' }]);
+    assert.deepEqual(t.mostrados, ['dashboard']);
+}));
+
+test('sin cargos pendientes no avisa ni redibuja; y si falla, no rompe nada', () => conApp({}, async t => {
     t.programados[0].fn();
     await asentar();
     assert.deepEqual([t.avisos, t.mostrados], [[], ['dashboard']]);
