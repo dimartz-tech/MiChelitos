@@ -113,28 +113,50 @@ pub fn categoria_de_suscripciones(almacen: &mut impl AlmacenSuscripciones) -> Re
     Ok(almacen.crear_categoria("Suscripciones")?)
 }
 
-/// Un cobro que toca hacer solo: la suscripción, su regla y el vencimiento que se salda.
-#[derive(Debug, Clone)]
-pub struct CobroAutomatico {
-    pub suscripcion: SuscripcionRegistrada,
-    pub regla: ReglaDeSuscripcion,
+/// Las suscripciones que **parecen** tocar cobrarse hoy: **solo si hay exactamente un período vencido**. Con varios, la
+/// aplicación no sabe si el proveedor los cobró ni si la suscripción siguió activa: se ofrecen para confirmar
+/// (`confirmar_pendiente`) en vez de fabricarse.
+///
+/// Es una lista de **candidatas** (identificadores) de solo lectura, y nada más: puede quedar vieja antes de que se
+/// asiente el primer cargo. Quien cobra es `cobrar_si_vence`, que vuelve a leer la suscripción dentro de la transacción
+/// de su propio cargo y decide con lo que hay en ese momento.
+pub fn cobros_automaticos(hoy: NaiveDate, almacen: &impl AlmacenSuscripciones) -> Result<Vec<i64>, ErrorAplicacion> {
+    Ok(almacen
+        .suscripciones_registradas()?
+        .into_iter()
+        .filter(|s| {
+            regla_de_un_registro(&s.frecuencia, s.fecha_proximo_cobro.as_deref(), s.dia_facturacion)
+                .is_some_and(|r| r.cobro_automatico(hoy).is_some())
+        })
+        .map(|s| s.id)
+        .collect())
+}
+
+/// Lo que de verdad se cobró, leído de la suscripción **en el momento del cargo**.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CargoAsentado {
+    pub plataforma: String,
+    pub divisa: String,
+    pub monto: f64,
     pub vencimiento: NaiveDate,
 }
 
-/// Los cobros que toca hacer hoy: **solo si hay exactamente un período vencido**. Con varios, la aplicación no sabe si el
-/// proveedor los cobró ni si la suscripción siguió activa: se ofrecen para confirmar (`confirmar_pendiente`) en vez de
-/// fabricarse. Es de solo lectura; cada cobro se asienta aparte, en su propia transacción.
-pub fn cobros_automaticos(
+/// Cobra la suscripción `id` si **sigue** venciendo hoy. Relee todo dentro de la transacción de quien llama: una
+/// suscripción borrada, editada (otra tarjeta, otro importe), ya cobrada por otra vía o con varios períodos acumulados
+/// desde que se hizo la lista de candidatas no carga la tarjeta antigua ni cobra dos veces. `None` si ya no toca.
+pub fn cobrar_si_vence(
+    id: i64,
     hoy: NaiveDate,
-    almacen: &impl AlmacenSuscripciones,
-) -> Result<Vec<CobroAutomatico>, ErrorAplicacion> {
-    let mut cobros = Vec::new();
-    for s in almacen.suscripciones_registradas()? {
-        let Some(regla) = regla_de_un_registro(&s.frecuencia, s.fecha_proximo_cobro.as_deref(), s.dia_facturacion) else { continue };
-        let Some(vencimiento) = regla.cobro_automatico(hoy) else { continue };
-        cobros.push(CobroAutomatico { suscripcion: s, regla, vencimiento });
-    }
-    Ok(cobros)
+    categoria: i64,
+    almacen: &mut (impl AlmacenGastos + AlmacenSuscripciones),
+) -> Result<Option<CargoAsentado>, ErrorAplicacion> {
+    let Some(sub) = almacen.suscripciones_registradas()?.into_iter().find(|s| s.id == id) else { return Ok(None) };
+    let Some(regla) = regla_de_un_registro(&sub.frecuencia, sub.fecha_proximo_cobro.as_deref(), sub.dia_facturacion) else {
+        return Ok(None);
+    };
+    let Some(vencimiento) = regla.cobro_automatico(hoy) else { return Ok(None) };
+    asentar_cargo(&sub, &regla, vencimiento, categoria, almacen)?;
+    Ok(Some(CargoAsentado { plataforma: sub.plataforma, divisa: sub.divisa, monto: sub.monto, vencimiento }))
 }
 
 /// Mueve la fecha del próximo cobro al período siguiente, **desde el vencimiento saldado** y no desde hoy.
@@ -322,28 +344,62 @@ mod tests {
     }
 
     #[test]
-    fn solo_se_cobra_solo_cuando_hay_exactamente_un_periodo_vencido() {
+    fn solo_son_candidatas_las_que_tienen_exactamente_un_periodo_vencido() {
         let mut a = almacen();
-        crear_suscripcion(datos("Uno", "mensual", 15, Some("15/03/2026")), &mut a).unwrap();
+        let uno = crear_suscripcion(datos("Uno", "mensual", 15, Some("15/03/2026")), &mut a).unwrap();
         crear_suscripcion(datos("Varios", "mensual", 15, Some("15/01/2026")), &mut a).unwrap();
         crear_suscripcion(datos("Futura", "mensual", 15, Some("15/09/2026")), &mut a).unwrap();
         crear_suscripcion(datos("SinFecha", "mensual", 15, None), &mut a).unwrap();
-        let cobros = cobros_automaticos(fecha(2026, 3, 20), &a).unwrap();
-        assert_eq!(cobros.iter().map(|c| c.suscripcion.plataforma.as_str()).collect::<Vec<_>>(), vec!["Varios"].into_iter().filter(|_| false).chain(["Uno"]).collect::<Vec<_>>());
-        assert_eq!(cobros[0].vencimiento, fecha(2026, 3, 15));
+        assert_eq!(cobros_automaticos(fecha(2026, 3, 20), &a).unwrap(), vec![uno]);
     }
 
     #[test]
-    fn asentar_cobra_con_la_fecha_del_vencimiento_sube_la_deuda_y_avanza_desde_el_vencimiento() {
+    fn cobrar_si_vence_cobra_con_la_fecha_del_vencimiento_sube_la_deuda_y_avanza_desde_el_vencimiento() {
         let mut a = almacen();
-        crear_suscripcion(datos("Uno", "mensual", 15, Some("15/03/2026")), &mut a).unwrap();
-        let cobro = cobros_automaticos(fecha(2026, 3, 20), &a).unwrap().remove(0);
-        asentar_cargo(&cobro.suscripcion, &cobro.regla, cobro.vencimiento, 7, &mut a).unwrap();
+        let id = crear_suscripcion(datos("Uno", "mensual", 15, Some("15/03/2026")), &mut a).unwrap();
+        let cargo = cobrar_si_vence(id, fecha(2026, 3, 20), 7, &mut a).unwrap().unwrap();
+        assert_eq!(cargo, CargoAsentado { plataforma: "Uno".into(), divisa: "DOP".into(), monto: 500.0, vencimiento: fecha(2026, 3, 15) });
         assert_eq!(a.deuda_de(20), dop(500.0));
         assert_eq!(a.gastos.len(), 1);
         let s = &a.suscripciones[0];
         assert_eq!(s.datos.fecha_proximo_cobro.as_deref(), Some("15/04/2026"), "desde el vencimiento saldado, no desde hoy");
         assert_eq!(s.fecha_ultimo_pago.as_deref(), Some("15/03/2026"));
+    }
+
+    #[test]
+    fn una_lista_vieja_no_carga_la_tarjeta_antigua_porque_el_cobro_relee_la_suscripcion() {
+        let mut a = almacen().con_tarjeta(21, dop(0.0));
+        let id = crear_suscripcion(datos("Uno", "mensual", 15, Some("15/03/2026")), &mut a).unwrap();
+        let candidatas = cobros_automaticos(fecha(2026, 3, 20), &a).unwrap();
+        // Entre la lista y el cargo, el titular traslada la suscripción a otra tarjeta y cambia el importe.
+        let mut nueva = datos("Uno", "mensual", 15, Some("15/03/2026"));
+        nueva.tarjeta_id = 21;
+        nueva.monto = dop(80.0);
+        editar_suscripcion(id, nueva, &mut a).unwrap();
+        let cargo = cobrar_si_vence(candidatas[0], fecha(2026, 3, 20), 7, &mut a).unwrap().unwrap();
+        assert_eq!((a.deuda_de(20), a.deuda_de(21)), (dop(0.0), dop(80.0)), "la tarjeta antigua no se toca");
+        assert_eq!(cargo.monto, 80.0, "el mensaje cuenta lo que de verdad se cobró");
+    }
+
+    #[test]
+    fn si_la_suscripcion_ya_no_vence_borrada_cobrada_o_con_varios_periodos_no_se_cobra() {
+        let mut a = almacen();
+        let borrada = crear_suscripcion(datos("Borrada", "mensual", 15, Some("15/03/2026")), &mut a).unwrap();
+        let cobrada = crear_suscripcion(datos("Cobrada", "mensual", 15, Some("15/03/2026")), &mut a).unwrap();
+        let acumulada = crear_suscripcion(datos("Acumulada", "mensual", 15, Some("15/03/2026")), &mut a).unwrap();
+        let hoy = fecha(2026, 3, 20);
+        let candidatas = cobros_automaticos(hoy, &a).unwrap();
+        assert_eq!(candidatas, vec![borrada, cobrada, acumulada]);
+
+        eliminar_suscripcion(borrada, &mut a).unwrap();
+        assert!(cobrar_si_vence(cobrada, hoy, 7, &mut a).unwrap().is_some());
+        // Dos veces seguidas con la misma lista: el segundo intento ve el puntero ya avanzado.
+        assert!(cobrar_si_vence(cobrada, hoy, 7, &mut a).unwrap().is_none(), "no cobra dos veces");
+        corregir_proximo_cobro(acumulada, "15/01/2026", &mut a).unwrap();
+
+        assert!(cobrar_si_vence(borrada, hoy, 7, &mut a).unwrap().is_none());
+        assert!(cobrar_si_vence(acumulada, hoy, 7, &mut a).unwrap().is_none(), "con varios períodos se ofrece confirmar");
+        assert_eq!(a.gastos.len(), 1, "solo el cargo de «Cobrada»");
     }
 
     #[test]

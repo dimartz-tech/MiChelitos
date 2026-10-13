@@ -940,20 +940,21 @@ fn procesar_suscripciones() -> Result<Vec<String>, String> {
 pub fn procesar_suscripciones_con(reloj: &dyn crate::puertos::reloj::Reloj) -> Result<Vec<String>, String> {
     let hoy = reloj.hoy();
     let categoria = con_almacen(|a| Ok(aplicacion::suscripciones::categoria_de_suscripciones(a)?))?;
-    let cobros = con_almacen(|a| Ok(aplicacion::suscripciones::cobros_automaticos(hoy, a)?))?;
+    // Solo candidatas: cada cargo vuelve a leer su suscripción dentro de su propia transacción.
+    let candidatas = con_almacen(|a| Ok(aplicacion::suscripciones::cobros_automaticos(hoy, a)?))?;
 
     let mut mensajes = Vec::new();
-    for cobro in cobros {
-        con_almacen(|a| {
-            Ok(aplicacion::suscripciones::asentar_cargo(&cobro.suscripcion, &cobro.regla, cobro.vencimiento, categoria, a)?)
-        })?;
-        mensajes.push(format!(
-            "Cargo automático realizado para {} ({} {:.2}) con fecha {}",
-            cobro.suscripcion.plataforma,
-            cobro.suscripcion.divisa,
-            cobro.suscripcion.monto,
-            cobro.vencimiento.format("%d/%m/%Y")
-        ));
+    for id in candidatas {
+        let cargo = con_almacen(|a| Ok(aplicacion::suscripciones::cobrar_si_vence(id, hoy, categoria, a)?))?;
+        if let Some(cargo) = cargo {
+            mensajes.push(format!(
+                "Cargo automático realizado para {} ({} {:.2}) con fecha {}",
+                cargo.plataforma,
+                cargo.divisa,
+                cargo.monto,
+                cargo.vencimiento.format("%d/%m/%Y")
+            ));
+        }
     }
     Ok(mensajes)
 }
