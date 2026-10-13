@@ -42,6 +42,11 @@ fn raiz_temporal() -> std::path::PathBuf {
 /// resuelve la ruta de la base desde `HOME`, que es estado global del proceso.
 /// Esa dependencia global es precisamente lo que la Fase 1 elimina al
 /// introducir repositorios inyectables.
+/// Para pruebas de otros módulos que necesitan `HOME` aislado (p. ej. `db_sql`).
+pub(crate) fn entorno_para_pruebas_externas() -> MutexGuard<'static, ()> {
+    entorno_aislado()
+}
+
 fn entorno_aislado() -> MutexGuard<'static, ()> {
     let guarda = bloquear_entorno();
 

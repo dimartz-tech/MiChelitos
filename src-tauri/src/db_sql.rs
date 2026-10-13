@@ -18,8 +18,33 @@ pub fn obtener_conexion() -> Result<Connection> {
     }
 
     let conn = Connection::open(db_path)?;
+    // Explícito: rusqlite trae 5 000 ms por defecto pero avisa de que puede cambiar, y de este valor depende cuánto
+    // espera un escritor a que otro termine (ver `transaccion`).
+    conn.busy_timeout(std::time::Duration::from_millis(ESPERA_OCUPADA_MS))?;
     conn.execute("PRAGMA foreign_keys = ON;", [])?;
     Ok(conn)
+}
+
+/// Cuánto espera una conexión a que otra suelte la base antes de fallar con «database is locked».
+pub const ESPERA_OCUPADA_MS: u64 = 5_000;
+
+/// Abre la transacción de un comando.
+///
+/// * **`escritura = true` → `IMMEDIATE`**: toma el derecho de escribir **antes de leer**. Un caso de uso que lee un
+///   saldo, decide y escribe (casi todos: `ajustar_saldo` suma en Rust y escribe el valor absoluto) ve entonces una
+///   base que nadie más puede cambiar hasta su `COMMIT`. Con una transacción diferida, si otra conexión escribía entre
+///   su lectura y su escritura, SQLite abortaba la suya **al instante** con «database is locked» —sin esperar el
+///   tiempo de espera—, y un cobro automático fallido cortaba el bucle de los demás. Con `IMMEDIATE` el otro escritor
+///   espera, hasta [`ESPERA_OCUPADA_MS`].
+/// * **`escritura = false` → diferida**: los listados no escriben y no deben ocupar el turno de escritura; en el modo
+///   de journal por defecto siguen leyendo mientras otro tiene el derecho de escribir.
+pub fn transaccion(conn: &mut Connection, escritura: bool) -> Result<rusqlite::Transaction<'_>> {
+    let comportamiento = if escritura {
+        rusqlite::TransactionBehavior::Immediate
+    } else {
+        rusqlite::TransactionBehavior::Deferred
+    };
+    conn.transaction_with_behavior(comportamiento)
 }
 
 /// Prepara el almacenamiento: respalda, migra y siembra.
@@ -1753,4 +1778,133 @@ pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
     sembrar(conn)
+}
+
+/// Concurrencia entre conexiones: por qué las operaciones que escriben abren su transacción `IMMEDIATE`.
+#[cfg(test)]
+mod pruebas_de_transaccion {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    /// Una base temporal con una fila `(balance 0, archivada 0)`; devuelve su ruta.
+    fn base(nombre: &str) -> std::path::PathBuf {
+        let ruta = std::env::temp_dir().join(format!("michelitos-tx-{}-{nombre}.db", std::process::id()));
+        let _ = std::fs::remove_file(&ruta);
+        let c = Connection::open(&ruta).unwrap();
+        c.execute_batch("CREATE TABLE t (balance INTEGER NOT NULL, archivada INTEGER NOT NULL); INSERT INTO t VALUES (0, 0);").unwrap();
+        ruta
+    }
+
+    fn abrir(ruta: &std::path::Path) -> Connection {
+        let c = Connection::open(ruta).unwrap();
+        c.busy_timeout(Duration::from_millis(ESPERA_OCUPADA_MS)).unwrap();
+        c
+    }
+
+    /// A lee el saldo, espera y archiva; B sube el saldo en medio. Devuelve lo que le pasó a A, cuánto esperó B y el
+    /// estado final.
+    fn leer_validar_escribir(escritura: bool, nombre: &str) -> (Result<usize, rusqlite::Error>, Duration, (i64, i64)) {
+        let ruta = base(nombre);
+        let (leyo, ya_leyo) = mpsc::channel::<()>();
+        let ruta_b = ruta.clone();
+        let b = std::thread::spawn(move || {
+            ya_leyo.recv().unwrap();
+            let c = abrir(&ruta_b);
+            let t0 = Instant::now();
+            c.execute("UPDATE t SET balance = 100;", []).unwrap();
+            t0.elapsed()
+        });
+        let mut a = abrir(&ruta);
+        let resultado = {
+            let tx = transaccion(&mut a, escritura).unwrap();
+            let balance: i64 = tx.query_row("SELECT balance FROM t;", [], |r| r.get(0)).unwrap();
+            assert_eq!(balance, 0);
+            leyo.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(400)); // B intenta escribir en medio
+            let r = tx.execute("UPDATE t SET archivada = 1 WHERE balance = 0;", []);
+            if r.is_ok() {
+                tx.commit().unwrap();
+            }
+            r
+        };
+        let espera_de_b = b.join().unwrap();
+        let fila = Connection::open(&ruta).unwrap().query_row("SELECT balance, archivada FROM t;", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        let _ = std::fs::remove_file(&ruta);
+        (resultado, espera_de_b, fila)
+    }
+
+    #[test]
+    fn con_una_transaccion_diferida_leer_y_luego_escribir_falla_al_instante_si_otro_escribio_en_medio() {
+        let (a, _, fila) = leer_validar_escribir(false, "diferida");
+        let e = a.expect_err("la escritura de A debía abortarse");
+        assert!(e.to_string().contains("locked"), "{e}");
+        assert_eq!(fila, (100, 0), "no hay pérdida silenciosa: A no archivó y B escribió");
+    }
+
+    #[test]
+    fn con_una_transaccion_immediate_el_otro_escritor_espera_y_la_operacion_se_completa() {
+        let (a, espera_de_b, fila) = leer_validar_escribir(true, "immediate");
+        assert_eq!(a.unwrap(), 1, "A archivó viendo el saldo que validó");
+        assert!(espera_de_b >= Duration::from_millis(300), "B esperó a que A terminara: {espera_de_b:?}");
+        assert_eq!(fila, (100, 1), "B escribió después del commit de A");
+    }
+
+    #[test]
+    fn un_listado_diferido_sigue_leyendo_mientras_otro_tiene_el_turno_de_escritura() {
+        let ruta = base("lectura");
+        let mut escritor = abrir(&ruta);
+        let tx = transaccion(&mut escritor, true).unwrap();
+        tx.execute("UPDATE t SET balance = 5;", []).unwrap();
+        let mut lector = abrir(&ruta);
+        let t0 = Instant::now();
+        let leido = {
+            let lectura = transaccion(&mut lector, false).unwrap();
+            lectura.query_row("SELECT balance FROM t;", [], |r| r.get::<_, i64>(0)).unwrap()
+        };
+        assert_eq!(leido, 0, "ve lo confirmado, no lo que A aún no confirmó");
+        assert!(t0.elapsed() < Duration::from_millis(500), "no se quedó esperando al escritor");
+        tx.commit().unwrap();
+        let _ = std::fs::remove_file(&ruta);
+    }
+
+    #[test]
+    fn la_conexion_de_la_aplicacion_fija_su_espera_explicitamente() {
+        let _g = crate::caracterizacion::entorno_para_pruebas_externas();
+        let c = obtener_conexion().unwrap();
+        let milis: i64 = c.query_row("PRAGMA busy_timeout;", [], |r| r.get(0)).unwrap();
+        assert_eq!(milis, ESPERA_OCUPADA_MS as i64);
+        // El valor por defecto de rusqlite hoy coincide, pero su documentación avisa de que puede cambiar: que esté escrito
+        // aquí es lo que se garantiza.
+        assert!(include_str!("db_sql.rs").contains("conn.busy_timeout(std::time::Duration::from_millis(ESPERA_OCUPADA_MS))"));
+    }
+
+    #[test]
+    fn los_comandos_no_abren_transacciones_diferidas_a_mano() {
+        // Los comandos de `main.rs` abren su transacción solo por `db_sql::transaccion` (o por los ayudantes `con_*` /
+        // `lee_*` que la usan): una `conn.transaction()` suelta volvería al modo diferido sin que nadie lo decida.
+        let fuente = include_str!("main.rs");
+        assert!(!fuente.contains(".transaction()"), "usa db_sql::transaccion(&mut conn, escritura)");
+        let escritura = fuente.matches("db_sql::transaccion(&mut conn, true)").count();
+        assert_eq!(escritura, 3, "las tres operaciones sueltas que escriben");
+        // Cada función de main.rs: un listado usa solo `lee_*`, y nada que escriba usa `lee_*`.
+        let mut revisadas = 0;
+        for trozo in fuente.split("\nfn ").skip(1).chain(fuente.split("\npub fn ").skip(1)) {
+            let nombre = trozo.split('(').next().unwrap().split('<').next().unwrap();
+            let cuerpo = trozo.split("\n}\n").next().unwrap();
+            if nombre.starts_with("con_") || nombre.starts_with("lee_") {
+                continue;
+            }
+            let es_listado = nombre.starts_with("obtener_") || nombre == "suscripciones_con_aviso";
+            let usa_lectura = ["lee_almacen(", "lee_catalogos(", "lee_cuentas(", "lee_prestamos(", "lee_tarjetas("].iter().any(|h| cuerpo.contains(h));
+            let usa_escritura = ["con_almacen(", "con_catalogos(", "con_cuentas(", "con_prestamos(", "con_tarjetas("].iter().any(|h| cuerpo.contains(h));
+            if es_listado {
+                assert!(!usa_escritura, "{nombre} es un listado y no debe ocupar el turno de escritura");
+                revisadas += usize::from(usa_lectura);
+            } else {
+                assert!(!usa_lectura, "{nombre} escribe: su transacción debe ser IMMEDIATE");
+            }
+        }
+        assert!(revisadas >= 10, "el recorrido no encontró los listados ({revisadas})");
+    }
 }
