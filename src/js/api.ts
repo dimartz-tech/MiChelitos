@@ -136,8 +136,17 @@ const AppAPI = {
         });
     },
 
-    async eliminarCuenta(id: number | string) {
-        return await invoke('eliminar_cuenta', { id: Number(id) });
+    async obtenerCuentasArchivadas() {
+        return await invoke('obtener_cuentas_archivadas');
+    },
+
+    /** Archiva una cuenta con saldo exactamente cero. No existe el borrado: el historial se conserva. */
+    async archivarCuenta(id: number | string) {
+        return await invoke('archivar_cuenta', { id: Number(id) });
+    },
+
+    async reactivarCuenta(id: number | string) {
+        return await invoke('reactivar_cuenta', { id: Number(id) });
     },
 
     async transferirEntreCuentas(fecha: string, origenId: number | string, destinoId: number | string, montoOrigen: string, montoDestino: string, cargo: string, descripcion: string) {

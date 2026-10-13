@@ -20,6 +20,7 @@ pub(super) fn resolver_deposito(
     cuenta_id: i64,
     importe: Dinero,
 ) -> Result<Deposito, ErrorAplicacion> {
+    super::cuentas::exigir_activa(almacen, cuenta_id)?;
     let divisa_cuenta = match almacen.divisa(cuenta_id) {
         Ok(d) => d,
         Err(ErrorAlmacen::NoEncontrado { .. }) => return Err(ErrorDominio::CuentaNoEncontrada { id: cuenta_id }.into()),

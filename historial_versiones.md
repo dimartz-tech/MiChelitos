@@ -4,7 +4,26 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.97.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.98.0 (Versión Actual) - 2026-10-14
+**Las cuentas se archivan, no se borran.** Primer tramo del cierre previsto para la RC (las tarjetas siguen en el siguiente). Sustituye a «Eliminar cuenta», que terminaba en un `DELETE`. **Cambio de reglas decidido por el titular.**
+
+### 🔧 Qué se hace
+* **Migración 16:** `cuentas_ahorro.archivada` (0/1, todas las existentes activas) y dos **disparadores `BEFORE DELETE`**, en `cuentas_ahorro` y en `tarjetas`. Las claves foráneas de pagos, bonificaciones, suscripciones y transferencias son `ON DELETE CASCADE`: un `DELETE` directo, por la vía que sea, se llevaría el historial. Ahora la base lo rechaza («Las cuentas no se borran: se archivan.» / «Las tarjetas no se borran: se desactivan.»). La migración 11 deja de rechazar una tabla que ya lleva sus restricciones por tener disparadores propios (comprobaba los disparadores antes que la idempotencia).
+* **Archivar:** exige saldo **exactamente cero** en la divisa de la cuenta (centavos, sin tolerancias) y que no sea la caja de efectivo. Distingue «tiene DOP 0.01 a favor» de «saldo pendiente de USD −0.01 por conciliar». La sentencia de archivo repite las tres condiciones en su `WHERE`, dentro de la transacción de escritura. La cuenta conserva identificador, nombre, divisa e historial.
+* **Reactivar:** cambia solo el estado; el saldo sigue en cero.
+* **Lecturas:** `obtener_cuentas` devuelve **solo las activas** (selectores, saldos, Cuentas, Ajustes); `obtener_cuentas_archivadas` alimenta el bloque «Cuentas archivadas» de Ajustes. Los historiales resuelven por identificador y siguen viendo las archivadas.
+* **Barreras de integridad:** `ajustar_saldo` no mueve dinero de una cuenta archivada —ni una operación nueva ni la reversión de una vieja, que primero exige reactivarla—, y gastos, transferencias (origen y destino), abonos, avances y cobros de facturas e informales la rechazan al empezar, también los de importe cero.
+* **Nombre:** sigue siendo único entre todas las cuentas; el de una archivada queda ocupado y crear o renombrar con él dice «Ya existe una cuenta archivada llamada «X». Reactívala o elige otro nombre.» (una unicidad solo entre activas exigiría reconstruir la tabla; queda pendiente de decidir).
+* **Interfaz (Ajustes):** el botón 🗑️ pasa a «📦 Archivar», con confirmación; las archivadas van en un bloque plegable «Cuentas archivadas (N)», con su estado en texto, **sin balances** y con «♻️ Reactivar».
+* **Se retiran** `eliminar_cuenta` (comando, caso de uso y puerto) y la guarda por referencias: ya no hay nada que borrar.
+
+### 🧪 Pruebas
+* 8 de caracterización nuevas (`ar1`–`ar7`, `ar4b`) que reemplazan a las 10 de la baja, 4 unitarias del caso de uso, un bloque del contrato que ejecutan el doble y el adaptador SQLite, y 5 de la interfaz. Quince mutaciones: 11 detectadas; las 4 que sobreviven son comprobaciones tempranas redundantes con la barrera de `ajustar_saldo` (gasto, destino de la transferencia, abono, avance) y una comparación que respalda el `WHERE`: dan el mismo resultado observable. **Rust 842 y frontend 592 pasan.**
+* No se repitió en la app empaquetada.
+
+---
+
+## 🚀 Versión 1.97.0 - 2026-10-14
 **El cobro automático de suscripciones continúa tras un fallo y lo informa como error.** Antes, un solo cargo que fallara (por ejemplo, la base rechazaba su gasto) cortaba el recorrido con `?`: las suscripciones posteriores no se cobraban hasta el siguiente arranque y la interfaz no se enteraba de qué había pasado.
 
 ### 🔧 Qué se hace

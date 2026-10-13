@@ -6,7 +6,7 @@
 //! comportamiento es correcto: lo fijan.
 
 use crate::db_sql;
-use crate::{crear_gasto, crear_suscripcion, eliminar_cuenta, eliminar_gasto, registrar_pago_tarjeta, revertir_abono_tarjeta, GastoInput, crear_ingreso, marcar_ingreso_pagado, eliminar_ingreso, actualizar_ingreso, crear_ingreso_informal, marcar_informal_pagado, eliminar_ingreso_informal, crear_cobro_efectivo_informal, IngresoInput};
+use crate::{crear_gasto, crear_suscripcion, eliminar_gasto, registrar_pago_tarjeta, revertir_abono_tarjeta, GastoInput, crear_ingreso, marcar_ingreso_pagado, eliminar_ingreso, actualizar_ingreso, crear_ingreso_informal, marcar_informal_pagado, eliminar_ingreso_informal, crear_cobro_efectivo_informal, IngresoInput};
 use rusqlite::{params, Connection};
 use std::sync::{Mutex, MutexGuard};
 
@@ -430,30 +430,6 @@ fn c10_renombrar_la_caja_ya_no_impide_que_el_gasto_se_asiente() {
         antes - 1200.0,
         "el saldo sí se movió pese al renombrado",
     );
-}
-
-#[test]
-fn c10b_la_caja_de_efectivo_no_se_puede_eliminar() {
-    // La vía por la que H3 era alcanzable desde la interfaz: la guarda de
-    // eliminar_cuenta contaba gastos con cuenta_ahorro_id, y los gastos en
-    // efectivo lo tenían nulo porque se vinculaban por nombre. La caja se
-    // borraba sin que nada lo impidiera.
-    let _g = entorno_aislado();
-    let caja: i64 = conexion()
-        .query_row(
-            "SELECT id FROM cuentas_ahorro WHERE es_caja_efectivo = 1 AND divisa = 'DOP';",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-
-    let error = eliminar_cuenta(caja).unwrap_err();
-
-    assert!(error.contains("caja de efectivo"), "explica por qué: {error}");
-    let sigue: i64 = conexion()
-        .query_row("SELECT COUNT(*) FROM cuentas_ahorro WHERE id = ?;", [caja], |r| r.get(0))
-        .unwrap();
-    assert_eq!(sigue, 1, "la caja sigue ahí");
 }
 
 #[test]
@@ -2278,37 +2254,6 @@ fn c50_h12_el_importe_de_destino_se_interpreta_en_la_divisa_de_su_cuenta() {
 }
 
 #[test]
-fn c51_h13_una_cuenta_con_transferencias_no_se_puede_eliminar() {
-    // **H13 resuelto.** Antes la guarda contaba gastos pero no transferencias,
-    // y como la clave foránea es ON DELETE CASCADE el historial se iba en
-    // silencio, dejando a la contraparte con el dinero recibido sin
-    // constancia de dónde había salido.
-    let _g = entorno_aislado();
-    let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
-    let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
-    crate::transferir_entre_cuentas(
-        "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(0.0), "Traspaso".into(),
-    )
-    .unwrap();
-    assert_eq!(total_transferencias(), 1);
-
-    let error = crate::eliminar_cuenta(origen).unwrap_err();
-
-    assert!(error.contains("transferencias"), "explica por qué: {error}");
-    assert_eq!(total_transferencias(), 1, "el historial sigue ahí");
-    assert_importe(saldo_cuenta_id(origen), 42_000.0, "y la cuenta también");
-}
-
-#[test]
-fn c52_una_cuenta_con_gastos_asociados_no_se_puede_eliminar() {
-    let _g = entorno_aislado();
-    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
-    crear_gasto(transferencia(1_000.0, "Alimentación", "Compra", cuenta)).unwrap();
-
-    assert!(crate::eliminar_cuenta(cuenta).is_err(), "la guarda sí cubre los gastos");
-}
-
-#[test]
 fn c53_una_transferencia_puede_dejar_el_origen_en_negativo() {
     // No se comprueban fondos. Se fija como conducta vigente: decidir si un
     // sobregiro es legítimo corresponde al titular, no a esta prueba.
@@ -3885,22 +3830,6 @@ fn c123_el_gasto_del_cargo_no_se_puede_borrar_por_separado() {
 }
 
 #[test]
-fn c124_una_cuenta_que_recibio_un_avance_no_se_puede_eliminar() {
-    let _g = entorno_aislado();
-    let tarjeta = crear_tarjeta(0.0, 0.0);
-    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
-    avance(tarjeta, cuenta, "1350.00", "exonerado", None, None).unwrap();
-
-    let r = crate::eliminar_cuenta(cuenta);
-    assert!(r.unwrap_err().contains("avances de efectivo"));
-
-    // Revertido el avance, la guarda se levanta.
-    let id: i64 = conexion().query_row("SELECT id FROM avances_efectivo;", [], |r| r.get(0)).unwrap();
-    crate::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
-    assert!(crate::eliminar_cuenta(cuenta).is_ok());
-}
-
-#[test]
 fn c125_el_esquema_rechaza_un_avance_que_se_contradice() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
@@ -4012,91 +3941,6 @@ fn c129_simular_rechaza_lo_mismo_que_registrar() {
 // factura cobrada, la cuenta borrada sin error, la factura pagada con
 // `cuenta_ahorro_id` nulo, y borrar esa factura después sin devolver nada a
 // ninguna parte.
-
-#[test]
-fn c130_una_cuenta_con_una_factura_cobrada_en_ella_no_se_puede_eliminar() {
-    let _g = entorno_aislado();
-    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
-    let id = crear_ingreso(factura("Z-001", 5_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(4_250.0)).unwrap();
-
-    let error = crate::eliminar_cuenta(cuenta).unwrap_err();
-
-    assert!(error.contains("facturas"), "explica por qué: {error}");
-    let destino: Option<i64> = conexion()
-        .query_row("SELECT cuenta_ahorro_id FROM ingresos WHERE id = ?;", [id], |r| r.get(0))
-        .unwrap();
-    assert_eq!(destino, Some(cuenta), "la factura conserva su cuenta de depósito");
-}
-
-#[test]
-fn c131_revertida_la_factura_la_cuenta_vuelve_a_poder_eliminarse() {
-    // La guarda no puede volverse un candado: al deshacer el cobro, se levanta.
-    let _g = entorno_aislado();
-    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
-    let id = crear_ingreso(factura("Z-002", 5_000.0, 15.0)).unwrap();
-    marcar_ingreso_pagado(id, cuenta, "20/09/2026".into(), monto(4_250.0)).unwrap();
-    assert!(crate::eliminar_cuenta(cuenta).is_err());
-
-    eliminar_ingreso(id, motivo_de_prueba()).unwrap();
-
-    assert!(crate::eliminar_cuenta(cuenta).is_ok());
-}
-
-#[test]
-fn c132_una_cuenta_con_un_ingreso_informal_cobrado_en_ella_no_se_puede_eliminar() {
-    let _g = entorno_aislado();
-    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100.0);
-    let id = crear_ingreso_informal("20/09/2026".into(), "Trabajo puntual".into(), monto(3_000.0)).unwrap();
-    marcar_informal_pagado(id, cuenta, "20/09/2026".into(), monto(3_000.0)).unwrap();
-
-    let error = crate::eliminar_cuenta(cuenta).unwrap_err();
-
-    assert!(error.contains("informales"), "explica por qué: {error}");
-}
-
-#[test]
-fn c133_una_cuenta_que_pago_un_abono_no_se_elimina_aunque_borren_el_gasto_de_su_comision() {
-    // Antes solo la frenaba, de rebote, el gasto de la comisión del abono. Ese
-    // gasto ya no se puede borrar por separado (c136), pero la guarda de la
-    // cuenta no debe depender de eso: se reproduce el estado de una base a la
-    // que se le quitó la comisión por otra vía, con SQL directo.
-    let _g = entorno_aislado();
-    let tarjeta = crear_tarjeta(1_000.0, 0.0);
-    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000.0);
-    registrar_pago_tarjeta(tarjeta, "20/09/2026".into(), monto(500.0), "DOP".into(), Some(cuenta), 0.0).unwrap();
-    let gasto_comision: i64 = conexion()
-        .query_row("SELECT gasto_comision_id FROM pagos_tarjeta;", [], |r| r.get(0))
-        .unwrap();
-    conexion().execute("DELETE FROM gastos WHERE id = ?;", [gasto_comision]).unwrap();
-    assert_eq!(total_gastos(), 0, "la comisión ya no existe como gasto");
-
-    let error = crate::eliminar_cuenta(cuenta).unwrap_err();
-
-    assert!(error.contains("abonos"), "explica por qué: {error}");
-}
-
-#[test]
-fn c134_las_guardas_que_ya_existian_siguen_diciendo_lo_mismo() {
-    // La lista sustituyó a tres comprobaciones sueltas; los mensajes que ya
-    // conocía el titular no cambian.
-    let _g = entorno_aislado();
-    let origen = crear_cuenta("Origen", "DOP", 1_000.0);
-    let destino = crear_cuenta("Destino", "DOP", 0.0);
-    crate::transferir_entre_cuentas("20/09/2026".into(), origen, destino, monto(500.0), monto(500.0), monto(0.0), "x".into()).unwrap();
-
-    let error = crate::eliminar_cuenta(destino).unwrap_err();
-
-    assert!(error.contains("transferencias"), "{error}");
-    assert!(error.contains("historial"), "{error}");
-}
-
-#[test]
-fn c135_una_cuenta_sin_ninguna_relacion_si_se_elimina() {
-    let _g = entorno_aislado();
-    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
-    assert!(crate::eliminar_cuenta(cuenta).is_ok());
-}
 
 #[test]
 fn c136_la_comision_de_un_abono_no_se_puede_borrar_por_separado() {
@@ -6026,4 +5870,209 @@ fn su7_un_cobro_automatico_que_falla_no_corta_los_demas_se_deshace_y_se_informa_
     let r = crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 21)).unwrap();
     assert_eq!((r.cargos.len(), r.fallos.len()), (1, 0));
     assert!(r.cargos[0].contains("Rota"));
+}
+
+// --- Archivo de cuentas (RC): las cuentas se archivan, no se borran ---
+
+fn cuenta_activa(id: i64) -> bool {
+    crate::obtener_cuentas().unwrap().iter().any(|c| c.id == id)
+}
+
+fn cuenta_archivada(id: i64) -> bool {
+    crate::obtener_cuentas_archivadas().unwrap().iter().any(|c| c.id == id)
+}
+
+fn dejar_en_cero(id: i64) {
+    conexion().execute("UPDATE cuentas_ahorro SET balance_actual = 0 WHERE id = ?;", [id]).unwrap();
+}
+
+#[test]
+fn ar1_la_caja_de_efectivo_no_se_archiva() {
+    let _g = entorno_aislado();
+    let caja: i64 = conexion()
+        .query_row("SELECT id FROM cuentas_ahorro WHERE es_caja_efectivo = 1 AND divisa = 'DOP';", [], |r| r.get(0))
+        .unwrap();
+    dejar_en_cero(caja);
+    let e = crate::archivar_cuenta(caja).unwrap_err();
+    assert!(e.contains("caja de efectivo"), "explica por qué: {e}");
+    assert!(cuenta_activa(caja), "la caja sigue activa aunque esté en cero");
+}
+
+#[test]
+fn ar2_archivar_exige_saldo_exactamente_cero_y_distingue_a_favor_de_pendiente() {
+    let _g = entorno_aislado();
+    let a_favor = crear_cuenta("Con centavo a favor", "DOP", 0.01);
+    let pendiente = crear_cuenta("Con centavo pendiente", "USD", -0.01);
+    let vacia = crear_cuenta("Vacía", "DOP", 0.0);
+
+    assert_eq!(
+        crate::archivar_cuenta(a_favor).unwrap_err(),
+        "No se puede archivar la cuenta «Con centavo a favor»: tiene DOP 0.01 a favor. Retira o transfiere ese dinero hasta dejarla en cero."
+    );
+    assert_eq!(
+        crate::archivar_cuenta(pendiente).unwrap_err(),
+        "No se puede archivar la cuenta «Con centavo pendiente»: tiene un saldo pendiente de USD -0.01 por conciliar. Déjala en cero antes de archivarla."
+    );
+    assert!(cuenta_activa(a_favor) && cuenta_activa(pendiente), "los rechazos no cambiaron el estado");
+
+    crate::archivar_cuenta(vacia).unwrap();
+    assert!(!cuenta_activa(vacia) && cuenta_archivada(vacia), "sale de las operativas y entra en las archivadas");
+    assert_eq!(crate::archivar_cuenta(vacia).unwrap_err(), "La cuenta «Vacía» ya está archivada.");
+    assert!(crate::archivar_cuenta(987_654).unwrap_err().contains("987654"));
+
+    crate::reactivar_cuenta(vacia).unwrap();
+    assert!(cuenta_activa(vacia) && !cuenta_archivada(vacia));
+    assert_eq!(crate::reactivar_cuenta(vacia).unwrap_err(), "La cuenta «Vacía» no está archivada.");
+}
+
+#[test]
+fn ar3_archivar_conserva_el_id_el_nombre_la_divisa_y_todo_lo_que_la_referenciaba() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(1_000.0, 0.0);
+    let otra = crear_cuenta("Contraparte", "DOP", 10_000.0);
+    let cuenta = crear_cuenta("Cuenta con historia", "DOP", 5_000.0);
+    // Todas las relaciones que apuntan a una cuenta: gasto, transferencia, avance, factura, informal y abono.
+    crear_gasto(transferencia(100.0, "Alimentación", "Compra", cuenta)).unwrap();
+    crate::transferir_entre_cuentas("20/09/2026".into(), otra, cuenta, monto(500.0), monto(500.0), monto(0.0), "Traspaso".into()).unwrap();
+    avance(tarjeta, cuenta, "1350.00", "exonerado", None, None).unwrap();
+    let factura_cobrada = crear_ingreso(factura("AR-001", 5_000.0, 15.0)).unwrap();
+    marcar_ingreso_pagado(factura_cobrada, cuenta, "20/09/2026".into(), monto(4_250.0)).unwrap();
+    let informal_cobrado = crear_ingreso_informal("20/09/2026".into(), "Trabajo".into(), monto(3_000.0)).unwrap();
+    marcar_informal_pagado(informal_cobrado, cuenta, "20/09/2026".into(), monto(3_000.0)).unwrap();
+    registrar_pago_tarjeta(tarjeta, "20/09/2026".into(), monto(500.0), "DOP".into(), Some(cuenta), 0.0).unwrap();
+
+    let referencias = || -> i64 {
+        conexion()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM gastos WHERE cuenta_ahorro_id = ?1)
+                      + (SELECT COUNT(*) FROM transacciones_cuentas WHERE cuenta_origen_id = ?1 OR cuenta_destino_id = ?1)
+                      + (SELECT COUNT(*) FROM avances_efectivo WHERE cuenta_ahorro_id = ?1)
+                      + (SELECT COUNT(*) FROM ingresos WHERE cuenta_ahorro_id = ?1)
+                      + (SELECT COUNT(*) FROM ingresos_informales WHERE cuenta_ahorro_id = ?1)
+                      + (SELECT COUNT(*) FROM pagos_tarjeta WHERE cuenta_ahorro_id = ?1);",
+                [cuenta],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let antes = referencias();
+    assert!(antes >= 6, "se montaron las seis relaciones: {antes}");
+    assert!(crate::archivar_cuenta(cuenta).is_err(), "con saldo no se archiva");
+
+    dejar_en_cero(cuenta); // el saldo ya se movió con cada operación; aquí se aísla lo que importa: los vínculos
+    crate::archivar_cuenta(cuenta).unwrap();
+
+    assert_eq!(referencias(), antes, "ninguna fila perdió su cuenta");
+    let (nombre, divisa): (String, String) = conexion()
+        .query_row("SELECT nombre, divisa FROM cuentas_ahorro WHERE id = ?;", [cuenta], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((nombre.as_str(), divisa.as_str()), ("Cuenta con historia", "DOP"));
+    let historial = crate::obtener_transacciones_cuentas().unwrap();
+    assert!(
+        historial.iter().any(|t| t.cuenta_destino_nombre == "Cuenta con historia"),
+        "el historial sigue nombrando a la archivada por su id"
+    );
+}
+
+#[test]
+fn ar4_ninguna_operacion_nueva_acepta_una_cuenta_archivada() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(1_000.0, 0.0);
+    let otra = crear_cuenta("Otra", "DOP", 10_000.0);
+    let cerrada = crear_cuenta("Cerrada", "DOP", 0.0);
+    let factura_id = crear_ingreso(factura("AR-002", 5_000.0, 0.0)).unwrap();
+    let informal_id = crear_ingreso_informal("20/09/2026".into(), "Trabajo".into(), monto(300.0)).unwrap();
+    crate::archivar_cuenta(cerrada).unwrap();
+    let total = || -> f64 { conexion().query_row("SELECT SUM(balance_actual) FROM cuentas_ahorro;", [], |r| r.get(0)).unwrap() };
+    let antes = total();
+    let gastos = total_gastos();
+
+    let casos: Vec<(&str, Result<(), String>)> = vec![
+        ("gasto", crear_gasto(transferencia(10.0, "Alimentación", "Compra", cerrada)).map(|_| ())),
+        ("transferencia desde", crate::transferir_entre_cuentas("20/09/2026".into(), cerrada, otra, monto(5.0), monto(5.0), monto(0.0), "x".into()).map(|_| ())),
+        ("transferencia hacia", crate::transferir_entre_cuentas("20/09/2026".into(), otra, cerrada, monto(5.0), monto(5.0), monto(0.0), "x".into()).map(|_| ())),
+        ("abono", registrar_pago_tarjeta(tarjeta, "20/09/2026".into(), monto(5.0), "DOP".into(), Some(cerrada), 0.0)),
+        ("avance", avance(tarjeta, cerrada, "50.00", "exonerado", None, None).map(|_| ())),
+        ("cobro de factura", marcar_ingreso_pagado(factura_id, cerrada, "20/09/2026".into(), monto(100.0))),
+        ("cobro informal", marcar_informal_pagado(informal_id, cerrada, "20/09/2026".into(), monto(100.0))),
+    ];
+    for (que, resultado) in casos {
+        let e = resultado.expect_err(que);
+        assert!(e.contains("archivada") && e.contains("Cerrada"), "{que}: {e}");
+    }
+    assert_importe(total(), antes, "ningún saldo se movió");
+    assert_eq!(total_gastos(), gastos, "ni se asentó un gasto");
+    assert_importe(balances_tarjeta(tarjeta).0, 1_000.0, "ni cambió la deuda de la tarjeta");
+}
+
+#[test]
+fn ar5_revertir_un_movimiento_historico_de_una_cuenta_archivada_exige_reactivarla_antes() {
+    let _g = entorno_aislado();
+    let a = crear_cuenta("A", "DOP", 1_000.0);
+    let b = crear_cuenta("B", "DOP", 0.0);
+    crate::transferir_entre_cuentas("20/09/2026".into(), a, b, monto(500.0), monto(500.0), monto(0.0), "ida".into()).unwrap();
+    crate::transferir_entre_cuentas("21/09/2026".into(), b, a, monto(500.0), monto(500.0), monto(0.0), "vuelta".into()).unwrap();
+    crate::archivar_cuenta(b).unwrap();
+    let ida: i64 = conexion().query_row("SELECT id FROM transacciones_cuentas WHERE descripcion = 'ida';", [], |r| r.get(0)).unwrap();
+
+    // Revertir la ida le quitaría 500 a B, que está archivada: no se altera en silencio una cuenta cerrada.
+    let e = crate::eliminar_transaccion_cuenta(ida, motivo_de_prueba()).unwrap_err();
+    assert!(e.contains("archivada"), "{e}");
+    assert_importe(saldo_cuenta_id(b), 0.0, "B sigue en cero");
+    assert_eq!(total_transferencias(), 2, "y el historial íntegro");
+
+    crate::reactivar_cuenta(b).unwrap();
+    crate::eliminar_transaccion_cuenta(ida, motivo_de_prueba()).unwrap();
+    assert_eq!(total_transferencias(), 1);
+}
+
+#[test]
+fn ar6_ni_una_cuenta_ni_una_tarjeta_se_borran_ni_por_sql() {
+    let _g = entorno_aislado();
+    let cuenta = crear_cuenta("Sin relaciones", "DOP", 0.0);
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let e = conexion().execute("DELETE FROM cuentas_ahorro WHERE id = ?;", [cuenta]).unwrap_err().to_string();
+    assert!(e.contains("Las cuentas no se borran: se archivan."), "{e}");
+    let e = conexion().execute("DELETE FROM tarjetas WHERE id = ?;", [tarjeta]).unwrap_err().to_string();
+    assert!(e.contains("Las tarjetas no se borran: se desactivan."), "{e}");
+    let n: i64 = conexion().query_row("SELECT (SELECT COUNT(*) FROM cuentas_ahorro WHERE id = ?) + (SELECT COUNT(*) FROM tarjetas WHERE id = ?);", [cuenta, tarjeta], |r| r.get(0)).unwrap();
+    assert_eq!(n, 2, "siguen ahí");
+}
+
+#[test]
+fn ar7_el_nombre_de_una_archivada_sigue_ocupado_y_se_explica() {
+    let _g = entorno_aislado();
+    let vieja = crear_cuenta("Vieja", "DOP", 0.0);
+    let otra = crear_cuenta("Otra", "DOP", 0.0);
+    crate::archivar_cuenta(vieja).unwrap();
+
+    let e = crate::crear_cuenta("Vieja".into(), "DOP".into(), monto(0.0), None, None).unwrap_err();
+    assert_eq!(e, "Ya existe una cuenta archivada llamada «Vieja». Reactívala o elige otro nombre.");
+    let e = crate::actualizar_cuenta(otra, "Vieja".into(), None, None).unwrap_err();
+    assert_eq!(e, "Ya existe una cuenta archivada llamada «Vieja». Reactívala o elige otro nombre.");
+    assert!(crate::actualizar_cuenta(otra, "Otra renombrada".into(), None, None).is_ok(), "otros nombres siguen libres");
+}
+
+#[test]
+fn ar4b_ni_siquiera_una_operacion_de_importe_cero_se_registra_en_una_cuenta_archivada() {
+    // La barrera de `ajustar_saldo` solo actúa cuando el saldo se mueve; la comprobación temprana de cada operación
+    // cubre las que no lo mueven: un cobro por cero dejaría un depósito anotado en una cuenta cerrada.
+    let _g = entorno_aislado();
+    let cerrada = crear_cuenta("Cerrada", "DOP", 0.0);
+    let factura_id = crear_ingreso(factura("AR-003", 5_000.0, 0.0)).unwrap();
+    let informal_id = crear_ingreso_informal("20/09/2026".into(), "Trabajo".into(), monto(300.0)).unwrap();
+    crate::archivar_cuenta(cerrada).unwrap();
+
+    for (que, r) in [
+        ("cobro de factura por cero", marcar_ingreso_pagado(factura_id, cerrada, "20/09/2026".into(), monto(0.0))),
+        ("cobro informal por cero", marcar_informal_pagado(informal_id, cerrada, "20/09/2026".into(), monto(0.0))),
+    ] {
+        let e = r.expect_err(que);
+        assert!(e.contains("archivada"), "{que}: {e}");
+    }
+    let estados: (String, String) = (
+        conexion().query_row("SELECT estatus FROM ingresos WHERE id = ?;", [factura_id], |r| r.get(0)).unwrap(),
+        conexion().query_row("SELECT estatus FROM ingresos_informales WHERE id = ?;", [informal_id], |r| r.get(0)).unwrap(),
+    );
+    assert_eq!((estados.0.as_str(), estados.1.as_str()), ("emitida", "pendiente"), "siguen pendientes de cobro");
 }

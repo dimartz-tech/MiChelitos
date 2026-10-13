@@ -50,6 +50,7 @@ pub fn registrar_gasto(
     // porque la retención se aplica sobre el importe que sale de la cuenta.
     let estado_conversion = match afectacion {
         AfectacionSaldo::DebitoCuenta { cuenta_id } => {
+            super::cuentas::exigir_activa(almacen, cuenta_id)?;
             let divisa_cuenta = almacen.divisa(cuenta_id)?;
             if divisa_cuenta == divisa {
                 EstadoConversion::NoAplica
