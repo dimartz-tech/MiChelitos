@@ -17,13 +17,17 @@ export interface EntornoDeInicio {
 export function iniciarAplicacion({ enrutador, avisos, dom, api }: EntornoDeInicio): void {
     // --- ROUTER GLOBAL ---
     function navigate(tab: string): void {
-        // 1. Alternar active class en la barra lateral
+        // 1. Alternar active class en la navegación superior
         const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
-        navItems.forEach(item => item.classList.remove('active'));
+        navItems.forEach(item => {
+            item.classList.remove('active');
+            item.removeAttribute('aria-current');
+        });
 
         const activeBtn = dom.buscar(`nav-btn-${tab}`);
         if (activeBtn) {
             activeBtn.classList.add('active');
+            activeBtn.setAttribute('aria-current', 'page');
         }
 
         // 2. Renderizar a través de la UI
@@ -53,7 +57,7 @@ export function iniciarAplicacion({ enrutador, avisos, dom, api }: EntornoDeInic
         // 3. Control de tema Claro/Oscuro
         const themeToggleBtn = dom.buscar('theme-toggle-btn');
         if (themeToggleBtn) {
-            const savedTheme = localStorage.getItem('desktop-theme') || 'dark';
+            const savedTheme = localStorage.getItem('desktop-theme') || 'light';
             
             if (savedTheme === 'light') {
                 document.body.classList.add('light-theme');
@@ -85,25 +89,6 @@ export function iniciarAplicacion({ enrutador, avisos, dom, api }: EntornoDeInic
             });
         }
 
-        // 4. Control de colapsado del menú lateral (Sidebar)
-        const sidebarCollapseBtn = dom.buscar('sidebar-collapse-btn');
-        const sidebar = document.querySelector('.app-sidebar');
-        if (sidebarCollapseBtn && sidebar) {
-            const savedCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
-            if (savedCollapsed) {
-                sidebar.classList.add('collapsed');
-                sidebarCollapseBtn.textContent = '▶️';
-            } else {
-                sidebarCollapseBtn.textContent = '◀️';
-            }
-
-            sidebarCollapseBtn.addEventListener('click', () => {
-                sidebar.classList.toggle('collapsed');
-                const isCollapsed = sidebar.classList.contains('collapsed');
-                sidebarCollapseBtn.textContent = isCollapsed ? '▶️' : '◀️';
-                localStorage.setItem('sidebar-collapsed', String(isCollapsed));
-            });
-        }
 };
 
     // Un módulo se ejecuta antes de `DOMContentLoaded`, pero por si alguna vez no fuera así.
