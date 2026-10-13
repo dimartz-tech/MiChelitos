@@ -9,79 +9,77 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/libro-contexto.css">
 </head>
 <body class="tauri-app">
+    <a class="skip-link" href="#app-content">Saltar al contenido principal</a>
     <div class="glass-bg"></div>
     
     <div class="app-layout">
-        <!-- Sidebar lateral fijo (Diseño macOS de Escritorio) -->
-        <aside class="app-sidebar">
-            <div class="sidebar-header" style="justify-content: center; flex-direction: column; align-items: center; margin-bottom: 1.5rem; gap: 0.6rem;">
-                <img src="assets/logo.jpg" alt="Logo MiChelitos" style="width: 100px; height: 100px; border-radius: 50%; border: 2px solid var(--accent-primary); box-shadow: var(--shadow-glow); object-fit: cover;">
-                <span class="logo-text" style="font-size: 1.25rem;">MiChelitos</span>
+        <header class="app-sidebar" aria-label="Cabecera de la aplicación">
+            <div class="sidebar-header">
+                <img src="assets/logo.jpg" alt="" class="sidebar-logo">
+                <span class="logo-text">MiChelitos</span>
             </div>
             
-            <nav class="sidebar-nav">
-                <button onclick="navigate('dashboard')" id="nav-btn-dashboard" class="nav-item active">
+            <nav class="sidebar-nav" aria-label="Secciones" tabindex="0">
+                <button onclick="navigate('dashboard')" id="nav-btn-dashboard" class="nav-item active" aria-label="Inicio" aria-current="page">
                     <span class="nav-icon">📊</span>
-                    <span class="nav-label">Dashboard</span>
+                    <span class="nav-label">Inicio</span>
                 </button>
-                <button onclick="navigate('ingresos')" id="nav-btn-ingresos" class="nav-item">
+                <button onclick="navigate('ingresos')" id="nav-btn-ingresos" class="nav-item" aria-label="Ingresos">
                     <span class="nav-icon">📈</span>
                     <span class="nav-label">Ingresos</span>
                 </button>
-                <button onclick="navigate('gastos')" id="nav-btn-gastos" class="nav-item">
+                <button onclick="navigate('gastos')" id="nav-btn-gastos" class="nav-item" aria-label="Gastos">
                     <span class="nav-icon">📉</span>
                     <span class="nav-label">Gastos</span>
                 </button>
-                <button onclick="navigate('tarjetas')" id="nav-btn-tarjetas" class="nav-item">
+                <button onclick="navigate('tarjetas')" id="nav-btn-tarjetas" class="nav-item" aria-label="Tarjetas">
                     <span class="nav-icon">💳</span>
                     <span class="nav-label">Tarjetas</span>
                 </button>
-                <button onclick="navigate('cuentas')" id="nav-btn-cuentas" class="nav-item">
+                <button onclick="navigate('cuentas')" id="nav-btn-cuentas" class="nav-item" aria-label="Cuentas">
                     <span class="nav-icon">🏦</span>
                     <span class="nav-label">Cuentas</span>
                 </button>
-                <button onclick="navigate('efectivo')" id="nav-btn-efectivo" class="nav-item">
+                <button onclick="navigate('efectivo')" id="nav-btn-efectivo" class="nav-item" aria-label="Efectivo">
                     <span class="nav-icon">💵</span>
                     <span class="nav-label">Efectivo</span>
                 </button>
-                <button onclick="navigate('suscripciones')" id="nav-btn-suscripciones" class="nav-item">
+                <button onclick="navigate('suscripciones')" id="nav-btn-suscripciones" class="nav-item" aria-label="Suscripciones">
                     <span class="nav-icon">🔄</span>
                     <span class="nav-label">Suscripciones</span>
                 </button>
-                <button onclick="navigate('capital')" id="nav-btn-capital" class="nav-item">
+                <button onclick="navigate('capital')" id="nav-btn-capital" class="nav-item" aria-label="Capital">
                     <span class="nav-icon">🏢</span>
                     <span class="nav-label">Capital</span>
                 </button>
-                <button onclick="navigate('prestamos')" id="nav-btn-prestamos" class="nav-item">
+                <button onclick="navigate('prestamos')" id="nav-btn-prestamos" class="nav-item" aria-label="Deudas">
                     <span class="nav-icon">🏷️</span>
                     <span class="nav-label">Deudas</span>
                 </button>
-                <button onclick="navigate('resumen')" id="nav-btn-resumen" class="nav-item">
+                <button onclick="navigate('resumen')" id="nav-btn-resumen" class="nav-item" aria-label="Resumen">
                     <span class="nav-icon">📊</span>
                     <span class="nav-label">Resumen</span>
                 </button>
-                <button onclick="navigate('ajustes')" id="nav-btn-ajustes" class="nav-item">
+                <button onclick="navigate('ajustes')" id="nav-btn-ajustes" class="nav-item" aria-label="Ajustes">
                     <span class="nav-icon">⚙️</span>
                     <span class="nav-label">Ajustes</span>
                 </button>
             </nav>
 
-            <div class="sidebar-footer" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <div class="sidebar-footer">
                 <button id="theme-toggle-btn" class="theme-toggle" title="Cambiar tema">
                     🌙
                 </button>
-                <button id="sidebar-collapse-btn" class="sidebar-toggle" title="Colapsar menú" style="background: none; border: none; font-size: 1.1rem; cursor: pointer; color: var(--text-normal); transition: transform 0.2s ease;">
-                    ◀️
-                </button>
             </div>
-        </aside>
+        </header>
 
         <!-- Área de Contenido Principal -->
         <main class="app-main">
             <div id="notification-container" class="notification-container"></div>
-            <div id="app-content" class="main-container">
+            <div id="app-content" class="main-container" tabindex="-1">
                 <!-- Se inyectan las pantallas dinámicamente -->
             </div>
         </main>
