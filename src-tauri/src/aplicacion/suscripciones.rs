@@ -113,14 +113,24 @@ pub fn categoria_de_suscripciones(almacen: &mut impl AlmacenSuscripciones) -> Re
     Ok(almacen.crear_categoria("Suscripciones")?)
 }
 
+/// Una suscripción que **parece** tocar cobrarse hoy: su identificador y su nombre (para poder decir cuál falló).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CandidataACobro {
+    pub id: i64,
+    pub plataforma: String,
+}
+
 /// Las suscripciones que **parecen** tocar cobrarse hoy: **solo si hay exactamente un período vencido**. Con varios, la
 /// aplicación no sabe si el proveedor los cobró ni si la suscripción siguió activa: se ofrecen para confirmar
 /// (`confirmar_pendiente`) en vez de fabricarse.
 ///
-/// Es una lista de **candidatas** (identificadores) de solo lectura, y nada más: puede quedar vieja antes de que se
-/// asiente el primer cargo. Quien cobra es `cobrar_si_vence`, que vuelve a leer la suscripción dentro de la transacción
-/// de su propio cargo y decide con lo que hay en ese momento.
-pub fn cobros_automaticos(hoy: NaiveDate, almacen: &impl AlmacenSuscripciones) -> Result<Vec<i64>, ErrorAplicacion> {
+/// Es una lista de **candidatas** de solo lectura, y nada más: puede quedar vieja antes de que se asiente el primer
+/// cargo. Quien cobra es `cobrar_si_vence`, que vuelve a leer la suscripción dentro de la transacción de su propio cargo
+/// y decide con lo que hay en ese momento.
+pub fn cobros_automaticos(
+    hoy: NaiveDate,
+    almacen: &impl AlmacenSuscripciones,
+) -> Result<Vec<CandidataACobro>, ErrorAplicacion> {
     Ok(almacen
         .suscripciones_registradas()?
         .into_iter()
@@ -128,7 +138,7 @@ pub fn cobros_automaticos(hoy: NaiveDate, almacen: &impl AlmacenSuscripciones) -
             regla_de_un_registro(&s.frecuencia, s.fecha_proximo_cobro.as_deref(), s.dia_facturacion)
                 .is_some_and(|r| r.cobro_automatico(hoy).is_some())
         })
-        .map(|s| s.id)
+        .map(|s| CandidataACobro { id: s.id, plataforma: s.plataforma })
         .collect())
 }
 
@@ -157,6 +167,39 @@ pub fn cobrar_si_vence(
     let Some(vencimiento) = regla.cobro_automatico(hoy) else { return Ok(None) };
     asentar_cargo(&sub, &regla, vencimiento, categoria, almacen)?;
     Ok(Some(CargoAsentado { plataforma: sub.plataforma, divisa: sub.divisa, monto: sub.monto, vencimiento }))
+}
+
+/// Un cobro automático que no pudo asentarse, con la causa.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FalloDeCobro {
+    pub plataforma: String,
+    pub motivo: String,
+}
+
+/// Lo que dejó el cobro automático de una pasada: los cargos asentados y los que fallaron.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CobrosAutomaticos {
+    pub cargos: Vec<CargoAsentado>,
+    pub fallos: Vec<FalloDeCobro>,
+}
+
+/// Recorre las candidatas y cobra cada una con `cobrar` (que abre **su propia transacción**). **Un fallo no corta el
+/// recorrido**: ese cargo se deshace entero (su transacción no se confirma, y su puntero no avanza, de modo que se
+/// reintenta al siguiente arranque) y las demás suscripciones se cobran igual. Los fallos se devuelven con su causa para
+/// que la interfaz los muestre como errores y no como cargos.
+pub fn procesar_cobros<E: std::fmt::Display>(
+    candidatas: Vec<CandidataACobro>,
+    mut cobrar: impl FnMut(i64) -> Result<Option<CargoAsentado>, E>,
+) -> CobrosAutomaticos {
+    let mut resultado = CobrosAutomaticos::default();
+    for candidata in candidatas {
+        match cobrar(candidata.id) {
+            Ok(Some(cargo)) => resultado.cargos.push(cargo),
+            Ok(None) => {}
+            Err(e) => resultado.fallos.push(FalloDeCobro { plataforma: candidata.plataforma, motivo: e.to_string() }),
+        }
+    }
+    resultado
 }
 
 /// Mueve la fecha del próximo cobro al período siguiente, **desde el vencimiento saldado** y no desde hoy.
@@ -350,7 +393,7 @@ mod tests {
         crear_suscripcion(datos("Varios", "mensual", 15, Some("15/01/2026")), &mut a).unwrap();
         crear_suscripcion(datos("Futura", "mensual", 15, Some("15/09/2026")), &mut a).unwrap();
         crear_suscripcion(datos("SinFecha", "mensual", 15, None), &mut a).unwrap();
-        assert_eq!(cobros_automaticos(fecha(2026, 3, 20), &a).unwrap(), vec![uno]);
+        assert_eq!(cobros_automaticos(fecha(2026, 3, 20), &a).unwrap(), vec![CandidataACobro { id: uno, plataforma: "Uno".into() }]);
     }
 
     #[test]
@@ -376,7 +419,7 @@ mod tests {
         nueva.tarjeta_id = 21;
         nueva.monto = dop(80.0);
         editar_suscripcion(id, nueva, &mut a).unwrap();
-        let cargo = cobrar_si_vence(candidatas[0], fecha(2026, 3, 20), 7, &mut a).unwrap().unwrap();
+        let cargo = cobrar_si_vence(candidatas[0].id, fecha(2026, 3, 20), 7, &mut a).unwrap().unwrap();
         assert_eq!((a.deuda_de(20), a.deuda_de(21)), (dop(0.0), dop(80.0)), "la tarjeta antigua no se toca");
         assert_eq!(cargo.monto, 80.0, "el mensaje cuenta lo que de verdad se cobró");
     }
@@ -389,7 +432,7 @@ mod tests {
         let acumulada = crear_suscripcion(datos("Acumulada", "mensual", 15, Some("15/03/2026")), &mut a).unwrap();
         let hoy = fecha(2026, 3, 20);
         let candidatas = cobros_automaticos(hoy, &a).unwrap();
-        assert_eq!(candidatas, vec![borrada, cobrada, acumulada]);
+        assert_eq!(candidatas.iter().map(|c| c.id).collect::<Vec<_>>(), vec![borrada, cobrada, acumulada]);
 
         eliminar_suscripcion(borrada, &mut a).unwrap();
         assert!(cobrar_si_vence(cobrada, hoy, 7, &mut a).unwrap().is_some());
@@ -400,6 +443,38 @@ mod tests {
         assert!(cobrar_si_vence(borrada, hoy, 7, &mut a).unwrap().is_none());
         assert!(cobrar_si_vence(acumulada, hoy, 7, &mut a).unwrap().is_none(), "con varios períodos se ofrece confirmar");
         assert_eq!(a.gastos.len(), 1, "solo el cargo de «Cobrada»");
+    }
+
+    fn cargo(plataforma: &str) -> CargoAsentado {
+        CargoAsentado { plataforma: plataforma.into(), divisa: "DOP".into(), monto: 10.0, vencimiento: fecha(2026, 3, 15) }
+    }
+
+    fn candidata(id: i64, plataforma: &str) -> CandidataACobro {
+        CandidataACobro { id, plataforma: plataforma.into() }
+    }
+
+    #[test]
+    fn un_fallo_no_corta_el_recorrido_y_se_devuelve_con_su_causa() {
+        let candidatas = vec![candidata(1, "Primera"), candidata(2, "Rota"), candidata(3, "Tercera")];
+        let mut intentos = Vec::new();
+        let r = procesar_cobros(candidatas, |id| {
+            intentos.push(id);
+            match id {
+                2 => Err("la tarjeta rechazó el cargo"),
+                otro => Ok(Some(cargo(&format!("S{otro}")))),
+            }
+        });
+        assert_eq!(intentos, vec![1, 2, 3], "se intentaron todas, también las posteriores al fallo");
+        assert_eq!(r.cargos.iter().map(|c| c.plataforma.as_str()).collect::<Vec<_>>(), vec!["S1", "S3"]);
+        assert_eq!(r.fallos, vec![FalloDeCobro { plataforma: "Rota".into(), motivo: "la tarjeta rechazó el cargo".into() }]);
+    }
+
+    #[test]
+    fn sin_fallos_ni_cargos_no_hay_nada_que_contar_y_una_que_ya_no_vence_no_es_un_fallo() {
+        let r = procesar_cobros(vec![candidata(1, "A"), candidata(2, "B")], |_| Ok::<_, String>(None));
+        assert_eq!(r, CobrosAutomaticos::default());
+        let todas_rotas = procesar_cobros(vec![candidata(1, "A"), candidata(2, "B")], |_| Err::<Option<CargoAsentado>, _>("x"));
+        assert_eq!((todas_rotas.cargos.len(), todas_rotas.fallos.len()), (0, 2));
     }
 
     #[test]
