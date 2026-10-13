@@ -63,6 +63,7 @@ pub fn registrar_gasto(
         // importe en moneda local no existe todavía, lo fijará el emisor. No
         // se estima, porque una cifra inventada nunca cuadraría con el estado.
         AfectacionSaldo::DeudaTarjeta { tarjeta_id } => {
+            super::cierre_de_tarjetas::exigir_tarjeta_activa(almacen, tarjeta_id)?;
             if almacen.politica(tarjeta_id)?.deja_pendiente(divisa, MONEDA_LOCAL) {
                 EstadoConversion::Pendiente
             } else {

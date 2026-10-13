@@ -40,8 +40,13 @@ fn a_guardar(datos: DatosSuscripcion) -> Result<SuscripcionAGuardar, ErrorAplica
     })
 }
 
-pub fn crear_suscripcion(datos: DatosSuscripcion, almacen: &mut impl AlmacenSuscripciones) -> Result<i64, ErrorAplicacion> {
-    Ok(almacen.insertar_suscripcion(&a_guardar(datos)?)?)
+pub fn crear_suscripcion(
+    datos: DatosSuscripcion,
+    almacen: &mut (impl AlmacenSuscripciones + RepositorioTarjetas),
+) -> Result<i64, ErrorAplicacion> {
+    let guardar = a_guardar(datos)?;
+    super::cierre_de_tarjetas::exigir_tarjeta_activa(almacen, guardar.tarjeta_id)?;
+    Ok(almacen.insertar_suscripcion(&guardar)?)
 }
 
 /// Edita una suscripción **conservando `fecha_ultimo_pago`**: la única alternativa era borrarla y volver a crearla, lo
@@ -50,9 +55,11 @@ pub fn crear_suscripcion(datos: DatosSuscripcion, almacen: &mut impl AlmacenSusc
 pub fn editar_suscripcion(
     id: i64,
     datos: DatosSuscripcion,
-    almacen: &mut impl AlmacenSuscripciones,
+    almacen: &mut (impl AlmacenSuscripciones + RepositorioTarjetas),
 ) -> Result<(), ErrorAplicacion> {
-    if !almacen.editar_suscripcion(id, &a_guardar(datos)?)? {
+    let guardar = a_guardar(datos)?;
+    super::cierre_de_tarjetas::exigir_tarjeta_activa(almacen, guardar.tarjeta_id)?;
+    if !almacen.editar_suscripcion(id, &guardar)? {
         return Err(ErrorDominio::SuscripcionNoEncontradaParaEditar.into());
     }
     Ok(())

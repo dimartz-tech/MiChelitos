@@ -19,16 +19,16 @@ fn fallo(e: rusqlite::Error) -> ErrorAlmacen {
     ErrorAlmacen::Fallo(e.to_string())
 }
 
-impl CatalogoDeTarjetas for TarjetasSqlite<'_> {
-    fn tarjetas(&self) -> Result<Vec<TarjetaLeida>, ErrorAlmacen> {
+impl TarjetasSqlite<'_> {
+    fn listar(&self, activa: i64) -> Result<Vec<TarjetaLeida>, ErrorAlmacen> {
         let mut stmt = self
             .tx
             .prepare(
-                "SELECT id, entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago, limite_ajustado_pesos, limite_ajustado_dolares, politica_liquidacion FROM tarjetas;",
+                "SELECT id, entidad, nombre_tarjeta, limite_pesos, limite_dolares, limite_sobregiro_pesos, limite_sobregiro_dolares, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares, fecha_corte, fecha_limite_pago, limite_ajustado_pesos, limite_ajustado_dolares, politica_liquidacion FROM tarjetas WHERE activa = ? ORDER BY id;",
             )
             .map_err(fallo)?;
         let filas = stmt
-            .query_map([], |r| {
+            .query_map([activa], |r| {
                 Ok(TarjetaLeida {
                     id: r.get(0)?,
                     entidad: r.get(1)?,
@@ -50,6 +50,16 @@ impl CatalogoDeTarjetas for TarjetasSqlite<'_> {
             })
             .map_err(fallo)?;
         filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
+    }
+}
+
+impl CatalogoDeTarjetas for TarjetasSqlite<'_> {
+    fn tarjetas(&self) -> Result<Vec<TarjetaLeida>, ErrorAlmacen> {
+        self.listar(1)
+    }
+
+    fn tarjetas_inactivas(&self) -> Result<Vec<TarjetaLeida>, ErrorAlmacen> {
+        self.listar(0)
     }
 
     fn insertar_tarjeta(&mut self, t: &TarjetaNueva) -> Result<i64, ErrorAlmacen> {

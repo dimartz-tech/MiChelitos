@@ -6076,3 +6076,261 @@ fn ar4b_ni_siquiera_una_operacion_de_importe_cero_se_registra_en_una_cuenta_arch
     );
     assert_eq!((estados.0.as_str(), estados.1.as_str()), ("emitida", "pendiente"), "siguen pendientes de cobro");
 }
+
+// --- Desactivar tarjetas (RC): las tarjetas se desactivan, no se borran ---
+
+fn tarjeta_activa(id: i64) -> bool {
+    crate::obtener_tarjetas().unwrap().iter().any(|t| t.id == id)
+}
+
+fn tarjeta_inactiva(id: i64) -> bool {
+    crate::obtener_tarjetas_inactivas().unwrap().iter().any(|t| t.id == id)
+}
+
+fn con_limites(id: i64, dop: f64, usd: f64) {
+    conexion()
+        .execute("UPDATE tarjetas SET limite_pesos = ?, limite_dolares = ?, limite_sobregiro_pesos = 0, limite_sobregiro_dolares = 0 WHERE id = ?;", params![dop, usd, id])
+        .unwrap();
+}
+
+fn suscripcion_en(tarjeta: i64, nombre: &str, importe_texto: &str, divisa: &str, proximo: &str) -> i64 {
+    crear_suscripcion(nombre.into(), importe(importe_texto), tarjeta, "mensual".into(), 15, divisa.into(), Some(proximo.into())).unwrap()
+}
+
+fn tarjeta_de(suscripcion: i64) -> i64 {
+    conexion().query_row("SELECT tarjeta_id FROM suscripciones WHERE id = ?;", [suscripcion], |r| r.get(0)).unwrap()
+}
+
+fn traslado(suscripcion: i64, destino: i64) -> crate::TrasladoElegido {
+    crate::TrasladoElegido { suscripcion_id: suscripcion, destino_id: destino }
+}
+
+#[test]
+fn ta1_una_tarjeta_en_cero_y_sin_suscripciones_se_desactiva_y_conserva_su_historial() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(0.0, 0.0);
+    let otra = crear_tarjeta(0.0, 0.0);
+    crate::cerrar_tarjeta(tarjeta, vec![]).unwrap();
+    assert!(!tarjeta_activa(tarjeta) && tarjeta_inactiva(tarjeta), "sale de las activas y entra en las inactivas");
+    assert!(tarjeta_activa(otra), "la otra no se toca");
+    let inactiva = crate::obtener_tarjetas_inactivas().unwrap();
+    assert_eq!(inactiva.len(), 1, "las inactivas solo llevan su identidad, sin balances");
+    let n: i64 = conexion().query_row("SELECT COUNT(*) FROM tarjetas WHERE id = ?;", [tarjeta], |r| r.get(0)).unwrap();
+    assert_eq!(n, 1, "la fila sigue ahí");
+    assert!(crate::cerrar_tarjeta(tarjeta, vec![]).unwrap_err().contains("ya está desactivada"));
+}
+
+#[test]
+fn ta2_una_tarjeta_con_deuda_o_saldo_a_favor_de_un_centavo_no_se_desactiva_y_lo_dice() {
+    let _g = entorno_aislado();
+    let con_deuda = crear_tarjeta(0.01, 0.0);
+    let a_favor = crear_tarjeta(0.0, -0.01);
+    let e = crate::cerrar_tarjeta(con_deuda, vec![]).unwrap_err();
+    assert_eq!(e, "No se puede desactivar la tarjeta «Banco Ejemplo Tarjeta Ejemplo»: debe DOP 0.01. Págala hasta dejarla en cero antes de cerrarla.");
+    let e = crate::cerrar_tarjeta(a_favor, vec![]).unwrap_err();
+    assert!(e.contains("tiene USD 0.01 a favor del titular") && e.contains("reembolso"), "{e}");
+    assert!(tarjeta_activa(con_deuda) && tarjeta_activa(a_favor), "los rechazos no cambiaron el estado");
+}
+
+#[test]
+fn ta3_la_vista_previa_muestra_todas_las_suscripciones_con_su_divisa_y_una_sugerencia_explicada() {
+    let _g = entorno_aislado();
+    let cierra = crear_tarjeta(0.0, 0.0);
+    let destino = crear_tarjeta(0.0, 0.0);
+    let en_pesos = suscripcion_en(cierra, "Streaming", "500", "DOP", "15/03/2026");
+    let en_dolares = suscripcion_en(cierra, "Nube", "10", "USD", "20/03/2026");
+
+    let v = crate::previsualizar_cierre_tarjeta(cierra).unwrap();
+    assert!(v.bloqueos.is_empty() && v.activa);
+    assert_eq!(v.lineas.len(), 2);
+    let linea = |id| v.lineas.iter().find(|l| l.suscripcion_id == id).unwrap();
+    assert_eq!((linea(en_pesos).divisa.as_str(), linea(en_dolares).divisa.as_str()), ("DOP", "USD"), "no se mezclan divisas");
+    assert_eq!(linea(en_pesos).destino_sugerido, Some(destino));
+    assert!(linea(en_pesos).motivo.contains("libres sin usar sobregiro"), "{}", linea(en_pesos).motivo);
+    assert_eq!(v.destinos.len(), 1, "solo candidatas activas y distintas del origen");
+    assert_eq!(v.destinos[0].id, destino);
+    // La vista previa no cambia nada.
+    assert_eq!((tarjeta_de(en_pesos), tarjeta_de(en_dolares)), (cierra, cierra));
+    assert!(tarjeta_activa(cierra));
+}
+
+#[test]
+fn ta4_dos_suscripciones_no_se_recomiendan_sobre_el_mismo_cupo() {
+    let _g = entorno_aislado();
+    let cierra = crear_tarjeta(0.0, 0.0);
+    let justa = crear_tarjeta(0.0, 0.0);
+    let holgada = crear_tarjeta(0.0, 0.0);
+    con_limites(justa, 1_000.0, 100.0);
+    con_limites(holgada, 5_000.0, 100.0);
+    let a = suscripcion_en(cierra, "A", "800", "DOP", "15/03/2026");
+    let b = suscripcion_en(cierra, "B", "800", "DOP", "15/03/2026");
+    let v = crate::previsualizar_cierre_tarjeta(cierra).unwrap();
+    let destino = |id| v.lineas.iter().find(|l| l.suscripcion_id == id).unwrap().destino_sugerido;
+    assert_eq!((destino(a), destino(b)), (Some(holgada), Some(holgada)), "la justa no aguanta dos de 800");
+}
+
+#[test]
+fn ta5_un_destino_que_no_vale_o_sin_cupo_rechaza_todo_sin_cambios_parciales() {
+    let _g = entorno_aislado();
+    let cierra = crear_tarjeta(0.0, 0.0);
+    let buena = crear_tarjeta(0.0, 0.0);
+    let cerrada = crear_tarjeta(0.0, 0.0);
+    let corta = crear_tarjeta(0.0, 0.0);
+    con_limites(corta, 100.0, 100.0);
+    let a = suscripcion_en(cierra, "A", "60", "DOP", "15/03/2026");
+    let b = suscripcion_en(cierra, "B", "60", "DOP", "15/03/2026");
+    crate::cerrar_tarjeta(cerrada, vec![]).unwrap();
+
+    let intentos: Vec<(&str, Vec<crate::TrasladoElegido>, &str)> = vec![
+        ("misma tarjeta", vec![traslado(a, buena), traslado(b, cierra)], "es la misma tarjeta que se cierra"),
+        ("inexistente", vec![traslado(a, buena), traslado(b, 987_654)], "no existe"),
+        ("desactivada", vec![traslado(a, buena), traslado(b, cerrada)], "está desactivada"),
+        ("falta una", vec![traslado(a, buena)], "Falta elegir una tarjeta destino para: B"),
+        ("sobra una", vec![traslado(a, buena), traslado(b, buena), traslado(987_654, buena)], "ya no tiene"),
+        ("sin cupo agregado", vec![traslado(a, corta), traslado(b, corta)], "no tiene cupo en DOP"),
+    ];
+    for (que, traslados, esperado) in intentos {
+        let e = crate::cerrar_tarjeta(cierra, traslados).expect_err(que);
+        assert!(e.contains(esperado), "{que}: {e}");
+        assert_eq!((tarjeta_de(a), tarjeta_de(b)), (cierra, cierra), "{que}: ninguna se movió");
+        assert!(tarjeta_activa(cierra), "{que}: la tarjeta sigue activa");
+    }
+}
+
+#[test]
+fn ta6_el_traslado_cambia_solo_la_referencia_futura_y_deja_su_rastro() {
+    let _g = entorno_aislado();
+    let cierra = crear_tarjeta(0.0, 0.0);
+    let destino = crear_tarjeta(0.0, 0.0);
+    let s = suscripcion_en(cierra, "Streaming", "500", "DOP", "15/03/2026");
+    // Un cargo ya asentado en la tarjeta que se cierra, y pagado: debe seguir vinculado a ella.
+    crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 10_000.0);
+    registrar_pago_tarjeta(cierra, "21/03/2026".into(), monto(500.0), "DOP".into(), Some(cuenta), 0.0).unwrap();
+    assert_importe(balances_tarjeta(cierra).0, 0.0, "pagada: la tarjeta queda en cero con su historial a cuestas");
+    let leer = || -> (String, f64, String, Option<String>, Option<String>) {
+        conexion()
+            .query_row("SELECT frecuencia, monto, divisa, fecha_proximo_cobro, fecha_ultimo_pago FROM suscripciones WHERE id = ?;", [s], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .unwrap()
+    };
+    let antes = leer();
+    let gasto_viejo: i64 = conexion().query_row("SELECT COUNT(*) FROM gastos WHERE tarjeta_id = ?;", [cierra], |r| r.get(0)).unwrap();
+
+    let r = crate::cerrar_tarjeta(cierra, vec![traslado(s, destino)]).unwrap();
+    assert!(r.contains("1 suscripción(es) trasladada(s)"), "{r}");
+
+    assert_eq!(antes, leer(), "frecuencia, importe, divisa y calendario intactos");
+    assert_eq!(tarjeta_de(s), destino);
+    let gasto_ahora: i64 = conexion().query_row("SELECT COUNT(*) FROM gastos WHERE tarjeta_id = ?;", [cierra], |r| r.get(0)).unwrap();
+    assert_eq!(gasto_ahora, gasto_viejo, "el historial sigue vinculado a la tarjeta original");
+    let (origen, hasta): (i64, i64) = conexion()
+        .query_row("SELECT tarjeta_origen_id, tarjeta_destino_id FROM traslados_de_suscripcion WHERE suscripcion_id = ?;", [s], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((origen, hasta), (cierra, destino), "la bitácora lo deja anotado");
+}
+
+#[test]
+fn ta7_un_fallo_en_el_segundo_traslado_deshace_todo_y_la_tarjeta_sigue_activa() {
+    let _g = entorno_aislado();
+    let cierra = crear_tarjeta(0.0, 0.0);
+    let destino = crear_tarjeta(0.0, 0.0);
+    let primera = suscripcion_en(cierra, "Primera", "50", "DOP", "15/03/2026");
+    let segunda = suscripcion_en(cierra, "Segunda", "50", "DOP", "15/03/2026");
+    conexion()
+        .execute_batch(&format!(
+            "CREATE TRIGGER falla_a_proposito BEFORE INSERT ON traslados_de_suscripcion WHEN NEW.suscripcion_id = {segunda}
+             BEGIN SELECT RAISE(ABORT, 'fallo sintético'); END;"
+        ))
+        .unwrap();
+
+    let e = crate::cerrar_tarjeta(cierra, vec![traslado(primera, destino), traslado(segunda, destino)]).unwrap_err();
+    assert!(e.contains("fallo sintético"), "{e}");
+
+    assert_eq!((tarjeta_de(primera), tarjeta_de(segunda)), (cierra, cierra), "la primera, ya movida, volvió");
+    assert!(tarjeta_activa(cierra));
+    let n: i64 = conexion().query_row("SELECT COUNT(*) FROM traslados_de_suscripcion;", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 0, "ni rastro del intento");
+}
+
+#[test]
+fn ta8_el_cobro_automatico_tras_el_cierre_carga_la_tarjeta_nueva_y_no_la_antigua() {
+    let _g = entorno_aislado();
+    let cierra = crear_tarjeta(0.0, 0.0);
+    let destino = crear_tarjeta(0.0, 0.0);
+    let s = suscripcion_en(cierra, "Streaming", "500", "DOP", "15/03/2026");
+    crate::cerrar_tarjeta(cierra, vec![traslado(s, destino)]).unwrap();
+
+    let r = crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
+    assert_eq!((r.cargos.len(), r.fallos.len()), (1, 0));
+    assert_importe(balances_tarjeta(destino).0, 500.0, "el cargo cae en la tarjeta destino");
+    assert_importe(balances_tarjeta(cierra).0, 0.0, "y la desactivada no recibe nada");
+}
+
+#[test]
+fn ta9_reactivar_no_devuelve_las_suscripciones_ni_sus_fechas() {
+    let _g = entorno_aislado();
+    let cierra = crear_tarjeta(0.0, 0.0);
+    let destino = crear_tarjeta(0.0, 0.0);
+    let s = suscripcion_en(cierra, "Streaming", "500", "DOP", "15/03/2026");
+    crate::cerrar_tarjeta(cierra, vec![traslado(s, destino)]).unwrap();
+
+    crate::reactivar_tarjeta(cierra).unwrap();
+    assert!(tarjeta_activa(cierra) && !tarjeta_inactiva(cierra));
+    assert_eq!(tarjeta_de(s), destino, "la suscripción sigue donde se trasladó");
+    assert!(crate::reactivar_tarjeta(cierra).unwrap_err().contains("no está desactivada"));
+    let v = crate::previsualizar_cierre_tarjeta(cierra).unwrap();
+    assert!(v.lineas.is_empty(), "queda sin suscripciones hasta que el titular las reasigne");
+}
+
+#[test]
+fn ta10_ninguna_operacion_nueva_acepta_una_tarjeta_desactivada() {
+    let _g = entorno_aislado();
+    let cerrada = crear_tarjeta(0.0, 0.0);
+    let activa = crear_tarjeta(0.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 10_000.0);
+    crate::cerrar_tarjeta(cerrada, vec![]).unwrap();
+    let deuda_antes = balances_tarjeta(cerrada);
+    let gastos = total_gastos();
+
+    let consumo = GastoInput {
+        fecha: "10/03/2026".into(), monto: importe("10"), divisa: "DOP".into(), descripcion: "Compra".into(),
+        categoria_id: conexion().query_row("SELECT id FROM categorias WHERE nombre = 'Otros';", [], |r| r.get(0)).unwrap(),
+        metodo_pago: "tarjeta".into(), es_lbtr: false, tarjeta_id: Some(cerrada), cuenta_ahorro_id: None, tasa_cambio: None,
+    };
+    let casos: Vec<(&str, Result<(), String>)> = vec![
+        ("consumo", crear_gasto(consumo).map(|_| ())),
+        ("abono", registrar_pago_tarjeta(cerrada, "10/03/2026".into(), monto(5.0), "DOP".into(), Some(cuenta), 0.0)),
+        ("avance", avance(cerrada, cuenta, "50.00", "exonerado", None, None).map(|_| ())),
+        ("bonificación", crate::crear_bonificacion("10/03/2026".into(), cerrada, monto(5.0), "DOP".into(), "Cashback".into(), None).map(|_| ())),
+        ("alta de suscripción", crear_suscripcion("Nueva".into(), importe("10"), cerrada, "mensual".into(), 5, "DOP".into(), None).map(|_| ())),
+    ];
+    for (que, r) in casos {
+        let e = r.expect_err(que);
+        assert!(e.contains("desactivada") && e.contains("Banco Ejemplo Tarjeta Ejemplo"), "{que}: {e}");
+    }
+    // Una suscripción existente tampoco puede editarse hacia una tarjeta desactivada.
+    let s = suscripcion_en(activa, "Streaming", "500", "DOP", "15/03/2026");
+    let e = crate::actualizar_suscripcion(s, "Streaming".into(), importe("500"), cerrada, "mensual".into(), 15, "DOP".into(), Some("15/03/2026".into())).unwrap_err();
+    assert!(e.contains("desactivada"), "{e}");
+    assert_eq!(tarjeta_de(s), activa);
+    assert_eq!(balances_tarjeta(cerrada), deuda_antes, "la deuda no cambió");
+    assert_eq!(total_gastos(), gastos, "ni se asentó un gasto");
+}
+
+#[test]
+fn ta11_revertir_un_movimiento_historico_de_una_tarjeta_desactivada_exige_reactivarla_antes() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(1_000.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 10_000.0);
+    registrar_pago_tarjeta(tarjeta, "10/03/2026".into(), monto(1_000.0), "DOP".into(), Some(cuenta), 0.0).unwrap();
+    crate::cerrar_tarjeta(tarjeta, vec![]).unwrap();
+
+    // Revertir el abono subiría la deuda de una tarjeta cerrada: no se altera en silencio.
+    let e = crate::revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap_err();
+    assert!(e.contains("desactivada"), "{e}");
+    assert_importe(balances_tarjeta(tarjeta).0, 0.0, "la tarjeta sigue en cero");
+
+    crate::reactivar_tarjeta(tarjeta).unwrap();
+    crate::revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
+    assert_importe(balances_tarjeta(tarjeta).0, 1_000.0, "reactivada, la reversión procede");
+}

@@ -28,6 +28,19 @@ const CUENTAS = [
 ];
 const BONIFICACION = (extra = {}) => ({ id: 11, fecha: '10/03/2027', tarjeta_id: 7, entidad: 'Banco Beta', nombre_tarjeta: 'Oro', monto: 25, divisa: 'DOP', concepto: 'Cashback', ...extra });
 
+const PREVIA = (extra = {}) => ({
+    tarjeta_id: 7, nombre: 'Banco Beta Oro', activa: true, balance_pesos: 0, balance_dolares: 0, bloqueos: [],
+    lineas: [
+        { suscripcion_id: 20, plataforma: 'Streaming <Uno>', monto: 500, divisa: 'DOP', frecuencia: 'mensual', fecha_proximo_cobro: '15/03/2027', destino_sugerido: 8, elegibles: [8, 9], motivo: 'Le quedan DOP 9500.00 libres sin usar sobregiro.' },
+        { suscripcion_id: 21, plataforma: 'Nube', monto: 10, divisa: 'USD', frecuencia: 'anual', fecha_proximo_cobro: null, destino_sugerido: null, elegibles: [], motivo: 'Ninguna tarjeta activa tiene cupo.' },
+    ],
+    destinos: [
+        { id: 8, nombre: 'Banco Gamma "Plata"', conserva_dolares: true, disponible_pesos: 9500, disponible_dolares: 100 },
+        { id: 9, nombre: 'Banco Delta Oro', conserva_dolares: false, disponible_pesos: 800, disponible_dolares: 0 },
+    ],
+    ...extra,
+});
+
 const el = (spec = {}) => ({ value: '', hidden: false, disabled: false, readOnly: false, required: false, placeholder: '', textContent: '', innerHTML: '', ...spec, remove() { this.quitado = true; } });
 /** Una cuenta del selector del avance: opciones con su divisa, y la elegida. */
 const selectorCuentas = (valor, opciones) => ({
@@ -37,7 +50,7 @@ const selectorCuentas = (valor, opciones) => ({
 /** Responde después, como el WebView real. */
 const tarde = valor => new Promise(resolver => setTimeout(() => resolver(valor), 2));
 
-function montar({ tarjetas = [tarjeta()], prestamos = [], bonificaciones = [], campos = {}, falla = {}, confirmar = true, motivo = 'Registrado por error en la tarjeta equivocada', respuesta = '58.5', abonos = [], avances = [], cuentas = CUENTAS } = {}) {
+function montar({ tarjetas = [tarjeta()], inactivas = [], previa = PREVIA(), prestamos = [], bonificaciones = [], campos = {}, falla = {}, confirmar = true, motivo = 'Registrado por error en la tarjeta equivocada', respuesta = '58.5', abonos = [], avances = [], cuentas = CUENTAS } = {}) {
     const llamadas = [], avisos = [], rutas = [], confirmaciones = [], preguntas = [], motivos = [], modales = [];
     const reg = (nombre, valor) => async (...a) => { llamadas.push([nombre, ...a]); if (falla[nombre]) throw new Error(falla[nombre]); return valor; };
     const api = {
@@ -50,6 +63,9 @@ function montar({ tarjetas = [tarjeta()], prestamos = [], bonificaciones = [], c
         registrarAvanceEfectivo: reg('registrarAvanceEfectivo', 'Avance registrado (prueba).'),
         obtenerAvancesTarjeta: async id => { llamadas.push(['obtenerAvancesTarjeta', id]); return avances; },
         revertirAvanceEfectivo: reg('revertirAvanceEfectivo', 'Avance revertido (prueba).'), actualizarLimitesTarjeta: reg('actualizarLimitesTarjeta'),
+        obtenerTarjetasInactivas: async () => inactivas,
+        previsualizarCierreTarjeta: async id => { llamadas.push(['previsualizarCierreTarjeta', id]); if (falla.previsualizarCierreTarjeta) throw new Error(falla.previsualizarCierreTarjeta); return previa; },
+        cerrarTarjeta: reg('cerrarTarjeta', 'Tarjeta Banco Beta Oro desactivada. 2 suscripción(es) trasladada(s).'), reactivarTarjeta: reg('reactivarTarjeta'),
     };
     const pantalla = { contenido: { innerHTML: '' } };
     const registro = { ...campos };
@@ -543,12 +559,13 @@ test('el puente expone todos los manejadores y delega en la vista', async () => 
 });
 
 test('todo appUI.x( que escribe la plantilla y su ventana está en el puente, y todo el puente está en la plantilla', async () => {
-    const t = montar({ tarjetas: [tarjeta()], bonificaciones: [BONIFICACION()], abonos: [{ id: 41, fecha_pago: '10/03/2027', monto_pagado: 8, divisa: 'DOP', cuenta_nombre: 'x', tasa_cambio: 1 }], avances: [{ id: 52, fecha: '10/03/2027', monto: 9, divisa: 'DOP', tipo_cargo: 'fijo', tasa: null, cargo: 1, cuenta_nombre: 'x', nota: null }], campos: { abonos_7: el({ hidden: true }), avances_7: el({ hidden: true }) } });
+    const t = montar({ tarjetas: [tarjeta()], inactivas: [{ id: 9, entidad: 'Banco Viejo', nombre_tarjeta: 'Clásica' }], bonificaciones: [BONIFICACION()], abonos: [{ id: 41, fecha_pago: '10/03/2027', monto_pagado: 8, divisa: 'DOP', cuenta_nombre: 'x', tasa_cambio: 1 }], avances: [{ id: 52, fecha: '10/03/2027', monto: 9, divisa: 'DOP', tipo_cargo: 'fijo', tasa: null, cargo: 1, cuenta_nombre: 'x', nota: null }], campos: { abonos_7: el({ hidden: true }), avances_7: el({ hidden: true }) } });
     await t.vista.render();
     await t.vista.alternarAbonos(7);
     await t.vista.alternarAvances(7);
     t.vista.abrirEdicionLimitesTarjeta(JSON.stringify(tarjeta()));
-    const html = t.pantalla.contenido.innerHTML + t.registro.abonos_7.innerHTML + t.registro.avances_7.innerHTML + t.modales[0].html;
+    await t.vista.abrirCierreTarjeta(7);
+    const html = t.pantalla.contenido.innerHTML + t.registro.abonos_7.innerHTML + t.registro.avances_7.innerHTML + t.modales[0].html + t.modales[1].html;
     const llamados = new Set([...html.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
     for (const nombre of llamados) assert.ok(MANEJADORES_TARJETAS.includes(nombre), `falta ${nombre} en el puente`);
     for (const nombre of MANEJADORES_TARJETAS) assert.ok(llamados.has(nombre), `${nombre} está en el puente pero ninguna plantilla lo usa`);
@@ -586,4 +603,106 @@ test('el error de un historial se escapa', async () => {
     await t.vista.alternarAbonos(7);
     assert.doesNotMatch(caja.innerHTML, /<img/);
     assert.match(caja.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
+});
+
+// --- Desactivar una tarjeta ---
+
+const selectores = (id, valores) => Object.fromEntries(Object.entries(valores).map(([sus, valor]) => [`cierre_dest_${id}_${sus}`, el({ value: valor })]));
+const boton = () => el({ disabled: true });
+
+test('el diálogo de cierre muestra balances, cada suscripción con su divisa y la sugerencia con su motivo, y escapa los nombres', async () => {
+    const t = montar({});
+    await t.vista.abrirCierreTarjeta(7);
+    assert.deepEqual(t.llamadas, [['previsualizarCierreTarjeta', 7]]);
+    const { id, html } = t.modales[0];
+    assert.equal(id, 'modal-cierre-tar-7');
+    assert.match(html, /role="dialog" aria-modal="true" aria-labelledby="cierre_titulo_7"/);
+    assert.match(html, /Streaming &lt;Uno&gt;/);
+    assert.doesNotMatch(html, /Streaming <Uno>/);
+    assert.match(html, /<label for="cierre_dest_7_20"/, 'cada select lleva su etiqueta');
+    assert.match(html, /DOP 500/);
+    assert.match(html, /USD 10/);
+    assert.match(html, /Banco Gamma &quot;Plata&quot; — sugerida/);
+    assert.match(html, /Le quedan DOP 9500\.00 libres sin usar sobregiro\./);
+    assert.match(html, /<option value="">— Elige una tarjeta destino —<\/option>/, 'sin sugerencia hay que elegir');
+    assert.match(html, /— sin cupo suficiente/, 'los destinos sin cupo se ofrecen pero se rotulan');
+    assert.match(html, /id="cierre_confirmar_7"[^>]*disabled/, 'Confirmar nace deshabilitado');
+});
+
+test('un balance distinto de cero se muestra como alerta y deja «Confirmar» deshabilitado aunque todo esté elegido', async () => {
+    const campos = { ...selectores(7, { 20: '8', 21: '9' }), cierre_resumen_7: el(), cierre_confirmar_7: boton() };
+    const t = montar({ campos, previa: PREVIA({ balance_pesos: 12.5, bloqueos: ['No se puede desactivar la tarjeta «Banco Beta Oro»: debe DOP 12.50.'] }) });
+    await t.vista.abrirCierreTarjeta(7);
+    assert.match(t.modales[0].html, /role="alert"[\s\S]*debe DOP 12\.50/);
+    assert.equal(campos.cierre_confirmar_7.disabled, true);
+    await t.vista.handleConfirmarCierreTarjeta(7);
+    assert.deepEqual(t.llamadas.filter(l => l[0] === 'cerrarTarjeta'), [], 'ni se intenta');
+    assert.equal(t.avisos[0].tipo, 'error');
+});
+
+test('el resumen enumera «suscripción → destino» y «Confirmar» se habilita solo con un destino por suscripción', async () => {
+    const campos = { ...selectores(7, { 20: '8', 21: '' }), cierre_resumen_7: el(), cierre_confirmar_7: boton() };
+    const t = montar({ campos });
+    await t.vista.abrirCierreTarjeta(7);
+    assert.match(campos.cierre_resumen_7.innerHTML, /Streaming &lt;Uno&gt; \(DOP 500\) → Banco Gamma &quot;Plata&quot;/);
+    assert.match(campos.cierre_resumen_7.innerHTML, /Nube \(USD 10\) → <em>sin destino<\/em>/);
+    assert.equal(campos.cierre_confirmar_7.disabled, true, 'falta una');
+    campos.cierre_dest_7_21.value = '9';
+    t.vista.actualizarResumenCierre(7);
+    assert.equal(campos.cierre_confirmar_7.disabled, false);
+});
+
+test('confirmar envía un traslado por suscripción, cierra el diálogo, avisa y redibuja', async () => {
+    const campos = { ...selectores(7, { 20: '8', 21: '9' }), cierre_resumen_7: el(), cierre_confirmar_7: boton(), 'modal-cierre-tar-7': el() };
+    const t = montar({ campos });
+    await t.vista.abrirCierreTarjeta(7);
+    await t.vista.handleConfirmarCierreTarjeta(7);
+    assert.deepEqual(t.llamadas.filter(l => l[0] === 'cerrarTarjeta'), [['cerrarTarjeta', 7, [{ suscripcion_id: 20, destino_id: 8 }, { suscripcion_id: 21, destino_id: 9 }]]]);
+    assert.equal(t.registro['modal-cierre-tar-7'].quitado, true, 'el diálogo se cierra');
+    assert.deepEqual(t.rutas, ['tarjetas']);
+    assert.match(t.avisos[0].mensaje, /desactivada/);
+});
+
+test('si Rust rechaza el cierre se muestra el error, el diálogo sigue abierto y no se redibuja', async () => {
+    const campos = { ...selectores(7, { 20: '8', 21: '9' }), cierre_resumen_7: el(), cierre_confirmar_7: boton(), 'modal-cierre-tar-7': el() };
+    const t = montar({ campos, falla: { cerrarTarjeta: 'La tarjeta «Banco Gamma» no tiene cupo.' } });
+    await t.vista.abrirCierreTarjeta(7);
+    await t.vista.handleConfirmarCierreTarjeta(7);
+    assert.equal(t.avisos[0].tipo, 'error');
+    assert.ok(!t.registro['modal-cierre-tar-7'].quitado, 'el diálogo sigue abierto');
+    assert.deepEqual(t.rutas, []);
+});
+
+test('si no se puede previsualizar el cierre se avisa y no se abre ningún diálogo', async () => {
+    const t = montar({ falla: { previsualizarCierreTarjeta: 'No se encontró tarjeta con identificador 7.' } });
+    await t.vista.abrirCierreTarjeta(7);
+    assert.equal(t.modales.length, 0);
+    assert.equal(t.avisos[0].tipo, 'error');
+});
+
+test('las tarjetas inactivas van aparte, en un bloque plegable, con su estado en texto y sin balances; sin ellas no hay bloque', async () => {
+    const t = montar({ inactivas: [{ id: 9, entidad: 'Banco <Viejo>', nombre_tarjeta: 'Clásica' }] });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.match(html, /<details[\s\S]*Tarjetas inactivas \(1\)/);
+    assert.match(html, /Banco &lt;Viejo&gt; - Clásica/);
+    assert.match(html, /· Inactiva/, 'el estado va en texto, no solo en el estilo');
+    assert.match(html, /appUI\.handleReactivarTarjeta\(9\)/);
+    const bloque = html.slice(html.indexOf('Tarjetas inactivas'));
+    assert.doesNotMatch(bloque.slice(0, bloque.indexOf('</details>')), /#\d+#/, 'ningún importe en las inactivas');
+    const sin = montar({});
+    await sin.vista.render();
+    assert.doesNotMatch(sin.pantalla.contenido.innerHTML, /Tarjetas inactivas/);
+});
+
+test('reactivar envía el id, avisa que las suscripciones no vuelven solas y redibuja; si Rust rechaza, solo avisa', async () => {
+    const t = montar({});
+    await t.vista.handleReactivarTarjeta(9);
+    assert.deepEqual(t.llamadas, [['reactivarTarjeta', 9]]);
+    assert.match(t.avisos[0].mensaje, /no vuelven solas/);
+    assert.deepEqual(t.rutas, ['tarjetas']);
+    const roto = montar({ falla: { reactivarTarjeta: 'No' } });
+    await roto.vista.handleReactivarTarjeta(9);
+    assert.equal(roto.avisos[0].tipo, 'error');
+    assert.deepEqual(roto.rutas, []);
 });

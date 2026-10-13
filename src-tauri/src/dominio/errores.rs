@@ -80,6 +80,18 @@ pub enum ErrorDominio {
     MotivoInsuficiente { motivo: String },
     FacturaNoPendiente { id: i64 },
     CuentaSinNombre,
+    /// Una tarjeta se desactiva con sus dos balances exactamente en cero. `importe` ya lleva dos decimales.
+    TarjetaConBalance { nombre: String, divisa: &'static str, importe: String, a_favor: bool },
+    TarjetaYaInactiva { nombre: String },
+    TarjetaNoInactiva { nombre: String },
+    /// La selección de traslados no coincide con las suscripciones que la tarjeta tiene ahora.
+    TrasladosNoCoinciden { faltan: Vec<String>, sobran: usize },
+    /// Un destino que no vale: no existe, es la misma tarjeta o está desactivado.
+    DestinoDeTrasladoInvalido { plataforma: String, motivo: &'static str },
+    /// Los traslados asignados a un destino superan su cupo en esa divisa.
+    DestinoSinCupo { destino: String, divisa: &'static str, falta: String },
+    /// Una suscripción cambió de tarjeta mientras se cerraba: se cancela todo.
+    TrasladoPerdido { plataforma: String },
     /// No se archiva la caja de efectivo: de ella depende todo gasto en efectivo de su divisa.
     CajaNoSeArchiva,
     /// Una cuenta se archiva con saldo exactamente cero. `importe` ya lleva el signo y los dos decimales.
@@ -215,6 +227,38 @@ impl fmt::Display for ErrorDominio {
                 write!(f, "No se encontró una factura {} pendiente de cobro.", id)
             }
             ErrorDominio::CuentaSinNombre => write!(f, "El nombre de la cuenta no puede estar vacío."),
+            ErrorDominio::TarjetaConBalance { nombre, divisa, importe, a_favor: false } => write!(
+                f,
+                "No se puede desactivar la tarjeta «{}»: debe {} {}. Págala hasta dejarla en cero antes de cerrarla.",
+                nombre, divisa, importe
+            ),
+            ErrorDominio::TarjetaConBalance { nombre, divisa, importe, a_favor: true } => write!(
+                f,
+                "No se puede desactivar la tarjeta «{}»: tiene {} {} a favor del titular. Resuelve ese saldo (reembolso a una cuenta del mismo banco o gasto de cierre aprobado) antes de cerrarla.",
+                nombre, divisa, importe
+            ),
+            ErrorDominio::TarjetaYaInactiva { nombre } => write!(f, "La tarjeta «{}» ya está desactivada.", nombre),
+            ErrorDominio::TarjetaNoInactiva { nombre } => write!(f, "La tarjeta «{}» no está desactivada.", nombre),
+            ErrorDominio::TrasladosNoCoinciden { faltan, sobran } => {
+                if faltan.is_empty() {
+                    write!(f, "Los traslados incluyen {} suscripción(es) que la tarjeta ya no tiene. Vuelve a abrir el cierre.", sobran)
+                } else {
+                    write!(f, "Falta elegir una tarjeta destino para: {}.", faltan.join(", "))
+                }
+            }
+            ErrorDominio::DestinoDeTrasladoInvalido { plataforma, motivo } => {
+                write!(f, "La tarjeta destino elegida para «{}» no vale: {}.", plataforma, motivo)
+            }
+            ErrorDominio::DestinoSinCupo { destino, divisa, falta } => write!(
+                f,
+                "La tarjeta «{}» no tiene cupo en {} para todo lo que se le asigna: faltan {} {}.",
+                destino, divisa, divisa, falta
+            ),
+            ErrorDominio::TrasladoPerdido { plataforma } => write!(
+                f,
+                "La suscripción «{}» cambió de tarjeta mientras se cerraba esta. No se cambió nada: vuelve a abrir el cierre.",
+                plataforma
+            ),
             ErrorDominio::CajaNoSeArchiva => write!(
                 f,
                 "No se puede archivar la caja de efectivo: es la cuenta donde se asientan todos los gastos en efectivo de su divisa."
