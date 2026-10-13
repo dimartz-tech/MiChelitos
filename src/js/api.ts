@@ -256,6 +256,30 @@ const AppAPI = {
 
     // Los límites ajustados son opcionales: null significa "sin ajuste", y se
     // distingue de 0, que es un tope deliberado que congela la tarjeta.
+    /** Las tarjetas desactivadas: solo su identidad, sin balances. */
+    async obtenerTarjetasInactivas() {
+        return await invoke('obtener_tarjetas_inactivas');
+    },
+
+    /** Lo que se muestra antes de confirmar «Desactivar tarjeta»: balances, suscripciones y destinos sugeridos. */
+    async previsualizarCierreTarjeta(id: number | string) {
+        return await invoke('previsualizar_cierre_tarjeta', { id: Number(id) });
+    },
+
+    /** Desactiva la tarjeta trasladando sus suscripciones, todo o nada. */
+    async cerrarTarjeta(id: number | string, traslados: { suscripcion_id: number; destino_id: number }[]) {
+        return await invoke('cerrar_tarjeta', {
+            id: Number(id),
+            // Los campos de una estructura anidada viajan con su nombre de Rust (snake_case); solo los argumentos del
+            // comando se pasan a camelCase.
+            traslados: traslados.map(t => ({ suscripcion_id: Number(t.suscripcion_id), destino_id: Number(t.destino_id) })),
+        });
+    },
+
+    async reactivarTarjeta(id: number | string) {
+        return await invoke('reactivar_tarjeta', { id: Number(id) });
+    },
+
     async actualizarLimitesTarjeta(id: number | string, limitePesos: string, limiteDolares: string, sobregiroPesos: string, sobregiroDolares: string, balanceCortePesos: string, balanceCorteDolares: string, ajustadoPesos: string | null = null, ajustadoDolares: string | null = null, politicaLiquidacion: string | null | undefined = 'origen') {
         return await invoke('actualizar_limites_tarjeta', {
             id: Number(id),

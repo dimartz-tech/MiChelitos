@@ -21,6 +21,7 @@ pub fn registrar_bonificacion(
     datos: DatosBonificacion,
     almacen: &mut impl AlmacenBonificaciones,
 ) -> Result<i64, ErrorAplicacion> {
+    super::cierre_de_tarjetas::exigir_tarjeta_activa(almacen, datos.tarjeta_id)?;
     // El saldo se mueve antes de insertar, igual que en los gastos: si la
     // inserción falla, la transacción del adaptador deshace ambas cosas.
     almacen.ajustar_deuda(datos.tarjeta_id, datos.bonificacion.efecto_sobre_deuda()?)?;
