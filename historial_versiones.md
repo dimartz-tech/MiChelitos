@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.95.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.96.0 (Versión Actual) - 2026-10-14
+**Las operaciones que escriben abren su transacción `IMMEDIATE`; los listados, no.** Sin cambios de reglas ni de datos.
+
+### 🔧 Qué se hace
+* **El problema (medido, con dos conexiones sobre una base temporal):** casi todos los casos de uso leen un saldo, deciden y escriben (`ajustar_saldo` suma en Rust y guarda el valor absoluto). Con una transacción diferida, si otra conexión escribía entre la lectura y la escritura, SQLite abortaba la primera **al instante** con «database is locked», sin esperar. No había pérdida silenciosa, pero sí errores espurios; y el caso más probable es el **cobro automático al arrancar**, que compite con la carga de la interfaz: un fallo cortaba el bucle y los demás cobros esperaban al siguiente arranque.
+* **`db_sql::transaccion(conn, escritura)`:** `IMMEDIATE` para lo que escribe —el escritor toma su turno **antes de leer**, y el otro escritor espera hasta 5 s— y diferida para los listados, que no ocupan el turno de escritura y siguen leyendo mientras alguien escribe.
+* **Ayudantes:** `con_almacen`, `con_catalogos`, `con_cuentas`, `con_prestamos` y `con_tarjetas` escriben; sus gemelos `lee_*` sirven a los 19 listados (`obtener_*` y `suscripciones_con_aviso`). Las tres operaciones sueltas (`eliminar_cuenta`, `transferir_entre_cuentas`, `eliminar_transaccion_cuenta`) pasan por la misma función.
+* **`busy_timeout` explícito de 5 000 ms** (era el valor por defecto de rusqlite, que avisa de que puede cambiar).
+* **No se activa WAL:** añadiría `-wal` y `-shm` junto a la base en carpetas sincronizadas y haría inválida cualquier copia directa del archivo.
+
+### 🧪 Pruebas
+* 5 nuevas en `db_sql`: la diferida falla al instante cuando otro escribe en medio; la `IMMEDIATE` hace esperar al otro y completa; un listado diferido lee mientras otro escribe; la espera es explícita; y un recorrido de `main.rs` exige que ningún listado escriba con `con_*`, que nada que escriba use `lee_*` y que no quede una `conn.transaction()` suelta. Cinco mutaciones efectivas detectadas (siempre diferida, siempre `IMMEDIATE`, listado con escritura, escritura con lectura, transacción suelta); la sexta (quitar el `busy_timeout` explícito) es equivalente en comportamiento y la cubre una comprobación del código. **Rust 844 pasan.**
+* No se repitió en la app empaquetada.
+
+---
+
+## 🚀 Versión 1.95.0 - 2026-10-14
 **El cobro automático de una suscripción relee la suscripción dentro de su propia transacción.** Corrige un defecto de la extracción de 1.90.0: la lista de cobros se hacía una vez y cada cargo se asentaba con esa copia, de modo que una suscripción editada o borrada mientras tanto podía cargar la tarjeta o el importe antiguos. Sin cambios de reglas ni de mensajes.
 
 ### 🔧 Qué se hace

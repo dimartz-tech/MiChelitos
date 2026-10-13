@@ -268,11 +268,13 @@ pub struct Prestamo {
 ///
 /// Es todo lo que los comandos de categorías y clientes tienen de infraestructura; las reglas están en
 /// `dominio::catalogo` y `aplicacion::catalogos`.
-fn con_catalogos<T>(
+fn con_catalogos_como<T>(
+    escritura: bool,
+    
     f: impl FnOnce(&mut CatalogosSqlite) -> Result<T, String>,
 ) -> Result<T, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = db_sql::transaccion(&mut conn, escritura).map_err(|e| e.to_string())?;
     let resultado = {
         let mut almacen = CatalogosSqlite::nuevo(&tx);
         f(&mut almacen)?
@@ -281,9 +283,19 @@ fn con_catalogos<T>(
     Ok(resultado)
 }
 
+/// Una operación que **escribe**: transacción `IMMEDIATE` (ver `db_sql::transaccion`).
+fn con_catalogos<T>(f: impl FnOnce(&mut CatalogosSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_catalogos_como(true, f)
+}
+
+/// Un listado: transacción diferida, que no ocupa el turno de escritura.
+fn lee_catalogos<T>(f: impl FnOnce(&mut CatalogosSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_catalogos_como(false, f)
+}
+
 #[tauri::command]
 fn obtener_categorias() -> Result<Vec<Categoria>, String> {
-    con_catalogos(|a| {
+    lee_catalogos(|a| {
         Ok(a.categorias()?.into_iter().map(|c| Categoria { id: c.id, nombre: c.nombre }).collect())
     })
 }
@@ -304,7 +316,7 @@ fn eliminar_categoria(id: i64) -> Result<(), String> {
 // --- COMANDOS: GASTOS ---
 #[tauri::command]
 fn obtener_gastos() -> Result<Vec<Gasto>, String> {
-    con_almacen(|a| {
+    lee_almacen(|a| {
         Ok(aplicacion::gastos::listar_gastos(a)?
             .into_iter()
             .map(|g| Gasto {
@@ -376,9 +388,11 @@ fn crear_gasto(input: GastoInput) -> Result<i64, String> {
 
 // --- COMANDOS: INGRESOS FORMALES ---
 /// Corre `f` sobre el almacén de gastos/cuentas/facturas dentro de una transacción y la confirma si salió bien.
-fn con_almacen<T>(f: impl FnOnce(&mut AlmacenSqlite) -> Result<T, String>) -> Result<T, String> {
+fn con_almacen_como<T>(
+    escritura: bool,
+    f: impl FnOnce(&mut AlmacenSqlite) -> Result<T, String>) -> Result<T, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = db_sql::transaccion(&mut conn, escritura).map_err(|e| e.to_string())?;
     let resultado = {
         let mut almacen = AlmacenSqlite::nuevo(&tx);
         f(&mut almacen)?
@@ -387,9 +401,19 @@ fn con_almacen<T>(f: impl FnOnce(&mut AlmacenSqlite) -> Result<T, String>) -> Re
     Ok(resultado)
 }
 
+/// Una operación que **escribe**: transacción `IMMEDIATE` (ver `db_sql::transaccion`).
+fn con_almacen<T>(f: impl FnOnce(&mut AlmacenSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_almacen_como(true, f)
+}
+
+/// Un listado: transacción diferida, que no ocupa el turno de escritura.
+fn lee_almacen<T>(f: impl FnOnce(&mut AlmacenSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_almacen_como(false, f)
+}
+
 #[tauri::command]
 fn obtener_ingresos() -> Result<Vec<Ingreso>, String> {
-    con_almacen(|a| {
+    lee_almacen(|a| {
         Ok(AlmacenIngresos::ingresos(a)?
             .into_iter()
             .map(|i| Ingreso {
@@ -461,7 +485,7 @@ fn marcar_ingreso_pagado(
 // --- COMANDOS: INGRESOS INFORMALES ---
 #[tauri::command]
 fn obtener_ingresos_informales() -> Result<Vec<IngresoInformal>, String> {
-    con_almacen(|a| {
+    lee_almacen(|a| {
         Ok(AlmacenInformales::informales(a)?
             .into_iter()
             .map(|i| IngresoInformal {
@@ -507,9 +531,11 @@ fn marcar_informal_pagado(
 
 // --- COMANDOS: TARJETAS ---
 /// Como `con_catalogos`, para las tarjetas.
-fn con_tarjetas<T>(f: impl FnOnce(&mut TarjetasSqlite) -> Result<T, String>) -> Result<T, String> {
+fn con_tarjetas_como<T>(
+    escritura: bool,
+    f: impl FnOnce(&mut TarjetasSqlite) -> Result<T, String>) -> Result<T, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = db_sql::transaccion(&mut conn, escritura).map_err(|e| e.to_string())?;
     let resultado = {
         let mut almacen = TarjetasSqlite::nuevo(&tx);
         f(&mut almacen)?
@@ -518,10 +544,20 @@ fn con_tarjetas<T>(f: impl FnOnce(&mut TarjetasSqlite) -> Result<T, String>) -> 
     Ok(resultado)
 }
 
+/// Una operación que **escribe**: transacción `IMMEDIATE` (ver `db_sql::transaccion`).
+fn con_tarjetas<T>(f: impl FnOnce(&mut TarjetasSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_tarjetas_como(true, f)
+}
+
+/// Un listado: transacción diferida, que no ocupa el turno de escritura.
+fn lee_tarjetas<T>(f: impl FnOnce(&mut TarjetasSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_tarjetas_como(false, f)
+}
+
 #[tauri::command]
 fn obtener_tarjetas() -> Result<Vec<Tarjeta>, String> {
     let dia_actual = Local::now().day() as i32;
-    con_tarjetas(|a| {
+    lee_tarjetas(|a| {
         Ok(aplicacion::tarjetas::listar_tarjetas(dia_actual, a)?
             .into_iter()
             .map(|t| Tarjeta {
@@ -667,7 +703,7 @@ pub struct AbonoTarjeta {
 /// Abonos registrados a una tarjeta, del más reciente al más antiguo.
 #[tauri::command]
 fn obtener_abonos_tarjeta(tarjeta_id: i64) -> Result<Vec<AbonoTarjeta>, String> {
-    con_almacen(|a| {
+    lee_almacen(|a| {
         Ok(aplicacion::abonos::listar_abonos(tarjeta_id, a)?
             .into_iter()
             .map(|p| AbonoTarjeta {
@@ -814,7 +850,7 @@ pub struct AvanceEfectivo {
 /// Avances de una tarjeta, del más reciente al más antiguo.
 #[tauri::command]
 fn obtener_avances_tarjeta(tarjeta_id: i64) -> Result<Vec<AvanceEfectivo>, String> {
-    con_almacen(|a| {
+    lee_almacen(|a| {
         Ok(aplicacion::avances::listar_avances(tarjeta_id, a)?
             .into_iter()
             .map(|v| AvanceEfectivo {
@@ -858,7 +894,7 @@ fn obtener_suscripciones() -> Result<Vec<Suscripcion>, String> {
 /// Las suscripciones, con el aviso ya resuelto para ese «hoy».
 pub fn suscripciones_con_aviso(reloj: &dyn Reloj) -> Result<Vec<Suscripcion>, String> {
     let hoy = reloj.hoy();
-    con_almacen(|a| {
+    lee_almacen(|a| {
         Ok(aplicacion::suscripciones::listar_suscripciones(hoy, a)?
             .into_iter()
             .map(|s| Suscripcion {
@@ -1046,15 +1082,27 @@ fn guardar_capital(data: Value) -> Result<(), String> {
 
 // --- COMANDOS: DEUDAS Y FINANCIAMIENTOS ---
 /// Como `con_catalogos`, para los financiamientos.
-fn con_prestamos<T>(f: impl FnOnce(&mut PrestamosSqlite) -> Result<T, String>) -> Result<T, String> {
+fn con_prestamos_como<T>(
+    escritura: bool,
+    f: impl FnOnce(&mut PrestamosSqlite) -> Result<T, String>) -> Result<T, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = db_sql::transaccion(&mut conn, escritura).map_err(|e| e.to_string())?;
     let resultado = {
         let mut almacen = PrestamosSqlite::nuevo(&tx);
         f(&mut almacen)?
     };
     tx.commit().map_err(|e| e.to_string())?;
     Ok(resultado)
+}
+
+/// Una operación que **escribe**: transacción `IMMEDIATE` (ver `db_sql::transaccion`).
+fn con_prestamos<T>(f: impl FnOnce(&mut PrestamosSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_prestamos_como(true, f)
+}
+
+/// Un listado: transacción diferida, que no ocupa el turno de escritura.
+fn lee_prestamos<T>(f: impl FnOnce(&mut PrestamosSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_prestamos_como(false, f)
 }
 
 /// La fecha de hoy como la guarda la aplicación: `dd/mm/aaaa`.
@@ -1065,7 +1113,7 @@ fn hoy_dd_mm_aaaa() -> String {
 #[tauri::command]
 fn obtener_prestamos() -> Result<Vec<Prestamo>, String> {
     let dia_actual = Local::now().day() as i32;
-    con_prestamos(|a| {
+    lee_prestamos(|a| {
         Ok(aplicacion::prestamos::listar_prestamos(dia_actual, a)?
             .into_iter()
             .map(|p| Prestamo {
@@ -1204,7 +1252,7 @@ pub struct MovimientoPrestamo {
 
 #[tauri::command]
 fn obtener_movimientos_prestamo(id: i64) -> Result<Vec<MovimientoPrestamo>, String> {
-    con_prestamos(|a| {
+    lee_prestamos(|a| {
         Ok(a.movimientos(id)?
             .into_iter()
             .map(|m| MovimientoPrestamo {
@@ -1227,7 +1275,7 @@ fn eliminar_prestamo(id: i64) -> Result<(), String> {
 
 #[tauri::command]
 fn obtener_clientes() -> Result<Vec<Cliente>, String> {
-    con_catalogos(|a| {
+    lee_catalogos(|a| {
         Ok(a.clientes()?.into_iter().map(|c| Cliente { id: c.id, rnc: c.rnc, nombre: c.nombre }).collect())
     })
 }
@@ -1279,9 +1327,11 @@ fn restaurar_respaldo(nombre: String) -> Result<serde_json::Value, String> {
 }
 
 /// Como `con_catalogos`, para el alta, corrección y consulta de cuentas.
-fn con_cuentas<T>(f: impl FnOnce(&mut CuentasSqlite) -> Result<T, String>) -> Result<T, String> {
+fn con_cuentas_como<T>(
+    escritura: bool,
+    f: impl FnOnce(&mut CuentasSqlite) -> Result<T, String>) -> Result<T, String> {
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = db_sql::transaccion(&mut conn, escritura).map_err(|e| e.to_string())?;
     let resultado = {
         let mut almacen = CuentasSqlite::nuevo(&tx);
         f(&mut almacen)?
@@ -1290,9 +1340,19 @@ fn con_cuentas<T>(f: impl FnOnce(&mut CuentasSqlite) -> Result<T, String>) -> Re
     Ok(resultado)
 }
 
+/// Una operación que **escribe**: transacción `IMMEDIATE` (ver `db_sql::transaccion`).
+fn con_cuentas<T>(f: impl FnOnce(&mut CuentasSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_cuentas_como(true, f)
+}
+
+/// Un listado: transacción diferida, que no ocupa el turno de escritura.
+fn lee_cuentas<T>(f: impl FnOnce(&mut CuentasSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_cuentas_como(false, f)
+}
+
 #[tauri::command]
 fn obtener_cuentas() -> Result<Vec<CuentaAhorro>, String> {
-    con_cuentas(|a| {
+    lee_cuentas(|a| {
         Ok(a.cuentas()?
             .into_iter()
             .map(|c| CuentaAhorro {
@@ -1361,7 +1421,7 @@ fn eliminar_cuenta(id: i64) -> Result<(), String> {
     // Traducción pura. La guarda —que hoy solo mira los gastos, H13— vive en
     // el caso de uso.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = db_sql::transaccion(&mut conn, true).map_err(|e| e.to_string())?;
 
     {
         let mut almacen = AlmacenSqlite::nuevo(&tx);
@@ -1387,7 +1447,7 @@ fn transferir_entre_cuentas(
     // números en importes de la divisa que corresponde a cada cuenta, y se
     // confirma o se deshace.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = db_sql::transaccion(&mut conn, true).map_err(|e| e.to_string())?;
 
     {
         let mut almacen = AlmacenSqlite::nuevo(&tx);
@@ -1418,7 +1478,7 @@ fn transferir_entre_cuentas(
 
 #[tauri::command]
 fn obtener_transacciones_cuentas() -> Result<Vec<TransaccionCuenta>, String> {
-    con_cuentas(|a| {
+    lee_cuentas(|a| {
         Ok(a.transacciones()?
             .into_iter()
             .map(|t| TransaccionCuenta {
@@ -1502,7 +1562,7 @@ fn crear_cobro_efectivo_informal(fecha: String, descripcion: String, monto: ipc:
 /// local. Devuelve la tasa que se dedujo, para poder mostrarla.
 #[tauri::command]
 fn obtener_bonificaciones() -> Result<Vec<BonificacionDto>, String> {
-    con_almacen(|a| {
+    lee_almacen(|a| {
         Ok(aplicacion::bonificaciones::listar_bonificaciones(a)?
             .into_iter()
             .map(|b| BonificacionDto {
@@ -1633,7 +1693,7 @@ fn eliminar_transaccion_cuenta(id: i64, motivo: String) -> Result<String, String
     // Traducción pura. El recorte en cero del destino (H10) vive ahora en el
     // caso de uso y en el puerto, no en esta consulta.
     let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = db_sql::transaccion(&mut conn, true).map_err(|e| e.to_string())?;
 
     let caso = abrir_caso(&tx, "traspaso", id, "SELECT COALESCE(descripcion, 'Traspaso entre cuentas'), monto_origen, 'DOP' FROM transacciones_cuentas WHERE id = ?;", &motivo)?;
 
