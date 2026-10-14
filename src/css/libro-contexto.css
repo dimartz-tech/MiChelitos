@@ -146,6 +146,37 @@ body.light-theme .sidebar-nav .nav-item.active {
 .sidebar-nav .nav-item:focus-visible,
 .sidebar-footer button:focus-visible { outline-color: #f1d79b; }
 
+/* La cabecera es oscura en ambos temas: el hover debe conservar texto claro
+   (el estilo base lo pasaba a --text-primary, oscuro en tema claro). */
+.sidebar-nav .nav-item:hover,
+body.light-theme .sidebar-nav .nav-item:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+/* Enlace para saltar la cabecera: oculto hasta recibir el foco del teclado. */
+.skip-link {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 1000;
+    padding: 0.6rem 1rem;
+    border-radius: var(--radius-md);
+    background: #10243b;
+    color: #ffffff;
+    border: 2px solid #f1d79b;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    transform: translateY(-200%);
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+    transform: translateY(0);
+    outline: 2px solid #f1d79b;
+    outline-offset: 2px;
+}
+
 .app-main {
     min-height: 0;
     padding: clamp(1.25rem, 3vw, 2.4rem);
