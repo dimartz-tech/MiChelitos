@@ -4,7 +4,19 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.100.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.101.0 (Versión Actual) - 2026-10-14
+**Los respaldos se podan por categoría: una racha de arranques ya no expulsa el respaldo previo a una actualización.**
+
+### 🔧 Qué se hace
+* **Problema:** la aplicación toma un respaldo automático en cada arranque en que la base cambió («antes de preparar el esquema») y la poda conservaba solo los 10 más recientes por nombre, sin distinguir tipo. Cualquier respaldo hecho a mano, previo a una actualización o a una restauración competía con ellos y era el siguiente en borrarse.
+* **Dos categorías con tope propio:** los **automáticos** conservan 10; todos los demás (manuales, previos a actualizar o a restaurar, con nombre elegido, «sin verificar») conservan 60. La copia del capital se poda junto a su base.
+* **Sin cambios de formato:** los nombres, la verificación, la restauración y el esquema son los de siempre. No hay migración.
+* **Pruebas:** reconocimiento de nombres (con el sufijo numérico de `ruta_libre`), racha de arranques que no expulsa un previo a actualizar, topes fijados en cifras, y en disco: el respaldo pedido y su capital sobreviven, y la red de seguridad de una restauración no se poda con los automáticos.
+* **Decidido tras medir:** no se añade respaldo diario, porque el de arranque ya cubre cada sesión con cambios; WAL se descarta por ahora (beneficio medido ≈ 0 y riesgo en copias y restauraciones).
+
+---
+
+## Versión 1.100.0 - 2026-10-14
 **Propuesta de interfaz «Libro y contexto» y dos correcciones de accesibilidad.** Solo presentación: no cambia cálculos, rutas ni datos.
 
 ### 🔧 Qué se hace
