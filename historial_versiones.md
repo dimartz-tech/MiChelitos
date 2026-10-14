@@ -4,7 +4,18 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.99.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.100.0 (Versión Actual) - 2026-10-14
+**Propuesta de interfaz «Libro y contexto» y dos correcciones de accesibilidad.** Solo presentación: no cambia cálculos, rutas ni datos.
+
+### 🔧 Qué se hace
+* **Interfaz:** cabecera horizontal con navegación por secciones, tema oscuro y claro, y estilos transversales (`libro-contexto.css`). Propuesta de evaluación en `docs/PROPUESTA_EVALUACION_UI_LIBRO_CONTEXTO.md`.
+* **Hover legible en la cabecera:** la cabecera es oscura en ambos temas, pero el hover tomaba el texto del tema (oscuro en el claro, contraste 1,08:1). Ahora conserva texto blanco (10,9:1).
+* **«Saltar al contenido principal»:** el enlace existía sin estilos; ahora queda oculto y aparece al recibir el foco con Tab (15,7:1).
+* **Pendiente del informe de revisión:** `prefers-reduced-motion`, colores en línea de bajo contraste, bordes de formularios, orden de foco del botón de tema y código muerto del menú colapsable.
+
+---
+
+## Versión 1.99.0 - 2026-10-14
 **Las tarjetas se desactivan, no se borran, y sus suscripciones se trasladan antes.** Segundo tramo del cierre previsto para la RC (SPEC-RC-TAR). **Cambio de reglas decidido por el titular.**
 
 ### 🔧 Qué se hace
