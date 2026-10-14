@@ -4,7 +4,16 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.101.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.102.0 (Versión Actual) - 2026-10-14
+**Se retira un importe real que se había colado en una prueba y en el historial.** El repositorio es público: las cifras de prueba deben ser siempre inventadas.
+
+### 🔧 Qué se hace
+* En `dominio/dinero.rs` (comentario y prueba del redondeo del 0.20 %) y en la entrada correspondiente de este historial, el importe se sustituye por una cifra inventada. El razonamiento y el resultado de la prueba no cambian.
+* **Límite conocido:** la cifra sigue en el historial de git de commits anteriores; quitarla de ahí exigiría reescribir el historial, y eso se decide aparte.
+
+---
+
+## Versión 1.101.0 - 2026-10-14
 **Los respaldos se podan por categoría: una racha de arranques ya no expulsa el respaldo previo a una actualización.**
 
 ### 🔧 Qué se hace
