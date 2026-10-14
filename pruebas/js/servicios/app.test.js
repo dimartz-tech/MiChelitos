@@ -1,5 +1,5 @@
 // El arranque de la aplicación (`app.ts`): navegar entre pestañas, procesar las
-// suscripciones pendientes al iniciar, el tema claro/oscuro y el menú lateral.
+// suscripciones pendientes al iniciar, el tema claro/oscuro y la navegación superior.
 //
 // Era un script clásico que llamaba al global `appUI`; ahora es un módulo que recibe
 // el enrutador, los avisos, el DOM y la API. Sigue colgando `navigate` de `window`
@@ -13,10 +13,14 @@ import { iniciarAplicacion } from '../../../src/js/app.js';
 const elemento = (extra = {}) => {
     const clases = new Set(extra.clases ?? []);
     const oyentes = {};
+    const atributos = new Map();
     return {
         id: extra.id ?? '', textContent: '',
         classList: { add: c => clases.add(c), remove: c => clases.delete(c), toggle: c => (clases.has(c) ? clases.delete(c) : clases.add(c)), contains: c => clases.has(c) },
         addEventListener: (tipo, fn) => { oyentes[tipo] = fn; },
+        setAttribute: (nombre, valor) => atributos.set(nombre, valor),
+        removeAttribute: nombre => atributos.delete(nombre),
+        getAttribute: nombre => atributos.get(nombre) ?? null,
         pulsar() { oyentes.click(); },
         clases,
     };
@@ -24,7 +28,7 @@ const elemento = (extra = {}) => {
 
 function montar({ cargos = [], fallos = [], falla = false, tema = null, colapsado = null, listo = true } = {}) {
     const navs = ['dashboard', 'gastos', 'ajustes'].map(r => elemento({ id: `nav-btn-${r}`, clases: r === 'ajustes' ? ['nav-item', 'active'] : ['nav-item'] }));
-    const botones = { 'theme-toggle-btn': elemento(), 'sidebar-collapse-btn': elemento() };
+    const botones = { 'theme-toggle-btn': elemento() };
     const sidebar = elemento();
     const cuerpo = elemento();
     const almacen = new Map();
@@ -66,6 +70,8 @@ test('al arrancar muestra el Dashboard, y navigate queda como global para los ma
 test('navigate marca la pestaña activa y pide dibujarla', () => conApp({}, t => {
     t.navigate('gastos');
     assert.deepEqual(t.navs.map(n => n.clases.has('active')), [false, true, false]);
+    assert.equal(t.navs[1].getAttribute('aria-current'), 'page');
+    assert.equal(t.navs[0].getAttribute('aria-current'), null);
     assert.deepEqual(t.mostrados, ['dashboard', 'gastos']);
 }));
 
@@ -121,13 +127,13 @@ test('sin cargos pendientes no avisa ni redibuja; y si falla, no rompe nada', ()
     } finally { console.error = previo; }
 }));
 
-test('el tema por defecto es oscuro; el guardado «light» lo arranca claro', () => {
-    return conApp({}, oscuro => {
-        assert.equal(oscuro.botones['theme-toggle-btn'].textContent, '🌙');
-        assert.equal(oscuro.cuerpo.clases.has('light-theme'), false);
-    }).then(() => conApp({ tema: 'light' }, claro => {
+test('el tema por defecto es claro; se respeta el oscuro guardado', () => {
+    return conApp({}, claro => {
         assert.equal(claro.botones['theme-toggle-btn'].textContent, '☀️');
         assert.equal(claro.cuerpo.clases.has('light-theme'), true);
+    }).then(() => conApp({ tema: 'dark' }, oscuro => {
+        assert.equal(oscuro.botones['theme-toggle-btn'].textContent, '🌙');
+        assert.equal(oscuro.cuerpo.clases.has('light-theme'), false);
     }));
 }
 
@@ -136,26 +142,18 @@ test('el tema por defecto es oscuro; el guardado «light» lo arranca claro', ()
 test('cambiar de tema lo guarda, lo avisa y redibuja la pestaña activa', () => conApp({}, t => {
     t.navigate('ajustes');
     t.botones['theme-toggle-btn'].pulsar();
-    assert.equal(t.cuerpo.clases.has('light-theme'), true);
-    assert.equal(t.almacen.get('desktop-theme'), 'light');
-    assert.deepEqual(t.avisos.at(-1), { mensaje: 'Modo Claro activado.', tipo: undefined });
+    assert.equal(t.cuerpo.clases.has('light-theme'), false);
+    assert.equal(t.almacen.get('desktop-theme'), 'dark');
+    assert.deepEqual(t.avisos.at(-1), { mensaje: 'Modo Oscuro activado.', tipo: undefined });
     assert.equal(t.mostrados.at(-1), 'ajustes');
     t.botones['theme-toggle-btn'].pulsar();
-    assert.equal(t.almacen.get('desktop-theme'), 'dark');
-    assert.equal(t.botones['theme-toggle-btn'].textContent, '🌙');
-    assert.deepEqual(t.avisos.at(-1), { mensaje: 'Modo Oscuro activado.', tipo: undefined });
+    assert.equal(t.almacen.get('desktop-theme'), 'light');
+    assert.equal(t.botones['theme-toggle-btn'].textContent, '☀️');
+    assert.deepEqual(t.avisos.at(-1), { mensaje: 'Modo Claro activado.', tipo: undefined });
 }));
 
-test('el menú lateral recuerda si estaba colapsado, y al pulsar se pliega y se guarda', () => conApp({ colapsado: 'true' }, t => {
-    assert.equal(t.sidebar.clases.has('collapsed'), true);
-    assert.equal(t.botones['sidebar-collapse-btn'].textContent, '▶️');
-    t.botones['sidebar-collapse-btn'].pulsar();
+test('la navegación superior ignora la preferencia obsoleta de menú colapsado', () => conApp({ colapsado: 'true' }, t => {
     assert.equal(t.sidebar.clases.has('collapsed'), false);
-    assert.equal(t.almacen.get('sidebar-collapsed'), 'false');
-    assert.equal(t.botones['sidebar-collapse-btn'].textContent, '◀️');
-}));
-
-test('el menú lateral parte desplegado si no hay nada guardado', () => conApp({}, t => {
-    assert.equal(t.sidebar.clases.has('collapsed'), false);
-    assert.equal(t.botones['sidebar-collapse-btn'].textContent, '◀️');
+    assert.equal(t.botones['sidebar-collapse-btn'], undefined);
+    assert.equal(t.almacen.get('sidebar-collapsed'), 'true');
 }));
