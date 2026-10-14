@@ -22,8 +22,18 @@ use rusqlite::Connection;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-/// Cuántos respaldos se conservan. Los más antiguos se descartan.
-const RESPALDOS_A_CONSERVAR: usize = 10;
+/// Motivo del respaldo que la aplicación toma sola al abrir la base. Es el único
+/// que se acumula sin que nadie lo pida, así que es el único que se poda pronto.
+pub const MOTIVO_AUTOMATICO: &str = "antes de preparar el esquema";
+
+/// Cuántos respaldos automáticos se conservan. Los más antiguos se descartan.
+const AUTOMATICOS_A_CONSERVAR: usize = 10;
+
+/// Cuántos respaldos con intención se conservan: manuales, previos a una
+/// actualización o a una restauración, o con un nombre elegido a mano. Son pocos
+/// y pesan poco; se podan por separado para que una racha de arranques no
+/// expulse el que se tomó antes de actualizar.
+const PROTEGIDOS_A_CONSERVAR: usize = 60;
 
 #[derive(Debug)]
 pub enum ErrorRespaldo {
@@ -263,14 +273,54 @@ fn respaldos_existentes() -> Vec<PathBuf> {
     rutas
 }
 
-fn podar(_directorio: &Path) {
-    let existentes = respaldos_existentes();
-    if existentes.len() <= RESPALDOS_A_CONSERVAR {
-        return;
+/// Si el nombre corresponde a un respaldo tomado solo por la aplicación.
+///
+/// Se reconoce por el motivo saneado al final del nombre, con o sin el sufijo
+/// numérico que añade `ruta_libre` cuando dos caen en el mismo segundo.
+fn es_automatico(nombre: &str) -> bool {
+    let motivo = sanear(MOTIVO_AUTOMATICO);
+    let Some(raiz) = nombre.strip_suffix(".db") else {
+        return false;
+    };
+    let sin_sufijo = match raiz.rsplit_once('-') {
+        Some((cabeza, cola)) if !cola.is_empty() && cola.chars().all(|c| c.is_ascii_digit()) => {
+            cabeza
+        }
+        _ => raiz,
+    };
+    raiz.ends_with(&format!("_{motivo}")) || sin_sufijo.ends_with(&format!("_{motivo}"))
+}
+
+/// Qué respaldos sobran, de los nombres dados (en cualquier orden).
+///
+/// Dos categorías, cada una con su propio tope: los automáticos se renuevan
+/// rápido; los demás casi no se tocan. Así ninguna cantidad de arranques puede
+/// desplazar un respaldo que alguien pidió o que precede a una actualización.
+fn a_podar(nombres: &[String]) -> Vec<String> {
+    let mut ordenados: Vec<&String> = nombres.iter().collect();
+    ordenados.sort();
+    let (automaticos, protegidos): (Vec<&String>, Vec<&String>) =
+        ordenados.into_iter().partition(|n| es_automatico(n));
+
+    let mut sobran = Vec::new();
+    for (grupo, tope) in [(automaticos, AUTOMATICOS_A_CONSERVAR), (protegidos, PROTEGIDOS_A_CONSERVAR)] {
+        if grupo.len() > tope {
+            sobran.extend(grupo[..grupo.len() - tope].iter().map(|n| (*n).clone()));
+        }
     }
-    for viejo in &existentes[..existentes.len() - RESPALDOS_A_CONSERVAR] {
-        let _ = std::fs::remove_file(viejo);
-        let _ = std::fs::remove_file(copia_de_capital(viejo));
+    sobran
+}
+
+fn podar(directorio: &Path) {
+    let existentes = respaldos_existentes();
+    let nombres: Vec<String> = existentes
+        .iter()
+        .filter_map(|r| r.file_name().map(|n| n.to_string_lossy().to_string()))
+        .collect();
+    for viejo in a_podar(&nombres) {
+        let ruta = directorio.join(&viejo);
+        let _ = std::fs::remove_file(&ruta);
+        let _ = std::fs::remove_file(copia_de_capital(&ruta));
     }
 }
 
@@ -474,11 +524,107 @@ mod tests {
         let _g = entorno();
         crear_base_con_datos();
 
-        for n in 0..RESPALDOS_A_CONSERVAR + 4 {
-            respaldar(&format!("n{n}")).expect("respaldar");
+        for _ in 0..AUTOMATICOS_A_CONSERVAR + 4 {
+            respaldar(MOTIVO_AUTOMATICO).expect("respaldar");
         }
 
-        assert_eq!(respaldos_existentes().len(), RESPALDOS_A_CONSERVAR, "se poda");
+        assert_eq!(respaldos_existentes().len(), AUTOMATICOS_A_CONSERVAR, "se poda");
+    }
+
+    fn nombre_auto(n: usize) -> String {
+        format!("michelitos_2026-10-{:02}T09-00-00_antes-de-preparar-el-esquema.db", n)
+    }
+
+    #[test]
+    fn los_topes_de_conservacion_son_los_acordados() {
+        // Se fijan los números, no solo las constantes: cambiarlos cambia
+        // cuánta historia se guarda y debe ser una decisión, no un descuido.
+        assert_eq!(AUTOMATICOS_A_CONSERVAR, 10);
+        assert_eq!(PROTEGIDOS_A_CONSERVAR, 60);
+    }
+
+    #[test]
+    fn solo_es_automatico_el_respaldo_del_arranque() {
+        assert!(es_automatico("michelitos_2026-10-14T08-50-39_antes-de-preparar-el-esquema.db"));
+        assert!(es_automatico("michelitos_2026-10-14T08-50-39_antes-de-preparar-el-esquema-2.db"));
+        assert!(!es_automatico("michelitos_2026-10-14_antes-de-actualizar-a-1.99.0.db"));
+        assert!(!es_automatico("michelitos_2026-10-14T09-04-09_manual.db"));
+        assert!(!es_automatico("michelitos_2026-10-14T09-04-09_antes-de-restaurar-sin-verificar.db"));
+        assert!(!es_automatico("michelitos_2026-10-14T09-04-09_antes-de-preparar-el-esquema-viejo.db"));
+        assert!(!es_automatico("antes-de-preparar-el-esquema.capital.json"));
+    }
+
+    #[test]
+    fn una_racha_de_arranques_no_expulsa_el_respaldo_previo_a_actualizar() {
+        let previo = "michelitos_2026-10-01_antes-de-actualizar-a-1.90.0.db".to_string();
+        let mut nombres = vec![previo.clone()];
+        nombres.extend((2..=30).map(nombre_auto));
+
+        let sobran = a_podar(&nombres);
+
+        assert!(!sobran.contains(&previo), "el previo a actualizar sobrevive");
+        assert_eq!(sobran.len(), 29 - AUTOMATICOS_A_CONSERVAR, "solo se podan automáticos");
+        assert!(sobran.iter().all(|n| es_automatico(n)));
+        assert!(sobran.contains(&nombre_auto(2)), "se va el más antiguo");
+        assert!(!sobran.contains(&nombre_auto(30)), "se queda el más reciente");
+    }
+
+    #[test]
+    fn los_protegidos_tienen_su_propio_tope_y_se_va_el_mas_antiguo() {
+        let nombres: Vec<String> = (0..PROTEGIDOS_A_CONSERVAR + 2)
+            .map(|n| format!("michelitos_2026-01-01T00-00-{:02}_manual-{n:03}.db", n % 60))
+            .collect();
+        let mut esperados = nombres.clone();
+        esperados.sort();
+        esperados.truncate(2);
+
+        let mut sobran = a_podar(&nombres);
+        sobran.sort();
+
+        assert_eq!(sobran, esperados);
+    }
+
+    #[test]
+    fn podar_no_borra_nada_si_no_se_pasa_de_los_topes() {
+        let mut nombres: Vec<String> = (1..=AUTOMATICOS_A_CONSERVAR).map(nombre_auto).collect();
+        nombres.push("michelitos_2026-10-09_antes-de-revertir-abonos-qik.db".into());
+
+        assert!(a_podar(&nombres).is_empty());
+    }
+
+    #[test]
+    fn en_disco_el_respaldo_pedido_sobrevive_a_los_automaticos_y_conserva_su_capital() {
+        let _g = entorno();
+        crear_base_con_datos();
+        escribir_capital(r#"{"certificados":[]}"#);
+
+        let manual = respaldar("antes de actualizar").unwrap();
+        for _ in 0..AUTOMATICOS_A_CONSERVAR + 5 {
+            respaldar(MOTIVO_AUTOMATICO).unwrap();
+        }
+
+        assert!(manual.exists(), "el respaldo con intención no se poda");
+        assert!(copia_de_capital(&manual).exists(), "ni su copia del capital");
+        assert_eq!(respaldos_existentes().len(), AUTOMATICOS_A_CONSERVAR + 1);
+    }
+
+    #[test]
+    fn una_copia_de_seguridad_previa_a_restaurar_no_se_poda_con_los_automaticos() {
+        let _g = entorno();
+        crear_base_con_datos();
+        let base = respaldar("manual").unwrap();
+        let nombre = base.file_name().unwrap().to_string_lossy().to_string();
+        for _ in 0..AUTOMATICOS_A_CONSERVAR + 2 {
+            respaldar(MOTIVO_AUTOMATICO).unwrap();
+        }
+
+        let r = restaurar(&nombre).unwrap();
+
+        assert!(r.respaldo_de_seguridad.exists());
+        for _ in 0..AUTOMATICOS_A_CONSERVAR + 2 {
+            respaldar(MOTIVO_AUTOMATICO).unwrap();
+        }
+        assert!(r.respaldo_de_seguridad.exists(), "la red para deshacer sigue ahí");
     }
 
     #[test]
@@ -541,15 +687,15 @@ mod tests {
         crear_base_con_datos();
         escribir_capital(r#"{"certificados":[]}"#);
 
-        for n in 0..RESPALDOS_A_CONSERVAR + 3 {
-            respaldar(&format!("n{n}")).unwrap();
+        for _ in 0..AUTOMATICOS_A_CONSERVAR + 3 {
+            respaldar(MOTIVO_AUTOMATICO).unwrap();
         }
 
         let sueltas = std::fs::read_dir(directorio_de_respaldos())
             .unwrap()
             .filter(|e| e.as_ref().unwrap().path().to_string_lossy().ends_with(".capital.json"))
             .count();
-        assert_eq!(sueltas, RESPALDOS_A_CONSERVAR, "ni una copia de capital huérfana");
+        assert_eq!(sueltas, AUTOMATICOS_A_CONSERVAR, "ni una copia de capital huérfana");
     }
 
     #[test]

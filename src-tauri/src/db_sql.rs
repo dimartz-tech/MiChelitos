@@ -58,7 +58,7 @@ pub fn transaccion(conn: &mut Connection, escritura: bool) -> Result<rusqlite::T
 /// La preparación de una instalación nueva no respalda nada: no hay nada que
 /// perder todavía.
 pub fn inicializar_db() -> Result<()> {
-    if let Err(e) = crate::respaldo::respaldar_si_hace_falta("antes de preparar el esquema") {
+    if let Err(e) = crate::respaldo::respaldar_si_hace_falta(crate::respaldo::MOTIVO_AUTOMATICO) {
         return Err(rusqlite::Error::InvalidParameterName(format!(
             "No se preparó la base porque antes no se pudo respaldar. {}",
             e
