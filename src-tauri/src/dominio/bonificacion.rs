@@ -11,7 +11,9 @@
 //! el vínculo con el gasto es de uno a muchos y además opcional: los estados
 //! no dicen a qué consumo corresponde cada crédito.
 
-use super::dinero::{Dinero, Porcentaje};
+use super::dinero::Dinero;
+#[cfg(test)]
+use super::dinero::Porcentaje;
 use super::errores::ErrorDominio;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +57,7 @@ impl Bonificacion {
     /// centavos**, no porcentajes: el emisor redondea el crédito, de modo que
     /// 1 234.56 al 5 % da 61.73 y no 61.728, y una comparación de porcentajes
     /// nunca daría exacta.
+    #[cfg(test)]
     pub fn coincide_con_tasa(&self, consumo: Dinero, tasa: Porcentaje) -> bool {
         match consumo.porcentaje(tasa) {
             Ok(esperado) => esperado == self.monto,
@@ -67,6 +70,7 @@ impl Bonificacion {
     /// Es orientativo: el redondeo a centavos hace que casi nunca coincida
     /// con la tasa nominal. Para comprobar si cuadra con una tasa concreta,
     /// usar [`Bonificacion::coincide_con_tasa`].
+    #[cfg(test)]
     pub fn porcentaje_sobre(&self, consumo: Dinero) -> Option<f64> {
         if consumo.divisa() != self.monto.divisa() || consumo.es_cero() {
             return None;

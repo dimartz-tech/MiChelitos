@@ -39,6 +39,10 @@ jobs:
     name: Rust
     runs-on: macos-latest
     timeout-minutes: 25
+    env:
+      # Un aviso del compilador (código sin usar, imports sobrantes) rompe la
+      # integración: ya no hay `allow(dead_code)` que lo esconda.
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

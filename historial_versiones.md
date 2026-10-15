@@ -4,7 +4,19 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.103.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.104.0 (Versión Actual) - 2026-10-14
+**Se retiran los cuatro `#![allow(dead_code)]` y con ellos el código que escondían.** Cambio de estructura: no altera el comportamiento ni el esquema.
+
+### 🔧 Qué se hace
+* **Los permisos de código sin usar** de `dominio`, `aplicacion`, `puertos` y `adaptadores` se quitan (su comentario decía «mientras los comandos siguen sin migrarse»; la migración terminó).
+* **Borrado, por no usarse ni en producción ni en pruebas:** los accesores `origen`/`destino` de `Transferencia` y `ajustado`/`sobregiro` de los límites; `es_caja` en el puerto, el adaptador y el doble (el archivo de cuentas lo sustituyó); los constructores de doble `con_comision_de_impuestos`, `con_dia_de_corte`, `con_factura_cobrada_en` y `con_informal_cobrado_en`; y los campos de prueba `caja_saldo`, `ingresos_en_cuenta` e `informales_en_cuenta`.
+* **Marcado `#[cfg(test)]`, por usarse solo en pruebas:** `desde_texto`/`centavos` de `ImporteDecimal`, `coincide_con_tasa`, `porcentaje_sobre`, `ninguno`, `neto`, `codigo`, `aprobado`, `esta_ajustado`, `uso`, `deuda`, dos constantes de tolerancia de `dinero` y dos de `db_sql`. No cambia lo que compila en la aplicación.
+* **Sin avisos:** `cargo check` queda en cero avisos, en producción y en pruebas. La integración continua compila Rust con `RUSTFLAGS=-D warnings`, así que el código sin usar vuelve a romper la integración en lugar de esconderse.
+* Ninguna fórmula del dominio se borró.
+
+---
+
+## Versión 1.103.0 - 2026-10-14
 **Integración continua y una revisión que ya no da visto bueno sin haber mirado.**
 
 ### 🔧 Qué se hace

@@ -98,14 +98,6 @@ impl Transferencia {
         Ok(Transferencia { origen, destino, monto_origen, monto_destino, cargo })
     }
 
-    pub fn origen(&self) -> ExtremoCuenta {
-        self.origen
-    }
-
-    pub fn destino(&self) -> ExtremoCuenta {
-        self.destino
-    }
-
     pub fn monto_origen(&self) -> Dinero {
         self.monto_origen
     }

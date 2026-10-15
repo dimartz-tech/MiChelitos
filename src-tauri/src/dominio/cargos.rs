@@ -19,7 +19,9 @@
 //! el tiempo. El dominio expresa *que existe esa clase de tarifa y cuándo se
 //! aplica*; cuánto cobra cada banco es un dato del titular.
 
-use super::dinero::{Dinero, Divisa, Porcentaje};
+use super::dinero::{Dinero, Porcentaje};
+#[cfg(test)]
+use super::dinero::Divisa;
 use super::errores::ErrorDominio;
 
 /// Retención impositiva sobre transferencias: 20 puntos básicos, 0.20 %.
@@ -49,6 +51,7 @@ pub struct Cargos {
 }
 
 impl Cargos {
+    #[cfg(test)]
     pub fn ninguno(divisa: Divisa) -> Cargos {
         Cargos { retencion: Dinero::cero(divisa), comision: Dinero::cero(divisa) }
     }
