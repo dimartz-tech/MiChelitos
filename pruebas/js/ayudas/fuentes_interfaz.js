@@ -1,6 +1,6 @@
 // Dónde está el código de la interfaz.
 //
-// Hasta la división de `ui.ts` por pestañas (`division_de_ui_limpia.md`) la
+// Hasta la división de `ui.ts` por pestañas (`docs/historico/division_de_ui_limpia.md`) la
 // interfaz era un solo archivo y varias pruebas de contrato lo leían por su
 // nombre. Con las vistas repartidas en `vistas/`, leer solo `ui.ts` daría por
 // buena una interfaz a la que le faltan pestañas. Este es el único sitio que

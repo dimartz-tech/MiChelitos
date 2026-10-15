@@ -1,6 +1,6 @@
 # =====================================================================
 #  MiChelitosTauri — Reglas de exclusión de control de versiones
-#  Ver justificación detallada en plan_arquitectura_hexagonal.md §2
+#  Ver justificación detallada en docs/historico/plan_arquitectura_hexagonal.md §2
 # =====================================================================
 
 # --- Datos financieros reales (NUNCA versionar) ---
@@ -69,3 +69,8 @@ RECOMENDACIONES_PRIVACIDAD.md
 *_AUDITORIA.md
 AUDITORIA_*.md
 src-tauri/gen/
+
+# --- Capital del titular exportado o copiado a mano ---
+# Cifras reales de patrimonio (capital*.json): fuera del repositorio, que es
+# público. La lógica de capital vive en el código; los datos, en la base local.
+capital*.json
