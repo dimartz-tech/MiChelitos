@@ -22,9 +22,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { leerInterfazTs } from '../ayudas/fuentes_interfaz.js';
+import { leerFuentesRust } from '../../../herramientas/generar_tipos_ipc.mjs';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const rust = readFileSync(join(RAIZ, 'src-tauri', 'src', 'main.rs'), 'utf8');
+const rust = leerFuentesRust();
 const js = readFileSync(join(RAIZ, 'src', 'js', 'api.js'), 'utf8');
 
 const aCamello = (s) => s.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
@@ -105,7 +106,7 @@ function partirPorComas(texto) {
 function comandosDeRust() {
     const fuente = sinComentarios(rust);
     const comandos = new Map();
-    const patron = /#\[tauri::command\]\s*(?:pub\s+)?fn\s+(\w+)\s*\(/g;
+    const patron = /#\[tauri::command\]\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)\s*\(/g;
     let m;
     while ((m = patron.exec(fuente))) {
         const cuerpo = entreDelimitadores(fuente, m.index + m[0].length - 1);
