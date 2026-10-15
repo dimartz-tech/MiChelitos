@@ -101,10 +101,6 @@ pub struct AlmacenEnMemoria {
     pub transferencias: HashMap<i64, TransferenciaGuardada>,
     pub pagos: HashMap<i64, PagoGuardado>,
     pub avances: HashMap<i64, AvanceGuardado>,
-    /// Cuentas en las que se cobró una factura. El doble no modela ingresos;
-    /// basta saber a qué cuenta apuntan para ejercitar la guarda de borrado.
-    pub ingresos_en_cuenta: Vec<i64>,
-    pub informales_en_cuenta: Vec<i64>,
     pub falla_al_insertar: bool,
     /// Cuando está activo, `ajustar_deuda` falla. Permite comprobar que un
     /// fallo a mitad de operación no deja saldos alterados.
@@ -207,14 +203,6 @@ impl AlmacenEnMemoria {
         self
     }
 
-    /// Cuenta cuya entidad cobra una tarifa fija por pagar impuestos.
-    pub fn con_comision_de_impuestos(mut self, id: i64, tarifa: Dinero) -> Self {
-        if let Some(c) = self.cuentas.get_mut(&id) {
-            c.comision_impuestos = Some(tarifa);
-        }
-        self
-    }
-
     /// Cuenta que además hace de caja de efectivo de su divisa.
     pub fn con_caja(mut self, id: i64, saldo: Dinero) -> Self {
         let divisa = saldo.divisa();
@@ -244,25 +232,8 @@ impl AlmacenEnMemoria {
         self
     }
 
-    pub fn con_dia_de_corte(mut self, id: i64, dia: i32) -> Self {
-        self.dias_de_corte.insert(id, dia);
-        self
-    }
-
     pub fn con_tarjeta_inactiva(mut self, id: i64) -> Self {
         self.inactivas.insert(id);
-        self
-    }
-
-    /// Una factura cobrada en esa cuenta.
-    pub fn con_factura_cobrada_en(mut self, cuenta_id: i64) -> Self {
-        self.ingresos_en_cuenta.push(cuenta_id);
-        self
-    }
-
-    /// Un ingreso informal cobrado en esa cuenta.
-    pub fn con_informal_cobrado_en(mut self, cuenta_id: i64) -> Self {
-        self.informales_en_cuenta.push(cuenta_id);
         self
     }
 
@@ -480,6 +451,7 @@ impl RepositorioTarjetas for AlmacenEnMemoria {
         Ok(())
     }
 
+    #[cfg(test)]
     fn deuda(&self, tarjeta_id: i64, divisa: Divisa) -> Result<Dinero, ErrorAlmacen> {
         if !self.tarjetas.contains(&tarjeta_id) {
             return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
@@ -585,13 +557,6 @@ impl RepositorioCuentas for AlmacenEnMemoria {
             .get(&divisa)
             .copied()
             .ok_or(ErrorAlmacen::CajaDeEfectivoAusente { divisa })
-    }
-
-    fn es_caja(&self, cuenta_id: i64) -> Result<bool, ErrorAlmacen> {
-        if !self.cuentas.contains_key(&cuenta_id) {
-            return Err(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id });
-        }
-        Ok(self.cajas.values().any(|&id| id == cuenta_id))
     }
 
     fn estado_de_cuenta(&self, cuenta_id: i64) -> Result<EstadoDeCuenta, ErrorAlmacen> {
@@ -832,7 +797,6 @@ mod contrato_del_doble {
             cuenta_saldo: dop(100000.0),
             cuenta_vacia_id: 12,
             caja_id: 11,
-            caja_saldo: dop(0.0),
             tarjeta_id: 20,
             tarjeta_deuda: dop(500.0),
             tarjeta_vacia_id: 21,

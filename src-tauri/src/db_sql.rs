@@ -577,6 +577,7 @@ pub const GASTOS_DERIVADOS: &[(&str, &str, &str)] = &[
 /// Claves ajenas hacia `gastos` que solo **informan**: el gasto existe por sí
 /// mismo y borrarlo no descuadra nada (la bonificación queda sin gasto de
 /// referencia).
+#[cfg(test)]
 pub const VINCULOS_INFORMATIVOS_CON_GASTOS: &[(&str, &str)] = &[("bonificaciones", "gasto_id")];
 
 /// Si el gasto lo creó otra operación, devuelve por qué no se puede borrar solo.
@@ -598,6 +599,7 @@ pub fn motivo_de_no_borrar_gasto(
     Ok(None)
 }
 
+#[cfg(test)]
 pub const COLUMNAS_DE_TASA: &[(&str, &str)] = &[
     ("avances_efectivo", "tasa"),
     ("gastos", "tasa_conversion"),

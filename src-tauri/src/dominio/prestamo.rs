@@ -46,6 +46,7 @@ impl TipoPrestamo {
         }
     }
 
+    #[cfg(test)]
     pub fn codigo(&self) -> &'static str {
         match self {
             TipoPrestamo::Consumo => "consumo",

@@ -33,6 +33,7 @@
 //! leerse en el código.
 
 use crate::dominio::dinero::{centavos_desde_texto, Dinero, Divisa};
+#[cfg(test)]
 use crate::dominio::errores::ErrorDominio;
 use serde::de::{self, Deserializer};
 use serde::Deserialize;
@@ -52,10 +53,12 @@ pub struct ImporteDecimal {
 impl ImporteDecimal {
     /// Desde los dígitos escritos. Es la misma puerta que usa el IPC, y estar
     /// disponible permite que las pruebas la ejerciten sin pasar por serde.
+    #[cfg(test)]
     pub fn desde_texto(texto: &str) -> Result<ImporteDecimal, ErrorDominio> {
         Ok(ImporteDecimal { centavos: centavos_desde_texto(texto)? })
     }
 
+    #[cfg(test)]
     pub fn centavos(&self) -> i64 {
         self.centavos
     }

@@ -779,6 +779,7 @@ pub trait RepositorioTarjetas {
     /// el contrato pueda comprobar el efecto de `ajustar_deuda` sobre las dos
     /// implementaciones; sin lector, la divergencia que causó **H5** solo era
     /// observable en el doble y no en SQLite, que es donde vivía.
+    #[cfg(test)]
     fn deuda(&self, tarjeta_id: i64, divisa: Divisa) -> Result<Dinero, ErrorAlmacen>;
 
     /// Cómo liquida esta tarjeta los consumos en divisa extranjera.
@@ -1005,14 +1006,6 @@ pub trait RepositorioCuentas {
     fn saldo(&self, cuenta_id: i64) -> Result<Dinero, ErrorAlmacen>;
 
     fn divisa(&self, cuenta_id: i64) -> Result<Divisa, ErrorAlmacen>;
-
-    /// Si la cuenta cumple el papel de caja de efectivo de su divisa.
-    ///
-    /// La clave foránea no protege a la caja: está declarada
-    /// `ON DELETE SET NULL`, de modo que borrarla desvincularía sus gastos en
-    /// silencio en lugar de impedir el borrado. La protección tiene que ser
-    /// una guarda explícita, y por eso el puerto expone la pregunta.
-    fn es_caja(&self, cuenta_id: i64) -> Result<bool, ErrorAlmacen>;
 
     /// Nombre, saldo, si es la caja de efectivo y si está archivada. Una cuenta que no existe es `NoEncontrado`.
     fn estado_de_cuenta(&self, cuenta_id: i64) -> Result<EstadoDeCuenta, ErrorAlmacen>;

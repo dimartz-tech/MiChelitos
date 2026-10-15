@@ -72,18 +72,12 @@ impl LimitesDivisa {
         Ok(LimitesDivisa { aprobado, ajustado, sobregiro })
     }
 
+    #[cfg(test)]
     pub fn aprobado(&self) -> Dinero {
         self.aprobado
     }
 
-    pub fn ajustado(&self) -> Option<Dinero> {
-        self.ajustado
-    }
-
-    pub fn sobregiro(&self) -> Dinero {
-        self.sobregiro
-    }
-
+    #[cfg(test)]
     pub fn esta_ajustado(&self) -> bool {
         self.ajustado.is_some()
     }
@@ -112,6 +106,7 @@ impl LimitesDivisa {
 
     /// Porcentaje del cupo ya consumido, de 0.0 a 1.0 o más si hay exceso.
     /// Devuelve 0.0 cuando no hay cupo, en lugar de dividir por cero.
+    #[cfg(test)]
     pub fn uso(&self, balance: Dinero) -> Result<f64, ErrorDominio> {
         let cupo = self.cupo_total()?;
         if cupo.es_cero() {

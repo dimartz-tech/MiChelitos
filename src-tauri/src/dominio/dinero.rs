@@ -39,6 +39,7 @@ const MAX_CENTAVOS_EXACTOS: f64 = 9_007_199_254_740_991.0;
 /// * **La representación de la tasa** sí es evitable. Una tasa guardada con
 ///   escala finita desplaza el resultado, y ese desplazamiento **sí** puede
 ///   acotarse eligiendo la escala. Es lo que esta constante gobierna.
+#[cfg(test)]
 pub const TOLERANCIA_REPRESENTACION_CENTAVOS: f64 = 0.01;
 
 /// Importe con el que se mide si una escala honra la tolerancia.
@@ -46,6 +47,7 @@ pub const TOLERANCIA_REPRESENTACION_CENTAVOS: f64 = 0.01;
 /// Diez mil unidades: el orden de magnitud de una operación corriente aquí.
 /// La desviación por representación crece con el importe, de modo que la
 /// tolerancia solo tiene sentido referida a una magnitud declarada.
+#[cfg(test)]
 pub const IMPORTE_DE_REFERENCIA_CENTAVOS: i64 = 1_000_000;
 
 /// Escala de los porcentajes: mil-millonésimas de la fracción.
