@@ -154,9 +154,35 @@ impl RegistroDeCorrecciones for AlmacenSqlite<'_> {
                 divisa: caso.divisa.clone(),
                 motivo: &caso.motivo,
             },
-            &caso.motivo,
         )
         .map_err(ErrorAlmacen::Fallo)
+    }
+}
+
+impl ConsultaDeCorrecciones for AlmacenSqlite<'_> {
+    fn casos(&self) -> Result<Vec<CasoLeido>, ErrorAlmacen> {
+        let mut stmt = self
+            .tx
+            .prepare(
+                "SELECT numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo
+                 FROM correcciones ORDER BY id DESC;",
+            )
+            .map_err(fallo)?;
+        let filas = stmt
+            .query_map([], |r| {
+                Ok(CasoLeido {
+                    numero_caso: r.get(0)?,
+                    fecha: r.get(1)?,
+                    tipo: r.get(2)?,
+                    referencia_id: r.get(3)?,
+                    descripcion: r.get(4)?,
+                    importe: r.get(5)?,
+                    divisa: r.get(6)?,
+                    motivo: r.get(7)?,
+                })
+            })
+            .map_err(fallo)?;
+        filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
     }
 }
 

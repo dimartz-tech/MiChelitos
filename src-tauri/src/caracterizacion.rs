@@ -2206,6 +2206,119 @@ fn c48_h10_la_reversion_devuelve_los_dos_saldos_aunque_el_destino_quede_negativo
     assert_importe(saldo_cuenta_id(origen), 50_000.0, "y el origen se restituye entero");
 }
 
+// --- M3: eliminar un traspaso y listar correcciones, fijados antes de sacar el SQL de main.rs ---
+
+fn casos_anotados_m3() -> Vec<(String, String, i64, String, Option<f64>, Option<String>)> {
+    let c = conexion();
+    let mut s = c
+        .prepare("SELECT numero_caso, tipo, referencia_id, descripcion, importe, divisa FROM correcciones ORDER BY id;")
+        .unwrap();
+    let v = s
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
+        .unwrap()
+        .map(|x| x.unwrap())
+        .collect();
+    v
+}
+
+#[test]
+fn m3_eliminar_un_traspaso_anota_el_caso_con_su_descripcion_e_importe() {
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Origen", "DOP", 5_000.0);
+    let destino = crear_cuenta("Destino", "DOP", 0.0);
+    crate::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(1_000.0), monto(1_000.0), monto(0.0), "Pago del alquiler".into()).unwrap();
+
+    let caso = crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+
+    let casos = casos_anotados_m3();
+    assert_eq!(casos.len(), 1);
+    assert_eq!(casos[0].0, caso, "devuelve el número de caso");
+    assert_eq!(casos[0].1, "traspaso");
+    assert_eq!(casos[0].3, "Pago del alquiler");
+    assert_importe(casos[0].4.unwrap(), 1_000.0, "importe del traspaso");
+    assert_eq!(casos[0].5.as_deref(), Some("DOP"));
+}
+
+#[test]
+fn m3_sin_descripcion_el_caso_dice_traspaso_entre_cuentas() {
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Origen", "DOP", 5_000.0);
+    let destino = crear_cuenta("Destino", "DOP", 0.0);
+    crate::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(100.0), monto(100.0), monto(0.0), "x".into()).unwrap();
+    conexion().execute("UPDATE transacciones_cuentas SET descripcion = NULL;", []).unwrap();
+
+    crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+
+    assert_eq!(casos_anotados_m3()[0].3, "Traspaso entre cuentas");
+}
+
+#[test]
+fn m3_hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
+    // **Hallazgo, fijado sin corregir** (protocolo de hallazgos): el caso de corrección graba siempre la
+    // divisa «DOP» y el importe de origen, aunque el traspaso sea entre cuentas en dólares. El rastro
+    // miente sobre la divisa. Cambiarlo es una decisión del titular, no de esta refactorización.
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Origen USD", "USD", 500.0);
+    let destino = crear_cuenta("Destino USD", "USD", 0.0);
+    crate::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(200.0), monto(200.0), monto(0.0), "usd".into()).unwrap();
+
+    crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+
+    let casos = casos_anotados_m3();
+    assert_eq!(casos[0].5.as_deref(), Some("DOP"), "HALLAZGO: debería decir USD");
+    assert_importe(casos[0].4.unwrap(), 200.0, "el importe sí es el del origen");
+}
+
+#[test]
+fn m3_un_traspaso_inexistente_se_nombra_traspaso_y_gana_al_motivo_invalido() {
+    let _g = entorno_aislado();
+
+    let e = crate::eliminar_transaccion_cuenta(999, "corto".into()).unwrap_err();
+
+    assert_eq!(e, "No se encontró traspaso con identificador 999.");
+    assert!(casos_anotados_m3().is_empty());
+}
+
+#[test]
+fn m3_un_motivo_corto_no_borra_el_traspaso_ni_anota_caso() {
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Origen", "DOP", 5_000.0);
+    let destino = crear_cuenta("Destino", "DOP", 0.0);
+    crate::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(100.0), monto(100.0), monto(0.0), "x".into()).unwrap();
+
+    assert!(crate::eliminar_transaccion_cuenta(ultima_transferencia(), "corto".into()).is_err());
+
+    assert_eq!(total_transferencias(), 1);
+    assert!(casos_anotados_m3().is_empty());
+    assert_importe(saldo_cuenta_id(destino), 100.0, "saldos intactos");
+}
+
+#[test]
+fn m3_las_correcciones_se_listan_de_la_mas_reciente_a_la_mas_antigua() {
+    let _g = entorno_aislado();
+    let origen = crear_cuenta("Origen", "DOP", 5_000.0);
+    let destino = crear_cuenta("Destino", "DOP", 0.0);
+    for d in ["primero", "segundo"] {
+        crate::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(100.0), monto(100.0), monto(0.0), d.into()).unwrap();
+        crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+    }
+
+    let lista = crate::obtener_correcciones().unwrap();
+
+    assert_eq!(lista.len(), 2);
+    assert_eq!(lista[0].descripcion, "segundo", "la más reciente primero");
+    assert_eq!(lista[1].descripcion, "primero");
+    assert_eq!(lista[0].tipo, "traspaso");
+    assert_eq!(lista[0].divisa.as_deref(), Some("DOP"));
+    assert_eq!(lista[0].motivo, motivo_de_prueba());
+    assert_eq!(obtener_vacio_de_correcciones_tras_limpiar(), 0);
+}
+
+fn obtener_vacio_de_correcciones_tras_limpiar() -> usize {
+    conexion().execute("DELETE FROM correcciones;", []).unwrap();
+    crate::obtener_correcciones().unwrap().len()
+}
+
 #[test]
 fn c49_h11_una_transferencia_de_una_cuenta_a_si_misma_se_rechaza() {
     // **Conducta corregida en la Fase 3.** Antes se aceptaba: la operación

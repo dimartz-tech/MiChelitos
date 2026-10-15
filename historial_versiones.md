@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.105.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.106.0 (Versión Actual) - 2026-10-15
+**Los últimos comandos con SQL propio pasan a casos de uso y puertos.** Cambio de estructura (M3 del informe de deuda técnica): el comportamiento se fijó con pruebas antes de moverlo.
+
+### 🔧 Qué se hace
+* **`transferir_entre_cuentas`, `eliminar_transaccion_cuenta`, `obtener_correcciones`** dejan de abrir conexión y transacción a mano: usan los ayudantes `con_almacen` / `lee_almacen`. `abrir_caso` (que llevaba SQL dentro de `main.rs`) desaparece.
+* **Casos de uso nuevos:** `aplicacion::transferir::eliminar_transferencia` (existencia → motivo → caso de corrección → reversión, igual que `eliminar_gasto`) y `aplicacion::correcciones::listar_correcciones`.
+* **Puerto nuevo `ConsultaDeCorrecciones`** (adaptador SQLite y doble en memoria) con `CasoLeido`. No hay puerto para borrar casos: es deliberado.
+* **Prueba estructural más estricta:** ningún comando abre conexión por su cuenta (solo los cinco ayudantes genéricos) ni una transacción de escritura a mano.
+* `correcciones::insertar` toma el motivo del propio caso; `registrar` queda solo para las pruebas.
+* **Dos diferencias mínimas, a conocer:** (1) un traspaso con descripción **vacía** (no nula) se anota ahora con el texto «Traspaso entre cuentas»; la nula ya lo hacía. (2) El mensaje de «no encontrado» sigue diciendo «traspaso» (se conservó ese nombre en el adaptador).
+
+### ⚠ Hallazgo, fijado y sin corregir
+El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el importe de origen, aunque el traspaso sea entre cuentas en dólares: el rastro miente sobre la divisa. Está fijado con una prueba de caracterización y otra del caso de uso, para que cambiarlo sea una decisión consciente. **Pendiente de decisión del titular** (protocolo de hallazgos).
+
+---
+
+## Versión 1.105.0 - 2026-10-14
 **El generador de tipos del contrato con Rust deja de depender de que todo viva en `main.rs`.** Es el paso previo a dividir los comandos en módulos; no cambia ningún comportamiento.
 
 ### 🔧 Qué se hace

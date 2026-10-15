@@ -836,14 +836,14 @@ impl RepositorioTransferencias for AlmacenEnMemoria {
         self.transferencias
             .get(&id)
             .cloned()
-            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "transferencia", id })
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "traspaso", id })
     }
 
     fn eliminar_transferencia(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
         self.transferencias
             .remove(&id)
             .map(|_| ())
-            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "transferencia", id })
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "traspaso", id })
     }
 }
 
@@ -1099,6 +1099,28 @@ impl RegistroDeCorrecciones for AlmacenEnMemoria {
     fn anotar_caso(&mut self, caso: &CasoAAnotar) -> Result<String, ErrorAlmacen> {
         self.casos.push(caso.clone());
         Ok(format!("CASO-{:04}", self.casos.len()))
+    }
+}
+
+impl ConsultaDeCorrecciones for AlmacenEnMemoria {
+    /// El doble no guarda la fecha del caso: la deja vacía.
+    fn casos(&self) -> Result<Vec<CasoLeido>, ErrorAlmacen> {
+        Ok(self
+            .casos
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(i, c)| CasoLeido {
+                numero_caso: format!("CASO-{:04}", i + 1),
+                fecha: String::new(),
+                tipo: c.tipo.clone(),
+                referencia_id: c.referencia_id,
+                descripcion: c.descripcion.clone(),
+                importe: c.importe,
+                divisa: c.divisa.clone(),
+                motivo: c.motivo.clone(),
+            })
+            .collect())
     }
 }
 
