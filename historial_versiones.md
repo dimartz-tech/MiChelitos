@@ -4,7 +4,20 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.110.0 (Versión Actual) - 2026-10-15
+## 🚀 Versión 1.111.0 (Versión Actual) - 2026-10-15
+**Los cinco ayudantes `con_*_como` de `comandos/ayudantes.rs` dejan de repetir el mismo cuerpo: una sola función genérica `en_transaccion` abre la conexión y la transacción.** Deuda técnica B5. No cambia ningún comportamiento.
+
+### 🔧 Qué se hace
+* **`en_transaccion(escritura, f)`** abre la conexión, la transacción (`IMMEDIATE` si escribe, diferida si lee), corre `f(&Transaction)` y confirma solo si salió `Ok`; con `Err` suelta la transacción (rollback) y propaga el mensaje. Delega en `en_transaccion_de(&mut Connection, ..)`, que se prueba con una base temporal.
+* Cada `con_X_como` queda en una línea: construye su adaptador (`XSqlite::nuevo(tx)`) y llama a `en_transaccion`. Las firmas públicas de `con_X`, `lee_X` y `con_X_como` no cambian: ningún comando se toca.
+* La prueba estructural `los_comandos_no_abren_transacciones_diferidas_a_mano` exige ahora **1** `db_sql::obtener_conexion()` (antes 5) y **1** `db_sql::transaccion(`; el resto, igual de estricta.
+
+### Verificación
+Pruebas nuevas: commit en `Ok`, rollback en `Err`, y que una escritura ocupa el turno de escritura y una lectura no. Mutaciones: commit aun con `Err`, ausencia de commit y lectura con `IMMEDIATE` hacen fallar la prueba correspondiente.
+
+---
+
+## Versión 1.110.0 - 2026-10-15
 **La interfaz deja de usar manejadores en línea (`onclick`, `onsubmit`, `onchange`, `oninput`).** Primer paso de la deuda de seguridad M1: los atributos se sustituyen por datos (`data-accion…`) y un oyente delegado. **La política de contenido (CSP) NO se toca en esta versión:** `script-src-attr 'unsafe-inline'` se retira en un cambio aparte (F4), después de probar la aplicación empaquetada a mano.
 
 ### 🔧 Qué se hace
