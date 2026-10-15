@@ -3,7 +3,7 @@
 // No usa `this` de ningún objeto mezclado, ni `AppAPI`, `elemento()`, `buscar()`
 // ni `appUI` globales: todo entra por el constructor, así que se puede probar en
 // Node con dobles (`pruebas/js/vistas/cuentas.test.js`). Los cuerpos son los de
-// `ui.ts`; solo cambian los accesos a lo compartido (ver `division_de_ui_limpia.md`).
+// `ui.ts`; solo cambian los accesos a lo compartido (ver `docs/historico/division_de_ui_limpia.md`).
 
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 

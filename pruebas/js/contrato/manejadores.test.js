@@ -3,7 +3,7 @@
 // a algo que no existe **falla al pulsar**, no al cargar: ninguna otra prueba
 // ni el compilador lo ven, porque el nombre vive dentro de una cadena.
 //
-// Existió para la división de `ui.ts` por pestañas (`division_de_ui.md`): mover
+// Existió para la división de `ui.ts` por pestañas (`docs/historico/division_de_ui.md`): mover
 // un método a otro archivo es justo la operación que deja un `onclick` colgado.
 // Sigue valiendo para cualquier vista nueva: comprueba que cada manejador tiene destino.
 

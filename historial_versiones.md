@@ -4,7 +4,19 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.106.0 (Versión Actual) - 2026-10-15
+## 🚀 Versión 1.107.0 (Versión Actual) - 2026-10-15
+**Mantenimiento de deuda técnica de prioridad baja.** Sin cambios de comportamiento.
+
+### 🔧 Qué se hace
+* **Documentos históricos fuera de la raíz:** las ocho fases del plan, el plan de arquitectura hexagonal, las sugerencias de migraciones y los dos documentos de la división de `ui.ts` pasan a `docs/historico/` (con un `README.md` que explica qué es). Se actualizaron las referencias en comentarios, documentos y este historial; una prueba nueva (`documentos_historicos.test.js`) falla si queda una ruta rota.
+* **La herramienta histórica de medición de la división de `ui.ts`** pasa también a `docs/historico/`; su ruta a la raíz del proyecto se ajustó.
+* **`.gitignore`:** nueva regla `capital*.json` (cifras reales del titular; el repositorio es público). No había ningún archivo así rastreado.
+* **`@tauri-apps/cli`** 2.12.2 a 2.12.3 (parche dentro de `^2`). Sin tocar `Cargo`.
+* **Idea anotada, no hecha:** los patrones `con_X_como`/`con_X`/`lee_X` de `main.rs` se repiten por agregado; no se toca `main.rs` mientras otro trabajo lo divide en módulos.
+
+---
+
+## Versión 1.106.0 - 2026-10-15
 **Los últimos comandos con SQL propio pasan a casos de uso y puertos.** Cambio de estructura (M3 del informe de deuda técnica): el comportamiento se fijó con pruebas antes de moverlo.
 
 ### 🔧 Qué se hace
@@ -711,7 +723,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas y diez comprobaciones transversales en las dos versiones (menú lateral con clics reales, manejadores de las once pestañas, tema con su aviso, menú plegable, ruta desconocida, fallo de una vista y motivo corto): mismos resultados, 0 errores.
 * **App empaquetada**: arranca con el Dashboard, navega por el menú, cambia el tema con su aviso, una ruta desconocida cae en el Dashboard, `window.appUI` tiene 70 manejadores y ninguno de la clase, y el diálogo de página funciona.
-* Balance de la división y registro de previsto frente a medido: `division_de_ui_limpia.md` §9.
+* Balance de la división y registro de previsto frente a medido: `docs/historico/division_de_ui_limpia.md` §9.
 
 ### Siguiente
 * La división de `ui.ts` está terminada. Pendientes aparte, anotados sin corregir: el panel de casos de corrección pinta el motivo sin escapar (corregido en la 1.67.0, y el problema general en la 1.68.0), los importes que aún viajan como `Number` y los riesgos del capital. (Las cuatro bajas sin `try/catch` se corrigieron en la 1.66.0.)
@@ -733,7 +745,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; **veintidós recorridos** ejercidos en las dos versiones (proponer el abono, abonos en efectivo y cruzados con la tasa, el avance completo con su simulación y su confirmación, los historiales, deshacer un abono con motivo, bonificaciones y límites): mismos comandos, argumentos y avisos, 0 errores. No se pudo ejercer deshacer un avance ni revertir una bonificación (no tienes de ninguno); las cubren las pruebas.
 * **App empaquetada**: once vistas registradas, la ventana de límites en `<body>` y el historial de abonos que se abre y se pliega.
-* Previsto frente a medido (≈125 → 119 líneas; esfuerzo 6 → ≈4) y los seis controles: `division_de_ui_limpia.md` §9.
+* Previsto frente a medido (≈125 → 119 líneas; esfuerzo 6 → ≈4) y los seis controles: `docs/historico/division_de_ui_limpia.md` §9.
 
 ### Siguiente
 * PR 12, el último de la división: pasar a sus servicios lo que queda en `ui.ts` (130 líneas: `showToast`, el enrutador, `formatMoney` y `pedirMotivoDeCorreccion`), retirar la clase `AppUI` y el puente `window.appUI`.
@@ -756,7 +768,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; **veintiséis recorridos** ejercidos en las dos versiones con los diálogos reales (altas, edición de cuenta, bajas con y sin cancelar, panel de casos, las cuatro correcciones con motivo y con motivo corto, respaldar y restaurar): mismos comandos, argumentos y avisos, 0 errores.
 * **App empaquetada**: diez vistas registradas y, con un respaldo real, la lista de respaldos sale legible.
-* Previsto frente a medido (≈118 → 114 líneas; esfuerzo 6 → ≈4) y los seis controles: `division_de_ui_limpia.md` §9.
+* Previsto frente a medido (≈118 → 114 líneas; esfuerzo 6 → ≈4) y los seis controles: `docs/historico/division_de_ui_limpia.md` §9.
 * Hallazgo sin corregir: el panel de casos de corrección pinta el motivo con `innerHTML` sin escapar (ver §9).
 
 ### Siguiente
@@ -809,7 +821,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; el **menú real** (apertura, posición, estilo, Escape, clic fuera, uno a la vez), las cuatro acciones, la edición y las dos altas, ejercidos en las dos versiones: mismos comandos, argumentos, modal y avisos, 0 errores. El grupo de una tarjeta con facilidades no se pudo ejercer (tus préstamos no cuelgan de ninguna); lo cubren las pruebas.
 * **App empaquetada**: nueve vistas registradas, el menú real en `<body>`, Escape lo cierra y elegir «editar» abre el modal.
-* Previsto frente a medido (≈89 → 125 líneas por el menú, que el agente no contó; esfuerzo 4 → ≈5) y los seis controles: `division_de_ui_limpia.md` §9.
+* Previsto frente a medido (≈89 → 125 líneas por el menú, que el agente no contó; esfuerzo 4 → ≈5) y los seis controles: `docs/historico/division_de_ui_limpia.md` §9.
 
 ### Siguiente
 * PR 10: `ajustes` (16 métodos, ≈736 líneas).
@@ -850,7 +862,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; las dos altas, elegir cliente y la edición de una factura cobrada (mueve saldo y pide motivo) ejercidas en las dos versiones: mismos comandos, argumentos, modal y avisos, 0 errores. El cobro de una factura y el de un informal no se pudieron ejercer (no tienes facturas emitidas ni informales pendientes); los cubren las pruebas.
 * **App empaquetada**: ocho vistas registradas, se dibuja sin error y los modales reales se crean en `<body>`.
-* Previsto frente a medido (≈93 → 96 líneas; esfuerzo 4 → ≈4) y los seis controles: `division_de_ui_limpia.md` §9.
+* Previsto frente a medido (≈93 → 96 líneas; esfuerzo 4 → ≈4) y los seis controles: `docs/historico/division_de_ui_limpia.md` §9.
 
 ### Siguiente
 * PR 9: `préstamos` (20 métodos, ≈705 líneas).
@@ -873,7 +885,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; selector de mes, visibilidad del método, conversión y **las tres altas** ejercidos en las dos versiones: mismos argumentos y avisos, 0 errores. La liquidación de un consumo no se pudo ejercer (no tienes consumos pendientes de conversión); la cubren las pruebas.
 * **App empaquetada**: siete vistas registradas, se dibuja sin error y el modal real se crea en `<body>`.
-* Previsto frente a medido (≈66 → 67 líneas; esfuerzo 4 → ≈4) y los seis controles: `division_de_ui_limpia.md` §9.
+* Previsto frente a medido (≈66 → 67 líneas; esfuerzo 4 → ≈4) y los seis controles: `docs/historico/division_de_ui_limpia.md` §9.
 
 ### Siguiente
 * PR 8: `ingresos` (11 métodos, ≈519 líneas).
@@ -896,7 +908,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; alta, **editor modal**, edición y baja ejercidos en las dos versiones: mismos comandos y argumentos, mismo modal, cerrado tras guardar, mismos avisos, 0 errores. Corregir fecha y asentar/descartar no se pudieron ejercer porque tus suscripciones no tienen ninguna parada ni períodos pendientes; las cubren las pruebas.
 * **App empaquetada**: seis vistas registradas, y el modal real se crea en `<body>` con la clase `modal-overlay`.
-* Previsto frente a medido (≈59 → 59 líneas; esfuerzo 3 → ≈3) y los seis controles del plan: `division_de_ui_limpia.md` §9. Incluye una trampa de la transformación mecánica: el `elemento(` que vive **dentro de un atributo `onclick` del HTML** no debe reescribirse.
+* Previsto frente a medido (≈59 → 59 líneas; esfuerzo 3 → ≈3) y los seis controles del plan: `docs/historico/division_de_ui_limpia.md` §9. Incluye una trampa de la transformación mecánica: el `elemento(` que vive **dentro de un atributo `onclick` del HTML** no debe reescribirse.
 
 ### Siguiente
 * PR 7: `gastos` (9 métodos, 480 líneas).
@@ -922,7 +934,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; **cinco de los seis formularios, ejercidos en las dos versiones sobre tu documento, guardan lo mismo** (comparado sin imprimirlo), con los mismos avisos y sin errores. La baja de certificado no se pudo ejercer porque tu capital no tiene certificados.
 * **App empaquetada**: cinco vistas registradas, se dibuja sin error y los seis manejadores existen.
-* Previsto frente a medido (≈55 → 58 líneas; esfuerzo 2 → ≈2) y los seis controles del plan: `division_de_ui_limpia.md` §9.
+* Previsto frente a medido (≈55 → 58 líneas; esfuerzo 2 → ≈2) y los seis controles del plan: `docs/historico/division_de_ui_limpia.md` §9.
 
 ### Siguiente
 * PR 6: `suscripciones` (10 métodos, 361 líneas).
@@ -945,7 +957,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; los dos enlaces del Dashboard, ejercidos en las dos versiones, llevan al mismo título y la misma pestaña activa; y una ruta inexistente cae en el Dashboard con el mismo texto.
 * **App empaquetada**: cuatro vistas registradas, la ruta inexistente cae en el Dashboard sin error.
-* Previsto frente a medido (14-16 → 17 líneas; esfuerzo 0,6 → ≈0,9) y los seis controles del plan: `division_de_ui_limpia.md` §9.
+* Previsto frente a medido (14-16 → 17 líneas; esfuerzo 0,6 → ≈0,9) y los seis controles del plan: `docs/historico/division_de_ui_limpia.md` §9.
 
 ### Siguiente
 * PR 5: `capital` (7 métodos, 294 líneas; tres diálogos y las llamadas a la API que guardan el capital).
@@ -968,7 +980,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; y como el Resumen **calcula**, se comparó además **cada cifra que muestra**: 17 cifras, las mismas en el mismo orden en las dos versiones, y el mismo texto tras repintar y volver de otra pestaña.
 * **App empaquetada**: tres vistas registradas, se dibuja sin error y la tasa llega como 60.
-* Previsto frente a medido (23-26 → 25 líneas; esfuerzo ≈1 → ≈1,3) y los seis controles del plan: `division_de_ui_limpia.md` §9.
+* Previsto frente a medido (23-26 → 25 líneas; esfuerzo ≈1 → ≈1,3) y los seis controles del plan: `docs/historico/division_de_ui_limpia.md` §9.
 
 ### Siguiente
 * PR 4: `dashboard` (161 líneas, solo lectura).
@@ -990,7 +1002,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): once pestañas idénticas; **el reactor de divisas y la transferencia, ejercidos en las dos versiones, dejan el mismo estado del DOM y envían los mismos comandos con los mismos argumentos y el mismo aviso**, 0 errores.
 * **App empaquetada**: dos vistas registradas, se dibuja, formulario y manejadores presentes.
-* Lo previsto frente a lo medido (24 frente a ≈25 líneas, esfuerzo ≈1) y los seis controles del plan: `division_de_ui_limpia.md` §9. Una discrepancia anotada: el modelo atribuía a `cuentas` un manejador que en realidad es de Ajustes (`abrirEdicionCuenta`).
+* Lo previsto frente a lo medido (24 frente a ≈25 líneas, esfuerzo ≈1) y los seis controles del plan: `docs/historico/division_de_ui_limpia.md` §9. Una discrepancia anotada: el modelo atribuía a `cuentas` un manejador que en realidad es de Ajustes (`abrirEdicionCuenta`).
 
 ### Siguiente
 * PR 3: `resumen` (168 líneas, solo lectura).
@@ -1014,7 +1026,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ### ✅ Comprobado a mano, contra lo planificado
 * **Con tus datos reales** (copia temporal, ya borrada): las **once pestañas idénticas** a `main`, y **los dos formularios ejercidos en las dos versiones envían los mismos comandos con los mismos argumentos y muestran los mismos avisos**, sin errores.
 * **En la aplicación empaquetada**: la vista queda registrada, se dibuja y su manejador existe.
-* Tabla completa de lo previsto frente a lo medido, y de los seis controles del plan: `division_de_ui_limpia.md` §9.
+* Tabla completa de lo previsto frente a lo medido, y de los seis controles del plan: `docs/historico/division_de_ui_limpia.md` §9.
 
 ### 🛠️ Herramienta
 * `herramientas/comparar_vistas/mock.js` registra ahora cada llamada a un comando (`window.__llamadas`), para comparar **lo que dos versiones envían a Rust**, no solo lo que pintan.
@@ -1032,7 +1044,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 * `src/js/composicion.ts`: la raíz de composición, como módulo ES. Todavía no registra ninguna vista; construye los servicios.
 * `AppUI.registrarVista(ruta, vista, puente)` y un registro de vistas que `render()` consulta antes del `switch`: cada PR siguiente saca una vista de la clase y la registra aquí. Los manejadores en línea siguen llamando a `appUI`.
 * `index.html` carga `composicion.js` como `<script type="module">`; los dos archivos nuevos entran en `tsconfig.estricto.json` (`noImplicitAny`).
-* `division_de_ui_limpia.md` y `herramientas/medir_division_ui.mjs` (obra de un agente independiente, verificada): el modelo del diseño B, con la medición por vista; el titular lo eligió frente al mecánico.
+* `docs/historico/division_de_ui_limpia.md` y `docs/historico/medir_division_ui.mjs` (obra de un agente independiente, verificada): el modelo del diseño B, con la medición por vista; el titular lo eligió frente al mecánico.
 
 ### 🧪 Pruebas
 * **Helper compartido** `pruebas/js/ayudas/fuentes_interfaz.js`: las pruebas de contrato (`importes`, `tipos`, `ipc`, `manejadores`) piden «la interfaz» y no `ui.ts`, así que siguen valiendo cuando las vistas se repartan en `vistas/`.
@@ -1088,7 +1100,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 ## 🚀 Versión 1.48.0 - 2026-10-01
 **Preparación de la división de `ui.ts` y revisión de la estabilidad de actualizar.** Sin cambios en la aplicación.
 
-### 🧭 División de `ui.ts` (plan en `division_de_ui.md`)
+### 🧭 División de `ui.ts` (plan en `docs/historico/division_de_ui.md`)
 * Medido con el grafo de llamadas: **98 de los 103 métodos pertenecen a una sola pestaña**; solo 4 son compartidos (89 líneas). No hay métodos pasados como valor ni `bind`/`call`/`apply`: ningún `this` se puede perder al mover un método.
 * Diseño propuesto: cada vista es un módulo con un objeto de métodos, mezclado en `appUI` (el mismo `this`), de modo que se mueven sin cambiar una línea de su cuerpo y los 99 manejadores en línea siguen funcionando. 13 PR, de la vista más pequeña a la más grande. **Espera tu visto bueno.**
 * `pruebas/js/contrato/manejadores.test.js`: todo `appUI.x()` de un `onclick` existe como método, `navigate` es global y los manejadores solo llaman a destinos globales declarados. Tres mutaciones, las tres detectadas.
@@ -1199,7 +1211,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 * Sin tipos de respuesta, la misma comprobación no encontraba nada; con ellos, 1 defecto real entre 204 avisos, y cada cambio de un campo en Rust señala los lugares de la interfaz que lo usan.
 
 ### 📐 Validación de TypeScript con solo `tsc`
-* Comprobado en una copia temporal, sin tocar el repositorio: `tsc` desde `beforeBuildCommand` de Tauri, salida en módulos ES sin empaquetador, ejecutada en la aplicación empaquetada. Resultados y comparación en `fase_7_frontend.md`, §4. También corrige el análisis: TypeScript con `tsc` no necesita dependencias de producción; el coste es un paso de compilación y una carpeta generada.
+* Comprobado en una copia temporal, sin tocar el repositorio: `tsc` desde `beforeBuildCommand` de Tauri, salida en módulos ES sin empaquetador, ejecutada en la aplicación empaquetada. Resultados y comparación en `docs/historico/fase_7_frontend.md`, §4. También corrige el análisis: TypeScript con `tsc` no necesita dependencias de producción; el coste es un paso de compilación y una carpeta generada.
 
 ---
 
@@ -1393,7 +1405,7 @@ El caso de corrección de un traspaso graba **siempre la divisa «DOP»** y el i
 **Arranca la Fase 6 — Capital y préstamos. Un valor calculado que se guardaba como declarado, corregido y confirmado contra la base real.**
 
 ### 🏦 Préstamos, documentado en retrospectiva
-* El saldo vivo, el desglose de cuota y la conciliación de la versión 1.6.0 quedan registrados en `fase_6_capital_y_prestamos.md`: no había trabajo pendiente, solo el documento de la fase.
+* El saldo vivo, el desglose de cuota y la conciliación de la versión 1.6.0 quedan registrados en `docs/historico/fase_6_capital_y_prestamos.md`: no había trabajo pendiente, solo el documento de la fase.
 
 ### 📉 Capital: el defecto de fondo
 * `obtener_capital` calculaba la alerta de vencimiento **sobre el mismo objeto** que devolvía. Las seis acciones de la vista de capital —añadir o quitar un certificado, una inversión, un bien— leen el capital completo, mutan una colección y guardan el objeto entero de vuelta, así que ese cálculo **se grababa en el archivo** como si el titular lo hubiera declarado.
