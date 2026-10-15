@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VistaAjustes, MANEJADORES_AJUSTES, puenteAjustes } from '../../../src/js/vistas/ajustes.js';
-import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
+import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
 
 const CATEGORIAS = [{ id: 1, nombre: 'Otros' }, { id: 2, nombre: 'Suscripciones' }, { id: 3, nombre: 'Comida' }];
 const CLIENTES = [{ id: 4, nombre: 'Cliente Uno', rnc: '101000001' }];
@@ -100,7 +100,7 @@ test('las categorías del sistema no se pueden borrar; las demás sí', async ()
     const t = montar();
     await t.vista.render();
     const html = t.pantalla.contenido.innerHTML;
-    assert.equal([...html.matchAll(/appUI\.handleEliminarCategoria\((\d+)\)/g)].map(m => m[1]).join(), '3');
+    assert.equal(llamadasDelManejador(html, 'handleEliminarCategoria').map(a => a[0]).join(), '3');
     assert.equal([...html.matchAll(/>Sistema</g)].length, 2);
 });
 
@@ -129,7 +129,7 @@ test('el panel de correcciones lista los más recientes: 15 gastos, 10 informale
     const t = montar({ datos: { ...DATOS(), gastos: muchos(20).map(gasto), informales: muchos(15).map(informal), ingresos: muchos(15).map(ingreso), transacciones: muchos(20).map(transaccion) } });
     await t.vista.render();
     const html = t.pantalla.contenido.innerHTML;
-    const cuenta = nombre => [...html.matchAll(new RegExp(`appUI\\.${nombre}\\(`, 'g'))].length;
+    const cuenta = nombre => llamadasDelManejador(html, nombre).length;
     assert.deepEqual([cuenta('handleEliminarGastoCorr'), cuenta('handleEliminarIngresoInformalCorr'), cuenta('handleEliminarIngresoCorr'), cuenta('handleEliminarTransaccionCuentaCorr')], [15, 10, 10, 15]);
 });
 
@@ -485,7 +485,7 @@ test('el puente expone todos los manejadores y delega en la vista', async () => 
 test('todo appUI.x( que escribe la plantilla está en el puente, y todo el puente está en la plantilla', async () => {
     const t = montar();
     await t.vista.render();
-    const llamados = new Set([...t.pantalla.contenido.innerHTML.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
+    const llamados = nombresDelPuente(t.pantalla.contenido.innerHTML);
     for (const nombre of llamados) assert.ok(MANEJADORES_AJUSTES.includes(nombre), `falta ${nombre} en el puente`);
     for (const nombre of MANEJADORES_AJUSTES) assert.ok(llamados.has(nombre), `${nombre} está en el puente pero la plantilla no lo usa`);
 });
@@ -499,7 +499,7 @@ test('las archivadas se listan aparte, sin balance, con su estado en texto, y su
     assert.match(html, /Cuentas archivadas \(1\)/);
     assert.match(html, /Archivada ·/, 'el estado va en texto, no solo en el estilo');
     assert.match(html, /Cuenta &lt;Vieja&gt;/);
-    assert.match(html, /appUI\.handleReactivarCuenta\(9\)/);
+    assert.deepEqual(llamadasDelManejador(html, 'handleReactivarCuenta'), [[9]]);
     assert.doesNotMatch(html, /Cuenta <Vieja>/);
     const bloque = html.slice(html.indexOf('Cuentas archivadas'), html.indexOf('Tarjetas de Crédito'));
     assert.doesNotMatch(bloque, /#0#/, 'las archivadas no muestran balance');

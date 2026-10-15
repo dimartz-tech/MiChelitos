@@ -82,7 +82,7 @@ export interface Modales {
  * Un menú flotante de acciones junto a un botón (antes `abrirMenuPasivo` y
  * `cerrarMenuPasivo`, con el `AbortController` suelto en la clase). Solo hay
  * uno abierto a la vez; se cierra con el siguiente clic o con Escape. `ancla` es
- * el rectángulo del botón; `alElegir` recibe el `data-accion` del renglón pulsado,
+ * el rectángulo del botón; `alElegir` recibe el `data-opcion` del renglón pulsado,
  * ya con el menú cerrado.
  */
 export interface MenuFlotante {
@@ -261,11 +261,11 @@ export function crearMenuFlotanteDelNavegador(): MenuFlotante {
             width:190px; box-shadow:var(--shadow-md); font-size:0.8rem;`;
             menu.innerHTML = html;
 
-            menu.querySelectorAll<HTMLElement>('[data-accion]').forEach(el => {
+            menu.querySelectorAll<HTMLElement>('[data-opcion]').forEach(el => {
                 el.onmouseenter = () => { el.style.background = 'rgba(255,255,255,0.06)'; };
                 el.onmouseleave = () => { el.style.background = 'none'; };
                 el.onclick = () => {
-                    const accion = el.dataset.accion ?? '';
+                    const accion = el.dataset.opcion ?? '';
                     cerrar();
                     alElegir(accion);
                 };

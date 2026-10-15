@@ -9,6 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VistaCuentas, MANEJADORES_CUENTAS, puenteCuentas } from '../../../src/js/vistas/cuentas.js';
+import { nombresDelPuente } from '../ayudas/manejadores_html.js';
 
 const CUENTAS = [
     { id: 1, nombre: 'Cuenta Alfa', divisa: 'DOP', balance_actual: 1000, entidad: null, comision_pago_impuestos: null },
@@ -164,7 +165,7 @@ test('el puente expone todos los manejadores y delega en la vista', async () => 
 test('todo appUI.x( que escribe la plantilla está en el puente', async () => {
     const t = montar({ transacciones: [TRANSACCION] });
     await t.vista.render();
-    const llamados = new Set([...t.pantalla.contenido.innerHTML.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
+    const llamados = nombresDelPuente(t.pantalla.contenido.innerHTML);
     assert.ok(llamados.size >= 2);
     for (const nombre of llamados) assert.ok(MANEJADORES_CUENTAS.includes(nombre), `falta ${nombre} en el puente`);
 });

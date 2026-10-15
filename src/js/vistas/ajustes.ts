@@ -10,8 +10,12 @@
 // (`pruebas/js/vistas/ajustes.test.js`). Los cuerpos son los de `ui.ts`.
 
 import type { CuentaAhorro } from '../tipos-ipc';
-import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+import { accion, alEnviar, escaparHtml, manejador } from '../nucleo/html.js';
 import { describirRespaldo } from '../nucleo/respaldos.js';
+
+/** Las pestañas del panel de correcciones: sus paneles y los botones que los alternan (acción `activarPestana`). */
+const PANELES_CORRECCION = ['corr-gastos', 'corr-ingresos', 'corr-trans'];
+const BOTONES_CORRECCION = ['btn-corr-gas', 'btn-corr-ing', 'btn-corr-tra'];
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Motivo, Pantalla, Vista } from '../ui/servicios';
 
 type ApiAjustes = ApiDe<
@@ -53,7 +57,7 @@ export interface DependenciasAjustes {
     motivo: Motivo;
 }
 
-/** Los manejadores en línea (`onsubmit`/`onclick`/`onchange` → `appUI.…`) que la plantilla escribe. */
+/** Las acciones delegadas (`data-accion*` → `appUI.…`) que la plantilla escribe. */
 export const MANEJADORES_AJUSTES = [
     'handleAgregarCategoria', 'handleEliminarCategoria',
     'handleAgregarCliente', 'handleEliminarCliente',
@@ -107,7 +111,7 @@ export class VistaAjustes implements Vista {
                     <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
                         La aplicación respalda sola antes de modificar el esquema. Usa esto cuando vayas a hacer algo arriesgado a mano — conciliar varios saldos o cargar un estado — y quieras una red antes.
                     </p>
-                    <button onclick="appUI.handleCrearRespaldo(this)" class="btn" style="width:100%;">Respaldar ahora</button>
+                    <button ${manejador('click', 'handleCrearRespaldo', [], 'elemento')} class="btn" style="width:100%;">Respaldar ahora</button>
                     <div id="respaldo_resultado" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.75rem; word-break:break-all;"></div>
 
                     <hr style="border:none; border-top:1px solid var(--border-color, rgba(128,128,128,0.25)); margin:1.25rem 0;">
@@ -120,7 +124,7 @@ export class VistaAjustes implements Vista {
                         : `<select id="respaldo_elegido" class="form-control" style="margin-bottom:0.6rem;">
                                ${respaldos.map(n => `<option value="${escaparHtml(n)}">${escaparHtml(describirRespaldo(n))}</option>`).join('')}
                            </select>
-                           <button onclick="appUI.handleRestaurarRespaldo(this)" class="btn" style="width:100%;">Restaurar este respaldo</button>`}
+                           <button ${manejador('click', 'handleRestaurarRespaldo', [], 'elemento')} class="btn" style="width:100%;">Restaurar este respaldo</button>`}
                     <div id="restauracion_resultado" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.75rem; word-break:break-all;"></div>
                 </div>
 
@@ -129,7 +133,7 @@ export class VistaAjustes implements Vista {
                     <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">🏷️ Categorías de Gastos</h3>
                     <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Añade nuevas etiquetas o remueve las que no utilices.</p>
                     
-                    <form id="form-add-categoria" onsubmit="appUI.handleAgregarCategoria(event)" style="display:flex; gap:0.4rem; margin-bottom: 1rem;">
+                    <form id="form-add-categoria" ${alEnviar('handleAgregarCategoria')} style="display:flex; gap:0.4rem; margin-bottom: 1rem;">
                         <input type="text" id="cat_nom" class="form-control" placeholder="Nueva categoría..." style="padding:0.5rem 0.8rem;" required>
                         <button type="submit" class="btn" style="padding:0.5rem 0.8rem;">➕</button>
                     </form>
@@ -139,7 +143,7 @@ export class VistaAjustes implements Vista {
                             <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.5rem 0.8rem; border-radius:var(--radius-sm); display:flex; justify-content:space-between; align-items:center;">
                                 <strong>${escaparHtml(c.nombre)}</strong>
                                 ${c.nombre !== 'Otros' && c.nombre !== 'Suscripciones' ? `
-                                    <button onclick="appUI.handleEliminarCategoria(${c.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
+                                    <button ${accion('handleEliminarCategoria', c.id)} class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
                                 ` : `
                                     <span style="font-size:0.7rem; color:var(--text-muted); font-style:italic;">Sistema</span>
                                 `}
@@ -153,7 +157,7 @@ export class VistaAjustes implements Vista {
                     <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">👥 Catálogo de Clientes</h3>
                     <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Registra clientes para utilizarlos en facturación formal.</p>
                     
-                    <form id="form-add-cliente" onsubmit="appUI.handleAgregarCliente(event)" style="display:flex; flex-direction:column; gap:0.4rem; margin-bottom: 1rem;">
+                    <form id="form-add-cliente" ${alEnviar('handleAgregarCliente')} style="display:flex; flex-direction:column; gap:0.4rem; margin-bottom: 1rem;">
                         <input type="text" id="cli_aj_nom" class="form-control" placeholder="Nombre (Ej. Empresa S.A.)..." style="padding:0.4rem 0.6rem;" required>
                         <input type="text" id="cli_aj_rnc" class="form-control" placeholder="RNC (Ej. 131XXXXXX)..." style="padding:0.4rem 0.6rem;" required>
                         <button type="submit" class="btn" style="padding:0.4rem; font-size:0.85rem;">🚀 Registrar Cliente</button>
@@ -166,7 +170,7 @@ export class VistaAjustes implements Vista {
                                     <strong>${escaparHtml(cl.nombre)}</strong><br>
                                     <span style="font-size:0.7rem; color:var(--text-muted);">RNC: ${escaparHtml(cl.rnc)}</span>
                                 </div>
-                                <button onclick="appUI.handleEliminarCliente(${cl.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
+                                <button ${accion('handleEliminarCliente', cl.id)} class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
                             </div>
                         `).join('') : `
                             <p style="color:var(--text-muted); text-align:center; padding:1rem; font-size:0.75rem;">No hay clientes registrados.</p>
@@ -179,7 +183,7 @@ export class VistaAjustes implements Vista {
                     <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">🏦 Cuentas de Ahorro</h3>
                     <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Registra tus cuentas bancarias en Pesos o Dólares.</p>
                     
-                    <form id="form-add-cuenta" onsubmit="appUI.handleAgregarCuenta(event)" style="display:flex; flex-direction:column; gap:0.4rem; margin-bottom: 1rem;">
+                    <form id="form-add-cuenta" ${alEnviar('handleAgregarCuenta')} style="display:flex; flex-direction:column; gap:0.4rem; margin-bottom: 1rem;">
                         <input type="text" id="cue_aj_nom" class="form-control" placeholder="Nombre de la Cuenta..." required style="padding:0.4rem 0.6rem;">
                         <div style="display:flex; gap:0.4rem;">
                             <input type="text" id="cue_aj_ent" class="form-control" placeholder="Entidad..." style="flex:1.5; padding:0.4rem 0.6rem;">
@@ -206,8 +210,8 @@ export class VistaAjustes implements Vista {
                                     ${c.comision_pago_impuestos != null ? `<span style="font-size:0.7rem; color:var(--color-warning);" title="Tarifa fija por pagar impuestos desde esta cuenta"> · 🧾 ${formato.importe(c.comision_pago_impuestos)}</span>` : ''}
                                 </div>
                                 <div style="display:flex; gap:0.3rem;">
-                                    <button onclick="appUI.abrirEdicionCuenta(${argumentoJs(c)})" class="btn" style="padding:0.2rem 0.4rem; font-size:0.75rem;">✏️</button>
-                                    <button onclick="appUI.handleArchivarCuenta(${c.id})" class="btn btn-secondary" style="padding:0.2rem 0.4rem; font-size:0.75rem;" title="Archivar: conserva el historial y solo se permite con saldo cero" aria-label="Archivar la cuenta ${escaparHtml(c.nombre)}">📦 Archivar</button>
+                                    <button ${accion('abrirEdicionCuenta', c)} class="btn" style="padding:0.2rem 0.4rem; font-size:0.75rem;">✏️</button>
+                                    <button ${accion('handleArchivarCuenta', c.id)} class="btn btn-secondary" style="padding:0.2rem 0.4rem; font-size:0.75rem;" title="Archivar: conserva el historial y solo se permite con saldo cero" aria-label="Archivar la cuenta ${escaparHtml(c.nombre)}">📦 Archivar</button>
                                 </div>
                             </div>
                         `).join('') : `
@@ -226,7 +230,7 @@ export class VistaAjustes implements Vista {
                                             <strong>${escaparHtml(c.nombre)}</strong>
                                             <span style="font-size:0.7rem; color:var(--text-muted);"> · Archivada · ${escaparHtml(c.divisa)}${c.entidad ? ` · ${escaparHtml(c.entidad)}` : ''}</span>
                                         </div>
-                                        <button onclick="appUI.handleReactivarCuenta(${c.id})" class="btn btn-secondary" style="padding:0.2rem 0.4rem; font-size:0.75rem;" aria-label="Reactivar la cuenta ${escaparHtml(c.nombre)}">♻️ Reactivar</button>
+                                        <button ${accion('handleReactivarCuenta', c.id)} class="btn btn-secondary" style="padding:0.2rem 0.4rem; font-size:0.75rem;" aria-label="Reactivar la cuenta ${escaparHtml(c.nombre)}">♻️ Reactivar</button>
                                     </div>
                                 `).join('')}
                             </div>
@@ -239,7 +243,7 @@ export class VistaAjustes implements Vista {
                     <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">💳 Tarjetas de Crédito</h3>
                     <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Registra tarjetas de crédito para consumos y abonos.</p>
                     
-                    <form id="form-add-tarjeta" onsubmit="appUI.handleAgregarTarjeta(event)" style="display:flex; flex-direction:column; gap:0.4rem;">
+                    <form id="form-add-tarjeta" ${alEnviar('handleAgregarTarjeta')} style="display:flex; flex-direction:column; gap:0.4rem;">
                         <div class="form-group" style="margin-bottom:0.6rem;">
                             <label for="tar_ent">Banco Emisor *</label>
                             <input type="text" id="tar_ent" class="form-control" placeholder="Banco Popular..." style="padding:0.4rem 0.6rem;" required>
@@ -326,14 +330,14 @@ export class VistaAjustes implements Vista {
                     cuando la operación lo permita.
                 </p>
                 <div style="display:flex; justify-content:flex-end; margin-bottom:0.8rem;">
-                    <button type="button" onclick="appUI.alternarCasosDeCorreccion()" class="btn btn-secondary" style="padding:0.25rem 0.6rem; font-size:0.75rem;">📋 Ver casos abiertos</button>
+                    <button type="button" ${accion('alternarCasosDeCorreccion')} class="btn btn-secondary" style="padding:0.25rem 0.6rem; font-size:0.75rem;">📋 Ver casos abiertos</button>
                 </div>
                 <div id="casos-correccion" hidden style="margin-bottom:1.2rem;"></div>
                 
                 <div style="display:flex; gap:0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
-                    <button type="button" onclick="elemento('corr-gastos').style.display='block'; elemento('corr-ingresos').style.display='none'; elemento('corr-trans').style.display='none'; this.className='btn'; elemento('btn-corr-ing').className='btn btn-secondary'; elemento('btn-corr-tra').className='btn btn-secondary';" id="btn-corr-gas" class="btn" style="padding: 0.35rem 0.75rem; font-size:0.8rem;">💸 Gastos</button>
-                    <button type="button" onclick="elemento('corr-gastos').style.display='none'; elemento('corr-ingresos').style.display='block'; elemento('corr-trans').style.display='none'; this.className='btn'; elemento('btn-corr-gas').className='btn btn-secondary'; elemento('btn-corr-tra').className='btn btn-secondary';" id="btn-corr-ing" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size:0.8rem; border:none;">📈 Ingresos</button>
-                    <button type="button" onclick="elemento('corr-gastos').style.display='none'; elemento('corr-ingresos').style.display='none'; elemento('corr-trans').style.display='block'; this.className='btn'; elemento('btn-corr-gas').className='btn btn-secondary'; elemento('btn-corr-ing').className='btn btn-secondary';" id="btn-corr-tra" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size:0.8rem; border:none;">🔄 Transferencias</button>
+                    <button type="button" ${manejador('click', 'activarPestana', ['corr-gastos', PANELES_CORRECCION, BOTONES_CORRECCION], 'elemento')} id="btn-corr-gas" class="btn" style="padding: 0.35rem 0.75rem; font-size:0.8rem;">💸 Gastos</button>
+                    <button type="button" ${manejador('click', 'activarPestana', ['corr-ingresos', PANELES_CORRECCION, BOTONES_CORRECCION], 'elemento')} id="btn-corr-ing" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size:0.8rem; border:none;">📈 Ingresos</button>
+                    <button type="button" ${manejador('click', 'activarPestana', ['corr-trans', PANELES_CORRECCION, BOTONES_CORRECCION], 'elemento')} id="btn-corr-tra" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size:0.8rem; border:none;">🔄 Transferencias</button>
                 </div>
 
                 <!-- SECCIÓN GASTOS -->
@@ -360,7 +364,7 @@ export class VistaAjustes implements Vista {
                                             <td style="text-transform:capitalize;">${escaparHtml(g.metodo_pago)}</td>
                                             <td class="amount expense">${escaparHtml(g.divisa)} ${formato.importe(g.monto + g.costo_adicional)}</td>
                                             <td>
-                                                <button type="button" onclick="appUI.handleEliminarGastoCorr(${g.id})" class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Revertir</button>
+                                                <button type="button" ${accion('handleEliminarGastoCorr', g.id)} class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Revertir</button>
                                             </td>
                                         </tr>
                                     `).join('')}
@@ -395,7 +399,7 @@ export class VistaAjustes implements Vista {
                                             <td><span class="badge ${inf.estatus === 'pagado' ? 'pagada' : 'emitida'}">${escaparHtml(inf.estatus)}</span></td>
                                             <td>${escaparHtml(inf.institucion_deposito || '-')}</td>
                                             <td>
-                                                <button type="button" onclick="appUI.handleEliminarIngresoInformalCorr(${inf.id})" class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Revertir</button>
+                                                <button type="button" ${accion('handleEliminarIngresoInformalCorr', inf.id)} class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Revertir</button>
                                             </td>
                                         </tr>
                                     `).join('')}
@@ -427,7 +431,7 @@ export class VistaAjustes implements Vista {
                                             <td class="amount income">DOP ${formato.importe(i.monto_total)}</td>
                                             <td><span class="badge ${i.estatus === 'pagada' ? 'pagada' : 'emitida'}">${escaparHtml(i.estatus)}</span></td>
                                             <td>
-                                                <button type="button" onclick="appUI.handleEliminarIngresoCorr(${i.id})" class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Eliminar</button>
+                                                <button type="button" ${accion('handleEliminarIngresoCorr', i.id)} class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Eliminar</button>
                                             </td>
                                         </tr>
                                     `).join('')}
@@ -463,7 +467,7 @@ export class VistaAjustes implements Vista {
                                             <td>${escaparHtml(t.cuenta_destino_nombre)}</td>
                                             <td class="amount expense">${t.cargo > 0 ? formato.importe(t.cargo) : '-'}</td>
                                             <td>
-                                                <button type="button" onclick="appUI.handleEliminarTransaccionCuentaCorr(${t.id})" class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Revertir</button>
+                                                <button type="button" ${accion('handleEliminarTransaccionCuentaCorr', t.id)} class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Revertir</button>
                                             </td>
                                         </tr>
                                     `).join('')}
@@ -847,7 +851,7 @@ export class VistaAjustes implements Vista {
 
 /**
  * Lo que `window.appUI` expone de esta vista: un puente que delega en la
- * instancia. Los atributos en línea no cambian.
+ * instancia. Los atributos `data-accion*` no cambian.
  */
 export function puenteAjustes(vista: VistaAjustes): {
     handleAgregarCategoria: (e: EventoDeFormulario) => Promise<void>;

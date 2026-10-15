@@ -112,7 +112,7 @@ test('todo envío de dinero sale de un manejador enlazado con onsubmit', () => {
             llamadas++;
             const antes = UI.slice(0, uso.index);
             const manejador = [...antes.matchAll(/\n\s+(?:async )?(\w+)\([^)]*\)\s*\{/g)].pop()?.[1];
-            if (!new RegExp(`onsubmit=["']appUI\\.${manejador}\\(`).test(UI)) {
+            if (!new RegExp(`alEnviar\\('${manejador}'`).test(UI)) {
                 sinSubmit.push(`${metodo} desde ${manejador}`);
             }
         }

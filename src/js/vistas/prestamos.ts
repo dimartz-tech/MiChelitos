@@ -14,7 +14,7 @@
 import type { Prestamo, Tarjeta } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, MenuFlotante, Modales, Pantalla, Referencias, Reloj, Vista } from '../ui/servicios';
 
-import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+import { accion, alCambiar, alEnviar, escaparHtml, manejador } from '../nucleo/html.js';
 
 type ApiPrestamos = ApiDe<
     | 'obtenerPrestamos'
@@ -102,10 +102,10 @@ export class VistaPrestamos implements Vista {
                 <!-- Formulario -->
                 <div class="card" style="height:fit-content;">
                     <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 1rem;">📝 Registrar Financiamiento</h3>
-                    <form id="form-add-prestamo" onsubmit="appUI.handleAgregarPrestamo(event)">
+                    <form id="form-add-prestamo" ${alEnviar('handleAgregarPrestamo')}>
                         <div class="form-group">
                             <label for="pre_tip">Tipo de Préstamo *</label>
-                            <select id="pre_tip" class="form-control" onchange="appUI.toggleCamposPrestamos(this.value)" required>
+                            <select id="pre_tip" class="form-control" ${manejador('change', 'toggleCamposPrestamos', [], 'valor')} required>
                                 <option value="consumo" selected>Préstamo de Consumo</option>
                                 <option value="hipotecario">Préstamo Hipotecario</option>
                                 <option value="vehiculo">Préstamo de Vehículo</option>
@@ -476,7 +476,7 @@ export class VistaPrestamos implements Vista {
                     ${anidada ? 'Hereda<br>las fechas' : `Día ${p.dia_pago}`}
                 </div>
                 <div style="width:30px; text-align:right;">
-                    <button onclick="appUI.abrirMenuPasivo(event, ${argumentoJs(p)})" title="Acciones"
+                    <button ${manejador('click', 'abrirMenuPasivo', [p], 'evento')} title="Acciones"
                             style="background:none; border:none; color:var(--text-muted); font-size:1.05rem; cursor:pointer; padding:0.2rem 0.4rem; border-radius:var(--radius-sm); transition:color var(--transition-fast), background var(--transition-fast);">⋯</button>
                 </div>
             </div>
@@ -496,11 +496,11 @@ export class VistaPrestamos implements Vista {
 
         const puedeAbonar = p.es_revolvente || (p.cuotas_pendientes ?? 0) > 0;
         const html = `
-            ${puedeAbonar ? `<div data-accion="abonar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Abonar cuota</div>` : ''}
-            <div data-accion="conciliar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Conciliar saldo</div>
-            <div data-accion="editar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Editar condiciones</div>
+            ${puedeAbonar ? `<div data-opcion="abonar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Abonar cuota</div>` : ''}
+            <div data-opcion="conciliar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Conciliar saldo</div>
+            <div data-opcion="editar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Editar condiciones</div>
             <div style="height:1px; background:rgba(255,255,255,0.07); margin:0.25rem 0.5rem;"></div>
-            <div data-accion="eliminar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer; color:#fca5a5;">Eliminar</div>
+            <div data-opcion="eliminar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer; color:#fca5a5;">Eliminar</div>
         `;
 
         menus.abrir({
@@ -565,7 +565,7 @@ export class VistaPrestamos implements Vista {
                     ${escaparHtml(p.institucion_financiera)} — <strong style="text-transform:capitalize;">${escaparHtml(p.tipo_prestamo)}</strong><br>
                     El saldo no se edita aquí: usa «Conciliar», que deja constancia de la diferencia.
                 </p>
-                <form onsubmit="appUI.handleEdicionPrestamo(event, ${p.id})">
+                <form ${alEnviar('handleEdicionPrestamo', p.id)}>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="edp_tas_${p.id}">Tasa anual (%)</label>
@@ -586,7 +586,7 @@ export class VistaPrestamos implements Vista {
                     ` : ''}
                     <div class="form-group">
                         <label for="edp_tar_${p.id}">Tarjeta que lo cobra</label>
-                        <select id="edp_tar_${p.id}" class="form-control" onchange="appUI.avisarFechasDerivadas(${p.id})">
+                        <select id="edp_tar_${p.id}" class="form-control" ${alCambiar('avisarFechasDerivadas', p.id)}>
                             <option value="">Ninguna — se paga por su cuenta</option>
                             ${tarjetas.map(t => `
                                 <option value="${t.id}" data-pago="${t.fecha_limite_pago}" data-corte="${t.fecha_corte}" ${p.tarjeta_id === t.id ? 'selected' : ''}>
@@ -601,7 +601,7 @@ export class VistaPrestamos implements Vista {
                         <input type="number" min="1" max="31" id="edp_dia_${p.id}" class="form-control" value="${p.dia_pago}" required>
                     </div>
                     <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                        <button type="button" onclick="elemento('modal-pre-${p.id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="button" ${accion('quitar', `modal-pre-${p.id}`)} class="btn btn-secondary">Cancelar</button>
                         <button type="submit" class="btn">Guardar</button>
                     </div>
                 </form>
@@ -764,7 +764,7 @@ export class VistaPrestamos implements Vista {
 
 /**
  * Lo que `window.appUI` expone de esta vista: un puente que delega en la
- * instancia. Los atributos en línea no cambian.
+ * instancia. Los atributos `data-accion*` no cambian.
  */
 export function puentePrestamos(vista: VistaPrestamos): {
     handleAgregarPrestamo: (e: EventoDeFormulario) => Promise<void>;

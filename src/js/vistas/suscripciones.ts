@@ -11,7 +11,7 @@
 import type { Suscripcion } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Vista } from '../ui/servicios';
 
-import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+import { accion, alEnviar, escaparHtml } from '../nucleo/html.js';
 
 type ApiSuscripciones = ApiDe<
     | 'obtenerSuscripciones'
@@ -36,7 +36,7 @@ export interface DependenciasSuscripciones {
     modales: Modales;
 }
 
-/** Los manejadores en línea (`onsubmit`/`onclick` → `appUI.…`) que la plantilla escribe. */
+/** Las acciones delegadas (`data-accion*` → `appUI.…`) que la plantilla escribe. */
 export const MANEJADORES_SUSCRIPCIONES = [
     'handleAgregarSuscripcion', 'abrirEdicionSuscripcion', 'handleEdicionSuscripcionSubmit',
     'handleEliminarSuscripcion', 'handleCorregirProximoCobro', 'handleAsentarPendiente', 'handleDescartarPendiente',
@@ -93,9 +93,9 @@ export class VistaSuscripciones implements Vista {
                                             <td>${escaparHtml(s.entidad)} (${escaparHtml(s.nombre_tarjeta)})</td>
                                             <td class="amount expense">${escaparHtml(s.divisa)} ${formato.importe(s.monto)}</td>
                                             <td>
-                                                ${s.impedimento ? `<button onclick="appUI.handleCorregirProximoCobro(${s.id})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(224,82,96,0.15); border:1px solid var(--danger, #e05260);" title="Corregir la fecha del último cobro">🔧</button>` : ''}
-                                                <button onclick="appUI.abrirEdicionSuscripcion(${argumentoJs(s)})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Editar">✏️</button>
-                                                <button onclick="appUI.handleEliminarSuscripcion(${s.id})" class="btn btn-danger" style="padding: 0.3rem 0.5rem; font-size:0.8rem;">🗑️</button>
+                                                ${s.impedimento ? `<button ${accion('handleCorregirProximoCobro', s.id)} class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(224,82,96,0.15); border:1px solid var(--danger, #e05260);" title="Corregir la fecha del último cobro">🔧</button>` : ''}
+                                                <button ${accion('abrirEdicionSuscripcion', s)} class="btn" style="padding: 0.3rem 0.5rem; font-size:0.8rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Editar">✏️</button>
+                                                <button ${accion('handleEliminarSuscripcion', s.id)} class="btn btn-danger" style="padding: 0.3rem 0.5rem; font-size:0.8rem;">🗑️</button>
                                             </td>
                                         </tr>
                                     `).join('')}
@@ -142,8 +142,8 @@ export class VistaSuscripciones implements Vista {
                                 <span style="flex:1;"><strong>${escaparHtml(s.plataforma)}</strong> — ${escaparHtml(s.divisa)} ${formato.importe(s.monto)},
                                     el más antiguo: <strong>${escaparHtml(s.pendientes[0])}</strong>
                                     ${s.pendientes.length > 1 ? `<span style="color:var(--text-muted);">(y ${s.pendientes.length - 1} más)</span>` : ''}</span>
-                                <button onclick="appUI.handleAsentarPendiente(${s.id}, ${argumentoJs(s.pendientes[0])})" class="btn" style="padding:0.25rem 0.5rem; font-size:0.78rem;">Sí se cobró</button>
-                                <button onclick="appUI.handleDescartarPendiente(${s.id}, ${argumentoJs(s.pendientes[0])})" class="btn" style="padding:0.25rem 0.5rem; font-size:0.78rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);">No se cobró</button>
+                                <button ${accion('handleAsentarPendiente', s.id, s.pendientes[0])} class="btn" style="padding:0.25rem 0.5rem; font-size:0.78rem;">Sí se cobró</button>
+                                <button ${accion('handleDescartarPendiente', s.id, s.pendientes[0])} class="btn" style="padding:0.25rem 0.5rem; font-size:0.78rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);">No se cobró</button>
                             </div>`).join('')}
                     </div>`;
                 })()}
@@ -164,7 +164,7 @@ export class VistaSuscripciones implements Vista {
                         <strong>🔔 Cobro próximo</strong>
                         <ul style="margin:0.5rem 0 0 1rem; font-size:0.85rem;">
                             ${avisan.map(s => `<li><strong>${escaparHtml(s.plataforma)}</strong> — ${escaparHtml(s.divisa)} ${formato.importe(s.monto)} el ${escaparHtml(s.fecha_proximo_cobro)}, con ${escaparHtml(s.entidad)} (${escaparHtml(s.nombre_tarjeta)})
-                                <button onclick="appUI.abrirEdicionSuscripcion(${argumentoJs(s)})" class="btn" style="padding: 0.15rem 0.4rem; font-size:0.75rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Cambiar la tarjeta que cobra">✏️ Cambiar tarjeta</button></li>`).join('')}
+                                <button ${accion('abrirEdicionSuscripcion', s)} class="btn" style="padding: 0.15rem 0.4rem; font-size:0.75rem; background:rgba(255,255,255,0.05); border:1px solid var(--border-color);" title="Cambiar la tarjeta que cobra">✏️ Cambiar tarjeta</button></li>`).join('')}
                         </ul>
                         <p style="margin:0.5rem 0 0; font-size:0.75rem; color:var(--text-muted);">¿Vas a pagar con otra tarjeta, por ejemplo una que bonifique las compras por internet? Cámbiala antes de la fecha.</p>
                     </div>`;
@@ -176,7 +176,7 @@ export class VistaSuscripciones implements Vista {
                 <div class="card" style="height:fit-content;">
                     <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 1rem;">🔄 Nueva Suscripción</h3>
                     ${tarjetas.length > 0 ? `
-                        <form id="form-add-suscripcion" onsubmit="appUI.handleAgregarSuscripcion(event)">
+                        <form id="form-add-suscripcion" ${alEnviar('handleAgregarSuscripcion')}>
                             <div class="form-group">
                                 <label for="sus_pla">Servicio / Plataforma *</label>
                                 <input type="text" id="sus_pla" class="form-control" placeholder="Netflix, Spotify, AWS..." required>
@@ -277,7 +277,7 @@ export class VistaSuscripciones implements Vista {
                 <p style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:1rem;">
                     Se conserva el último pago registrado (${escaparHtml(s.fecha_ultimo_pago || 'ninguno')}), de modo que editar no provoca un cobro repetido este período.
                 </p>
-                <form onsubmit="appUI.handleEdicionSuscripcionSubmit(event, ${s.id})">
+                <form ${alEnviar('handleEdicionSuscripcionSubmit', s.id)}>
                     <div class="form-group">
                         <label>Servicio / Plataforma</label>
                         <input type="text" id="es_pla_${s.id}" class="form-control" value="${escaparHtml(s.plataforma)}" required>
@@ -319,7 +319,7 @@ export class VistaSuscripciones implements Vista {
                         </select>
                     </div>
                     <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                        <button type="button" onclick="elemento('modal-edit-sus-${s.id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="button" ${accion('quitar', `modal-edit-sus-${s.id}`)} class="btn btn-secondary">Cancelar</button>
                         <button type="submit" class="btn">Guardar Cambios</button>
                     </div>
                 </form>
@@ -458,7 +458,7 @@ export class VistaSuscripciones implements Vista {
 
 /**
  * Lo que `window.appUI` expone de esta vista: un puente que delega en la
- * instancia. Los atributos `onsubmit`/`onclick` no cambian.
+ * instancia. Los atributos `data-accion*` no cambian.
  */
 export function puenteSuscripciones(vista: VistaSuscripciones): {
     handleAgregarSuscripcion: (e: EventoDeFormulario) => Promise<void>;

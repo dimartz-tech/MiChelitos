@@ -9,6 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VistaDashboard, puenteDashboard } from '../../../src/js/vistas/dashboard.js';
+import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
 
 function datos(extra = {}) {
     return {
@@ -130,10 +131,10 @@ test('sin tarjetas ni préstamos dibuja los mensajes vacíos', async () => {
     assert.match(html, /No hay préstamos registrados/);
 });
 
-test('sus enlaces son navigate(), no manejadores de appUI; el puente no cuelga nada', async () => {
+test('sus enlaces son la acción general «navegar», no manejadores de appUI; el puente no cuelga nada', async () => {
     const { html } = await dibujar();
-    assert.match(html, /onclick="navigate\('tarjetas'\)"/);
-    assert.match(html, /onclick="navigate\('prestamos'\)"/);
+    assert.deepEqual(llamadasDelManejador(html, 'navegar'), [['tarjetas'], ['prestamos']]);
+    assert.deepEqual([...nombresDelPuente(html)], []);
     assert.doesNotMatch(html, /appUI\./);
     assert.deepEqual(puenteDashboard(new VistaDashboard({})), {});
 });
