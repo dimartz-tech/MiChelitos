@@ -8,6 +8,7 @@ pub mod cierre_de_tarjetas;
 pub mod gastos;
 pub mod cuentas;
 pub mod cobrar_suscripcion;
+pub mod correcciones;
 pub mod informales;
 pub mod ingresos;
 pub mod prestamos;

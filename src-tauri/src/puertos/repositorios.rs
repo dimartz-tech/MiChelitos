@@ -538,6 +538,25 @@ pub trait RegistroDeCorrecciones {
     fn anotar_caso(&mut self, caso: &CasoAAnotar) -> Result<String, ErrorAlmacen>;
 }
 
+/// Un caso de corrección tal como quedó anotado.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CasoLeido {
+    pub numero_caso: String,
+    pub fecha: String,
+    pub tipo: String,
+    pub referencia_id: i64,
+    pub descripcion: String,
+    pub importe: Option<f64>,
+    pub divisa: Option<String>,
+    pub motivo: String,
+}
+
+/// Lectura del rastro de correcciones. No hay forma de borrarlo: es deliberado.
+pub trait ConsultaDeCorrecciones {
+    /// Del caso más reciente al más antiguo.
+    fn casos(&self) -> Result<Vec<CasoLeido>, ErrorAlmacen>;
+}
+
 /// Lo que hay que saber de una factura para corregirla o eliminarla.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EstadoDeFactura {

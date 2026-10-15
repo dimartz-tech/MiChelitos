@@ -39,7 +39,7 @@ use puertos::repositorios::AlmacenCatalogos;
 use aplicacion::registrar_gasto::{registrar_gasto, DatosGasto};
 use aplicacion::registrar_pago_tarjeta::DatosPago;
 use aplicacion::registrar_avance_de_efectivo::DatosAvance;
-use aplicacion::transferir::{revertir_transferencia, transferir, DatosTransferencia};
+use aplicacion::transferir::{transferir, DatosTransferencia};
 use puertos::repositorios::RepositorioCuentas;
 use dominio::tarjeta::MONEDA_LOCAL;
 use aplicacion::liquidar_gasto::liquidar_gasto;
@@ -1588,18 +1588,12 @@ fn transferir_entre_cuentas(
     cargo: ipc::ImporteDecimal,
     descripcion: String
 ) -> Result<(), String> {
-    // Traducción pura: la operación y sus invariantes viven en el dominio y
-    // en el caso de uso. Aquí solo se abre la transacción, se convierten los
-    // números en importes de la divisa que corresponde a cada cuenta, y se
-    // confirma o se deshace.
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = db_sql::transaccion(&mut conn, true).map_err(|e| e.to_string())?;
-
-    {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
+    // Traducción pura: la operación y sus invariantes viven en el dominio y en el caso de uso. Aquí solo se
+    // convierten los números en importes de la divisa que corresponde a cada cuenta.
+    con_almacen(|almacen| {
         // Las divisas son un hecho de cada cuenta: se leen, no se declaran.
-        let divisa_origen = almacen.divisa(origen_id)?;
-        let divisa_destino = almacen.divisa(destino_id)?;
+        let divisa_origen = almacen.divisa(origen_id).map_err(|e| e.to_string())?;
+        let divisa_destino = almacen.divisa(destino_id).map_err(|e| e.to_string())?;
 
         transferir(
             DatosTransferencia {
@@ -1614,12 +1608,10 @@ fn transferir_entre_cuentas(
                 cargo: cargo.con_divisa(divisa_origen),
                 descripcion,
             },
-            &mut almacen,
+            almacen,
         )?;
-    }
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -1777,56 +1769,21 @@ pub struct CasoCorreccion {
 /// se destruyó, y un rastro que se puede borrar no es un rastro.
 #[tauri::command]
 fn obtener_correcciones() -> Result<Vec<CasoCorreccion>, String> {
-    let conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo
-             FROM correcciones ORDER BY id DESC;",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let filas = stmt
-        .query_map([], |r| {
-            Ok(CasoCorreccion {
-                numero_caso: r.get(0)?,
-                fecha: r.get(1)?,
-                tipo: r.get(2)?,
-                referencia_id: r.get(3)?,
-                descripcion: r.get(4)?,
-                importe: r.get(5)?,
-                divisa: r.get(6)?,
-                motivo: r.get(7)?,
+    lee_almacen(|a| {
+        Ok(aplicacion::correcciones::listar_correcciones(a)?
+            .into_iter()
+            .map(|c| CasoCorreccion {
+                numero_caso: c.numero_caso,
+                fecha: c.fecha,
+                tipo: c.tipo,
+                referencia_id: c.referencia_id,
+                descripcion: c.descripcion,
+                importe: c.importe,
+                divisa: c.divisa,
+                motivo: c.motivo,
             })
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut lista = Vec::new();
-    for f in filas {
-        lista.push(f.map_err(|e| e.to_string())?);
-    }
-    Ok(lista)
-}
-
-/// Anota el caso de corrección de un movimiento antes de borrarlo.
-///
-/// Lee la descripción **antes** del borrado: después no habría de dónde
-/// sacarla, y un caso que dice «se borró el gasto 315» sin decir cuál era no
-/// sirve para auditar nada.
-fn abrir_caso(
-    tx: &rusqlite::Transaction,
-    tipo: &str,
-    id: i64,
-    consulta: &str,
-    motivo: &str,
-) -> Result<String, String> {
-    let (descripcion, importe, divisa): (String, Option<f64>, Option<String>) = tx
-        .query_row(consulta, [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-        .map_err(|_| format!("No se encontró {} con identificador {}.", tipo, id))?;
-
-    correcciones::registrar(
-        tx,
-        correcciones::Correccion { tipo, referencia_id: id, descripcion, importe, divisa, motivo },
-    )
+            .collect())
+    })
 }
 
 #[tauri::command]
@@ -1836,20 +1793,7 @@ fn eliminar_gasto(id: i64, motivo: String) -> Result<String, String> {
 
 #[tauri::command]
 fn eliminar_transaccion_cuenta(id: i64, motivo: String) -> Result<String, String> {
-    // Traducción pura. El recorte en cero del destino (H10) vive ahora en el
-    // caso de uso y en el puerto, no en esta consulta.
-    let mut conn = db_sql::obtener_conexion().map_err(|e| e.to_string())?;
-    let tx = db_sql::transaccion(&mut conn, true).map_err(|e| e.to_string())?;
-
-    let caso = abrir_caso(&tx, "traspaso", id, "SELECT COALESCE(descripcion, 'Traspaso entre cuentas'), monto_origen, 'DOP' FROM transacciones_cuentas WHERE id = ?;", &motivo)?;
-
-    {
-        let mut almacen = AlmacenSqlite::nuevo(&tx);
-        revertir_transferencia(id, &mut almacen)?;
-    }
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(caso)
+    con_almacen(|a| Ok(aplicacion::transferir::eliminar_transferencia(id, &motivo, a)?))
 }
 
 #[tauri::command]
