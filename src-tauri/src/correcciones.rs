@@ -30,15 +30,16 @@ pub struct Correccion<'a> {
 /// Se llama **antes** de borrar: si el borrado falla, la transacción se
 /// deshace entera y no queda un caso huérfano; si el registro falla, no se
 /// borra nada.
+#[cfg(test)]
 pub fn registrar(tx: &Transaction, c: Correccion<'_>) -> Result<String, String> {
     // La regla del motivo es del dominio; aquí solo se anota.
     let motivo = crate::dominio::correccion::motivo_de_correccion(c.motivo).map_err(|e| e.to_string())?;
-    insertar(tx, &c, &motivo)
+    insertar(tx, &Correccion { motivo: &motivo, ..c })
 }
 
 /// Anota el caso con un motivo **ya validado** y devuelve su número. Lo usa el adaptador del puerto de
 /// correcciones, cuyo caso de uso valida el motivo antes de llamar.
-pub fn insertar(tx: &Transaction, c: &Correccion<'_>, motivo: &str) -> Result<String, String> {
+pub fn insertar(tx: &Transaction, c: &Correccion<'_>) -> Result<String, String> {
     let numero = siguiente_numero(tx)?;
     let hoy = Local::now().format("%d/%m/%Y").to_string();
 
@@ -54,7 +55,7 @@ pub fn insertar(tx: &Transaction, c: &Correccion<'_>, motivo: &str) -> Result<St
             &c.descripcion,
             c.importe,
             &c.divisa,
-            motivo,
+            c.motivo,
         ),
     )
     .map_err(|e| e.to_string())?;
