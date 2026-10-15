@@ -1,4 +1,4 @@
-// GENERADO por herramientas/generar_tipos_ipc.mjs desde src-tauri/src/main.rs. No editar a mano:
+// GENERADO por herramientas/generar_tipos_ipc.mjs desde el Rust de src-tauri/src (main.rs y comandos/). No editar a mano:
 // se regenera con `npm run tipos:generar` y una prueba exige que esté al día.
 // Solo contiene tipos; no hay código que se ejecute.
 

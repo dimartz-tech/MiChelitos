@@ -4,7 +4,20 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.104.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.105.0 (Versión Actual) - 2026-10-14
+**El generador de tipos del contrato con Rust deja de depender de que todo viva en `main.rs`.** Es el paso previo a dividir los comandos en módulos; no cambia ningún comportamiento.
+
+### 🔧 Qué se hace
+* **Lee el Rust repartido:** `main.rs` y, si existe, todos los `src-tauri/src/comandos/*.rs` en orden. La prueba de contrato de IPC (`ipc.test.js`) usa el mismo lector, así que ambas ven lo mismo.
+* **Entiende la forma de un módulo:** `pub fn`, `pub(crate) fn`, `async fn`, estructuras `pub(crate)` y tipos con ruta (`modulo::Tipo`).
+* **Falla en voz alta, nunca en silencio:** se niega si el número de `#[tauri::command]` no coincide con los comandos que entiende (antes, un `pub fn` simplemente desaparecía y el archivo salía vacío), o si los comandos no coinciden con los registrados en `generate_handler!` (sin registrar, o registrados sin comando).
+* **`npm run tipos:comprobar`** (y la integración continua lo usa).
+* **Pruebas:** cinco nuevas con Rust inventado (formas de módulo, recuento, registro, comentarios, lectura de `comandos/`). 12 de 13 mutaciones mueren; la que sobrevive (`.sort()` de la lista de archivos) es equivalente en macOS, que ya devuelve el directorio ordenado.
+* `tipos-ipc.d.ts` solo cambia en su cabecera.
+
+---
+
+## Versión 1.104.0 - 2026-10-14
 **Se retiran los cuatro `#![allow(dead_code)]` y con ellos el código que escondían.** Cambio de estructura: no altera el comportamiento ni el esquema.
 
 ### 🔧 Qué se hace
