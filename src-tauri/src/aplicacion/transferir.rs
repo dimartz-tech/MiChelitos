@@ -101,6 +101,35 @@ pub fn revertir_transferencia(
     Ok(())
 }
 
+/// Anota el caso de corrección de un traspaso y lo revierte.
+///
+/// Orden (el de siempre): **primero** que el traspaso exista —un id que no existe se nombra antes que un motivo
+/// flojo—, después el motivo, el caso de corrección y, **al final**, la reversión: si algo falla antes no queda un
+/// caso huérfano.
+///
+/// **Hallazgo, conservado sin corregir** (ver `caracterizacion::m3_hallazgo_…`): el caso graba siempre la divisa
+/// «DOP», aunque el traspaso sea entre cuentas en dólares; el importe es el de origen. Cambiarlo es una decisión
+/// del titular.
+pub fn eliminar_transferencia(
+    id: i64,
+    motivo: &str,
+    almacen: &mut (impl AlmacenTransferencias + RegistroDeCorrecciones),
+) -> Result<String, ErrorAplicacion> {
+    let t = almacen.obtener_transferencia(id)?;
+    let motivo = crate::dominio::correccion::motivo_de_correccion(motivo)?;
+    let descripcion = if t.descripcion.is_empty() { "Traspaso entre cuentas".to_string() } else { t.descripcion };
+    let caso = almacen.anotar_caso(&CasoAAnotar {
+        tipo: "traspaso".to_string(),
+        referencia_id: id,
+        descripcion,
+        importe: Some(t.monto_origen.unidades()),
+        divisa: Some("DOP".to_string()),
+        motivo,
+    })?;
+    revertir_transferencia(id, almacen)?;
+    Ok(caso)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +161,111 @@ mod tests {
             cargo,
             descripcion: "Traspaso".into(),
         }
+    }
+
+    const MOTIVO: &str = "Corrección de prueba del sistema";
+
+    fn con_traspaso(a: &mut AlmacenEnMemoria, descripcion: &str) -> i64 {
+        let mut d = datos(dop(1_000.0), dop(1_000.0), dop(0.0));
+        d.descripcion = descripcion.into();
+        transferir(d, a).unwrap()
+    }
+
+    #[test]
+    fn eliminar_un_traspaso_anota_el_caso_y_devuelve_los_saldos() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "Pago del alquiler");
+
+        let caso = eliminar_transferencia(id, MOTIVO, &mut a).unwrap();
+
+        assert_eq!(caso, "CASO-0001");
+        assert_eq!(a.casos.len(), 1);
+        let c = &a.casos[0];
+        assert_eq!((c.tipo.as_str(), c.referencia_id), ("traspaso", id));
+        assert_eq!(c.descripcion, "Pago del alquiler");
+        assert_eq!(c.importe, Some(1_000.0));
+        assert_eq!(c.motivo, MOTIVO);
+        assert_eq!(a.saldo(10).unwrap(), dop(50_000.0));
+        assert_eq!(a.saldo(11).unwrap(), dop(10_000.0));
+        assert!(a.obtener_transferencia(id).is_err(), "el asiento se retiró");
+    }
+
+    #[test]
+    fn el_importe_del_caso_es_el_de_origen_aunque_el_destino_sea_otra_divisa() {
+        let mut a = AlmacenEnMemoria::nuevo().con_cuenta(10, "Pesos", dop(10_000.0)).con_cuenta(12, "Dólares", usd(0.0));
+        let id = transferir(
+            DatosTransferencia {
+                fecha: "13/10/2026".into(),
+                origen_id: 10,
+                destino_id: 12,
+                monto_origen: dop(6_000.0),
+                monto_destino: usd(100.0),
+                cargo: dop(0.0),
+                descripcion: "cambio".into(),
+            },
+            &mut a,
+        )
+        .unwrap();
+
+        eliminar_transferencia(id, MOTIVO, &mut a).unwrap();
+
+        assert_eq!(a.casos[0].importe, Some(6_000.0), "el de origen, no los 100 del destino");
+    }
+
+    #[test]
+    fn un_traspaso_sin_descripcion_se_anota_con_el_texto_generico() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "");
+
+        eliminar_transferencia(id, MOTIVO, &mut a).unwrap();
+
+        assert_eq!(a.casos[0].descripcion, "Traspaso entre cuentas");
+    }
+
+    #[test]
+    fn un_traspaso_inexistente_se_nombra_antes_que_un_motivo_invalido() {
+        let mut a = almacen();
+
+        let e = eliminar_transferencia(99, "corto", &mut a).unwrap_err();
+
+        assert_eq!(e.to_string(), "No se encontró traspaso con identificador 99.");
+        assert!(a.casos.is_empty());
+    }
+
+    #[test]
+    fn un_motivo_invalido_no_anota_caso_ni_toca_los_saldos() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "x");
+
+        assert!(eliminar_transferencia(id, "corto", &mut a).is_err());
+
+        assert!(a.casos.is_empty(), "sin caso huérfano");
+        assert!(a.obtener_transferencia(id).is_ok(), "el asiento sigue");
+        assert_eq!(a.saldo(11).unwrap(), dop(11_000.0));
+    }
+
+    #[test]
+    fn hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
+        // Fijado sin corregir (protocolo de hallazgos): ver el comentario de `eliminar_transferencia`.
+        let mut a2 = AlmacenEnMemoria::nuevo().con_cuenta(12, "A USD", usd(500.0)).con_cuenta(13, "B USD", usd(0.0));
+        let id = transferir(
+            DatosTransferencia {
+                fecha: "13/10/2026".into(),
+                origen_id: 12,
+                destino_id: 13,
+                monto_origen: usd(200.0),
+                monto_destino: usd(200.0),
+                cargo: usd(0.0),
+                descripcion: "usd".into(),
+            },
+            &mut a2,
+        )
+        .unwrap();
+
+        eliminar_transferencia(id, MOTIVO, &mut a2).unwrap();
+
+        assert_eq!(a2.casos[0].divisa.as_deref(), Some("DOP"), "HALLAZGO: debería decir USD");
+        assert_eq!(a2.casos[0].importe, Some(200.0));
     }
 
     #[test]

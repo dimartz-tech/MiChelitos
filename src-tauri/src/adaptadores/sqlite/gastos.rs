@@ -799,7 +799,7 @@ impl RepositorioTransferencias for AlmacenSqlite<'_> {
             .map_err(fallo)?;
 
         let (fecha, origen_id, destino_id, monto_origen, monto_destino, cargo, descripcion) =
-            fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "transferencia", id })?;
+            fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "traspaso", id })?;
 
         // Los importes se reconstruyen en la divisa de su propia cuenta, que
         // es lo único que los hace comparables con los saldos que mueven.
@@ -827,7 +827,7 @@ impl RepositorioTransferencias for AlmacenSqlite<'_> {
             .execute("DELETE FROM transacciones_cuentas WHERE id = ?;", [id])
             .map_err(fallo)?;
         if filas == 0 {
-            return Err(ErrorAlmacen::NoEncontrado { entidad: "transferencia", id });
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "traspaso", id });
         }
         Ok(())
     }

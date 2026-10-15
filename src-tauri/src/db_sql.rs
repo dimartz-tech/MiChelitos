@@ -1963,8 +1963,10 @@ mod pruebas_de_transaccion {
         // `lee_*` que la usan): una `conn.transaction()` suelta volvería al modo diferido sin que nadie lo decida.
         let fuente = include_str!("main.rs");
         assert!(!fuente.contains(".transaction()"), "usa db_sql::transaccion(&mut conn, escritura)");
-        let escritura = fuente.matches("db_sql::transaccion(&mut conn, true)").count();
-        assert_eq!(escritura, 2, "las dos operaciones sueltas que escriben");
+        // Ya no queda ninguna operación suelta: todo comando escribe por un ayudante `con_*`.
+        assert!(!fuente.contains("transaccion(&mut conn, true)"), "un comando abre su transacción de escritura a mano");
+        // Solo los cinco ayudantes genéricos `con_*_como` abren conexión; ningún comando lo hace por su cuenta.
+        assert_eq!(fuente.matches("db_sql::obtener_conexion()").count(), 5, "un comando abre su conexión a mano");
         // Cada función de main.rs: un listado usa solo `lee_*`, y nada que escriba usa `lee_*`.
         let mut revisadas = 0;
         for trozo in fuente.split("\nfn ").skip(1).chain(fuente.split("\npub fn ").skip(1)) {
