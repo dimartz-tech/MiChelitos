@@ -4,7 +4,16 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.101.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.102.0 (Versión Actual) - 2026-10-14
+**Se retira un importe real que se había colado en una prueba y en el historial.** El repositorio es público: las cifras de prueba deben ser siempre inventadas.
+
+### 🔧 Qué se hace
+* En `dominio/dinero.rs` (comentario y prueba del redondeo del 0.20 %) y en la entrada correspondiente de este historial, el importe se sustituye por una cifra inventada. El razonamiento y el resultado de la prueba no cambian.
+* **Límite conocido:** la cifra sigue en el historial de git de commits anteriores; quitarla de ahí exigiría reescribir el historial, y eso se decide aparte.
+
+---
+
+## Versión 1.101.0 - 2026-10-14
 **Los respaldos se podan por categoría: una racha de arranques ya no expulsa el respaldo previo a una actualización.**
 
 ### 🔧 Qué se hace
@@ -1643,7 +1652,7 @@ Con esto se cierran los seis defectos que abrió la caracterización de la Fase 
 
 ### 📏 Tolerancia de representación: 0.01 centavos
 * Se declara y se **hace cumplir por prueba** una desviación máxima de 0.01 centavos atribuible a representar una tasa, medida sobre un importe de referencia de 10 000 unidades.
-* **Acota una de las dos fuentes de desviación, no las dos.** El redondeo final al céntimo no es un error sino una decisión: el 0.20 % de 8 967.90 son 1 793.58 centavos, y hay que cobrar 1 793 o 1 794. Ese residuo llega a medio centavo por definición y ningún límite lo reduce.
+* **Acota una de las dos fuentes de desviación, no las dos.** El redondeo final al céntimo no es un error sino una decisión: el 0.20 % de 10 002.10 son 2 000.42 centavos, y hay que cobrar 2 000 o 2 001. Ese residuo llega a medio centavo por definición y ningún límite lo reduce.
 * **La tolerancia obligó a subir la escala de los porcentajes** de millonésimas a mil-millonésimas: a la escala anterior, una tasa cuantizada desviaba hasta 0.5 centavos sobre el importe de referencia, cincuenta veces el límite.
 * Las tasas que el sistema declara en puntos básicos se representan **exactas**, sin residuo: toda la desviación que queda en ellas es la del redondeo final.
 
