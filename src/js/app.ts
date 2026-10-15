@@ -1,10 +1,11 @@
 // --- MICHELITOS TAURI - PUNTO DE ENTRADA E INICIALIZACIÓN DE LA SPA ---
 //
 // Es un módulo que arranca `composicion.ts` con los servicios ya compuestos (antes
-// era un script clásico que llamaba al global `appUI`). Sigue definiendo `navigate`
-// como global porque lo llaman los manejadores en línea del HTML
-// (`onclick="navigate('ajustes')"`).
+// era un script clásico que llamaba al global `appUI`). Engancha además la delegación de
+// eventos (`ui/delegacion.ts`): el HTML ya no lleva manejadores en línea, sino
+// `data-accion="…"`, y `navegar` (el menú, los enlaces de las vistas) llama a `navigate`.
 
+import { accionesGenerales, delegar, type Acciones } from './ui/delegacion.js';
 import type { ApiDe, Avisos, Dom, Enrutador } from './ui/servicios';
 
 export interface EntornoDeInicio {
@@ -12,9 +13,11 @@ export interface EntornoDeInicio {
     avisos: Avisos;
     dom: Dom;
     api: ApiDe<'procesarSuscripciones'>;
+    /** El puente de las vistas (`window.appUI`): las acciones a las que apuntan los `data-accion`. */
+    acciones: Acciones;
 }
 
-export function iniciarAplicacion({ enrutador, avisos, dom, api }: EntornoDeInicio): void {
+export function iniciarAplicacion({ enrutador, avisos, dom, api, acciones }: EntornoDeInicio): void {
     // --- ROUTER GLOBAL ---
     function navigate(tab: string): void {
         // 1. Alternar active class en la navegación superior
@@ -33,7 +36,12 @@ export function iniciarAplicacion({ enrutador, avisos, dom, api }: EntornoDeInic
         // 2. Renderizar a través de la UI
         void enrutador.mostrar(tab);
     }
-    (window as unknown as { navigate: typeof navigate }).navigate = navigate;
+
+    // --- MANEJADORES DELEGADOS (sustituyen a los onclick/onsubmit/onchange/oninput en línea) ---
+    const generales = accionesGenerales({ dom, navegar: navigate });
+    const repetidas = Object.keys(generales).filter(nombre => nombre in acciones);
+    if (repetidas.length > 0) throw new Error(`Acciones generales pisadas por una vista: ${repetidas.join(', ')}.`);
+    delegar(document, { ...acciones, ...generales });
 
     const arrancar = (): void => {
         // 1. Cargar la pestaña predeterminada (Dashboard)

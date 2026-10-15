@@ -9,7 +9,11 @@
 import type { Ingreso } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+import { accion, alCambiar, alEnviar, escaparHtml, manejador } from '../nucleo/html.js';
+
+/** Las dos pestañas del formulario de ingresos: sus paneles y los botones que los alternan (acción `activarPestana`). */
+const PANELES_COBRO = ['tauri-form-formal', 'tauri-form-informal'];
+const BOTONES_COBRO = ['btn-tab-for', 'btn-tab-inf'];
 
 type ApiIngresos = ApiDe<
     | 'obtenerIngresos'
@@ -36,7 +40,7 @@ export interface DependenciasIngresos {
     ahora: Reloj;
 }
 
-/** Los manejadores en línea (`onsubmit`/`onchange`/`onclick` → `appUI.…`) que la plantilla escribe. */
+/** Las acciones delegadas (`data-accion*` → `appUI.…`) que la plantilla escribe. */
 export const MANEJADORES_INGRESOS = [
     'handleAgregarIngreso', 'handleAgregarIngresoInformal', 'handleSelectCliente',
     'abrirEdicionFormal', 'alternarCobroParcial', 'handleEdicionFormalSubmit',
@@ -84,13 +88,13 @@ export class VistaIngresos implements Vista {
                 <!-- Formulario -->
                 <div class="card" style="height: fit-content;">
                     <div style="display: flex; gap: 0.4rem; margin-bottom: 1.2rem; background: rgba(255,255,255,0.02); padding: 3px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-                        <button onclick="elemento('tauri-form-formal').style.display='block'; elemento('tauri-form-informal').style.display='none'; this.className='btn'; elemento('btn-tab-inf').className='btn btn-secondary';" id="btn-tab-for" class="btn" style="flex:1; padding: 0.4rem; font-size: 0.8rem;">📄 Formal</button>
-                        <button onclick="elemento('tauri-form-formal').style.display='none'; elemento('tauri-form-informal').style.display='block'; this.className='btn'; elemento('btn-tab-for').className='btn btn-secondary';" id="btn-tab-inf" class="btn btn-secondary" style="flex:1; padding: 0.4rem; font-size: 0.8rem; border:none;">💸 Informal</button>
+                        <button ${manejador('click', 'activarPestana', ['tauri-form-formal', PANELES_COBRO, BOTONES_COBRO], 'elemento')} id="btn-tab-for" class="btn" style="flex:1; padding: 0.4rem; font-size: 0.8rem;">📄 Formal</button>
+                        <button ${manejador('click', 'activarPestana', ['tauri-form-informal', PANELES_COBRO, BOTONES_COBRO], 'elemento')} id="btn-tab-inf" class="btn btn-secondary" style="flex:1; padding: 0.4rem; font-size: 0.8rem; border:none;">💸 Informal</button>
                     </div>
 
                     <!-- FORMULARIO FORMAL -->
                     <div id="tauri-form-formal">
-                        <form id="form-add-formal" onsubmit="appUI.handleAgregarIngreso(event)">
+                        <form id="form-add-formal" ${alEnviar('handleAgregarIngreso')}>
                             <div class="form-group">
                                 <label for="num_fac">Número de Factura *</label>
                                 <input type="text" id="num_fac" class="form-control" value="${escaparHtml(nextInvoice)}" required>
@@ -101,14 +105,14 @@ export class VistaIngresos implements Vista {
                             </div>
                             <div class="form-group">
                                 <label for="cli_select">Cliente *</label>
-                                <select id="cli_select" class="form-control" onchange="appUI.handleSelectCliente(this.value)" required>
+                                <select id="cli_select" class="form-control" ${manejador('change', 'handleSelectCliente', [], 'valor')} required>
                                     <option value="" disabled selected>Seleccione cliente...</option>
                                     ${clientes.map(c => `<option value="${c.id}" data-rnc="${escaparHtml(c.rnc)}" data-nombre="${escaparHtml(c.nombre)}">${escaparHtml(c.nombre)} (RNC: ${escaparHtml(c.rnc)})</option>`).join('')}
                                 </select>
                                 <input type="hidden" id="cli_nom">
                                 <input type="hidden" id="cli_rnc">
                                 <div style="margin-top:0.4rem; text-align:right;">
-                                    <a href="#" onclick="navigate('ajustes')" style="font-size:0.75rem; color:var(--accent-primary); text-decoration:none;">⚙️ Crear nuevo cliente</a>
+                                    <a href="#" ${accion('navegar', 'ajustes')} style="font-size:0.75rem; color:var(--accent-primary); text-decoration:none;">⚙️ Crear nuevo cliente</a>
                                 </div>
                             </div>
                             <div class="form-row">
@@ -127,7 +131,7 @@ export class VistaIngresos implements Vista {
 
                     <!-- FORMULARIO INFORMAL -->
                     <div id="tauri-form-informal" style="display: none;">
-                        <form id="form-add-informal" onsubmit="appUI.handleAgregarIngresoInformal(event)">
+                        <form id="form-add-informal" ${alEnviar('handleAgregarIngresoInformal')}>
                             <div class="form-group">
                                 <label for="fecha_inf">Fecha *</label>
                                 <input type="text" id="fecha_inf" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" required>
@@ -179,9 +183,9 @@ export class VistaIngresos implements Vista {
                                                             <!-- Corregir se ofrece también cobrada: un error de importe no
                                                                  debería quedar congelado porque el dinero ya entró. El ajuste
                                                                  de la cuenta lo resuelve el comando. -->
-                                                            <button onclick="appUI.abrirEdicionFormal(${argumentoJs(JSON.stringify(i))})" class="btn btn-secondary" style="padding: 0.3rem 0.5rem; font-size:0.75rem; border:none; background:rgba(255,255,255,0.05);" title="${i.estatus === 'pagada' ? 'Corregir factura cobrada: ajustará la cuenta por la diferencia' : 'Corregir factura'}">✏️</button>
+                                                            <button ${accion('abrirEdicionFormal', JSON.stringify(i))} class="btn btn-secondary" style="padding: 0.3rem 0.5rem; font-size:0.75rem; border:none; background:rgba(255,255,255,0.05);" title="${i.estatus === 'pagada' ? 'Corregir factura cobrada: ajustará la cuenta por la diferencia' : 'Corregir factura'}">✏️</button>
                                                             ${i.estatus === 'emitida' ? `
-                                                                <button onclick="appUI.abrirCobroFormal(${i.id}, ${i.monto_total - i.monto_retenido})" class="btn" style="padding: 0.3rem 0.5rem; font-size:0.75rem;">💵 Cobrar</button>
+                                                                <button ${accion('abrirCobroFormal', i.id, i.monto_total - i.monto_retenido)} class="btn" style="padding: 0.3rem 0.5rem; font-size:0.75rem;">💵 Cobrar</button>
                                                             ` : `
                                                                 <span style="font-size:0.75rem; color:var(--text-muted); font-style:italic;">Dep: ${escaparHtml(i.institucion_deposito)}</span>
                                                             `}
@@ -228,7 +232,7 @@ export class VistaIngresos implements Vista {
                                                 </td>
                                                 <td>
                                                     ${inf.estatus === 'pendiente' ? `
-                                                        <button onclick="appUI.abrirCobroInformal(${inf.id}, ${inf.monto})" class="btn" style="padding: 0.3rem 0.6rem; font-size:0.75rem; background: linear-gradient(135deg, #10b981, #059669); color: white;">💵 Cobrar</button>
+                                                        <button ${accion('abrirCobroInformal', inf.id, inf.monto)} class="btn" style="padding: 0.3rem 0.6rem; font-size:0.75rem; background: linear-gradient(135deg, #10b981, #059669); color: white;">💵 Cobrar</button>
                                                     ` : '-'}
                                                 </td>
                                             </tr>
@@ -314,7 +318,7 @@ export class VistaIngresos implements Vista {
                         </p>
                         <div style="border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:0.6rem; margin-bottom:0.8rem;">
                             <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.8rem; cursor:pointer;">
-                                <input type="checkbox" id="edit_parcial_chk_${i.id}" onchange="appUI.alternarCobroParcial(${i.id})">
+                                <input type="checkbox" id="edit_parcial_chk_${i.id}" ${alCambiar('alternarCobroParcial', i.id)}>
                                 Entró solo una parte del neto
                             </label>
                             <div id="edit_parcial_caja_${i.id}" hidden style="margin-top:0.5rem;">
@@ -326,7 +330,7 @@ export class VistaIngresos implements Vista {
                             </div>
                         </div>
                     ` : ''}
-                    <form onsubmit="appUI.handleEdicionFormalSubmit(event, ${i.id})">
+                    <form ${alEnviar('handleEdicionFormalSubmit', i.id)}>
                         <div class="form-group">
                             <label>Número de Factura *</label>
                             <input type="text" id="edit_num_fac_${i.id}" class="form-control" value="${escaparHtml(i.numero_factura)}" required>
@@ -352,7 +356,7 @@ export class VistaIngresos implements Vista {
                             </div>
                         </div>
                         <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                            <button type="button" onclick="elemento('modal-edit-for-${i.id}').remove()" class="btn btn-secondary">Cancelar</button>
+                            <button type="button" ${accion('quitar', `modal-edit-for-${i.id}`)} class="btn btn-secondary">Cancelar</button>
                             <button type="submit" class="btn">Guardar Cambios</button>
                         </div>
                     </form>
@@ -470,7 +474,7 @@ export class VistaIngresos implements Vista {
                     <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1.2rem;">
                         Monto neto sugerido a recibir: <strong>DOP ${formato.importe(sugerido)}</strong>
                     </p>
-                    <form onsubmit="appUI.handleCobroFormalSubmit(event, ${id})">
+                    <form ${alEnviar('handleCobroFormalSubmit', id)}>
                         <div class="form-group">
                             <label>Cuenta de Depósito *</label>
                             <select id="cob_ban_${id}" class="form-control" required>
@@ -489,7 +493,7 @@ export class VistaIngresos implements Vista {
                             </div>
                         </div>
                         <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                            <button type="button" onclick="elemento('modal-cobro-for-${id}').remove()" class="btn btn-secondary">Cancelar</button>
+                            <button type="button" ${accion('quitar', `modal-cobro-for-${id}`)} class="btn btn-secondary">Cancelar</button>
                             <button type="submit" class="btn">Cobrar</button>
                         </div>
                     </form>
@@ -529,7 +533,7 @@ export class VistaIngresos implements Vista {
                     <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1.2rem;">
                         Monto esperado: <strong>DOP ${formato.importe(sugerido)}</strong>
                     </p>
-                    <form onsubmit="appUI.handleCobroInformalSubmit(event, ${id})">
+                    <form ${alEnviar('handleCobroInformalSubmit', id)}>
                         <div class="form-group">
                             <label>Cuenta de Depósito *</label>
                             <select id="cob_ban_inf_${id}" class="form-control" required>
@@ -548,7 +552,7 @@ export class VistaIngresos implements Vista {
                             </div>
                         </div>
                         <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                            <button type="button" onclick="elemento('modal-cobro-inf-${id}').remove()" class="btn btn-secondary">Cancelar</button>
+                            <button type="button" ${accion('quitar', `modal-cobro-inf-${id}`)} class="btn btn-secondary">Cancelar</button>
                             <button type="submit" class="btn" style="background: linear-gradient(135deg, #10b981, #059669); color:white;">Cobrar</button>
                         </div>
                     </form>
@@ -580,7 +584,7 @@ export class VistaIngresos implements Vista {
 
 /**
  * Lo que `window.appUI` expone de esta vista: un puente que delega en la
- * instancia. Los atributos en línea no cambian.
+ * instancia. Los atributos `data-accion*` no cambian.
  */
 export function puenteIngresos(vista: VistaIngresos): {
     handleAgregarIngreso: (e: EventoDeFormulario) => Promise<void>;

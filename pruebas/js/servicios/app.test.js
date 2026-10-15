@@ -2,8 +2,9 @@
 // suscripciones pendientes al iniciar, el tema claro/oscuro y la navegación superior.
 //
 // Era un script clásico que llamaba al global `appUI`; ahora es un módulo que recibe
-// el enrutador, los avisos, el DOM y la API. Sigue colgando `navigate` de `window`
-// porque lo llaman los manejadores en línea del HTML. Se prueba con un DOM de juguete.
+// el enrutador, los avisos, el DOM y la API. `navigate` ya no cuelga de `window`: lo llama la
+// acción general `navegar` de la delegación de eventos (`data-accion="navegar"`). Se prueba
+// con un DOM de juguete.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -34,7 +35,7 @@ function montar({ cargos = [], fallos = [], falla = false, tema = null, colapsad
     const almacen = new Map();
     if (tema) almacen.set('desktop-theme', tema);
     if (colapsado !== null) almacen.set('sidebar-collapsed', colapsado);
-    const programados = [], mostrados = [], avisos = [], escuchas = {};
+    const programados = [], mostrados = [], avisos = [], escuchas = {}, llamadasDeVista = [];
     const previos = { document: globalThis.document, window: globalThis.window, localStorage: globalThis.localStorage, setTimeout: globalThis.setTimeout };
     globalThis.document = {
         readyState: listo ? 'complete' : 'loading', body: cuerpo,
@@ -50,9 +51,15 @@ function montar({ cargos = [], fallos = [], falla = false, tema = null, colapsad
         avisos: { mostrar: (mensaje, tipo) => avisos.push({ mensaje, tipo }) },
         dom: { elemento: id => botones[id], buscar: id => botones[id] ?? navs.find(n => n.id === id) ?? null },
         api: { procesarSuscripciones: () => (falla ? Promise.reject(new Error('sin red')) : Promise.resolve({ cargos, fallos })) },
+        acciones: { accionDeVista: (...args) => llamadasDeVista.push(args) },
+    });
+    // Pulsar un elemento con `data-accion="navegar"`: lo que hace un botón del menú.
+    const navigate = ruta => escuchas.click({
+        target: { getAttribute: n => (n === 'data-accion' ? 'navegar' : n === 'data-args' ? JSON.stringify([ruta]) : null), parentElement: null },
+        cancelBubble: false, preventDefault() {},
     });
     return {
-        navs, botones, sidebar, cuerpo, almacen, programados, mostrados, avisos, escuchas, navigate: globalThis.window.navigate,
+        navs, botones, sidebar, cuerpo, almacen, programados, mostrados, avisos, escuchas, navigate, llamadasDeVista,
         restaurar: () => { Object.assign(globalThis, previos); },
     };
 }
@@ -62,9 +69,10 @@ async function conApp(opciones, prueba) {
 }
 const asentar = () => new Promise(r => setImmediate(r));
 
-test('al arrancar muestra el Dashboard, y navigate queda como global para los manejadores en línea', () => conApp({}, t => {
+test('al arrancar muestra el Dashboard, y deja enganchada la delegación de eventos', () => conApp({}, t => {
     assert.deepEqual(t.mostrados, ['dashboard']);
-    assert.equal(typeof t.navigate, 'function');
+    for (const tipo of ['click', 'submit', 'change', 'input']) assert.equal(typeof t.escuchas[tipo], 'function', tipo);
+    assert.equal(globalThis.window.navigate, undefined, 'ya no hay manejadores en línea que necesiten un global');
 }));
 
 test('navigate marca la pestaña activa y pide dibujarla', () => conApp({}, t => {

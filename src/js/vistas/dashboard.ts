@@ -9,7 +9,7 @@
 
 import type { ApiDe, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { escaparHtml } from '../nucleo/html.js';
+import { accion, escaparHtml } from '../nucleo/html.js';
 
 type ApiDashboard = ApiDe<
     | 'obtenerCapital'
@@ -163,7 +163,7 @@ export class VistaDashboard implements Vista {
                 <div class="card">
                     <h3 style="font-family: var(--font-heading); font-size: 1.1rem; margin-bottom: 1rem; display:flex; justify-content:space-between;">
                         Tarjetas de Crédito Destacadas
-                        <button onclick="navigate('tarjetas')" class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;">Detalles</button>
+                        <button ${accion('navegar', 'tarjetas')} class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;">Detalles</button>
                     </h3>
                     ${tarjetas.length > 0 ? `
                         <div style="display:flex; flex-direction:column; gap:0.6rem;">
@@ -185,7 +185,7 @@ export class VistaDashboard implements Vista {
                 <div class="card">
                     <h3 style="font-family: var(--font-heading); font-size: 1.1rem; margin-bottom: 1rem; display:flex; justify-content:space-between;">
                         Deudas por Vencer
-                        <button onclick="navigate('prestamos')" class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;">Deudas</button>
+                        <button ${accion('navegar', 'prestamos')} class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;">Deudas</button>
                     </h3>
                     ${prestamos.length > 0 ? `
                         <div style="display:flex; flex-direction:column; gap:0.6rem;">
@@ -205,7 +205,7 @@ export class VistaDashboard implements Vista {
     }
 }
 
-/** Esta vista no tiene manejadores en línea: no cuelga nada de `appUI`. */
+/** Esta vista no tiene acciones delegadas: no cuelga nada de `appUI`. */
 export function puenteDashboard(_vista: VistaDashboard): Record<string, never> {
     return {};
 }

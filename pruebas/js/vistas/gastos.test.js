@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
+import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
 import { VistaGastos, MANEJADORES_GASTOS, puenteGastos } from '../../../src/js/vistas/gastos.js';
 
 const gasto = (extra = {}) => ({
@@ -217,7 +217,7 @@ test('liquidar un consumo: abre la ventana con su identificador y el monto forma
     assert.equal(t.modales[0].id, 'modal-liq-9');
     assert.match(t.modales[0].html, /Compra en dólares/);
     assert.match(t.modales[0].html, /USD #100#/);
-    assert.match(t.modales[0].html, /appUI\.handleLiquidacionSubmit\(event, 9, 100\)/);
+    assert.deepEqual(llamadasDelManejador(t.modales[0].html, 'handleLiquidacionSubmit'), [['EVENTO', 9, 100]]);
 });
 
 test('liquidar un consumo: el importe viaja como TEXTO, con los espacios recortados y los dígitos intactos', async () => {
@@ -269,7 +269,7 @@ test('todo appUI.x( que escribe la plantilla (y la ventana de liquidación) est�
     await t.vista.render();
     t.vista.abrirLiquidacionConsumo(9, 100, 'USD', 'x');
     const html = t.pantalla.contenido.innerHTML + t.modales[0].html;
-    const llamados = new Set([...html.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
+    const llamados = nombresDelPuente(html);
     assert.ok(llamados.size >= 6);
     for (const nombre of llamados) assert.ok(MANEJADORES_GASTOS.includes(nombre), `falta ${nombre} en el puente`);
 });

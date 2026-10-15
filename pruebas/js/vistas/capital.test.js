@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
+import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
 import { VistaCapital, MANEJADORES_CAPITAL, puenteCapital } from '../../../src/js/vistas/capital.js';
 
 const campo = value => ({ value });
@@ -201,7 +201,7 @@ test('el puente expone todos los manejadores y delega en la vista', async () => 
 test('todo appUI.x( que escribe la plantilla está en el puente', async () => {
     const t = montar();
     await t.vista.render();
-    const llamados = new Set([...t.pantalla.contenido.innerHTML.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
+    const llamados = nombresDelPuente(t.pantalla.contenido.innerHTML);
     assert.equal(llamados.size, 6);
     for (const nombre of llamados) assert.ok(MANEJADORES_CAPITAL.includes(nombre), `falta ${nombre} en el puente`);
 });

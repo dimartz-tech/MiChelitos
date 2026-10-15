@@ -20,7 +20,7 @@
 import ts from 'typescript';
 import { join } from 'node:path';
 
-const FRAGMENTOS = /^(formato\.importe|escaparHtml|argumentoJs|Number|this\.plantilla\w*|this\.formatMonthYearStr|this\.fechaAIso)$/;
+const FRAGMENTOS = /^(formato\.importe|escaparHtml|argumentoJs|accion|alEnviar|alCambiar|alEscribir|manejador|Number|this\.plantilla\w*|this\.formatMonthYearStr|this\.fechaAIso)$/;
 const DEVUELVE_NUMERO_O_FRAGMENTO = /\.(toFixed|toLocaleString|join|reduce|length)$/;
 
 export function analizarPlantillas(raiz) {

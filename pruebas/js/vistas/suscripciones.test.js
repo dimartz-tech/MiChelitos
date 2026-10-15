@@ -8,7 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
+import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
 import { VistaSuscripciones, MANEJADORES_SUSCRIPCIONES, puenteSuscripciones } from '../../../src/js/vistas/suscripciones.js';
 
 const TARJETAS = [{ id: 7, entidad: 'Banco Alfa', nombre_tarjeta: 'Oro' }];
@@ -124,7 +124,7 @@ test('el aviso de cobro próximo nombra la tarjeta que cobra y ofrece cambiarla 
     const aviso = html.slice(html.indexOf('Cobro próximo'), html.indexOf('Monitoreo'));
     assert.match(aviso, /Plataforma Aviso[\s\S]*con Banco Alfa \(Oro\)/);
     assert.match(aviso, /Cambiar tarjeta/);
-    assert.match(aviso, /abrirEdicionSuscripcion\(/);
+    assert.ok(llamadasDelManejador(aviso, 'abrirEdicionSuscripcion').length > 0, 'ofrece cambiar la tarjeta');
     assert.doesNotMatch(aviso, /Lejana/);
     assert.match(aviso, /bonifique las compras por internet/);
 });
@@ -146,7 +146,7 @@ test('una suscripción parada se anuncia con su impedimento y ofrece corregir la
     assert.match(html, /No se cobrarán/);
     assert.match(html, /No tiene fecha de próximo cobro/);
     assert.match(html, /Sin fecha: no se cobrará/);
-    assert.match(html, /appUI\.handleCorregirProximoCobro\(1\)/);
+    assert.deepEqual(llamadasDelManejador(html, 'handleCorregirProximoCobro'), [[1]]);
 });
 
 test('sin suscripciones dibuja el mensaje vacío', async () => {
@@ -188,7 +188,7 @@ test('abrir la edición abre una ventana modal con su identificador, la tarjeta 
     assert.match(t.modales[0].html, /Editar Suscripción/);
     assert.match(t.modales[0].html, /value="2027-03-15"/, 'la fecha guardada como dd/mm/aaaa vuelve a ISO para el campo de fecha');
     assert.match(t.modales[0].html, /<option value="7" selected>Banco Alfa - Oro/);
-    assert.match(t.modales[0].html, /appUI\.handleEdicionSuscripcionSubmit\(event, 1\)/);
+    assert.deepEqual(llamadasDelManejador(t.modales[0].html, 'handleEdicionSuscripcionSubmit'), [['EVENTO', 1]]);
 });
 
 test('edición: envía todo con el monto como TEXTO, cierra la ventana y redibuja', async () => {
@@ -284,7 +284,7 @@ test('todo appUI.x( que escribe la plantilla (y la ventana de edición) está en
     await t.vista.render();
     await t.vista.abrirEdicionSuscripcion(sus());
     const html = t.pantalla.contenido.innerHTML + t.modales[0].html;
-    const llamados = new Set([...html.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
+    const llamados = nombresDelPuente(html);
     assert.ok(llamados.size >= 6);
     for (const nombre of llamados) assert.ok(MANEJADORES_SUSCRIPCIONES.includes(nombre), `falta ${nombre} en el puente`);
 });

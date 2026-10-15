@@ -9,7 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
+import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
 import { VistaIngresos, MANEJADORES_INGRESOS, puenteIngresos } from '../../../src/js/vistas/ingresos.js';
 
 const factura = (extra = {}) => ({
@@ -100,10 +100,10 @@ test('solo la factura emitida ofrece «cobrar»; la cobrada muestra su depósito
     });
     await t.vista.render();
     const html = t.pantalla.contenido.innerHTML;
-    assert.equal([...html.matchAll(/appUI\.abrirCobroFormal\(/g)].length, 1);
-    assert.match(html, /abrirCobroFormal\(4, 900\)/);
+    assert.equal(llamadasDelManejador(html, 'abrirCobroFormal').length, 1);
+    assert.deepEqual(llamadasDelManejador(html, 'abrirCobroFormal'), [[4, 900]]);
     assert.match(html, /Dep: Banco Alfa/);
-    assert.equal([...html.matchAll(/appUI\.abrirCobroInformal\(/g)].length, 1);
+    assert.equal(llamadasDelManejador(html, 'abrirCobroInformal').length, 1);
     assert.match(html, /En Banco Beta el 13\/03\/2027/);
 });
 
@@ -321,7 +321,7 @@ test('todo appUI.x( que escribe la plantilla y sus ventanas está en el puente',
     t.vista.abrirEdicionFormal(JSON.stringify(factura({ estatus: 'pagada' })));
     await new Promise(r => setImmediate(r));
     const html = t.pantalla.contenido.innerHTML + t.modales.map(m => m.html).join('') + t.registro['modal-edit-for-4'].innerHTML;
-    const llamados = new Set([...html.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
+    const llamados = nombresDelPuente(html);
     assert.ok(llamados.size >= 8, [...llamados].join());
     for (const nombre of llamados) assert.ok(MANEJADORES_INGRESOS.includes(nombre), `falta ${nombre} en el puente`);
 });
