@@ -4,7 +4,21 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.102.0 (Versión Actual) - 2026-10-14
+## 🚀 Versión 1.103.0 (Versión Actual) - 2026-10-14
+**Integración continua y una revisión que ya no da visto bueno sin haber mirado.**
+
+### 🔧 Qué se hace
+* **`.github/workflows/ci.yml`:** en cada pull request y en cada push a `main` corre `npm run tipos`, la comprobación de `tipos-ipc.d.ts`, `npm test`, `cargo test --locked` y `revisar.py`. No compila ni empaqueta la app. Tiempos medidos en local: tipos y JavaScript ≈ 3 s, Rust ≈ 61 s en frío (14 s en caliente).
+* **`revisar.py` endurecido (tres defectos hallados al medir):**
+  * Si la referencia base no existe, ahora se niega (código 2). Antes omitía el diff en silencio y decía «Listo para publicar».
+  * Sin la base viva, el visto bueno dice **PARCIAL** y no «Listo para publicar»; en Actions añade una anotación `::warning::`. Con `--exigir-importes` sale con código 3.
+  * El docstring decía «cuatro archivos» y comprueba cinco sitios.
+* **`herramientas/pruebas_revisar.py`:** seis pruebas de los códigos de salida y de la lectura de importes, con datos inventados.
+* **Límite conocido:** la comprobación de importes contra la base viva no puede correr en el ejecutor; sigue siendo una tarea local antes de publicar.
+
+---
+
+## Versión 1.102.0 - 2026-10-14
 **Se retira un importe real que se había colado en una prueba y en el historial.** El repositorio es público: las cifras de prueba deben ser siempre inventadas.
 
 ### 🔧 Qué se hace
