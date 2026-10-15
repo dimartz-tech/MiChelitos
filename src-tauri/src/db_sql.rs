@@ -1966,8 +1966,10 @@ mod pruebas_de_transaccion {
         assert!(!fuente.contains(".transaction()"), "usa db_sql::transaccion(&mut conn, escritura)");
         // Ya no queda ninguna operación suelta: todo comando escribe por un ayudante `con_*`.
         assert!(!fuente.contains("transaccion(&mut conn, true)"), "un comando abre su transacción de escritura a mano");
-        // Solo los cinco ayudantes genéricos `con_*_como` abren conexión; ningún comando lo hace por su cuenta.
-        assert_eq!(fuente.matches("db_sql::obtener_conexion()").count(), 5, "un comando abre su conexión a mano");
+        // Solo el ayudante genérico `en_transaccion` abre conexión; ningún comando lo hace por su cuenta.
+        assert_eq!(fuente.matches("db_sql::obtener_conexion()").count(), 1, "un comando abre su conexión a mano");
+        // Y solo él abre la transacción: los `con_*_como` pasan por `en_transaccion`, no por `db_sql::transaccion`.
+        assert_eq!(fuente.matches("db_sql::transaccion(").count(), 1, "un comando abre su transacción a mano");
         // Cada función de los comandos: un listado usa solo `lee_*`, y nada que escriba usa `lee_*`.
         let mut revisadas = 0;
         for trozo in fuente.split("\nfn ").skip(1).chain(fuente.split("\npub fn ").skip(1)) {
