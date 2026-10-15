@@ -22,6 +22,8 @@ mod caracterizacion;
 #[cfg(test)]
 mod contrato_rusqlite;
 #[cfg(test)]
+mod sumas_en_centavos;
+#[cfg(test)]
 mod gherkin;
 #[cfg(test)]
 mod caso_de_uso_gherkin;
