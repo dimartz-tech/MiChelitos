@@ -23,7 +23,6 @@ pub struct Semilla {
     /// Una cuenta activa, no caja, con saldo exactamente cero: la que el contrato archiva y reactiva.
     pub cuenta_vacia_id: i64,
     pub caja_id: i64,
-    pub caja_saldo: Dinero,
     pub tarjeta_id: i64,
     pub tarjeta_deuda: Dinero,
     /// Una tarjeta activa con los dos balances en cero: la que el contrato desactiva y reactiva.

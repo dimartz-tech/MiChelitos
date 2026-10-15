@@ -33,6 +33,7 @@ impl MetodoPago {
         }
     }
 
+    #[cfg(test)]
     pub fn codigo(&self) -> &'static str {
         match self {
             MetodoPago::Efectivo => "efectivo",

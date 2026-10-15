@@ -27,6 +27,7 @@ pub fn retencion(monto: Dinero, tasa: Porcentaje) -> Result<Dinero, ErrorDominio
 /// Se obtiene **restando**, no calculando el complemento con otro porcentaje.
 /// Así la retención y el neto suman siempre el total exacto, sin que un
 /// segundo redondeo los descuadre por un céntimo.
+#[cfg(test)]
 pub fn neto(monto: Dinero, tasa: Porcentaje) -> Result<Dinero, ErrorDominio> {
     monto.restar(&retencion(monto, tasa)?)
 }
