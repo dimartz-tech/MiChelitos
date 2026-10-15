@@ -1,6 +1,6 @@
 // Pruebas de la vista «Caja y Efectivo» en Node, sin navegador.
 //
-// Es lo que el diseño «B» de `division_de_ui_limpia.md` permite y el «A» no:
+// Es lo que el diseño «B» de `docs/historico/division_de_ui_limpia.md` permite y el «A» no:
 // la vista recibe sus dependencias, así que aquí se le pasan dobles (una API
 // falsa que anota las llamadas, un aviso falso, un DOM mínimo de campos con
 // `value`) y se comprueba **qué hace al pulsar**, que es justo lo que la

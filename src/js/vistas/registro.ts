@@ -3,7 +3,7 @@
 //
 // Lo llama `ui/componer.ts`, que es lo mismo que ejecutan la aplicación y las
 // pruebas de interacción. Una pestaña nueva añade aquí una línea de construcción
-// y otra de registro. Ver `division_de_ui_limpia.md`.
+// y otra de registro. Ver `docs/historico/division_de_ui_limpia.md`.
 
 import type { ServiciosComunes, Vista } from '../ui/servicios';
 import { VistaCapital, puenteCapital } from './capital.js';

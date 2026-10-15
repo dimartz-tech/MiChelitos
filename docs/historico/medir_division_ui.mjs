@@ -1,8 +1,8 @@
 // HISTÓRICA: mide `src/js/ui.ts` para la división por pestañas (ver division_de_ui_limpia.md).
 // `ui.ts` se retiró en la 1.65.0, al terminar la división; para medir una versión anterior:
-//   git show <commit>:src/js/ui.ts > /tmp/ui.ts && node herramientas/medir_division_ui.mjs /tmp/ui.ts
+//   git show <commit>:src/js/ui.ts > /tmp/ui.ts && node docs/historico/medir_division_ui.mjs /tmp/ui.ts
 //
-// Uso:  node herramientas/medir_division_ui.mjs [ruta/ui.ts] [--json]
+// Uso:  node docs/historico/medir_division_ui.mjs [ruta/ui.ts] [--json]
 //
 // Usa el compilador de TypeScript (devDependency) para leer la clase `AppUI`,
 // construye el grafo de llamadas entre métodos (`this.metodo(...)` y los
@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
+const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const args = process.argv.slice(2);
 const ruta = args.find(a => !a.startsWith('--')) ?? join(RAIZ, 'src', 'js', 'ui.ts');
 const comoJson = args.includes('--json');

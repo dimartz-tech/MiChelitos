@@ -1,5 +1,5 @@
 // Servicios compartidos que reciben las vistas por inyección (diseño «B» de
-// `division_de_ui_limpia.md`).
+// `docs/historico/division_de_ui_limpia.md`).
 //
 // Una vista no importa globales ni toca `window`: declara en su constructor lo
 // que necesita, con estas interfaces. En la aplicación se le pasan los reales;

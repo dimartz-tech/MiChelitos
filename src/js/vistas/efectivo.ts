@@ -4,7 +4,7 @@
 // `appUI` globales: todo entra por el constructor. Por eso se puede probar en
 // Node con dobles (`pruebas/js/vistas/efectivo.test.js`). Los cuerpos son los
 // de `ui.ts`; solo cambian los accesos a lo compartido (ver
-// `division_de_ui_limpia.md`, §6).
+// `docs/historico/division_de_ui_limpia.md`, §6).
 
 import type { CuentaAhorro } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';

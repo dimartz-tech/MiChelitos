@@ -7,7 +7,7 @@
 // manda los importes como **texto**, tal cual se escribieron, y solo los formatea
 // para mostrarlos. Los totales del capital los calcula Rust en centavos
 // (`obtener_capital` los añade como `totales`) y los muestran el Dashboard y el
-// Resumen, no esta pantalla. Ver `division_de_ui_limpia.md`, §9.
+// Resumen, no esta pantalla. Ver `docs/historico/division_de_ui_limpia.md`, §9.
 //
 // No usa `this` de ningún objeto mezclado, ni `AppAPI`, `elemento()`, `confirm()`
 // ni `Date` globales: todo entra por el constructor

@@ -5,7 +5,7 @@
 
 Estado: **modelo, medición y un prototipo (la vista `efectivo`) en la rama `modelo/division-limpia`. Nada fusionado.** Es la alternativa al diseño «A» (mecánico) de [division_de_ui.md](division_de_ui.md); la decisión 1 de ese documento (§7) se toma comparando ambos con números, aquí.
 
-Todo lo medido sale de `herramientas/medir_division_ui.mjs`, que analiza `ui.ts` con el compilador de TypeScript (grafo de llamadas por alcanzabilidad desde cada `render*`, igual que el plan). Se ejecuta con `node herramientas/medir_division_ui.mjs [ruta/ui.ts]`; las cifras de este documento son las de `ui.ts` **antes** del prototipo (1.48.0). Los datos de las pruebas son inventados; no se usó ningún dato real.
+Todo lo medido sale de `docs/historico/medir_division_ui.mjs`, que analiza `ui.ts` con el compilador de TypeScript (grafo de llamadas por alcanzabilidad desde cada `render*`, igual que el plan). Se ejecuta con `node docs/historico/medir_division_ui.mjs [ruta/ui.ts]`; las cifras de este documento son las de `ui.ts` **antes** del prototipo (1.48.0). Los datos de las pruebas son inventados; no se usó ningún dato real.
 
 ## 1. Resumen
 
