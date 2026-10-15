@@ -4,7 +4,21 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.111.0 (Versión Actual) - 2026-10-15
+## 🚀 Versión 1.112.0 (Versión Actual) - 2026-10-15
+**Parches y menores de Tauri y serde.** Deuda técnica B3. No cambia ningún comportamiento de la app ni el código: solo `Cargo.lock`.
+
+### 🔧 Qué se hace
+* **Versiones directas** (con `cargo update -p`, sin tocar los rangos de `Cargo.toml`): `tauri` 2.11.5 a 2.12.4, `tauri-build` 2.6.3 a 2.7.3, `serde` 1.0.228 a 1.0.229, `serde_json` 1.0.150 a 1.0.154. `rusqlite` (0.40.2) y `chrono` no se tocan.
+* **Transitivas que se mueven con Tauri** (inevitable al subir su menor): `wry` 0.55.1 a 0.57.0, `tao` 0.35.3 a 0.37.1, `tauri-utils` 2.9.3 a 2.10.2, `tauri-runtime(-wry)` a 2.12.2, `tray-icon` 0.24.2 a 0.25.1, `urlpattern` 0.3.0 a 0.6.0, `webview2-com`/`windows` (solo Windows), `selectors` 0.36.1 a 0.38.0. Desaparecen 5 crates `unic-*` (sin mantenimiento), `toml` 0.9, `winnow` 0.7 y `windows-*` antiguos; entran `web-time`, `static_vcruntime` y `ndk-context` (los dos últimos no se compilan en macOS).
+* **Cambios de Tauri 2.12 relevantes para esta app:** corrección de seguridad GHSA-w28w-mhc8-qvjv (la cola IPC de datos de canal queda atada a su webview); los permisos `deny` de una capability dejan de negar el comando para todos los orígenes (la app solo tiene origen local); el protocolo `asset://` carga en segundo plano y corrige respuestas multi-rango; 2.12.4 evita un pánico en IPC/asset con URI de ruta vacía. Nuevas funciones (permisos de WebView de `wry`, `appDirectoriesOverride`, `exit` de la API de app, etc.) son opcionales y la app no las usa. Sin cambios de CSP.
+* **Auditoría RustSec** (consulta de solo lectura a la base `rustsec/advisory-db` de los 55 crates del lock con algún aviso): ninguna vulnerabilidad contra `rusqlite`, `libsqlite3-sys`, `serde`, `serde_json`, `chrono`, `tauri`, `idna`, `url`, etc. Solo quedan avisos de «sin mantenimiento» (`gtk*`/`gdk*`/`atk*`, `proc-macro-error`, `dirs`) y uno de solidez en `glib` 0.18.5 (RUSTSEC-2024-0429), todos de la pila GTK3 de Linux, que no se compila en macOS.
+
+### Verificación
+`RUSTFLAGS="-D warnings" cargo test --locked` (897 pruebas, 2 ignoradas), `cargo build --release --locked` y `npm test` (609) en verde. Sin pruebas nuevas, por lo que no hay mutación que comprobar.
+
+---
+
+## Versión 1.111.0 - 2026-10-15
 **Los cinco ayudantes `con_*_como` de `comandos/ayudantes.rs` dejan de repetir el mismo cuerpo: una sola función genérica `en_transaccion` abre la conexión y la transacción.** Deuda técnica B5. No cambia ningún comportamiento.
 
 ### 🔧 Qué se hace
