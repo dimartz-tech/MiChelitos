@@ -973,10 +973,11 @@ mod tests_centavos {
         // La corrección es `ROUND(v ± ?, 2)`, y no decide ningún céntimo: con
         // los dos operandos exactos, lo que corrige está acotado en 1,5·10⁻⁵
         // unidades —por debajo incluso de la tolerancia de representación—.
-        let fuentes = [
+        let mut fuentes = vec![
             ("main.rs", include_str!("main.rs")),
             ("adaptadores/sqlite/gastos.rs", include_str!("adaptadores/sqlite/gastos.rs")),
         ];
+        fuentes.extend_from_slice(crate::comandos::FUENTES);
         let mut sin_redondear = Vec::new();
         for (nombre, texto) in fuentes {
             for (n, linea) in texto.lines().enumerate() {
