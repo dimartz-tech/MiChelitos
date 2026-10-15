@@ -10,7 +10,7 @@
 
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Modales, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+import { accion, alCambiar, alEnviar, alEscribir, escaparHtml, manejador } from '../nucleo/html.js';
 
 type ApiGastos = ApiDe<
     | 'obtenerGastos'
@@ -32,9 +32,9 @@ export interface DependenciasGastos {
     ahora: Reloj;
 }
 
-/** Los manejadores en línea (`onsubmit`/`onchange`/`oninput`/`onclick` → `appUI.…`) que la plantilla escribe. */
+/** Las acciones delegadas (`data-accion*` → `appUI.…`) que la plantilla escribe. */
 export const MANEJADORES_GASTOS = [
-    'handleAgregarGasto', 'actualizarConversionGasto', 'toggleMetodoPago',
+    'handleAgregarGasto', 'actualizarConversionGasto', 'toggleMetodoPago', 'cambiarMetodoDePago',
     'handleSelectGastosMonth', 'abrirLiquidacionConsumo', 'previsualizarTasa', 'handleLiquidacionSubmit',
 ] as const;
 export type ManejadorGastos = (typeof MANEJADORES_GASTOS)[number];
@@ -114,7 +114,7 @@ export class VistaGastos implements Vista {
             <div class="responsive-split-grid">
                 <div class="card" style="height: fit-content;">
                     <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 1rem;">💸 Registrar Gasto</h3>
-                    <form id="form-add-gasto" onsubmit="appUI.handleAgregarGasto(event)">
+                    <form id="form-add-gasto" ${alEnviar('handleAgregarGasto')}>
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gas_fec">Fecha *</label>
@@ -122,7 +122,7 @@ export class VistaGastos implements Vista {
                             </div>
                             <div class="form-group">
                                 <label for="gas_div">Divisa</label>
-                                <select id="gas_div" class="form-control" onchange="appUI.actualizarConversionGasto()">
+                                <select id="gas_div" class="form-control" ${alCambiar('actualizarConversionGasto')}>
                                     <option value="DOP" selected>DOP</option>
                                     <option value="USD">USD</option>
                                 </select>
@@ -131,7 +131,7 @@ export class VistaGastos implements Vista {
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gas_mon">Monto *</label>
-                                    <input type="number" id="gas_mon" step="0.01" class="form-control" placeholder="0.00" oninput="appUI.actualizarConversionGasto()" required>
+                                    <input type="number" id="gas_mon" step="0.01" class="form-control" placeholder="0.00" ${alEscribir('actualizarConversionGasto')} required>
                             </div>
                             <div class="form-group">
                                 <label for="gas_cat">Categoría *</label>
@@ -143,7 +143,7 @@ export class VistaGastos implements Vista {
                         </div>
                         <div class="form-group">
                             <label for="gas_met">Método de Pago *</label>
-                            <select id="gas_met" class="form-control" onchange="appUI.toggleMetodoPago(this.value); appUI.actualizarConversionGasto();" required>
+                            <select id="gas_met" class="form-control" ${manejador('change', 'cambiarMetodoDePago', [], 'valor')} required>
                                 <option value="efectivo" selected>Efectivo</option>
                                 <option value="tarjeta">Tarjeta de Crédito</option>
                                 <option value="transferencia">Transferencia Bancaria</option>
@@ -162,7 +162,7 @@ export class VistaGastos implements Vista {
                         <!-- Selector cuenta de ahorro -->
                         <div id="gas_cuenta_container" class="form-group" style="display:none;">
                             <label for="gas_cue">Cuenta de Ahorro *</label>
-                            <select id="gas_cue" class="form-control" onchange="appUI.actualizarConversionGasto()">
+                            <select id="gas_cue" class="form-control" ${alCambiar('actualizarConversionGasto')}>
                                 <option value="" disabled selected>Seleccione cuenta...</option>
                                 ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                             </select>
@@ -171,7 +171,7 @@ export class VistaGastos implements Vista {
                         <!-- Conversión: solo si el gasto y la cuenta van en divisas distintas -->
                         <div id="gas_conversion_container" class="form-group" style="display:none; background:rgba(255, 193, 7, 0.05); padding:0.6rem; border-radius: var(--radius-sm); border:1px solid rgba(255, 193, 7, 0.2);">
                             <label for="gas_tasa" style="font-size:0.8rem;">Tasa de cambio *</label>
-                            <input type="number" id="gas_tasa" step="0.0001" class="form-control" placeholder="0.0000" oninput="appUI.actualizarConversionGasto()">
+                            <input type="number" id="gas_tasa" step="0.0001" class="form-control" placeholder="0.0000" ${alEscribir('actualizarConversionGasto')}>
                             <div id="gas_conversion_previa" style="font-size:0.72rem; color:var(--text-secondary); margin-top:0.4rem;"></div>
                         </div>
 
@@ -196,7 +196,7 @@ export class VistaGastos implements Vista {
                     <div class="card">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
                             <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin:0;">📊 Resumen de ${this.formatMonthYearStr(mSelected)}</h3>
-                            <select onchange="appUI.handleSelectGastosMonth(this.value)" class="form-control" style="width:auto; padding:0.3rem 0.6rem; font-size:0.8rem; margin:0;">
+                            <select ${manejador('change', 'handleSelectGastosMonth', [], 'valor')} class="form-control" style="width:auto; padding:0.3rem 0.6rem; font-size:0.8rem; margin:0;">
                                 ${mesesDisponibles.map(m => `
                                     <option value="${escaparHtml(m)}" ${m === mSelected ? 'selected' : ''}>${this.formatMonthYearStr(m)}</option>
                                 `).join('')}
@@ -322,7 +322,7 @@ export class VistaGastos implements Vista {
                                             <tr>
                                                 <td>
                                                     <strong>${escaparHtml(g.descripcion)}</strong>
-                                                    ${pendiente ? `<button onclick="appUI.abrirLiquidacionConsumo(${g.id}, ${g.monto}, ${argumentoJs(g.divisa)}, ${argumentoJs(g.descripcion)})" class="btn" style="margin-left:0.4rem; padding:0.1rem 0.4rem; font-size:0.65rem; background:rgba(255,193,7,0.15); border:1px solid rgba(255,193,7,0.4); color:#ffc107;" title="El emisor aún no ha fijado el importe en pesos">⏳ Liquidar</button>` : ''}
+                                                    ${pendiente ? `<button ${accion('abrirLiquidacionConsumo', g.id, g.monto, g.divisa, g.descripcion)} class="btn" style="margin-left:0.4rem; padding:0.1rem 0.4rem; font-size:0.65rem; background:rgba(255,193,7,0.15); border:1px solid rgba(255,193,7,0.4); color:#ffc107;" title="El emisor aún no ha fijado el importe en pesos">⏳ Liquidar</button>` : ''}
                                                     ${liquidado ? `<span style="margin-left:0.4rem; font-size:0.65rem; color:var(--text-muted);" title="Tasa aplicada por el emisor">@ ${Number(g.tasa_conversion).toFixed(4)}</span>` : ''}
                                                 </td>
                                                 <td>${escaparHtml(g.categoria_nombre)}</td>
@@ -369,6 +369,12 @@ export class VistaGastos implements Vista {
         if (tarjeta) tarjeta.style.display = val === 'tarjeta' ? 'block' : 'none';
         if (cuenta) cuenta.style.display = val === 'transferencia' ? 'block' : 'none';
         if (lbtr) lbtr.style.display = val === 'transferencia' ? 'block' : 'none';
+    }
+
+    /** Al elegir el método de pago: muestra sus campos y recalcula la conversión (antes dos llamadas en un solo `onchange`). */
+    cambiarMetodoDePago(val: string): void {
+        this.toggleMetodoPago(val);
+        this.actualizarConversionGasto();
     }
 
     // --- MANEJADORES DE ENTRADAS ---
@@ -493,15 +499,15 @@ export class VistaGastos implements Vista {
                     ${escaparHtml(descripcion)} — <strong>${escaparHtml(divisaOrigen)} ${formato.importe(montoOrigen)}</strong><br>
                     Indica el importe en pesos que aparece en tu estado de cuenta. La tasa se deduce sola.
                 </p>
-                <form onsubmit="appUI.handleLiquidacionSubmit(event, ${id}, ${montoOrigen})">
+                <form ${alEnviar('handleLiquidacionSubmit', id, montoOrigen)}>
                     <div class="form-group">
                         <label>Importe cargado en pesos (DOP)</label>
                         <input type="number" step="0.01" id="liq_monto_${id}" class="form-control" placeholder="0.00"
-                               oninput="appUI.previsualizarTasa(${id}, ${montoOrigen})" required autofocus>
+                               ${alEscribir('previsualizarTasa', id, montoOrigen)} required autofocus>
                         <div id="liq_tasa_${id}" style="font-size:0.72rem; color:var(--text-secondary); margin-top:0.4rem;"></div>
                     </div>
                     <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                        <button type="button" onclick="elemento('modal-liq-${id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="button" ${accion('quitar', `modal-liq-${id}`)} class="btn btn-secondary">Cancelar</button>
                         <button type="submit" class="btn">Liquidar</button>
                     </div>
                 </form>
@@ -537,12 +543,13 @@ export class VistaGastos implements Vista {
 
 /**
  * Lo que `window.appUI` expone de esta vista: un puente que delega en la
- * instancia. Los atributos en línea no cambian.
+ * instancia. Los atributos `data-accion*` no cambian.
  */
 export function puenteGastos(vista: VistaGastos): {
     handleAgregarGasto: (e: EventoDeFormulario) => Promise<void>;
     actualizarConversionGasto: () => void;
     toggleMetodoPago: (val: string) => void;
+    cambiarMetodoDePago: (val: string) => void;
     handleSelectGastosMonth: (val: string) => Promise<void>;
     abrirLiquidacionConsumo: (id: number, montoOrigen: number, divisaOrigen: string, descripcion: string) => void;
     previsualizarTasa: (id: number, montoOrigen: number) => void;
@@ -552,6 +559,7 @@ export function puenteGastos(vista: VistaGastos): {
         handleAgregarGasto: e => vista.handleAgregarGasto(e),
         actualizarConversionGasto: () => vista.actualizarConversionGasto(),
         toggleMetodoPago: val => vista.toggleMetodoPago(val),
+        cambiarMetodoDePago: val => vista.cambiarMetodoDePago(val),
         handleSelectGastosMonth: val => vista.handleSelectGastosMonth(val),
         abrirLiquidacionConsumo: (id, montoOrigen, divisaOrigen, descripcion) => vista.abrirLiquidacionConsumo(id, montoOrigen, divisaOrigen, descripcion),
         previsualizarTasa: (id, montoOrigen) => vista.previsualizarTasa(id, montoOrigen),

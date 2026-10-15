@@ -2,7 +2,7 @@
 //
 // Compone la interfaz con el DOM y la API reales (`ui/componer.ts`, que es lo mismo
 // que ejecutan las pruebas con dobles), cuelga el puente de manejadores de
-// `window.appUI` —lo que llaman los manejadores en línea del HTML— y arranca la
+// `window.appUI` —las acciones a las que apuntan los `data-accion` del HTML— y arranca la
 // aplicación. Se carga como módulo ES (`<script type="module">`): se ejecuta después
 // de leer el documento y antes de `DOMContentLoaded`, que es cuando `app.ts` dibuja la
 // primera pestaña, así que toda vista está registrada antes de poder pulsarse.
@@ -28,7 +28,8 @@ const { appUI, servicios, enrutador } = componerInterfaz(
     AppAPI,
 );
 
-// El HTML llama a `appUI.<método>(…)` desde sus atributos `onclick`/`onsubmit`/`onchange`.
+// Las acciones del HTML (`data-accion`, `data-accion-enviar`…) son los métodos de `appUI`: la
+// delegación de eventos (`app.ts`) los llama. Sigue colgado de `window` para depurar desde la consola.
 (window as unknown as { appUI: typeof appUI }).appUI = appUI;
 
-iniciarAplicacion({ enrutador, avisos: servicios.avisos, dom, api: AppAPI });
+iniciarAplicacion({ enrutador, avisos: servicios.avisos, dom, api: AppAPI, acciones: appUI });

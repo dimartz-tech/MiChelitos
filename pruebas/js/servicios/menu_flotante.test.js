@@ -45,21 +45,21 @@ function instalarDom({ altoVentana = 800, altoMenu = 120, anchoMenu = 190 } = {}
 }
 
 /** Un renglón del menú: las acciones se enganchan con `onclick`. */
-const renglon = accion => ({ dataset: { accion }, style: {} });
+const renglon = accion => ({ dataset: { opcion: accion }, style: {} });
 
 async function conDom(opciones, prueba) {
     const dom = instalarDom(opciones);
     try { await prueba(dom); } finally { dom.restaurar(); }
 }
 
-const abrir = (menu, extra = {}) => menu.abrir({ id: 'menu-x', html: '<div data-accion="a"></div>', ancla: { right: 300, top: 50, bottom: 80 }, alElegir: () => {}, ...extra });
+const abrir = (menu, extra = {}) => menu.abrir({ id: 'menu-x', html: '<div data-opcion="a"></div>', ancla: { right: 300, top: 50, bottom: 80 }, alElegir: () => {}, ...extra });
 
 test('abre el menú en <body> con su identificador y su contenido', () => conDom({}, dom => {
     const menu = crearMenuFlotanteDelNavegador();
     abrir(menu);
     assert.equal(dom.cuerpo.hijos.length, 1);
     assert.equal(dom.cuerpo.hijos[0].id, 'menu-x');
-    assert.match(dom.cuerpo.hijos[0].innerHTML, /data-accion="a"/);
+    assert.match(dom.cuerpo.hijos[0].innerHTML, /data-opcion="a"/);
 }));
 
 test('solo hay uno abierto: abrir otro retira el anterior', () => conDom({}, dom => {

@@ -40,6 +40,8 @@ function analizarEjemplo(cuerpo) {
         writeFileSync(join(dir, 'src', 'js', 'vistas', 'ejemplo.ts'), `
 declare function escaparHtml(t: unknown): string;
 declare function argumentoJs(v: unknown): string;
+declare function accion(nombre: string, ...args: unknown[]): string;
+declare function alEnviar(nombre: string, ...args: unknown[]): string;
 declare const formato: { importe(v: number): string };
 interface Cuenta { id: number; nombre: string; entidad: string | null; saldo: number; estado: 'a' | 'b' }
 declare const c: Cuenta;
@@ -73,6 +75,11 @@ test('el analizador trata como texto lo que no tiene tipo (el resultado de un JS
     assert.deepEqual(analizarEjemplo('return `<td>${sinTipo.nombre}</td>`;'), ['texto libre sin escapar']);
     assert.deepEqual(analizarEjemplo('return `<td>${escaparHtml(sinTipo.nombre)}</td>`;'), []);
     assert.deepEqual(analizarEjemplo('const o: Cuenta = JSON.parse("{}"); return `<td>${o.id} ${escaparHtml(o.nombre)}</td>`;'), [], 'con su tipo, los números no cuentan');
+});
+
+test('el analizador da por seguros los ayudantes de manejador (escapan por construcción), pero no un texto suelto a su lado', () => {
+    assert.deepEqual(analizarEjemplo('return `<button ${accion("f", c.nombre, c)} class="x">x</button>`;'), []);
+    assert.deepEqual(analizarEjemplo('return `<form ${alEnviar("f", c.id)}>${c.nombre}</form>`;'), ['texto libre sin escapar']);
 });
 
 test('el analizador no se queja de lo que es seguro: escapado, números, literales y fragmentos', () => {

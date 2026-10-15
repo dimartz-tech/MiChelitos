@@ -14,7 +14,7 @@
 import type { Tarjeta, VistaPreviaDeCierre } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+import { accion, alCambiar, alEnviar, escaparHtml } from '../nucleo/html.js';
 
 type ApiTarjetas = ApiDe<
     | 'obtenerTarjetas'
@@ -50,7 +50,7 @@ export interface DependenciasTarjetas {
     ahora: Reloj;
 }
 
-/** Los manejadores en línea (`onsubmit`/`onclick`/`onchange` → `appUI.…`) que la plantilla escribe. */
+/** Las acciones delegadas (`data-accion*` → `appUI.…`) que la plantilla escribe. */
 export const MANEJADORES_TARJETAS = [
     'handleAbonoTarjeta', 'aplicarTipoAbono',
     'alternarAvance', 'aplicarTipoAvance', 'handleAvanceEfectivo',
@@ -125,7 +125,7 @@ export class VistaTarjetas implements Vista {
                     <h1>Tarjetas de Crédito</h1>
                     <span class="subtitle">Monitoreo de consumos, abonos y alertas de corte (Multidivisa)</span>
                 </div>
-                <button onclick="navigate('ajustes')" class="btn" style="padding: 0.5rem 1rem; font-size: 0.85rem;">➕ Registrar Tarjeta</button>
+                <button ${accion('navegar', 'ajustes')} class="btn" style="padding: 0.5rem 1rem; font-size: 0.85rem;">➕ Registrar Tarjeta</button>
             </div>
 
             <div style="display:flex; flex-direction:column; gap:2rem; width:100%;">
@@ -237,7 +237,7 @@ export class VistaTarjetas implements Vista {
                                     </div>
 
                                     <!-- Abono rápido -->
-                                    <form onsubmit="appUI.handleAbonoTarjeta(event, ${t.id})" style="display:flex; flex-direction:column; gap:0.5rem; border-top:1px dashed var(--border-color); padding-top:0.8rem; margin-top:0.3rem;">
+                                    <form ${alEnviar('handleAbonoTarjeta', t.id)} style="display:flex; flex-direction:column; gap:0.5rem; border-top:1px dashed var(--border-color); padding-top:0.8rem; margin-top:0.3rem;">
                                         <div style="display:flex; gap:0.4rem; align-items:flex-end; width:100%;">
                                             <div style="flex:1.2;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
@@ -245,7 +245,7 @@ export class VistaTarjetas implements Vista {
                                             </div>
                                             <div style="flex:1;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Divisa</label>
-                                                <select id="pag_div_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem;" onchange="appUI.aplicarTipoAbono(${t.id}, ${t.balance_corte_pesos}, ${t.balance_corte_dolares}, ${t.balance_pesos}, ${t.balance_dolares})">
+                                                <select id="pag_div_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem;" ${alCambiar('aplicarTipoAbono', t.id, t.balance_corte_pesos, t.balance_corte_dolares, t.balance_pesos, t.balance_dolares)}>
                                                     <option value="DOP">DOP</option>
                                                     <option value="USD">USD</option>
                                                 </select>
@@ -257,7 +257,7 @@ export class VistaTarjetas implements Vista {
                                         </div>
                                         <div style="width:100%;">
                                             <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Tipo de abono</label>
-                                            <select id="pag_tipo_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;" onchange="appUI.aplicarTipoAbono(${t.id}, ${t.balance_corte_pesos}, ${t.balance_corte_dolares}, ${t.balance_pesos}, ${t.balance_dolares})">
+                                            <select id="pag_tipo_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;" ${alCambiar('aplicarTipoAbono', t.id, t.balance_corte_pesos, t.balance_corte_dolares, t.balance_pesos, t.balance_dolares)}>
                                                 <option value="personalizado">Personalizado</option>
                                                 <option value="corte">Pago al corte</option>
                                                 <option value="actual">Saldo del balance actual</option>
@@ -280,12 +280,12 @@ export class VistaTarjetas implements Vista {
                                     </form>
 
                                     <!-- Abonos registrados -->
-                                    <button onclick="appUI.alternarAbonos(${t.id})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">🧾 Abonos registrados</button>
+                                    <button ${accion('alternarAbonos', t.id)} class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">🧾 Abonos registrados</button>
                                     <div id="abonos_${t.id}" hidden style="font-size:0.75rem;"></div>
 
                                     <!-- Avance de efectivo -->
-                                    <button onclick="appUI.alternarAvance(${t.id})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">💵 Avance de efectivo</button>
-                                    <form id="avance_${t.id}" hidden onsubmit="appUI.handleAvanceEfectivo(event, ${t.id})" style="font-size:0.75rem;">
+                                    <button ${accion('alternarAvance', t.id)} class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">💵 Avance de efectivo</button>
+                                    <form id="avance_${t.id}" hidden ${alEnviar('handleAvanceEfectivo', t.id)} style="font-size:0.75rem;">
                                         <div style="display:flex; flex-direction:column; gap:0.5rem;">
                                             <p style="font-size:0.7rem; color:var(--text-secondary); margin:0;">
                                                 La tarjeta pone el dinero en una cuenta de ahorro. La deuda sube por el monto <strong>y</strong> su cargo; la cuenta recibe el monto sin el cargo.
@@ -297,7 +297,7 @@ export class VistaTarjetas implements Vista {
                                                 </div>
                                                 <div style="flex:1;">
                                                     <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Divisa</label>
-                                                    <select id="avc_div_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem;" onchange="appUI.aplicarTipoAvance(${t.id})">
+                                                    <select id="avc_div_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem;" ${alCambiar('aplicarTipoAvance', t.id)}>
                                                         <option value="DOP">DOP</option>
                                                         <option value="USD">USD</option>
                                                     </select>
@@ -317,7 +317,7 @@ export class VistaTarjetas implements Vista {
                                             <div style="display:flex; gap:0.4rem; align-items:flex-end;">
                                                 <div style="flex:1.3;">
                                                     <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Cargo</label>
-                                                    <select id="avc_tipo_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;" onchange="appUI.aplicarTipoAvance(${t.id})">
+                                                    <select id="avc_tipo_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;" ${alCambiar('aplicarTipoAvance', t.id)}>
                                                         <option value="porcentaje">Porcentaje</option>
                                                         <option value="fijo">Monto fijo</option>
                                                         <option value="exonerado">Exonerado</option>
@@ -335,14 +335,14 @@ export class VistaTarjetas implements Vista {
                                             <button type="submit" class="btn" style="padding:0.4rem 0.6rem; font-size:0.75rem; background: linear-gradient(135deg, #6366f1, #4f46e5); color:white;">Registrar avance</button>
                                         </div>
                                     </form>
-                                    <button onclick="appUI.alternarAvances(${t.id})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">🧾 Avances registrados</button>
+                                    <button ${accion('alternarAvances', t.id)} class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">🧾 Avances registrados</button>
                                     <div id="avances_${t.id}" hidden style="font-size:0.75rem;"></div>
 
                                     <!-- Configurar límites -->
-                                    <button onclick="appUI.abrirEdicionLimitesTarjeta(${argumentoJs(JSON.stringify(t))})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">⚙️ Configurar Límites / Corte</button>
+                                    <button ${accion('abrirEdicionLimitesTarjeta', JSON.stringify(t))} class="btn" style="padding:0.3rem; font-size:0.75rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); color:var(--text-secondary); width:100%;">⚙️ Configurar Límites / Corte</button>
 
                                     <!-- Desactivar: nunca se borra; el diálogo pide trasladar las suscripciones -->
-                                    <button onclick="appUI.abrirCierreTarjeta(${t.id})" class="btn" style="padding:0.3rem; font-size:0.75rem; background:transparent; border:1px solid var(--border-color); color:var(--text-secondary); width:100%;" aria-label="Desactivar la tarjeta ${escaparHtml(t.entidad)} ${escaparHtml(t.nombre_tarjeta)}">📦 Desactivar tarjeta</button>
+                                    <button ${accion('abrirCierreTarjeta', t.id)} class="btn" style="padding:0.3rem; font-size:0.75rem; background:transparent; border:1px solid var(--border-color); color:var(--text-secondary); width:100%;" aria-label="Desactivar la tarjeta ${escaparHtml(t.entidad)} ${escaparHtml(t.nombre_tarjeta)}">📦 Desactivar tarjeta</button>
                                 </div>
                             `;
                         }).join('')}
@@ -362,7 +362,7 @@ export class VistaTarjetas implements Vista {
                                         <strong>${escaparHtml(t.entidad)} - ${escaparHtml(t.nombre_tarjeta)}</strong>
                                         <span style="font-size:0.72rem; color:var(--color-warning);"> · Inactiva</span>
                                     </div>
-                                    <button onclick="appUI.handleReactivarTarjeta(${t.id})" class="btn btn-secondary" style="padding:0.3rem 0.6rem; font-size:0.75rem;" aria-label="Reactivar la tarjeta ${escaparHtml(t.entidad)} ${escaparHtml(t.nombre_tarjeta)}">♻️ Reactivar</button>
+                                    <button ${accion('handleReactivarTarjeta', t.id)} class="btn btn-secondary" style="padding:0.3rem 0.6rem; font-size:0.75rem;" aria-label="Reactivar la tarjeta ${escaparHtml(t.entidad)} ${escaparHtml(t.nombre_tarjeta)}">♻️ Reactivar</button>
                                 </div>
                             `).join('')}
                         </div>
@@ -377,7 +377,7 @@ export class VistaTarjetas implements Vista {
                         Un mismo consumo puede recibir varias.
                     </p>
 
-                    <form onsubmit="appUI.handleAgregarBonificacion(event)" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
+                    <form ${alEnviar('handleAgregarBonificacion')} style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
                         <div style="flex:1; min-width:110px;">
                             <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
                             <input type="text" id="bon_fecha" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.78rem;" required>
@@ -423,7 +423,7 @@ export class VistaTarjetas implements Vista {
                                         <td>${escaparHtml(b.entidad)} (${escaparHtml(b.nombre_tarjeta)})</td>
                                         <td>${escaparHtml(b.concepto)}</td>
                                         <td class="amount" style="text-align:right; color:var(--color-success);">+${escaparHtml(b.divisa)} ${formato.importe(b.monto)}</td>
-                                        <td><button onclick="appUI.handleEliminarBonificacion(${b.id})" class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.7rem;">🗑️</button></td>
+                                        <td><button ${accion('handleEliminarBonificacion', b.id)} class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.7rem;">🗑️</button></td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -565,7 +565,7 @@ export class VistaTarjetas implements Vista {
                             <strong>${escaparHtml(a.divisa)} ${formato.importe(a.monto_pagado)}</strong>
                             <div style="font-size:0.7rem; color:var(--text-muted);">${escaparHtml(a.fecha_pago)} · ${escaparHtml(origen)}${escaparHtml(tasa)}</div>
                         </div>
-                        <button onclick="appUI.handleRevertirAbono(${a.id}, ${id})" class="btn btn-danger" style="padding:0.2rem 0.45rem; font-size:0.7rem;" title="Deshacer este abono">↩︎</button>
+                        <button ${accion('handleRevertirAbono', a.id, id)} class="btn btn-danger" style="padding:0.2rem 0.45rem; font-size:0.7rem;" title="Deshacer este abono">↩︎</button>
                     </div>`;
             }).join('');
         } catch (err) {
@@ -745,7 +745,7 @@ export class VistaTarjetas implements Vista {
                             <div style="font-size:0.7rem; color:var(--text-muted);">${escaparHtml(a.fecha)} · ${escaparHtml(a.cuenta_nombre)} · ${escaparHtml(cargo)}</div>
                             ${nota}
                         </div>
-                        <button onclick="appUI.handleRevertirAvance(${a.id}, ${id})" class="btn btn-danger" style="padding:0.2rem 0.45rem; font-size:0.7rem;" title="Deshacer este avance">↩︎</button>
+                        <button ${accion('handleRevertirAvance', a.id, id)} class="btn btn-danger" style="padding:0.2rem 0.45rem; font-size:0.7rem;" title="Deshacer este avance">↩︎</button>
                     </div>`;
             }).join('');
         } catch (err) {
@@ -861,7 +861,7 @@ export class VistaTarjetas implements Vista {
                         ${escaparHtml(l.plataforma)}
                         <span style="font-weight:400; color:var(--text-secondary);"> · ${escaparHtml(l.divisa)} ${escaparHtml(String(l.monto))} · ${escaparHtml(l.frecuencia)} · próximo cargo ${escaparHtml(l.fecha_proximo_cobro ?? 'sin fecha')}</span>
                     </label>
-                    <select id="cierre_dest_${id}_${l.suscripcion_id}" class="form-control" onchange="appUI.actualizarResumenCierre(${id})" aria-describedby="cierre_motivo_${id}_${l.suscripcion_id}">
+                    <select id="cierre_dest_${id}_${l.suscripcion_id}" class="form-control" ${alCambiar('actualizarResumenCierre', id)} aria-describedby="cierre_motivo_${id}_${l.suscripcion_id}">
                         ${l.destino_sugerido === null ? '<option value="">— Elige una tarjeta destino —</option>' : ''}${opciones}
                     </select>
                     <div id="cierre_motivo_${id}_${l.suscripcion_id}" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.25rem;">${escaparHtml(l.motivo)}</div>
@@ -878,8 +878,8 @@ export class VistaTarjetas implements Vista {
                 ${v.lineas.length > 0 ? `<h4 style="font-size:0.9rem; margin-bottom:0.5rem;">Suscripciones vinculadas (${v.lineas.length})</h4>${filas}` : '<p style="font-size:0.8rem; color:var(--text-secondary);">No tiene suscripciones vinculadas.</p>'}
                 <div id="cierre_resumen_${id}" aria-live="polite" style="font-size:0.78rem; margin:0.6rem 0;"></div>
                 <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1rem;">
-                    <button type="button" onclick="elemento('modal-cierre-tar-${id}').remove()" class="btn btn-secondary">Cancelar</button>
-                    <button type="button" id="cierre_confirmar_${id}" onclick="appUI.handleConfirmarCierreTarjeta(${id})" class="btn btn-danger" disabled>Desactivar tarjeta</button>
+                    <button type="button" ${accion('quitar', `modal-cierre-tar-${id}`)} class="btn btn-secondary">Cancelar</button>
+                    <button type="button" id="cierre_confirmar_${id}" ${accion('handleConfirmarCierreTarjeta', id)} class="btn btn-danger" disabled>Desactivar tarjeta</button>
                 </div>
             </div>
         `;
@@ -957,7 +957,7 @@ export class VistaTarjetas implements Vista {
             <div class="card" style="width: 450px; background: var(--bg-surface-opaque); max-height:90vh; overflow-y:auto;">
                 <h3 style="font-family: var(--font-heading); margin-bottom: 0.6rem;">⚙️ Configurar Límites / Corte</h3>
                 <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">${escaparHtml(t.entidad)} - ${escaparHtml(t.nombre_tarjeta)}</p>
-                <form onsubmit="appUI.handleEdicionLimitesTarjetaSubmit(event, ${t.id})">
+                <form ${alEnviar('handleEdicionLimitesTarjetaSubmit', t.id)}>
                     <h4 style="font-size:0.85rem; color:var(--accent-primary); margin-bottom:0.5rem; border-bottom:1px solid var(--border-color); padding-bottom:0.2rem;">Pesos (DOP)</h4>
                     <div class="form-row">
                         <div class="form-group">
@@ -1010,7 +1010,7 @@ export class VistaTarjetas implements Vista {
                     </div>
 
                     <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.2rem;">
-                        <button type="button" onclick="elemento('modal-edit-tar-${t.id}').remove()" class="btn btn-secondary">Cancelar</button>
+                        <button type="button" ${accion('quitar', `modal-edit-tar-${t.id}`)} class="btn btn-secondary">Cancelar</button>
                         <button type="submit" class="btn">Guardar Parámetros</button>
                     </div>
                 </form>
@@ -1076,7 +1076,7 @@ export class VistaTarjetas implements Vista {
 
 /**
  * Lo que `window.appUI` expone de esta vista: un puente que delega en la
- * instancia. Los atributos en línea no cambian.
+ * instancia. Los atributos `data-accion*` no cambian.
  */
 export function puenteTarjetas(vista: VistaTarjetas): {
     handleAbonoTarjeta: (e: EventoDeFormulario, id: number) => Promise<void>;

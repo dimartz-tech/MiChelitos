@@ -1,6 +1,6 @@
 // La composición de la interfaz: crea los servicios, construye cada vista con sus
 // dependencias, las registra en el enrutador y arma el puente `appUI` que llaman
-// los manejadores en línea del HTML (los atributos `onclick`, `onsubmit` y `onchange`).
+// las acciones delegadas del HTML (los atributos `data-accion*`).
 //
 // Es **una función** y no el cuerpo de `composicion.ts` para que lo mismo que ejecuta
 // la aplicación lo ejecuten las pruebas de interacción con servicios y API falsos

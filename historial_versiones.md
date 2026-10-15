@@ -4,7 +4,25 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.109.0 (Versión Actual) - 2026-10-15
+## 🚀 Versión 1.110.0 (Versión Actual) - 2026-10-15
+**La interfaz deja de usar manejadores en línea (`onclick`, `onsubmit`, `onchange`, `oninput`).** Primer paso de la deuda de seguridad M1: los atributos se sustituyen por datos (`data-accion…`) y un oyente delegado. **La política de contenido (CSP) NO se toca en esta versión:** `script-src-attr 'unsafe-inline'` se retira en un cambio aparte (F4), después de probar la aplicación empaquetada a mano.
+
+### 🔧 Qué se hace
+* **Cero `on…=` en `src/`:** 111 manejadores (66 `onclick`, de ellos 11 `navigate(…)` del `index.html`; 27 `onsubmit`; 15 `onchange`; 3 `oninput`) pasan a atributos de datos: `data-accion` (clic), `data-accion-enviar`, `data-accion-cambiar`, `data-accion-escribir`, más `data-args` (arreglo JSON) y `data-pasa` (`evento`, `elemento` o `valor`: lo que el atributo antiguo pasaba como `event`, `this` o `this.value`).
+* **Un oyente por tipo de evento, en `document`** (`ui/delegacion.ts`, `delegar`): sube desde el elemento tocado, burbujea de dentro a fuera como los atributos y respeta `stopPropagation`; en `submit` llama a `preventDefault` y pasa el evento. Una acción inexistente o unos `data-args` mal formados se registran con `console.error`.
+* **Escritura segura en plantillas** (`nucleo/html.ts`): `accion(…)`, `alEnviar(…)`, `alCambiar(…)`, `alEscribir(…)` y `manejador(…)` escapan nombre y argumentos (`escaparHtml` + JSON). El texto libre sigue llegando como dato; la prueba `escape_html` las reconoce como seguras.
+* **Acciones generales** (`accionesGenerales`): `navegar` (el menú y los enlaces de las vistas, que ya no necesitan `window.navigate`), `quitar` (cerrar una ventana modal) y `activarPestana` (las pestañas del panel de correcciones y del formulario de ingresos, antes cuatro fragmentos de JavaScript repetidos).
+* **Un método nuevo en Gastos:** `cambiarMetodoDePago(valor)` reúne las dos llamadas que hacía un solo `onchange` (`toggleMetodoPago` + `actualizarConversionGasto`).
+* **El menú flotante usa `data-opcion`** (antes `data-accion`) para no chocar con el nombre nuevo.
+* **Prueba de contrato reescrita** (`contrato/manejadores.test.js`): prohíbe cualquier `on…="…"` en el marcado y exige que cada acción escrita exista en el puente real (`cargarInterfaz`) o sea una acción general, y que no queden métodos muertos en el puente. Pruebas nuevas de la delegación y de los ayudantes, con textos hostiles.
+
+### ⚠ Límites
+* No se probó en la aplicación empaquetada (el WebView real): hay que recorrer a mano cada formulario y diálogo antes de retirar `'unsafe-inline'` de la CSP.
+* Los ~685 `style="…"` de las plantillas siguen (F5, aparte); el `index.html` no tiene ninguno.
+
+---
+
+## Versión 1.109.0 - 2026-10-15
 **`main.rs` deja de ser un archivo de 1 900 líneas: los 67 comandos se reparten en `src-tauri/src/comandos/`, un módulo por agregado.** Cambio de estructura (M2 del informe de deuda técnica): es un **movimiento puro**, sin cambiar firmas, nombres de comando, lógica, mensajes ni esquema.
 
 ### 🔧 Qué se hace

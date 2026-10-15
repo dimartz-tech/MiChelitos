@@ -246,7 +246,7 @@ export class VistaResumen implements Vista {
     }
 }
 
-/** Esta vista no tiene manejadores en línea: no cuelga nada de `appUI`. */
+/** Esta vista no tiene acciones delegadas: no cuelga nada de `appUI`. */
 export function puenteResumen(_vista: VistaResumen): Record<string, never> {
     return {};
 }

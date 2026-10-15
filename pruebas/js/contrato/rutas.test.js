@@ -12,9 +12,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { leerHtml } from '../ayudas/fuentes_interfaz.js';
+import { accionesDe } from '../ayudas/manejadores_html.js';
 import { cargarInterfaz } from '../ayudas/cargar_interfaz.js';
 
-const rutasDelMenu = () => [...leerHtml().matchAll(/navigate\('(\w+)'\)/g)].map(m => m[1]);
+const rutasDelMenu = () => accionesDe(leerHtml()).filter(a => a.nombre === 'navegar').map(a => a.args[0]);
 const rutasRegistradas = () => [...cargarInterfaz().vistas.keys()];
 
 test('el menú tiene las once pestañas', () => {
