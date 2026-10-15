@@ -6,7 +6,21 @@
 //! comportamiento es correcto: lo fijan.
 
 use crate::db_sql;
-use crate::{crear_gasto, crear_suscripcion, eliminar_gasto, registrar_pago_tarjeta, revertir_abono_tarjeta, GastoInput, crear_ingreso, marcar_ingreso_pagado, eliminar_ingreso, actualizar_ingreso, crear_ingreso_informal, marcar_informal_pagado, eliminar_ingreso_informal, crear_cobro_efectivo_informal, IngresoInput};
+use crate::comandos::gastos::crear_gasto;
+use crate::comandos::suscripciones::crear_suscripcion;
+use crate::comandos::gastos::eliminar_gasto;
+use crate::comandos::abonos::registrar_pago_tarjeta;
+use crate::comandos::abonos::revertir_abono_tarjeta;
+use crate::comandos::gastos::GastoInput;
+use crate::comandos::ingresos::crear_ingreso;
+use crate::comandos::ingresos::marcar_ingreso_pagado;
+use crate::comandos::ingresos::eliminar_ingreso;
+use crate::comandos::ingresos::actualizar_ingreso;
+use crate::comandos::informales::crear_ingreso_informal;
+use crate::comandos::informales::marcar_informal_pagado;
+use crate::comandos::informales::eliminar_ingreso_informal;
+use crate::comandos::informales::crear_cobro_efectivo_informal;
+use crate::comandos::ingresos::IngresoInput;
 use rusqlite::{params, Connection};
 use std::sync::{Mutex, MutexGuard};
 
@@ -757,7 +771,7 @@ fn c21_una_transferencia_sin_cuenta_calcula_la_retencion_pero_no_debita() {
 
 fn procesar_en(anio: i32, mes: u32, dia: u32) -> Vec<String> {
     let reloj = crate::puertos::reloj::RelojFijo::en(anio, mes, dia);
-    let r = crate::procesar_suscripciones_con(&reloj).expect("procesar suscripciones");
+    let r = crate::comandos::suscripciones::procesar_suscripciones_con(&reloj).expect("procesar suscripciones");
     assert!(r.fallos.is_empty(), "un cobro falló: {:?}", r.fallos);
     r.cargos
 }
@@ -787,7 +801,7 @@ fn ultimo_pago(sub_id: i64) -> Option<String> {
 
 fn pendientes_de(sub_id: i64, anio: i32, mes: u32, dia: u32) -> Vec<String> {
     let reloj = crate::puertos::reloj::RelojFijo::en(anio, mes, dia);
-    crate::suscripciones_con_aviso(&reloj)
+    crate::comandos::suscripciones::suscripciones_con_aviso(&reloj)
         .expect("leer suscripciones")
         .into_iter()
         .find(|s| s.id_para_pruebas() == sub_id)
@@ -797,7 +811,7 @@ fn pendientes_de(sub_id: i64, anio: i32, mes: u32, dia: u32) -> Vec<String> {
 
 fn avisa_en(anio: i32, mes: u32, dia: u32) -> bool {
     let reloj = crate::puertos::reloj::RelojFijo::en(anio, mes, dia);
-    crate::suscripciones_con_aviso(&reloj).expect("leer").iter().any(|s| s.avisa_para_pruebas())
+    crate::comandos::suscripciones::suscripciones_con_aviso(&reloj).expect("leer").iter().any(|s| s.avisa_para_pruebas())
 }
 
 /// Una mensual con su fecha ya puesta.
@@ -891,7 +905,7 @@ fn s7_editar_conserva_el_puntero_y_no_recobra() {
     procesar_en(2026, 3, 15);
     let puntero = proximo_cobro_de(sub);
 
-    crate::actualizar_suscripcion(sub, "Otro nombre".into(), monto(600.0), tarjeta, "mensual".into(), 15,
+    crate::comandos::suscripciones::actualizar_suscripcion(sub, "Otro nombre".into(), monto(600.0), tarjeta, "mensual".into(), 15,
                                   "DOP".into(), puntero.clone()).unwrap();
 
     assert_eq!(proximo_cobro_de(sub), puntero, "el puntero se conserva");
@@ -905,7 +919,7 @@ fn s8_editar_no_altera_los_cargos_ya_realizados() {
     let (sub, tarjeta) = suscripcion_mensual(15, "15/03/2026");
     procesar_en(2026, 3, 15);
 
-    crate::actualizar_suscripcion(sub, "Otro".into(), monto(999.0), tarjeta, "anual".into(), 20,
+    crate::comandos::suscripciones::actualizar_suscripcion(sub, "Otro".into(), monto(999.0), tarjeta, "anual".into(), 20,
                                   "USD".into(), Some("20/01/2027".into())).unwrap();
 
     let (monto, _, _) = ultimo_gasto();
@@ -917,7 +931,7 @@ fn s8_editar_no_altera_los_cargos_ya_realizados() {
 fn s9_editar_una_suscripcion_inexistente_es_error() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
-    assert!(crate::actualizar_suscripcion(9999, "X".into(), monto(1.0), tarjeta, "mensual".into(), 1,
+    assert!(crate::comandos::suscripciones::actualizar_suscripcion(9999, "X".into(), monto(1.0), tarjeta, "mensual".into(), 1,
                                           "DOP".into(), None).is_err());
 }
 
@@ -967,7 +981,7 @@ fn s13d_confirmar_un_periodo_lo_asienta_en_su_fecha_y_avanza() {
     let (sub, tarjeta) = suscripcion_mensual(30, "30/07/2026");
     let reloj = crate::puertos::reloj::RelojFijo::en(2026, 9, 10);
 
-    let resumen = crate::confirmar_pendiente(sub, &reloj, None).unwrap();
+    let resumen = crate::comandos::suscripciones::confirmar_pendiente(sub, &reloj, None).unwrap();
 
     assert!(resumen.contains("30/07/2026"), "resumen obtenido: {resumen}");
     assert_importe(balances_tarjeta(tarjeta).0, 500.0, "el cargo entra");
@@ -989,7 +1003,7 @@ fn s13e_descartar_un_periodo_avanza_sin_cobrar_y_deja_caso() {
     let (sub, tarjeta) = suscripcion_mensual(30, "30/07/2026");
     let reloj = crate::puertos::reloj::RelojFijo::en(2026, 9, 10);
 
-    let resumen = crate::confirmar_pendiente(
+    let resumen = crate::comandos::suscripciones::confirmar_pendiente(
         sub, &reloj, Some("El proveedor no cobró ese mes, según el estado".into())).unwrap();
 
     assert!(resumen.contains("COR-"), "no devolvió el número de caso: {resumen}");
@@ -1009,7 +1023,7 @@ fn s13f_descartar_sin_explicar_se_rechaza() {
     let (sub, _) = suscripcion_mensual(30, "30/07/2026");
     let reloj = crate::puertos::reloj::RelojFijo::en(2026, 9, 10);
 
-    assert!(crate::confirmar_pendiente(sub, &reloj, Some("error".into())).is_err());
+    assert!(crate::comandos::suscripciones::confirmar_pendiente(sub, &reloj, Some("error".into())).is_err());
 }
 
 #[test]
@@ -1020,7 +1034,7 @@ fn s13g_no_hay_nada_que_confirmar_cuando_solo_vence_uno() {
     let (sub, _) = suscripcion_mensual(15, "15/03/2026");
     let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 20);
 
-    assert!(crate::confirmar_pendiente(sub, &reloj, None).is_err());
+    assert!(crate::comandos::suscripciones::confirmar_pendiente(sub, &reloj, None).is_err());
     assert!(pendientes_de(sub, 2026, 3, 20).is_empty());
 }
 
@@ -1181,7 +1195,7 @@ fn s14g_la_marca_del_ultimo_cobro_informa_pero_ya_no_decide() {
 
     // Y al cobrar queda la fecha **del vencimiento**, no la de ejecución.
     assert_eq!(ultimo_pago(sub), Some("15/03/2026".into()));
-    assert!(crate::obtener_suscripciones().unwrap()[0].impedimento_para_pruebas().is_none());
+    assert!(crate::comandos::suscripciones::obtener_suscripciones().unwrap()[0].impedimento_para_pruebas().is_none());
 }
 
 #[test]
@@ -1197,7 +1211,7 @@ fn s14h_una_marca_ilegible_ya_no_para_ni_duplica_nada() {
 
     assert!(procesar_en(2026, 3, 14).is_empty(), "no cobra antes de su fecha");
     assert_eq!(procesar_en(2026, 3, 15).len(), 1, "y cobra cuando toca");
-    assert!(crate::obtener_suscripciones().unwrap()[0].impedimento_para_pruebas().is_none(),
+    assert!(crate::comandos::suscripciones::obtener_suscripciones().unwrap()[0].impedimento_para_pruebas().is_none(),
             "no se señala un impedimento que ya no impide");
 }
 
@@ -1212,7 +1226,7 @@ fn s14c_una_suscripcion_sin_fecha_lo_dice_en_la_lista() {
 
     assert!(procesar_en(2026, 12, 31).is_empty(), "sin fecha no se cobra");
 
-    let impedimento = crate::obtener_suscripciones().unwrap()[0]
+    let impedimento = crate::comandos::suscripciones::obtener_suscripciones().unwrap()[0]
         .impedimento_para_pruebas()
         .map(str::to_string);
     assert!(impedimento.is_some(), "la lista no dice que esté parada");
@@ -1226,10 +1240,10 @@ fn s14d_poner_la_fecha_devuelve_la_suscripcion_al_ciclo() {
     let sub = crear_suscripcion("Plataforma".into(), monto(500.0), tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
     assert!(procesar_en(2026, 3, 20).is_empty(), "parada");
 
-    crate::corregir_proximo_cobro(sub, "15/03/2026".into()).unwrap();
+    crate::comandos::suscripciones::corregir_proximo_cobro(sub, "15/03/2026".into()).unwrap();
 
     assert_eq!(procesar_en(2026, 3, 20).len(), 1, "vuelve a cobrar");
-    assert!(crate::obtener_suscripciones().unwrap()[0].impedimento_para_pruebas().is_none());
+    assert!(crate::comandos::suscripciones::obtener_suscripciones().unwrap()[0].impedimento_para_pruebas().is_none());
 }
 
 #[test]
@@ -1239,9 +1253,9 @@ fn s14e_corregir_con_una_fecha_que_no_se_entiende_se_rechaza() {
     let sub = crear_suscripcion("Plataforma".into(), monto(500.0), tarjeta, "mensual".into(), 15, "DOP".into(), None).unwrap();
 
     for mala in ["2026-02-15", "15-02-2026", "ayer", "", "31/02/2026", "1009/2026"] {
-        assert!(crate::corregir_proximo_cobro(sub, mala.into()).is_err(), "aceptó «{mala}»");
+        assert!(crate::comandos::suscripciones::corregir_proximo_cobro(sub, mala.into()).is_err(), "aceptó «{mala}»");
     }
-    assert!(crate::corregir_proximo_cobro(9999, "15/02/2026".into()).is_err());
+    assert!(crate::comandos::suscripciones::corregir_proximo_cobro(9999, "15/02/2026".into()).is_err());
 }
 
 #[test]
@@ -1291,7 +1305,7 @@ fn s20_un_cargo_en_dolares_a_una_tarjeta_que_traduce_queda_pendiente_y_se_puede_
     assert_importe(pesos, 0.0, "y todavía no existe cifra en pesos");
 
     // El titular registra lo que el emisor cargó: 15 USD a 60.50 = 907.50.
-    crate::liquidar_consumo_pendiente(gasto, monto(907.5)).unwrap();
+    crate::comandos::gastos::liquidar_consumo_pendiente(gasto, monto(907.5)).unwrap();
 
     assert_eq!(estado_conversion(gasto).as_deref(), Some("liquidado"));
     let (pesos, dolares) = balances_tarjeta(tarjeta);
@@ -1357,7 +1371,7 @@ fn s24_editar_una_suscripcion_aplica_las_mismas_reglas() {
                                 Some("01/03/2026".into())).unwrap();
 
     let editar = |m: &str, fre: &str, dia: i32| {
-        crate::actualizar_suscripcion(sub, "X".into(), importe(m), tarjeta, fre.into(), dia,
+        crate::comandos::suscripciones::actualizar_suscripcion(sub, "X".into(), importe(m), tarjeta, fre.into(), dia,
                                       "DOP".into(), Some("01/03/2026".into()))
     };
     assert!(editar("-1.00", "mensual", 1).is_err());
@@ -1638,7 +1652,7 @@ fn c28_liquidar_traslada_el_saldo_entre_divisas_y_guarda_la_tasa_deducida() {
     let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
 
     // El emisor informa que cargó 6 050.00 en pesos.
-    let tasa = crate::liquidar_consumo_pendiente(id, monto(6050.0)).unwrap();
+    let tasa = crate::comandos::gastos::liquidar_consumo_pendiente(id, monto(6050.0)).unwrap();
 
     assert_importe(tasa, 60.5, "la tasa se deduce del importe, no se pide");
     assert_eq!(estado_conversion(id).as_deref(), Some("liquidado"));
@@ -1656,7 +1670,7 @@ fn c28b_el_importe_liquidado_lo_decide_el_nucleo_con_los_digitos_escritos() {
     fijar_politica(tarjeta, "traduce");
     let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
 
-    let tasa = crate::liquidar_consumo_pendiente(id, importe("6050.005")).unwrap();
+    let tasa = crate::comandos::gastos::liquidar_consumo_pendiente(id, importe("6050.005")).unwrap();
 
     assert_importe(balances_tarjeta(tarjeta).0, 6050.01, "los pesos reciben el céntimo decidido con los dígitos");
     assert_importe(tasa, 60.5001, "la tasa sale del importe decidido, no del número binario");
@@ -1670,7 +1684,7 @@ fn c28c_un_importe_liquidado_que_no_es_positivo_no_liquida_nada() {
     let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
 
     for escrito in ["0.00", "0.004", "-6050.00"] {
-        assert!(crate::liquidar_consumo_pendiente(id, importe(escrito)).is_err(), "{escrito} no liquida");
+        assert!(crate::comandos::gastos::liquidar_consumo_pendiente(id, importe(escrito)).is_err(), "{escrito} no liquida");
     }
     assert_eq!(estado_conversion(id).as_deref(), Some("pendiente"), "sigue pendiente");
     assert_importe(balances_tarjeta(tarjeta).0, 0.0, "ningún saldo se movió");
@@ -1683,8 +1697,8 @@ fn c29_no_se_liquida_dos_veces_ni_lo_que_no_esta_pendiente() {
     fijar_politica(tarjeta, "traduce");
     let id = crear_gasto(compra_en_dolares(tarjeta)).unwrap();
 
-    crate::liquidar_consumo_pendiente(id, monto(6050.0)).unwrap();
-    assert!(crate::liquidar_consumo_pendiente(id, monto(6050.0)).is_err(), "no se liquida dos veces");
+    crate::comandos::gastos::liquidar_consumo_pendiente(id, monto(6050.0)).unwrap();
+    assert!(crate::comandos::gastos::liquidar_consumo_pendiente(id, monto(6050.0)).is_err(), "no se liquida dos veces");
     assert_importe(balances_tarjeta(tarjeta).0, 6050.0, "ni se duplica el traslado");
 }
 
@@ -1716,7 +1730,7 @@ fn c30_una_bonificacion_reduce_la_deuda_sin_tocar_el_gasto() {
     let gasto = crear_gasto(entrada).unwrap();
     assert_importe(deuda_pesos(tarjeta), 11234.56, "el consumo sube la deuda");
 
-    crate::crear_bonificacion(
+    crate::comandos::bonificaciones::crear_bonificacion(
         "09/09/2026".to_string(), tarjeta, monto(61.73), "DOP".to_string(),
         "Cashback compra por internet".to_string(), Some(gasto),
     ).unwrap();
@@ -1747,12 +1761,12 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
     })
     .unwrap();
 
-    crate::crear_bonificacion("09/09/2026".into(), tarjeta, monto(50.00), "DOP".into(),
+    crate::comandos::bonificaciones::crear_bonificacion("09/09/2026".into(), tarjeta, monto(50.00), "DOP".into(),
         "Recompensa base".into(), Some(gasto)).unwrap();
-    crate::crear_bonificacion("09/09/2026".into(), tarjeta, monto(100.00), "DOP".into(),
+    crate::comandos::bonificaciones::crear_bonificacion("09/09/2026".into(), tarjeta, monto(100.00), "DOP".into(),
         "Bonificación de categoría".into(), Some(gasto)).unwrap();
 
-    assert_eq!(crate::obtener_bonificaciones().unwrap().len(), 2);
+    assert_eq!(crate::comandos::bonificaciones::obtener_bonificaciones().unwrap().len(), 2);
     assert_importe(deuda_pesos(tarjeta), 10000.0 + 5200.00 - 150.00, "el consumo sube y las dos bonificaciones bajan");
 }
 
@@ -1760,14 +1774,14 @@ fn c31_un_mismo_gasto_admite_varias_bonificaciones() {
 fn c32_revertir_una_bonificacion_restituye_la_deuda() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10000.0, 0.0);
-    let id = crate::crear_bonificacion("09/09/2026".into(), tarjeta, monto(61.73), "DOP".into(),
+    let id = crate::comandos::bonificaciones::crear_bonificacion("09/09/2026".into(), tarjeta, monto(61.73), "DOP".into(),
         "Cashback".into(), None).unwrap();
 
-    crate::eliminar_bonificacion(id).unwrap();
+    crate::comandos::bonificaciones::eliminar_bonificacion(id).unwrap();
 
     assert_importe(deuda_pesos(tarjeta), 10000.0, "restitución exacta");
-    assert!(crate::obtener_bonificaciones().unwrap().is_empty());
-    assert!(crate::eliminar_bonificacion(id).is_err(), "no se revierte dos veces");
+    assert!(crate::comandos::bonificaciones::obtener_bonificaciones().unwrap().is_empty());
+    assert!(crate::comandos::bonificaciones::eliminar_bonificacion(id).is_err(), "no se revierte dos veces");
 }
 
 #[test]
@@ -1775,9 +1789,9 @@ fn c33_una_bonificacion_sin_concepto_o_en_cero_se_rechaza() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10000.0, 0.0);
 
-    assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, monto(61.73), "DOP".into(),
+    assert!(crate::comandos::bonificaciones::crear_bonificacion("09/09/2026".into(), tarjeta, monto(61.73), "DOP".into(),
         "   ".into(), None).is_err(), "el concepto es obligatorio");
-    assert!(crate::crear_bonificacion("09/09/2026".into(), tarjeta, monto(0.0), "DOP".into(),
+    assert!(crate::comandos::bonificaciones::crear_bonificacion("09/09/2026".into(), tarjeta, monto(0.0), "DOP".into(),
         "Cashback".into(), None).is_err(), "cero no es una bonificación");
     assert_importe(deuda_pesos(tarjeta), 10000.0, "ningún saldo se movió");
 }
@@ -1789,13 +1803,13 @@ fn c33b_la_bonificacion_decide_el_centimo_con_los_digitos_escritos_y_se_casa_con
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10000.0, 500.0);
 
-    let id = crate::crear_bonificacion("09/09/2026".into(), tarjeta, importe("1.005"), "DOP".into(), "Cashback".into(), None).unwrap();
-    crate::crear_bonificacion("09/09/2026".into(), tarjeta, importe("20.10"), "USD".into(), "Cashback en dólares".into(), None).unwrap();
+    let id = crate::comandos::bonificaciones::crear_bonificacion("09/09/2026".into(), tarjeta, importe("1.005"), "DOP".into(), "Cashback".into(), None).unwrap();
+    crate::comandos::bonificaciones::crear_bonificacion("09/09/2026".into(), tarjeta, importe("20.10"), "USD".into(), "Cashback en dólares".into(), None).unwrap();
 
     let (pesos, dolares) = balances_tarjeta(tarjeta);
     assert_importe(pesos, 10000.0 - 1.01, "los pesos bajan el céntimo decidido con los dígitos");
     assert_importe(dolares, 500.0 - 20.10, "los dólares bajan por su cuenta");
-    let guardada = crate::obtener_bonificaciones().unwrap().into_iter().find(|b| b.id == id).unwrap();
+    let guardada = crate::comandos::bonificaciones::obtener_bonificaciones().unwrap().into_iter().find(|b| b.id == id).unwrap();
     assert_importe(guardada.monto, 1.01, "lo guardado es el mismo céntimo");
 }
 
@@ -1806,11 +1820,11 @@ fn c33c_un_importe_negativo_o_que_redondea_a_cero_no_es_una_bonificacion() {
 
     for escrito in ["-5.00", "0.00", "0.004"] {
         assert!(
-            crate::crear_bonificacion("09/09/2026".into(), tarjeta, importe(escrito), "DOP".into(), "Cashback".into(), None).is_err(),
+            crate::comandos::bonificaciones::crear_bonificacion("09/09/2026".into(), tarjeta, importe(escrito), "DOP".into(), "Cashback".into(), None).is_err(),
             "{escrito} no es una bonificación"
         );
     }
-    assert!(crate::obtener_bonificaciones().unwrap().is_empty());
+    assert!(crate::comandos::bonificaciones::obtener_bonificaciones().unwrap().is_empty());
     assert_importe(deuda_pesos(tarjeta), 10000.0, "ningún saldo se movió");
 }
 
@@ -1867,7 +1881,7 @@ fn c34_pagar_una_cuota_de_la_linea_revolvente_baja_el_saldo() {
     // 100 000 al 12 % anual: 1 % mensual = 1 000 de interés, 4 000 de capital.
     let id = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, Some(150_000.0));
 
-    crate::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
 
     assert_importe(saldo_prestamo(id), 96_000.0, "el saldo baja por el capital, no por la cuota");
 }
@@ -1877,7 +1891,7 @@ fn c35_la_cuota_no_reduce_la_deuda_por_su_importe_entero() {
     let _g = entorno_aislado();
     let id = crear_prestamo_de_prueba("vehiculo", 100_000.0, 12.0, 5_000.0, Some((100, 89)), None);
 
-    crate::pagar_cuota_prestamo(id, Some("17/09/2026".into())).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(id, Some("17/09/2026".into())).unwrap();
 
     assert_importe(saldo_prestamo(id), 96_000.0, "5 000 de cuota amortizan 4 000");
     assert_eq!(cuotas_pendientes(id), Some(88), "el contador sí baja de uno en uno");
@@ -1888,10 +1902,10 @@ fn c36_cada_cuota_queda_asentada_con_su_desglose() {
     let _g = entorno_aislado();
     let id = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, Some(150_000.0));
 
-    crate::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
-    crate::pagar_cuota_prestamo(id, Some("25/10/2026".into())).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(id, Some("25/10/2026".into())).unwrap();
 
-    let movimientos = crate::obtener_movimientos_prestamo(id).unwrap();
+    let movimientos = crate::comandos::prestamos::obtener_movimientos_prestamo(id).unwrap();
     assert_eq!(movimientos.len(), 2, "un asiento por cuota");
 
     // Vienen en orden descendente: el más reciente primero.
@@ -1909,13 +1923,13 @@ fn c37_declarar_el_saldo_del_estado_lo_fija_y_deja_constancia_de_la_diferencia()
     // declaración corrige, pero no en silencio.
     let _g = entorno_aislado();
     let id = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, Some(150_000.0));
-    crate::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
     assert_importe(saldo_prestamo(id), 96_000.0, "estimación");
 
-    crate::declarar_saldo_prestamo(id, importe("96250.75"), Some("30/09/2026".into())).unwrap();
+    crate::comandos::prestamos::declarar_saldo_prestamo(id, importe("96250.75"), Some("30/09/2026".into())).unwrap();
 
     assert_importe(saldo_prestamo(id), 96_250.75, "manda el estado de cuenta");
-    let movimientos = crate::obtener_movimientos_prestamo(id).unwrap();
+    let movimientos = crate::comandos::prestamos::obtener_movimientos_prestamo(id).unwrap();
     assert_eq!(movimientos[0].tipo, "declaracion");
     assert_importe(movimientos[0].monto, 250.75, "la diferencia queda registrada");
 }
@@ -1927,7 +1941,7 @@ fn c38_una_cuota_que_no_cubre_el_interes_hace_crecer_la_deuda() {
     let _g = entorno_aislado();
     let id = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 500.0, None, Some(150_000.0));
 
-    crate::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(id, Some("25/09/2026".into())).unwrap();
 
     assert_importe(saldo_prestamo(id), 100_500.0, "500 de cuota contra 1 000 de interés");
 }
@@ -1935,7 +1949,7 @@ fn c38_una_cuota_que_no_cubre_el_interes_hace_crecer_la_deuda() {
 #[test]
 fn c39_el_limite_solo_se_admite_en_una_linea_revolvente() {
     let _g = entorno_aislado();
-    let con_limite = |tipo: &str| crate::crear_prestamo(crate::PrestamoInput {
+    let con_limite = |tipo: &str| crate::comandos::prestamos::crear_prestamo(crate::comandos::prestamos::PrestamoInput {
         tipo_prestamo: tipo.into(),
         monto_prestamo: monto(100_000.0),
         institucion_financiera: "Banco Ejemplo".into(),
@@ -1967,7 +1981,7 @@ fn vincular_a_tarjeta(prestamo_id: i64, tarjeta_id: Option<i64>) -> Result<(), S
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .expect("leer condiciones");
-    crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
+    crate::comandos::prestamos::actualizar_prestamo(crate::comandos::prestamos::ActualizarPrestamoInput {
         id: prestamo_id,
         tasa_actual: tasa,
         monto_cuota: monto(cuota),
@@ -1977,8 +1991,8 @@ fn vincular_a_tarjeta(prestamo_id: i64, tarjeta_id: Option<i64>) -> Result<(), S
     })
 }
 
-fn prestamo_por_id(id: i64) -> crate::Prestamo {
-    crate::obtener_prestamos()
+fn prestamo_por_id(id: i64) -> crate::comandos::prestamos::Prestamo {
+    crate::comandos::prestamos::obtener_prestamos()
         .unwrap()
         .into_iter()
         .find(|p| p.id == id)
@@ -2038,10 +2052,10 @@ fn c43_actualizar_no_es_una_puerta_trasera_para_mover_el_saldo() {
     // cambiarlo sin rastro.
     let _g = entorno_aislado();
     let linea = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, None);
-    crate::pagar_cuota_prestamo(linea, Some("25/09/2026".into())).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(linea, Some("25/09/2026".into())).unwrap();
     let saldo_antes = saldo_prestamo(linea);
 
-    crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
+    crate::comandos::prestamos::actualizar_prestamo(crate::comandos::prestamos::ActualizarPrestamoInput {
         id: linea,
         tasa_actual: 24.0,
         monto_cuota: monto(7_000.0),
@@ -2057,7 +2071,7 @@ fn c43_actualizar_no_es_una_puerta_trasera_para_mover_el_saldo() {
     assert_importe(p.tasa_actual, 24.0, "las condiciones sí se corrigen");
     assert_eq!(p.limite_credito, Some(200_000.0), "el límite se puede registrar después");
     assert_eq!(
-        crate::obtener_movimientos_prestamo(linea).unwrap().len(),
+        crate::comandos::prestamos::obtener_movimientos_prestamo(linea).unwrap().len(),
         1,
         "no aparecen asientos nuevos"
     );
@@ -2067,7 +2081,7 @@ fn c43_actualizar_no_es_una_puerta_trasera_para_mover_el_saldo() {
 fn c44_actualizar_rechaza_lo_que_no_tiene_sentido() {
     let _g = entorno_aislado();
     let auto = crear_prestamo_de_prueba("vehiculo", 100_000.0, 12.0, 5_000.0, Some((100, 89)), None);
-    let base = |limite: Option<f64>, tarjeta, dia| crate::ActualizarPrestamoInput {
+    let base = |limite: Option<f64>, tarjeta, dia| crate::comandos::prestamos::ActualizarPrestamoInput {
         id: auto,
         tasa_actual: 12.0,
         monto_cuota: monto(5_000.0),
@@ -2076,13 +2090,13 @@ fn c44_actualizar_rechaza_lo_que_no_tiene_sentido() {
         tarjeta_id: tarjeta,
     };
 
-    assert!(crate::actualizar_prestamo(base(Some(50_000.0), None, 25)).is_err(),
+    assert!(crate::comandos::prestamos::actualizar_prestamo(base(Some(50_000.0), None, 25)).is_err(),
         "un amortizable no repone cupo");
-    assert!(crate::actualizar_prestamo(base(None, Some(999_999), 25)).is_err(),
+    assert!(crate::comandos::prestamos::actualizar_prestamo(base(None, Some(999_999), 25)).is_err(),
         "no se vincula a una tarjeta inexistente");
-    assert!(crate::actualizar_prestamo(base(None, None, 32)).is_err(),
+    assert!(crate::comandos::prestamos::actualizar_prestamo(base(None, None, 32)).is_err(),
         "el día 32 no existe");
-    assert!(crate::actualizar_prestamo(base(None, None, 25)).is_ok());
+    assert!(crate::comandos::prestamos::actualizar_prestamo(base(None, None, 25)).is_ok());
 }
 
 // ---------------------------------------------------------------------------
@@ -2118,7 +2132,7 @@ fn c45_una_transferencia_mueve_los_dos_saldos_y_cobra_el_cargo_al_origen() {
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
 
-    crate::transferir_entre_cuentas(
+    crate::comandos::cuentas::transferir_entre_cuentas(
         "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(100.0), "Traspaso".into(),
     )
     .unwrap();
@@ -2134,7 +2148,7 @@ fn c46_la_tasa_se_deduce_dividiendo_los_dos_importes() {
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
     let destino = crear_cuenta("Cuenta Ahorros USD", "USD", 0.0);
 
-    crate::transferir_entre_cuentas(
+    crate::comandos::cuentas::transferir_entre_cuentas(
         "13/09/2026".into(), origen, destino, monto(6_000.0), monto(100.0), monto(0.0), "Compra de divisa".into(),
     )
     .unwrap();
@@ -2152,7 +2166,7 @@ fn c46b_los_tres_importes_de_una_transferencia_deciden_el_centavo_por_su_texto()
     let _g = entorno_aislado();
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
-    crate::transferir_entre_cuentas(
+    crate::comandos::cuentas::transferir_entre_cuentas(
         "13/09/2026".into(), origen, destino, importe("1000.005"), importe("1000.005"), importe("1.005"), "Traspaso".into(),
     )
     .unwrap();
@@ -2166,12 +2180,12 @@ fn c47_revertir_una_transferencia_devuelve_el_monto_y_el_cargo_al_origen() {
     let _g = entorno_aislado();
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
-    crate::transferir_entre_cuentas(
+    crate::comandos::cuentas::transferir_entre_cuentas(
         "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(100.0), "Traspaso".into(),
     )
     .unwrap();
 
-    crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+    crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
 
     assert_importe(saldo_cuenta_id(origen), 50_000.0, "restitución exacta con cargo");
     assert_importe(saldo_cuenta_id(destino), 10_000.0, "restitución exacta");
@@ -2190,7 +2204,7 @@ fn c48_h10_la_reversion_devuelve_los_dos_saldos_aunque_el_destino_quede_negativo
     let _g = entorno_aislado();
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
-    crate::transferir_entre_cuentas(
+    crate::comandos::cuentas::transferir_entre_cuentas(
         "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(0.0), "Traspaso".into(),
     )
     .unwrap();
@@ -2200,7 +2214,7 @@ fn c48_h10_la_reversion_devuelve_los_dos_saldos_aunque_el_destino_quede_negativo
         .execute("UPDATE cuentas_ahorro SET balance_actual = 3000.0 WHERE id = ?;", [destino])
         .unwrap();
 
-    crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+    crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
 
     assert_importe(saldo_cuenta_id(destino), -5_000.0, "3 000 - 8 000, sin recorte");
     assert_importe(saldo_cuenta_id(origen), 50_000.0, "y el origen se restituye entero");
@@ -2226,9 +2240,9 @@ fn m3_eliminar_un_traspaso_anota_el_caso_con_su_descripcion_e_importe() {
     let _g = entorno_aislado();
     let origen = crear_cuenta("Origen", "DOP", 5_000.0);
     let destino = crear_cuenta("Destino", "DOP", 0.0);
-    crate::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(1_000.0), monto(1_000.0), monto(0.0), "Pago del alquiler".into()).unwrap();
+    crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(1_000.0), monto(1_000.0), monto(0.0), "Pago del alquiler".into()).unwrap();
 
-    let caso = crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+    let caso = crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
 
     let casos = casos_anotados_m3();
     assert_eq!(casos.len(), 1);
@@ -2244,10 +2258,10 @@ fn m3_sin_descripcion_el_caso_dice_traspaso_entre_cuentas() {
     let _g = entorno_aislado();
     let origen = crear_cuenta("Origen", "DOP", 5_000.0);
     let destino = crear_cuenta("Destino", "DOP", 0.0);
-    crate::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(100.0), monto(100.0), monto(0.0), "x".into()).unwrap();
+    crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(100.0), monto(100.0), monto(0.0), "x".into()).unwrap();
     conexion().execute("UPDATE transacciones_cuentas SET descripcion = NULL;", []).unwrap();
 
-    crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+    crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
 
     assert_eq!(casos_anotados_m3()[0].3, "Traspaso entre cuentas");
 }
@@ -2260,9 +2274,9 @@ fn m3_hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
     let _g = entorno_aislado();
     let origen = crear_cuenta("Origen USD", "USD", 500.0);
     let destino = crear_cuenta("Destino USD", "USD", 0.0);
-    crate::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(200.0), monto(200.0), monto(0.0), "usd".into()).unwrap();
+    crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(200.0), monto(200.0), monto(0.0), "usd".into()).unwrap();
 
-    crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+    crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
 
     let casos = casos_anotados_m3();
     assert_eq!(casos[0].5.as_deref(), Some("DOP"), "HALLAZGO: debería decir USD");
@@ -2273,7 +2287,7 @@ fn m3_hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
 fn m3_un_traspaso_inexistente_se_nombra_traspaso_y_gana_al_motivo_invalido() {
     let _g = entorno_aislado();
 
-    let e = crate::eliminar_transaccion_cuenta(999, "corto".into()).unwrap_err();
+    let e = crate::comandos::cuentas::eliminar_transaccion_cuenta(999, "corto".into()).unwrap_err();
 
     assert_eq!(e, "No se encontró traspaso con identificador 999.");
     assert!(casos_anotados_m3().is_empty());
@@ -2284,9 +2298,9 @@ fn m3_un_motivo_corto_no_borra_el_traspaso_ni_anota_caso() {
     let _g = entorno_aislado();
     let origen = crear_cuenta("Origen", "DOP", 5_000.0);
     let destino = crear_cuenta("Destino", "DOP", 0.0);
-    crate::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(100.0), monto(100.0), monto(0.0), "x".into()).unwrap();
+    crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(100.0), monto(100.0), monto(0.0), "x".into()).unwrap();
 
-    assert!(crate::eliminar_transaccion_cuenta(ultima_transferencia(), "corto".into()).is_err());
+    assert!(crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), "corto".into()).is_err());
 
     assert_eq!(total_transferencias(), 1);
     assert!(casos_anotados_m3().is_empty());
@@ -2299,11 +2313,11 @@ fn m3_las_correcciones_se_listan_de_la_mas_reciente_a_la_mas_antigua() {
     let origen = crear_cuenta("Origen", "DOP", 5_000.0);
     let destino = crear_cuenta("Destino", "DOP", 0.0);
     for d in ["primero", "segundo"] {
-        crate::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(100.0), monto(100.0), monto(0.0), d.into()).unwrap();
-        crate::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+        crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(100.0), monto(100.0), monto(0.0), d.into()).unwrap();
+        crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
     }
 
-    let lista = crate::obtener_correcciones().unwrap();
+    let lista = crate::comandos::correcciones::obtener_correcciones().unwrap();
 
     assert_eq!(lista.len(), 2);
     assert_eq!(lista[0].descripcion, "segundo", "la más reciente primero");
@@ -2316,7 +2330,7 @@ fn m3_las_correcciones_se_listan_de_la_mas_reciente_a_la_mas_antigua() {
 
 fn obtener_vacio_de_correcciones_tras_limpiar() -> usize {
     conexion().execute("DELETE FROM correcciones;", []).unwrap();
-    crate::obtener_correcciones().unwrap().len()
+    crate::comandos::correcciones::obtener_correcciones().unwrap().len()
 }
 
 #[test]
@@ -2332,7 +2346,7 @@ fn c49_h11_una_transferencia_de_una_cuenta_a_si_misma_se_rechaza() {
     let _g = entorno_aislado();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
 
-    let error = crate::transferir_entre_cuentas(
+    let error = crate::comandos::cuentas::transferir_entre_cuentas(
         "13/09/2026".into(), cuenta, cuenta, monto(8_000.0), monto(8_000.0), monto(100.0), "A sí misma".into(),
     )
     .unwrap_err();
@@ -2358,7 +2372,7 @@ fn c50_h12_el_importe_de_destino_se_interpreta_en_la_divisa_de_su_cuenta() {
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 100_000.0);
     let destino = crear_cuenta("Cuenta Ahorros USD", "USD", 0.0);
 
-    crate::transferir_entre_cuentas(
+    crate::comandos::cuentas::transferir_entre_cuentas(
         "13/09/2026".into(), origen, destino, monto(6_000.0), monto(6_000.0), monto(0.0), "Sin convertir".into(),
     )
     .unwrap();
@@ -2374,7 +2388,7 @@ fn c53_una_transferencia_puede_dejar_el_origen_en_negativo() {
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 1_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
 
-    crate::transferir_entre_cuentas(
+    crate::comandos::cuentas::transferir_entre_cuentas(
         "13/09/2026".into(), origen, destino, monto(5_000.0), monto(5_000.0), monto(0.0), "Sobregiro".into(),
     )
     .unwrap();
@@ -2387,15 +2401,15 @@ fn c54_revertir_dos_veces_la_misma_transferencia_falla_la_segunda() {
     let _g = entorno_aislado();
     let origen = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000.0);
     let destino = crear_cuenta("Cuenta Corriente DOP", "DOP", 10_000.0);
-    crate::transferir_entre_cuentas(
+    crate::comandos::cuentas::transferir_entre_cuentas(
         "13/09/2026".into(), origen, destino, monto(8_000.0), monto(8_000.0), monto(0.0), "Traspaso".into(),
     )
     .unwrap();
     let id = ultima_transferencia();
 
-    crate::eliminar_transaccion_cuenta(id, motivo_de_prueba()).unwrap();
+    crate::comandos::cuentas::eliminar_transaccion_cuenta(id, motivo_de_prueba()).unwrap();
 
-    assert!(crate::eliminar_transaccion_cuenta(id, motivo_de_prueba()).is_err(), "no se revierte dos veces");
+    assert!(crate::comandos::cuentas::eliminar_transaccion_cuenta(id, motivo_de_prueba()).is_err(), "no se revierte dos veces");
     assert_importe(saldo_cuenta_id(origen), 50_000.0, "sin doble restitución");
 }
 
@@ -2832,7 +2846,7 @@ fn c75b_el_cobro_decide_el_centimo_con_los_digitos_escritos_y_la_fila_guarda_lo_
     marcar_ingreso_pagado(id, cuenta, "16/09/2026".into(), importe("8500.005")).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0 + 8_500.01, "la cuenta recibe el céntimo decidido");
-    let fila = crate::obtener_ingresos().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    let fila = crate::comandos::ingresos::obtener_ingresos().unwrap().into_iter().find(|i| i.id == id).unwrap();
     assert_importe(fila.monto_recibido.unwrap(), 8_500.01, "la fila guarda exactamente lo que se acreditó");
 }
 
@@ -2974,7 +2988,7 @@ fn c81b_el_cobro_en_efectivo_decide_el_centimo_con_los_digitos_escritos_y_lo_usa
 
     let id = crear_cobro_efectivo_informal("16/09/2026".into(), "Clase suelta".into(), importe("1.005"), "DOP".into()).unwrap();
 
-    let fila = crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    let fila = crate::comandos::informales::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
     assert_importe(fila.monto, 1.01, "el ingreso guarda el céntimo decidido");
     assert_importe(fila.monto_recibido.unwrap(), 1.01, "lo recibido es lo mismo");
     assert_eq!(fila.estatus, "pagado");
@@ -3013,7 +3027,7 @@ fn c82b_el_cobro_de_un_informal_decide_el_centimo_con_los_digitos_escritos() {
     marcar_informal_pagado(id, cuenta, "16/09/2026".into(), importe("2000.005")).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0 + 2_000.01, "la cuenta recibe el céntimo decidido");
-    let fila = crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    let fila = crate::comandos::informales::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
     assert_importe(fila.monto_recibido.unwrap(), 2_000.01, "la fila guarda exactamente lo que se acreditó");
 }
 
@@ -3048,7 +3062,7 @@ fn c84b_el_importe_de_un_informal_lo_decide_el_nucleo_con_los_digitos_escritos()
     let _g = entorno_aislado();
     let id = crear_ingreso_informal("16/09/2026".into(), "Clase suelta".into(), importe("1.005")).unwrap();
 
-    let guardado = crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    let guardado = crate::comandos::informales::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
     assert_importe(guardado.monto, 1.01, "el céntimo se decide con los dígitos escritos");
     assert_eq!(guardado.estatus, "pendiente");
 }
@@ -3057,12 +3071,12 @@ fn c84b_el_importe_de_un_informal_lo_decide_el_nucleo_con_los_digitos_escritos()
 fn c84c_un_importe_de_dos_decimales_se_guarda_exacto_y_un_texto_ilegible_no_crea_nada() {
     let _g = entorno_aislado();
     let id = crear_ingreso_informal("16/09/2026".into(), "Clase suelta".into(), importe("75.25")).unwrap();
-    let guardado = crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
+    let guardado = crate::comandos::informales::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).unwrap();
     assert_importe(guardado.monto, 75.25, "dos decimales: sin pérdida");
 
     // El texto ilegible falla **antes** de llegar al comando: en la frontera, al leer el argumento.
     assert!(crate::ipc::ImporteDecimal::desde_texto("setenta").is_err());
-    assert_eq!(crate::obtener_ingresos_informales().unwrap().len(), 1, "no se creó ningún ingreso");
+    assert_eq!(crate::comandos::informales::obtener_ingresos_informales().unwrap().len(), 1, "no se creó ningún ingreso");
 }
 
 // ---------------------------------------------------------------------------
@@ -3329,7 +3343,7 @@ fn comision_de(cuenta_id: i64) -> Option<f64> {
 fn c94b_el_saldo_inicial_de_una_cuenta_lo_decide_el_nucleo_con_los_digitos_escritos() {
     // `100.005` sube a 100.01: el saldo inicial entra por la misma puerta que el resto de los importes.
     let _g = entorno_aislado();
-    crate::crear_cuenta("Cuenta Nueva DOP".into(), "DOP".into(), importe("100.005"), None, None).unwrap();
+    crate::comandos::cuentas::crear_cuenta("Cuenta Nueva DOP".into(), "DOP".into(), importe("100.005"), None, None).unwrap();
 
     assert_importe(balance_cuenta("Cuenta Nueva DOP"), 100.01, "el saldo inicial lleva el céntimo decidido");
 }
@@ -3337,7 +3351,7 @@ fn c94b_el_saldo_inicial_de_una_cuenta_lo_decide_el_nucleo_con_los_digitos_escri
 #[test]
 fn c95_una_comision_con_fraccion_de_centimo_se_decide_al_crear() {
     let _g = entorno_aislado();
-    let id = crate::crear_cuenta(
+    let id = crate::comandos::cuentas::crear_cuenta(
         "Cuenta Corriente DOP".into(), "DOP".into(), monto(0.0),
         Some("Banco Ejemplo".into()), Some(importe("75.005")),
     )
@@ -3356,7 +3370,7 @@ fn c96_lo_mismo_al_corregir_una_cuenta_existente() {
     let _g = entorno_aislado();
     let id = crear_cuenta("Cuenta Corriente DOP", "DOP", 0.0);
 
-    crate::actualizar_cuenta(
+    crate::comandos::cuentas::actualizar_cuenta(
         id, "Cuenta Corriente DOP".into(), Some("Banco Ejemplo".into()), Some(importe("120.507")),
     )
     .unwrap();
@@ -3369,7 +3383,7 @@ fn c97_una_comision_sin_declarar_sigue_siendo_nula_y_no_cero() {
     // Nulo significa «no hay tarifa pactada» y cero significa «el banco no
     // cobra». Pasar por `Dinero` no puede borrar esa distinción.
     let _g = entorno_aislado();
-    let id = crate::crear_cuenta(
+    let id = crate::comandos::cuentas::crear_cuenta(
         "Cuenta Ahorros DOP".into(), "DOP".into(), monto(0.0), None, None,
     )
     .unwrap();
@@ -3380,7 +3394,7 @@ fn c97_una_comision_sin_declarar_sigue_siendo_nula_y_no_cero() {
 #[test]
 fn c98_una_comision_negativa_se_sigue_rechazando() {
     let _g = entorno_aislado();
-    let r = crate::crear_cuenta(
+    let r = crate::comandos::cuentas::crear_cuenta(
         "Cuenta Ahorros DOP".into(), "DOP".into(), monto(0.0), None, Some(importe("-1.00")),
     );
 
@@ -3419,7 +3433,7 @@ fn c99_un_certificado_lejos_de_vencer_no_lleva_alerta() {
     let _g = entorno_aislado();
     escribir_capital_de_prueba(&capital_con_una_entrada("certificados", "31/12/2030"));
 
-    let leido = crate::obtener_capital().unwrap();
+    let leido = crate::comandos::capital::obtener_capital().unwrap();
     let c = &leido["certificados"][0];
     assert_eq!(c["alerta_vencimiento"], false);
     assert!(c.get("alerta_msg").is_none());
@@ -3432,7 +3446,7 @@ fn c100_un_certificado_que_vence_en_diez_dias_avisa_con_la_cuenta_regresiva() {
     let vence = (hoy + chrono::Duration::days(10)).format("%d/%m/%Y").to_string();
     escribir_capital_de_prueba(&capital_con_una_entrada("certificados", &vence));
 
-    let leido = crate::obtener_capital().unwrap();
+    let leido = crate::comandos::capital::obtener_capital().unwrap();
     let c = &leido["certificados"][0];
     assert_eq!(c["alerta_vencimiento"], true);
     assert_eq!(c["dias_restantes"], 10);
@@ -3446,7 +3460,7 @@ fn c101_un_certificado_vencido_lo_dice_sin_recortar_los_dias() {
     let vencio = (hoy - chrono::Duration::days(5)).format("%d/%m/%Y").to_string();
     escribir_capital_de_prueba(&capital_con_una_entrada("certificados", &vencio));
 
-    let leido = crate::obtener_capital().unwrap();
+    let leido = crate::comandos::capital::obtener_capital().unwrap();
     let c = &leido["certificados"][0];
     assert_eq!(c["alerta_vencimiento"], true);
     assert_eq!(c["dias_restantes"], -5, "negativo, sin recortar");
@@ -3460,7 +3474,7 @@ fn c102_lo_mismo_vale_para_una_inversion_de_bolsa() {
     let vencio = (hoy - chrono::Duration::days(1)).format("%d/%m/%Y").to_string();
     escribir_capital_de_prueba(&capital_con_una_entrada("bolsa", &vencio));
 
-    let leido = crate::obtener_capital().unwrap();
+    let leido = crate::comandos::capital::obtener_capital().unwrap();
     let b = &leido["bolsa"][0];
     assert_eq!(b["alerta_vencimiento"], true);
     assert_eq!(b["alerta_msg"], "¡Vencido!");
@@ -3482,9 +3496,9 @@ fn c103_guardar_no_persiste_la_alerta_que_obtener_calculo() {
     escribir_capital_de_prueba(&capital_con_una_entrada("bolsa", &vencio));
 
     // Exactamente el patrón de la interfaz: leer todo, guardar todo.
-    let leido = crate::obtener_capital().unwrap();
+    let leido = crate::comandos::capital::obtener_capital().unwrap();
     assert_eq!(leido["bolsa"][0]["alerta_vencimiento"], true, "obtener sí la calcula");
-    crate::guardar_capital(leido).unwrap();
+    crate::comandos::capital::guardar_capital(leido).unwrap();
 
     let en_disco = capital_en_disco();
     let b = &en_disco["bolsa"][0];
@@ -3503,8 +3517,8 @@ fn c104_guardar_limpia_certificados_y_bolsa_por_igual() {
     datos["bolsa"] = serde_json::json!([{"emisor": "X", "monto": 1.0, "tasa": 1.0, "vencimiento": "01/01/2020"}]);
     escribir_capital_de_prueba(&datos);
 
-    let leido = crate::obtener_capital().unwrap();
-    crate::guardar_capital(leido).unwrap();
+    let leido = crate::comandos::capital::obtener_capital().unwrap();
+    crate::comandos::capital::guardar_capital(leido).unwrap();
 
     let en_disco = capital_en_disco();
     for coleccion in ["certificados", "bolsa"] {
@@ -3524,7 +3538,7 @@ fn c105_guardar_no_falla_si_los_campos_nunca_llegaron_a_calcularse() {
         "bolsa": [],
     });
 
-    assert!(crate::guardar_capital(datos).is_ok());
+    assert!(crate::comandos::capital::guardar_capital(datos).is_ok());
     let en_disco = capital_en_disco();
     assert_eq!(en_disco["certificados"][0]["banco"], "Nuevo");
 }
@@ -3540,7 +3554,7 @@ fn c106_una_propiedad_no_lleva_ni_lleva_campos_calculados() {
         "bolsa": [],
     });
 
-    crate::guardar_capital(datos).unwrap();
+    crate::comandos::capital::guardar_capital(datos).unwrap();
     let en_disco = capital_en_disco();
     assert_eq!(en_disco["propiedades"]["inmobiliario"][0]["nombre"], "Casa");
 }
@@ -3567,7 +3581,7 @@ fn c107_guardar_capital_rechaza_lo_que_antes_aceptaba_sin_comprobar() {
     ] {
         let mut datos = bueno.clone();
         datos["certificados"].as_array_mut().unwrap().push(entrada);
-        let r = crate::guardar_capital(datos);
+        let r = crate::comandos::capital::guardar_capital(datos);
         assert!(r.is_err(), "aceptó {que}");
         assert!(r.unwrap_err().contains("Certificado 2"), "el error no dice cuál entrada: {que}");
     }
@@ -3582,7 +3596,7 @@ fn c108b_un_importe_escrito_como_texto_se_guarda_como_numero_y_lo_deciden_los_di
     let mut datos = capital_con_una_entrada("certificados", "31/12/2030");
     datos["bolsa"] = serde_json::json!([{"emisor": "Emisor Ejemplo", "monto": "1234.565", "tasa": 6.25, "vencimiento": "01/01/2031"}]);
 
-    crate::guardar_capital(datos).unwrap();
+    crate::comandos::capital::guardar_capital(datos).unwrap();
 
     let en_disco = capital_en_disco();
     assert_eq!(en_disco["bolsa"][0]["monto"], serde_json::json!(1234.57), "un número, y el 5 sube");
@@ -3601,15 +3615,15 @@ fn c109b_una_entrada_antigua_mal_formada_no_bloquea_borrar_otra() {
     crate::db_nosql::guardar_coleccion("capital", &guardado).unwrap();
 
     // Se borra la buena y la antigua vuelve tal cual, como hace la interfaz.
-    let mut datos = crate::obtener_capital().unwrap();
+    let mut datos = crate::comandos::capital::obtener_capital().unwrap();
     datos["certificados"].as_array_mut().unwrap().remove(0);
-    assert!(crate::guardar_capital(datos).is_ok(), "no debe bloquear por una entrada que no se tocó");
+    assert!(crate::comandos::capital::guardar_capital(datos).is_ok(), "no debe bloquear por una entrada que no se tocó");
     assert_eq!(capital_en_disco()["certificados"][0]["banco"], "Antiguo");
 
     // Y borrar la antigua también se puede.
-    let mut datos = crate::obtener_capital().unwrap();
+    let mut datos = crate::comandos::capital::obtener_capital().unwrap();
     datos["certificados"].as_array_mut().unwrap().clear();
-    assert!(crate::guardar_capital(datos).is_ok());
+    assert!(crate::comandos::capital::guardar_capital(datos).is_ok());
 }
 
 #[test]
@@ -3623,9 +3637,9 @@ fn c110b_obtener_capital_trae_los_totales_sumados_en_centavos() {
                          {"banco": "B", "monto": 0.2, "tasa": 8.0, "vencimiento": "31/12/2030"}],
         "bolsa": [],
     });
-    crate::guardar_capital(datos).unwrap();
+    crate::comandos::capital::guardar_capital(datos).unwrap();
 
-    let t = &crate::obtener_capital().unwrap()["totales"];
+    let t = &crate::comandos::capital::obtener_capital().unwrap()["totales"];
 
     assert_eq!(t["certificados"], serde_json::json!(0.3), "0.1 + 0.2, sin el ruido de la coma flotante");
     assert_eq!(t["inmobiliario"], serde_json::json!(300000.3));
@@ -3639,9 +3653,9 @@ fn c111b_los_totales_no_se_guardan_aunque_la_interfaz_los_devuelva() {
     let _g = entorno_aislado();
     escribir_capital_de_prueba(&capital_con_una_entrada("certificados", "31/12/2030"));
 
-    let leido = crate::obtener_capital().unwrap();
+    let leido = crate::comandos::capital::obtener_capital().unwrap();
     assert!(leido.get("totales").is_some(), "obtener sí los trae");
-    crate::guardar_capital(leido).unwrap();
+    crate::comandos::capital::guardar_capital(leido).unwrap();
 
     assert!(capital_en_disco().get("totales").is_none(), "no deben quedar en el archivo");
 }
@@ -3655,7 +3669,7 @@ fn c112b_un_identificador_de_bien_repetido_se_rechaza() {
                           "maquinaria": []},
         "certificados": [], "bolsa": [],
     });
-    assert!(crate::guardar_capital(datos).unwrap_err().contains("repetido"));
+    assert!(crate::comandos::capital::guardar_capital(datos).unwrap_err().contains("repetido"));
 }
 
 // =====================================================================
@@ -3671,7 +3685,7 @@ fn avance(
     porcentaje: Option<f64>,
     fijo: Option<&str>,
 ) -> Result<String, String> {
-    crate::registrar_avance_efectivo(
+    crate::comandos::avances::registrar_avance_efectivo(
         tarjeta,
         cuenta,
         "01/10/2026".into(),
@@ -3765,7 +3779,7 @@ fn c112_la_nota_de_exoneracion_se_guarda_sin_espacios_sobrantes() {
     let tarjeta = crear_tarjeta(0.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
 
-    crate::registrar_avance_efectivo(
+    crate::comandos::avances::registrar_avance_efectivo(
         tarjeta, cuenta, "01/10/2026".into(), importe("1350.00"), "DOP".into(),
         "exonerado".into(), None, None, Some("  Promoción de la entidad  ".into()),
     )
@@ -3862,7 +3876,7 @@ fn c119_una_fecha_ilegible_o_inexistente_se_rechaza() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
 
     for fecha in ["2026-10-01", "1/10/2026", "31/02/2026", "ayer", ""] {
-        let r = crate::registrar_avance_efectivo(
+        let r = crate::comandos::avances::registrar_avance_efectivo(
             tarjeta, cuenta, fecha.into(), importe("100.00"), "DOP".into(),
             "exonerado".into(), None, None, None,
         );
@@ -3879,7 +3893,7 @@ fn c120_revertir_un_avance_deja_tarjeta_cuenta_y_gastos_como_estaban_y_abre_un_c
     avance(tarjeta, cuenta, "12500.00", "porcentaje", Some(6.25), None).unwrap();
     let id: i64 = conexion().query_row("SELECT id FROM avances_efectivo;", [], |r| r.get(0)).unwrap();
 
-    let resumen = crate::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
+    let resumen = crate::comandos::avances::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
 
     assert_importe(balances_tarjeta(tarjeta).0, 5_000.0, "la deuda vuelve, cargo incluido");
     assert_importe(saldo_cuenta_id(cuenta), 1_000.0, "la cuenta devuelve el importe");
@@ -3900,7 +3914,7 @@ fn c121_revertir_sin_explicar_se_rechaza_y_no_mueve_nada() {
     avance(tarjeta, cuenta, "1350.00", "exonerado", None, None).unwrap();
     let id: i64 = conexion().query_row("SELECT id FROM avances_efectivo;", [], |r| r.get(0)).unwrap();
 
-    assert!(crate::revertir_avance_efectivo(id, "error".into()).is_err());
+    assert!(crate::comandos::avances::revertir_avance_efectivo(id, "error".into()).is_err());
 
     assert_importe(balances_tarjeta(tarjeta).0, 1_350.0, "sigue todo como estaba");
     assert_eq!(filas_de_avances(), 1);
@@ -3914,8 +3928,8 @@ fn c122_revertir_dos_veces_falla_la_segunda_sin_duplicar_la_devolucion() {
     avance(tarjeta, cuenta, "1350.00", "exonerado", None, None).unwrap();
     let id: i64 = conexion().query_row("SELECT id FROM avances_efectivo;", [], |r| r.get(0)).unwrap();
 
-    crate::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
-    assert!(crate::revertir_avance_efectivo(id, motivo_de_prueba()).is_err());
+    crate::comandos::avances::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
+    assert!(crate::comandos::avances::revertir_avance_efectivo(id, motivo_de_prueba()).is_err());
 
     assert_importe(balances_tarjeta(tarjeta).0, 0.0, "una sola devolución");
     assert_importe(saldo_cuenta_id(cuenta), 500.0, "una sola devolución");
@@ -3933,7 +3947,7 @@ fn c123_el_gasto_del_cargo_no_se_puede_borrar_por_separado() {
         .query_row("SELECT gasto_cargo_id FROM avances_efectivo;", [], |r| r.get(0))
         .unwrap();
 
-    let r = crate::eliminar_gasto(gasto_id, motivo_de_prueba());
+    let r = crate::comandos::gastos::eliminar_gasto(gasto_id, motivo_de_prueba());
 
     assert!(r.unwrap_err().contains("avance de efectivo"));
     assert_importe(balances_tarjeta(tarjeta).0, 13_500.0, "la deuda no se movió");
@@ -3975,7 +3989,7 @@ fn c126_la_lista_de_avances_de_una_tarjeta_los_devuelve_del_mas_reciente() {
     avance(tarjeta, cuenta, "2750.00", "porcentaje", Some(6.25), None).unwrap();
     avance(otra, cuenta, "3900.00", "exonerado", None, None).unwrap();
 
-    let lista = crate::obtener_avances_tarjeta(tarjeta).unwrap();
+    let lista = crate::comandos::avances::obtener_avances_tarjeta(tarjeta).unwrap();
 
     assert_eq!(lista.len(), 2, "solo los de esa tarjeta");
     assert_importe(lista[0].monto, 2_750.0, "el más reciente primero");
@@ -3989,7 +4003,7 @@ fn c127_simular_enseña_lo_que_el_avance_va_a_mover_sin_guardar_nada() {
     let tarjeta = crear_tarjeta(0.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
 
-    let s = crate::simular_avance_efectivo(
+    let s = crate::comandos::avances::simular_avance_efectivo(
         importe("12500.00"), "DOP".into(), "porcentaje".into(), Some(6.25), None,
     )
     .unwrap();
@@ -4013,7 +4027,7 @@ fn c128_la_cifra_que_se_simula_es_exactamente_la_que_se_asienta() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 0.0);
 
     for (monto, p) in [("1234.56", 8.5), ("0.50", 7.0), ("99999.99", 6.25), ("1000.005", 9.99)] {
-        let s = crate::simular_avance_efectivo(
+        let s = crate::comandos::avances::simular_avance_efectivo(
             importe(monto), "DOP".into(), "porcentaje".into(), Some(p), None,
         )
         .unwrap();
@@ -4037,11 +4051,11 @@ fn c128_la_cifra_que_se_simula_es_exactamente_la_que_se_asienta() {
 fn c129_simular_rechaza_lo_mismo_que_registrar() {
     let _g = entorno_aislado();
     // Las mismas reglas, por el mismo camino: banda, contradicciones, cero.
-    assert!(crate::simular_avance_efectivo(importe("1350.00"), "DOP".into(), "porcentaje".into(), Some(0.8), None).is_err());
-    assert!(crate::simular_avance_efectivo(importe("1350.00"), "DOP".into(), "fijo".into(), None, None).is_err());
-    assert!(crate::simular_avance_efectivo(importe("1350.00"), "DOP".into(), "exonerado".into(), Some(8.0), None).is_err());
-    assert!(crate::simular_avance_efectivo(importe("0.00"), "DOP".into(), "exonerado".into(), None, None).is_err());
-    assert!(crate::simular_avance_efectivo(importe("1350.00"), "EUR".into(), "exonerado".into(), None, None).is_err());
+    assert!(crate::comandos::avances::simular_avance_efectivo(importe("1350.00"), "DOP".into(), "porcentaje".into(), Some(0.8), None).is_err());
+    assert!(crate::comandos::avances::simular_avance_efectivo(importe("1350.00"), "DOP".into(), "fijo".into(), None, None).is_err());
+    assert!(crate::comandos::avances::simular_avance_efectivo(importe("1350.00"), "DOP".into(), "exonerado".into(), Some(8.0), None).is_err());
+    assert!(crate::comandos::avances::simular_avance_efectivo(importe("0.00"), "DOP".into(), "exonerado".into(), None, None).is_err());
+    assert!(crate::comandos::avances::simular_avance_efectivo(importe("1350.00"), "EUR".into(), "exonerado".into(), None, None).is_err());
 }
 
 // =====================================================================
@@ -4127,7 +4141,7 @@ fn c138_un_gasto_con_bonificacion_se_puede_borrar_porque_el_vinculo_solo_informa
         tasa_cambio: None,
     })
     .unwrap();
-    crate::crear_bonificacion(
+    crate::comandos::bonificaciones::crear_bonificacion(
         "09/09/2026".to_string(), tarjeta, monto(61.73), "DOP".to_string(),
         "Cashback".to_string(), Some(gasto),
     )
@@ -4170,34 +4184,34 @@ fn volcado_de_datos_para_comparar_vistas() {
     macro_rules! leer { ($n:expr, $e:expr) => {
         v.insert($n.to_string(), to_value($e.unwrap_or_else(|e| panic!("{} falló: {e}", $n))).unwrap());
     }; }
-    leer!("obtener_categorias", crate::obtener_categorias());
-    leer!("obtener_clientes", crate::obtener_clientes());
-    leer!("obtener_ingresos", crate::obtener_ingresos());
-    leer!("obtener_ingresos_informales", crate::obtener_ingresos_informales());
-    leer!("obtener_gastos", crate::obtener_gastos());
-    leer!("obtener_tarjetas", crate::obtener_tarjetas());
-    leer!("obtener_cuentas", crate::obtener_cuentas());
-    leer!("obtener_transacciones_cuentas", crate::obtener_transacciones_cuentas());
-    leer!("obtener_suscripciones", crate::obtener_suscripciones());
-    leer!("obtener_prestamos", crate::obtener_prestamos());
-    leer!("obtener_bonificaciones", crate::obtener_bonificaciones());
-    leer!("obtener_correcciones", crate::obtener_correcciones());
-    v.insert("obtener_capital".into(), crate::obtener_capital().expect("capital"));
-    v.insert("listar_respaldos".into(), to_value(crate::listar_respaldos()).unwrap());
+    leer!("obtener_categorias", crate::comandos::catalogos::obtener_categorias());
+    leer!("obtener_clientes", crate::comandos::catalogos::obtener_clientes());
+    leer!("obtener_ingresos", crate::comandos::ingresos::obtener_ingresos());
+    leer!("obtener_ingresos_informales", crate::comandos::informales::obtener_ingresos_informales());
+    leer!("obtener_gastos", crate::comandos::gastos::obtener_gastos());
+    leer!("obtener_tarjetas", crate::comandos::tarjetas::obtener_tarjetas());
+    leer!("obtener_cuentas", crate::comandos::cuentas::obtener_cuentas());
+    leer!("obtener_transacciones_cuentas", crate::comandos::cuentas::obtener_transacciones_cuentas());
+    leer!("obtener_suscripciones", crate::comandos::suscripciones::obtener_suscripciones());
+    leer!("obtener_prestamos", crate::comandos::prestamos::obtener_prestamos());
+    leer!("obtener_bonificaciones", crate::comandos::bonificaciones::obtener_bonificaciones());
+    leer!("obtener_correcciones", crate::comandos::correcciones::obtener_correcciones());
+    v.insert("obtener_capital".into(), crate::comandos::capital::obtener_capital().expect("capital"));
+    v.insert("listar_respaldos".into(), to_value(crate::comandos::respaldos::listar_respaldos()).unwrap());
 
     let mut por_tarjeta = Map::new();
     for t in v["obtener_tarjetas"].as_array().unwrap().clone() {
         let id = t["id"].as_i64().unwrap();
         por_tarjeta.insert(id.to_string(), json!({
-            "abonos": to_value(crate::obtener_abonos_tarjeta(id).expect("abonos")).unwrap(),
-            "avances": to_value(crate::obtener_avances_tarjeta(id).expect("avances")).unwrap(),
+            "abonos": to_value(crate::comandos::abonos::obtener_abonos_tarjeta(id).expect("abonos")).unwrap(),
+            "avances": to_value(crate::comandos::avances::obtener_avances_tarjeta(id).expect("avances")).unwrap(),
         }));
     }
     v.insert("por_tarjeta".into(), Value::Object(por_tarjeta));
     let mut por_prestamo = Map::new();
     for p in v["obtener_prestamos"].as_array().unwrap().clone() {
         let id = p["id"].as_i64().unwrap();
-        por_prestamo.insert(id.to_string(), to_value(crate::obtener_movimientos_prestamo(id).expect("movimientos")).unwrap());
+        por_prestamo.insert(id.to_string(), to_value(crate::comandos::prestamos::obtener_movimientos_prestamo(id).expect("movimientos")).unwrap());
     }
     v.insert("por_prestamo".into(), Value::Object(por_prestamo));
 
@@ -4209,7 +4223,7 @@ fn volcado_de_datos_para_comparar_vistas() {
 fn c95_crear_tarjeta_guarda_cada_importe_por_su_texto_y_en_su_columna() {
     // Ocho importes distintos, para que un cruce de columnas se note; `.005` sube por texto.
     let _g = entorno_aislado();
-    let id = crate::crear_tarjeta(
+    let id = crate::comandos::tarjetas::crear_tarjeta(
         "Banco".into(), "Visa".into(),
         importe("1000.005"), importe("2000.005"), importe("3000.005"), importe("4000.005"),
         importe("5000.005"), importe("6000.005"), importe("7000.005"), importe("8000.005"),
@@ -4232,7 +4246,7 @@ fn c96_actualizar_limites_guarda_cada_importe_por_su_texto_y_distingue_sin_ajust
     let _g = entorno_aislado();
     let id = crear_tarjeta(0.0, 0.0);
 
-    crate::actualizar_limites_tarjeta(
+    crate::comandos::tarjetas::actualizar_limites_tarjeta(
         id,
         importe("1000.005"), importe("2000.005"), importe("3000.005"), importe("4000.005"),
         importe("5000.005"), importe("6000.005"),
@@ -4257,7 +4271,7 @@ fn c96_actualizar_limites_guarda_cada_importe_por_su_texto_y_distingue_sin_ajust
 fn c96b_el_limite_ajustado_tambien_decide_el_centavo_por_su_texto() {
     let _g = entorno_aislado();
     let id = crear_tarjeta(0.0, 0.0);
-    crate::actualizar_limites_tarjeta(
+    crate::comandos::tarjetas::actualizar_limites_tarjeta(
         id,
         importe("9000"), importe("9000"), importe("0"), importe("0"), importe("0"), importe("0"),
         Some(importe("1000.005")), Some(importe("2000.005")), None,
@@ -4305,7 +4319,7 @@ fn c98_la_factura_decide_el_centavo_y_la_retencion_por_el_texto_del_total() {
 fn c110_el_financiamiento_guarda_sus_importes_por_el_texto_y_el_saldo_ausente_es_el_monto() {
     // `.005` sube por texto; sin saldo declarado se asume el monto ya decidido al céntimo.
     let _g = entorno_aislado();
-    let id = crate::crear_prestamo(crate::PrestamoInput {
+    let id = crate::comandos::prestamos::crear_prestamo(crate::comandos::prestamos::PrestamoInput {
         tipo_prestamo: "flexible".into(),
         monto_prestamo: importe("2000.005"),
         institucion_financiera: "Banco Ejemplo".into(),
@@ -4329,7 +4343,7 @@ fn c110_el_financiamiento_guarda_sus_importes_por_el_texto_y_el_saldo_ausente_es
     assert_importe(leer("monto_cuota"), 50.01, "cuota");
     assert_importe(leer("limite_credito"), 3000.01, "límite");
 
-    crate::actualizar_prestamo(crate::ActualizarPrestamoInput {
+    crate::comandos::prestamos::actualizar_prestamo(crate::comandos::prestamos::ActualizarPrestamoInput {
         id, tasa_actual: 12.0, monto_cuota: importe("60.005"), dia_pago: 25,
         limite_credito: Some(importe("4000.005")), tarjeta_id: None,
     })
@@ -4363,7 +4377,7 @@ fn c111_sin_archivo_de_capital_se_da_la_estructura_inicial() {
     assert!(!ruta_del_capital().exists());
     let c = crate::db_nosql::leer_coleccion("capital").expect("un archivo ausente no es un error");
     assert!(c["certificados"].as_array().unwrap().is_empty());
-    assert!(crate::obtener_capital().is_ok());
+    assert!(crate::comandos::capital::obtener_capital().is_ok());
     // Una colección ausente que no es el capital empieza vacía.
     assert_eq!(crate::db_nosql::leer_coleccion("otra").unwrap(), serde_json::json!([]));
     quitar_capital();
@@ -4380,8 +4394,8 @@ fn c112_un_capital_con_json_dañado_da_error_y_no_se_sobrescribe() {
 
     let e = crate::db_nosql::leer_coleccion("capital").expect_err("JSON dañado debe fallar");
     assert!(e.contains("dañado"), "mensaje: {e}");
-    assert!(crate::obtener_capital().is_err(), "la pestaña no debe mostrar «sin datos»");
-    let g = crate::guardar_capital(capital_valido());
+    assert!(crate::comandos::capital::obtener_capital().is_err(), "la pestaña no debe mostrar «sin datos»");
+    let g = crate::comandos::capital::guardar_capital(capital_valido());
     assert!(g.is_err(), "no se guarda sobre un archivo que no se pudo leer");
 
     assert_eq!(std::fs::read_to_string(&ruta).unwrap(), dañado, "el original quedó intacto");
@@ -4398,7 +4412,7 @@ fn c113_un_capital_vacio_de_cero_bytes_tambien_es_un_archivo_dañado() {
     std::fs::write(&ruta, "").unwrap();
 
     assert!(crate::db_nosql::leer_coleccion("capital").is_err());
-    assert!(crate::guardar_capital(capital_valido()).is_err());
+    assert!(crate::comandos::capital::guardar_capital(capital_valido()).is_err());
     assert_eq!(std::fs::read(&ruta).unwrap().len(), 0, "sigue vacío: no se tocó");
     quitar_capital();
 }
@@ -4413,7 +4427,7 @@ fn c114_un_error_de_lectura_del_archivo_tampoco_produce_un_guardado() {
 
     let e = crate::db_nosql::leer_coleccion("capital").expect_err("no se puede leer");
     assert!(e.contains("No se pudo leer"), "mensaje: {e}");
-    assert!(crate::guardar_capital(capital_valido()).is_err());
+    assert!(crate::comandos::capital::guardar_capital(capital_valido()).is_err());
     assert!(ruta.is_dir(), "lo que había sigue ahí");
     quitar_capital();
 }
@@ -4422,9 +4436,9 @@ fn c114_un_error_de_lectura_del_archivo_tampoco_produce_un_guardado() {
 fn c115_con_el_archivo_sano_lee_y_guarda_como_siempre() {
     let _g = entorno_aislado();
     quitar_capital();
-    crate::guardar_capital(capital_valido()).expect("guardar");
+    crate::comandos::capital::guardar_capital(capital_valido()).expect("guardar");
     assert!(crate::db_nosql::leer_coleccion("capital").is_ok());
-    assert!(crate::obtener_capital().is_ok());
+    assert!(crate::comandos::capital::obtener_capital().is_ok());
     quitar_capital();
 }
 
@@ -4434,16 +4448,16 @@ fn c115_con_el_archivo_sano_lee_y_guarda_como_siempre() {
 // dominio / caso de uso / adaptador no cambie nada observable.
 
 fn nombres_de_categorias() -> Vec<String> {
-    crate::obtener_categorias().unwrap().into_iter().map(|c| c.nombre).collect()
+    crate::comandos::catalogos::obtener_categorias().unwrap().into_iter().map(|c| c.nombre).collect()
 }
 
 #[test]
 fn k1_una_categoria_se_crea_recortada_y_se_lista_ordenada_por_nombre() {
     let _g = entorno_aislado();
-    let c = crate::crear_categoria("  Zapatería  ".into()).unwrap();
+    let c = crate::comandos::catalogos::crear_categoria("  Zapatería  ".into()).unwrap();
     assert_eq!(c.nombre, "Zapatería");
     assert!(c.id > 0);
-    crate::crear_categoria("Academia".into()).unwrap();
+    crate::comandos::catalogos::crear_categoria("Academia".into()).unwrap();
     let nombres = nombres_de_categorias();
     let a = nombres.iter().position(|n| n == "Academia").unwrap();
     let z = nombres.iter().position(|n| n == "Zapatería").unwrap();
@@ -4456,13 +4470,13 @@ fn k1_una_categoria_se_crea_recortada_y_se_lista_ordenada_por_nombre() {
 #[test]
 fn k2_una_categoria_vacia_o_repetida_se_rechaza_con_su_mensaje() {
     let _g = entorno_aislado();
-    assert_eq!(crate::crear_categoria("   ".into()).unwrap_err(), "El nombre de la categoría no puede estar vacío.");
-    crate::crear_categoria("Mascotas".into()).unwrap();
+    assert_eq!(crate::comandos::catalogos::crear_categoria("   ".into()).unwrap_err(), "El nombre de la categoría no puede estar vacío.");
+    crate::comandos::catalogos::crear_categoria("Mascotas".into()).unwrap();
     for repetido in ["Mascotas", "mascotas", "MASCOTAS", "  mascotas "] {
-        assert_eq!(crate::crear_categoria(repetido.into()).unwrap_err(), "La categoría ya existe.", "aceptó «{repetido}»");
+        assert_eq!(crate::comandos::catalogos::crear_categoria(repetido.into()).unwrap_err(), "La categoría ya existe.", "aceptó «{repetido}»");
     }
     let antes = nombres_de_categorias().len();
-    assert!(crate::crear_categoria("Otros".into()).is_err(), "«Otros» ya existe de fábrica");
+    assert!(crate::comandos::catalogos::crear_categoria("Otros".into()).is_err(), "«Otros» ya existe de fábrica");
     assert_eq!(nombres_de_categorias().len(), antes);
 }
 
@@ -4479,22 +4493,22 @@ fn gasto_en_categoria(categoria_id: i64) {
 #[test]
 fn k3_eliminar_categoria_respeta_otros_los_gastos_y_borra_la_que_esta_libre() {
     let _g = entorno_aislado();
-    let otros = crate::obtener_categorias().unwrap().into_iter().find(|c| c.nombre == "Otros").expect("«Otros» existe de fábrica").id;
+    let otros = crate::comandos::catalogos::obtener_categorias().unwrap().into_iter().find(|c| c.nombre == "Otros").expect("«Otros» existe de fábrica").id;
     assert_eq!(
-        crate::eliminar_categoria(otros).unwrap_err(),
+        crate::comandos::catalogos::eliminar_categoria(otros).unwrap_err(),
         "No se puede eliminar la categoría de sistema 'Otros'."
     );
 
-    let con_gastos = crate::crear_categoria("Con gastos".into()).unwrap().id;
+    let con_gastos = crate::comandos::catalogos::crear_categoria("Con gastos".into()).unwrap().id;
     gasto_en_categoria(con_gastos);
     assert_eq!(
-        crate::eliminar_categoria(con_gastos).unwrap_err(),
+        crate::comandos::catalogos::eliminar_categoria(con_gastos).unwrap_err(),
         "No se puede eliminar la categoría porque tiene gastos registrados asociados."
     );
     assert!(nombres_de_categorias().contains(&"Con gastos".to_string()));
 
-    let libre = crate::crear_categoria("Libre".into()).unwrap().id;
-    crate::eliminar_categoria(libre).unwrap();
+    let libre = crate::comandos::catalogos::crear_categoria("Libre".into()).unwrap().id;
+    crate::comandos::catalogos::eliminar_categoria(libre).unwrap();
     assert!(!nombres_de_categorias().contains(&"Libre".to_string()));
 }
 
@@ -4502,17 +4516,17 @@ fn k3_eliminar_categoria_respeta_otros_los_gastos_y_borra_la_que_esta_libre() {
 fn k4_eliminar_una_categoria_inexistente_falla_sin_borrar_nada() {
     let _g = entorno_aislado();
     let antes = nombres_de_categorias().len();
-    assert!(crate::eliminar_categoria(987_654).is_err());
+    assert!(crate::comandos::catalogos::eliminar_categoria(987_654).is_err());
     assert_eq!(nombres_de_categorias().len(), antes);
 }
 
 #[test]
 fn k5_un_cliente_se_crea_recortado_y_se_lista_por_nombre() {
     let _g = entorno_aislado();
-    let a = crate::crear_cliente("  101010101 ".into(), "  Beta SRL ".into()).unwrap();
+    let a = crate::comandos::catalogos::crear_cliente("  101010101 ".into(), "  Beta SRL ".into()).unwrap();
     assert_eq!((a.rnc.as_str(), a.nombre.as_str()), ("101010101", "Beta SRL"));
-    crate::crear_cliente("202020202".into(), "Alfa SRL".into()).unwrap();
-    let nombres: Vec<String> = crate::obtener_clientes().unwrap().into_iter().map(|c| c.nombre).collect();
+    crate::comandos::catalogos::crear_cliente("202020202".into(), "Alfa SRL".into()).unwrap();
+    let nombres: Vec<String> = crate::comandos::catalogos::obtener_clientes().unwrap().into_iter().map(|c| c.nombre).collect();
     assert_eq!(nombres, vec!["Alfa SRL".to_string(), "Beta SRL".to_string()]);
 }
 
@@ -4521,16 +4535,16 @@ fn k6_un_cliente_sin_datos_o_con_rnc_repetido_se_rechaza_con_su_mensaje() {
     let _g = entorno_aislado();
     for (rnc, nombre) in [("", "Algo"), ("123", ""), ("  ", "  ")] {
         assert_eq!(
-            crate::crear_cliente(rnc.into(), nombre.into()).unwrap_err(),
+            crate::comandos::catalogos::crear_cliente(rnc.into(), nombre.into()).unwrap_err(),
             "RNC y nombre no pueden estar vacíos."
         );
     }
-    crate::crear_cliente("303030303".into(), "Gamma".into()).unwrap();
+    crate::comandos::catalogos::crear_cliente("303030303".into(), "Gamma".into()).unwrap();
     assert_eq!(
-        crate::crear_cliente(" 303030303 ".into(), "Otro nombre".into()).unwrap_err(),
+        crate::comandos::catalogos::crear_cliente(" 303030303 ".into(), "Otro nombre".into()).unwrap_err(),
         "Ya existe un cliente con este RNC."
     );
-    assert_eq!(crate::obtener_clientes().unwrap().len(), 1);
+    assert_eq!(crate::comandos::catalogos::obtener_clientes().unwrap().len(), 1);
 }
 
 #[test]
@@ -4538,16 +4552,16 @@ fn k7_eliminar_cliente_exige_que_no_tenga_facturas() {
     let _g = entorno_aislado();
     let con_factura = crear_ingreso(factura("K-001", 1000.0, 15.0)).unwrap();
     let _ = con_factura;
-    let cliente = crate::obtener_clientes().unwrap().into_iter().next().expect("la factura creó su cliente").id;
+    let cliente = crate::comandos::catalogos::obtener_clientes().unwrap().into_iter().next().expect("la factura creó su cliente").id;
     assert_eq!(
-        crate::eliminar_cliente(cliente).unwrap_err(),
+        crate::comandos::catalogos::eliminar_cliente(cliente).unwrap_err(),
         "No se puede eliminar el cliente porque tiene facturas registradas."
     );
-    assert_eq!(crate::obtener_clientes().unwrap().len(), 1);
+    assert_eq!(crate::comandos::catalogos::obtener_clientes().unwrap().len(), 1);
 
-    let libre = crate::crear_cliente("404040404".into(), "Delta".into()).unwrap().id;
-    crate::eliminar_cliente(libre).unwrap();
-    assert_eq!(crate::obtener_clientes().unwrap().len(), 1);
+    let libre = crate::comandos::catalogos::crear_cliente("404040404".into(), "Delta".into()).unwrap().id;
+    crate::comandos::catalogos::eliminar_cliente(libre).unwrap();
+    assert_eq!(crate::comandos::catalogos::obtener_clientes().unwrap().len(), 1);
 }
 
 // --- A-03, vertical «cuentas»: caracterización antes de extraer ---
@@ -4566,13 +4580,13 @@ fn columnas_de_cuenta(id: i64) -> (String, Option<String>, Option<f64>, f64) {
 }
 
 fn total_de_cuentas() -> usize {
-    crate::obtener_cuentas().unwrap().len()
+    crate::comandos::cuentas::obtener_cuentas().unwrap().len()
 }
 
 #[test]
 fn m1_una_cuenta_se_crea_recortada_con_su_entidad_y_su_saldo() {
     let _g = entorno_aislado();
-    let id = crate::crear_cuenta(
+    let id = crate::comandos::cuentas::crear_cuenta(
         "  Cuenta Prueba  ".into(), "USD".into(), importe("250.50"), Some("  Banco Ejemplo ".into()), Some(importe("12.00")),
     )
     .unwrap();
@@ -4590,8 +4604,8 @@ fn m1_una_cuenta_se_crea_recortada_con_su_entidad_y_su_saldo() {
 #[test]
 fn m2_una_entidad_en_blanco_se_guarda_como_nula_igual_que_una_ausente() {
     let _g = entorno_aislado();
-    let a = crate::crear_cuenta("Con espacios".into(), "DOP".into(), monto(0.0), Some("   ".into()), None).unwrap();
-    let b = crate::crear_cuenta("Sin entidad".into(), "DOP".into(), monto(0.0), None, None).unwrap();
+    let a = crate::comandos::cuentas::crear_cuenta("Con espacios".into(), "DOP".into(), monto(0.0), Some("   ".into()), None).unwrap();
+    let b = crate::comandos::cuentas::crear_cuenta("Sin entidad".into(), "DOP".into(), monto(0.0), None, None).unwrap();
     assert_eq!(columnas_de_cuenta(a).1, None);
     assert_eq!(columnas_de_cuenta(b).1, None);
 }
@@ -4600,36 +4614,36 @@ fn m2_una_entidad_en_blanco_se_guarda_como_nula_igual_que_una_ausente() {
 fn m3_crear_una_cuenta_rechaza_nombre_vacio_y_comision_negativa_con_su_mensaje_y_en_ese_orden() {
     let _g = entorno_aislado();
     assert_eq!(
-        crate::crear_cuenta("   ".into(), "DOP".into(), monto(0.0), None, None).unwrap_err(),
+        crate::comandos::cuentas::crear_cuenta("   ".into(), "DOP".into(), monto(0.0), None, None).unwrap_err(),
         "El nombre de la cuenta no puede estar vacío."
     );
     assert_eq!(
-        crate::crear_cuenta("Negativa".into(), "DOP".into(), monto(0.0), None, Some(importe("-0.01"))).unwrap_err(),
+        crate::comandos::cuentas::crear_cuenta("Negativa".into(), "DOP".into(), monto(0.0), None, Some(importe("-0.01"))).unwrap_err(),
         "La comisión por pago de impuestos no puede ser negativa."
     );
     // El nombre se comprueba primero.
     assert_eq!(
-        crate::crear_cuenta(" ".into(), "DOP".into(), monto(0.0), None, Some(importe("-5"))).unwrap_err(),
+        crate::comandos::cuentas::crear_cuenta(" ".into(), "DOP".into(), monto(0.0), None, Some(importe("-5"))).unwrap_err(),
         "El nombre de la cuenta no puede estar vacío."
     );
     // Una comisión de cero es válida (el banco no cobra), y distinta de ninguna.
-    let id = crate::crear_cuenta("Cero".into(), "DOP".into(), monto(0.0), None, Some(importe("0.00"))).unwrap();
+    let id = crate::comandos::cuentas::crear_cuenta("Cero".into(), "DOP".into(), monto(0.0), None, Some(importe("0.00"))).unwrap();
     assert_importe(columnas_de_cuenta(id).2.unwrap(), 0.0, "cero declarado");
     assert_eq!(total_de_cuentas(), 1 + cuentas_de_fabrica(), "las rechazadas no dejaron nada");
 }
 
 fn cuentas_de_fabrica() -> usize {
-    crate::obtener_cuentas().unwrap().iter().filter(|c| c.nombre.starts_with("Efectivo")).count()
+    crate::comandos::cuentas::obtener_cuentas().unwrap().iter().filter(|c| c.nombre.starts_with("Efectivo")).count()
 }
 
 #[test]
 fn m4_una_divisa_ilegal_o_un_nombre_repetido_los_rechaza_el_esquema_y_no_dejan_nada() {
     let _g = entorno_aislado();
     let antes = total_de_cuentas();
-    let e = crate::crear_cuenta("Euro".into(), "EUR".into(), monto(0.0), None, None).unwrap_err();
+    let e = crate::comandos::cuentas::crear_cuenta("Euro".into(), "EUR".into(), monto(0.0), None, None).unwrap_err();
     assert!(e.contains("CHECK constraint failed"), "mensaje: {e}");
-    crate::crear_cuenta("Repetida".into(), "DOP".into(), monto(0.0), None, None).unwrap();
-    let e = crate::crear_cuenta("Repetida".into(), "DOP".into(), monto(0.0), None, None).unwrap_err();
+    crate::comandos::cuentas::crear_cuenta("Repetida".into(), "DOP".into(), monto(0.0), None, None).unwrap();
+    let e = crate::comandos::cuentas::crear_cuenta("Repetida".into(), "DOP".into(), monto(0.0), None, None).unwrap_err();
     assert!(e.contains("UNIQUE constraint failed"), "mensaje: {e}");
     assert_eq!(total_de_cuentas(), antes + 1);
 }
@@ -4638,14 +4652,14 @@ fn m4_una_divisa_ilegal_o_un_nombre_repetido_los_rechaza_el_esquema_y_no_dejan_n
 fn m5_actualizar_una_cuenta_corrige_nombre_entidad_y_comision_sin_tocar_el_saldo() {
     let _g = entorno_aislado();
     let id = crear_cuenta("Original", "DOP", 777.0);
-    crate::actualizar_cuenta(id, "  Renombrada ".into(), Some(" Banco Nuevo ".into()), Some(importe("5.00"))).unwrap();
+    crate::comandos::cuentas::actualizar_cuenta(id, "  Renombrada ".into(), Some(" Banco Nuevo ".into()), Some(importe("5.00"))).unwrap();
     let (nombre, entidad, comision, saldo) = columnas_de_cuenta(id);
     assert_eq!((nombre.as_str(), entidad.as_deref()), ("Renombrada", Some("Banco Nuevo")));
     assert_importe(comision.unwrap(), 5.0, "comisión");
     assert_importe(saldo, 777.0, "el saldo no se toca");
 
     // Sin entidad ni comisión las deja nulas: corregir con vacío borra lo declarado.
-    crate::actualizar_cuenta(id, "Renombrada".into(), Some("  ".into()), None).unwrap();
+    crate::comandos::cuentas::actualizar_cuenta(id, "Renombrada".into(), Some("  ".into()), None).unwrap();
     let (_, entidad, comision, _) = columnas_de_cuenta(id);
     assert_eq!(entidad, None);
     assert!(comision.is_none());
@@ -4656,15 +4670,15 @@ fn m6_actualizar_rechaza_vacio_negativo_e_inexistente_con_su_mensaje() {
     let _g = entorno_aislado();
     let id = crear_cuenta("Estable", "DOP", 10.0);
     assert_eq!(
-        crate::actualizar_cuenta(id, "  ".into(), None, None).unwrap_err(),
+        crate::comandos::cuentas::actualizar_cuenta(id, "  ".into(), None, None).unwrap_err(),
         "El nombre de la cuenta no puede estar vacío."
     );
     assert_eq!(
-        crate::actualizar_cuenta(id, "Estable".into(), None, Some(importe("-1"))).unwrap_err(),
+        crate::comandos::cuentas::actualizar_cuenta(id, "Estable".into(), None, Some(importe("-1"))).unwrap_err(),
         "La comisión por pago de impuestos no puede ser negativa."
     );
     assert_eq!(
-        crate::actualizar_cuenta(987_654, "Nada".into(), None, None).unwrap_err(),
+        crate::comandos::cuentas::actualizar_cuenta(987_654, "Nada".into(), None, None).unwrap_err(),
         "No se encontró la cuenta 987654."
     );
     assert_eq!(columnas_de_cuenta(id).0, "Estable", "lo rechazado no cambió nada");
@@ -4673,9 +4687,9 @@ fn m6_actualizar_rechaza_vacio_negativo_e_inexistente_con_su_mensaje() {
 #[test]
 fn m7_las_cuentas_se_listan_por_nombre_con_todos_sus_campos() {
     let _g = entorno_aislado();
-    crate::crear_cuenta("Zeta".into(), "USD".into(), importe("1.50"), Some("Banco Z".into()), Some(importe("3.00"))).unwrap();
-    crate::crear_cuenta("Alfa".into(), "DOP".into(), importe("2.25"), None, None).unwrap();
-    let todas = crate::obtener_cuentas().unwrap();
+    crate::comandos::cuentas::crear_cuenta("Zeta".into(), "USD".into(), importe("1.50"), Some("Banco Z".into()), Some(importe("3.00"))).unwrap();
+    crate::comandos::cuentas::crear_cuenta("Alfa".into(), "DOP".into(), importe("2.25"), None, None).unwrap();
+    let todas = crate::comandos::cuentas::obtener_cuentas().unwrap();
     let nombres: Vec<&str> = todas.iter().map(|c| c.nombre.as_str()).collect();
     let mut ordenados = nombres.clone();
     ordenados.sort();
@@ -4693,9 +4707,9 @@ fn m8_las_transacciones_entre_cuentas_salen_de_la_mas_nueva_a_la_mas_vieja_con_l
     let _g = entorno_aislado();
     let a = crear_cuenta("Origen DOP", "DOP", 1000.0);
     let b = crear_cuenta("Destino USD", "USD", 0.0);
-    crate::transferir_entre_cuentas("01/09/2026".into(), a, b, importe("600.00"), importe("10.00"), importe("1.00"), "Primera".into()).unwrap();
-    crate::transferir_entre_cuentas("02/09/2026".into(), a, b, importe("120.00"), importe("2.00"), importe("0.00"), "Segunda".into()).unwrap();
-    let t = crate::obtener_transacciones_cuentas().unwrap();
+    crate::comandos::cuentas::transferir_entre_cuentas("01/09/2026".into(), a, b, importe("600.00"), importe("10.00"), importe("1.00"), "Primera".into()).unwrap();
+    crate::comandos::cuentas::transferir_entre_cuentas("02/09/2026".into(), a, b, importe("120.00"), importe("2.00"), importe("0.00"), "Segunda".into()).unwrap();
+    let t = crate::comandos::cuentas::obtener_transacciones_cuentas().unwrap();
     assert_eq!(t.len(), 2);
     assert_eq!(t[0].descripcion.as_deref(), Some("Segunda"), "la más nueva primero");
     assert_eq!(t[1].descripcion.as_deref(), Some("Primera"));
@@ -4851,7 +4865,7 @@ fn n7_las_facturas_se_listan_de_la_mas_nueva_a_la_mas_vieja_con_los_datos_de_su_
     let b = crear_ingreso(input_de_factura("N-010", "232323232", "Cliente Dos", "400", 0.0)).unwrap();
     marcar_ingreso_pagado(a, cuenta, "07/10/2026".into(), importe("270")).unwrap();
 
-    let lista = crate::obtener_ingresos().unwrap();
+    let lista = crate::comandos::ingresos::obtener_ingresos().unwrap();
     assert_eq!(lista.iter().map(|i| i.id).collect::<Vec<_>>(), vec![b, a], "la más nueva primero");
     let uno = &lista[1];
     assert_eq!((uno.numero_factura.as_str(), uno.cliente_nombre.as_str(), uno.cliente_rnc.as_str()), ("N-009", "Cliente Uno", "212121212"));
@@ -4969,7 +4983,7 @@ fn o6_eliminar_una_factura_cobrada_cuya_cuenta_ya_no_existe_la_borra_igual_sin_m
     eliminar_ingreso(id, motivo_de_prueba()).unwrap();
 
     assert_importe(saldo_cuenta_id(cuenta), saldo_antes, "ninguna cuenta se tocó");
-    assert_eq!(crate::obtener_ingresos().unwrap().len(), 0, "la factura se borró");
+    assert_eq!(crate::comandos::ingresos::obtener_ingresos().unwrap().len(), 0, "la factura se borró");
 }
 
 #[test]
@@ -4986,8 +5000,8 @@ fn o7_eliminar_una_factura_sin_cobrar_no_toca_ningun_saldo() {
 // Completan c81–c84b con los mensajes exactos, el listado, la forma de las filas y los bordes. Fijan lo que
 // los cinco comandos hacen HOY.
 
-fn informal_por_id(id: i64) -> crate::IngresoInformal {
-    crate::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).expect("informal")
+fn informal_por_id(id: i64) -> crate::comandos::informales::IngresoInformal {
+    crate::comandos::informales::obtener_ingresos_informales().unwrap().into_iter().find(|i| i.id == id).expect("informal")
 }
 
 #[test]
@@ -4995,7 +5009,7 @@ fn p1_un_informal_se_crea_pendiente_y_se_lista_de_el_mas_nuevo_al_mas_viejo() {
     let _g = entorno_aislado();
     let a = crear_ingreso_informal("01/10/2026".into(), "Primero".into(), importe("100")).unwrap();
     let b = crear_ingreso_informal("02/10/2026".into(), "Segundo".into(), importe("200")).unwrap();
-    let lista = crate::obtener_ingresos_informales().unwrap();
+    let lista = crate::comandos::informales::obtener_ingresos_informales().unwrap();
     assert_eq!(lista.iter().map(|i| i.id).collect::<Vec<_>>(), vec![b, a]);
     let primero = informal_por_id(a);
     assert_eq!((primero.fecha.as_str(), primero.descripcion.as_str(), primero.estatus.as_str()), ("01/10/2026", "Primero", "pendiente"));
@@ -5006,7 +5020,7 @@ fn p1_un_informal_se_crea_pendiente_y_se_lista_de_el_mas_nuevo_al_mas_viejo() {
 #[test]
 fn p2_un_informal_rechaza_monto_cero_o_negativo_y_datos_vacios_sin_dejar_nada() {
     let _g = entorno_aislado();
-    let informales = || crate::obtener_ingresos_informales().unwrap().len();
+    let informales = || crate::comandos::informales::obtener_ingresos_informales().unwrap().len();
     let crear = |fecha: &str, descripcion: &str, monto: &str| crear_ingreso_informal(fecha.into(), descripcion.into(), importe(monto));
     assert_eq!(crear("01/10/2026", "Cero", "0").unwrap_err(), "Un ingreso debe tener un monto mayor que cero.");
     assert_eq!(crear("01/10/2026", "Negativo", "-50").unwrap_err(), "Un ingreso debe tener un monto mayor que cero.");
@@ -5027,14 +5041,14 @@ fn p2b_el_cobro_en_efectivo_informal_exige_lo_mismo_y_no_mueve_la_caja() {
     assert_eq!(cobrar("", "Sin fecha", "5").unwrap_err(), "Falta la fecha del ingreso.");
     assert_eq!(cobrar("01/10/2026", " ", "5").unwrap_err(), "Falta la descripción del ingreso.");
     assert_importe(balance_cuenta("Efectivo DOP"), antes, "la caja no se movió");
-    assert_eq!(crate::obtener_ingresos_informales().unwrap().len(), 0);
+    assert_eq!(crate::comandos::informales::obtener_ingresos_informales().unwrap().len(), 0);
 }
 
 #[test]
 fn r2b_los_sobregiros_de_una_tarjeta_nueva_tampoco_pueden_ser_negativos() {
     let _g = entorno_aislado();
     let alta = |sobregiro_pesos: &str, sobregiro_dolares: &str| {
-        crate::crear_tarjeta(
+        crate::comandos::tarjetas::crear_tarjeta(
             "B".into(), "T".into(), importe("100"), importe("100"), importe(sobregiro_pesos), importe(sobregiro_dolares),
             importe("0"), importe("0"), importe("0"), importe("0"), 15, 5,
         )
@@ -5105,12 +5119,12 @@ fn p6_sin_caja_de_efectivo_el_cobro_se_rechaza_sin_registrar_nada_ni_mover_saldo
     let _g = entorno_aislado();
     conexion().execute("UPDATE cuentas_ahorro SET nombre = 'Caja renombrada' WHERE nombre = 'Efectivo DOP';", []).unwrap();
     let total_antes: f64 = conexion().query_row("SELECT SUM(balance_actual) FROM cuentas_ahorro;", [], |r| r.get(0)).unwrap();
-    let informales_antes = crate::obtener_ingresos_informales().unwrap().len();
+    let informales_antes = crate::comandos::informales::obtener_ingresos_informales().unwrap().len();
 
     let e = crear_cobro_efectivo_informal("04/10/2026".into(), "Sin caja".into(), importe("90"), "DOP".into()).unwrap_err();
     assert_eq!(e, "No existe la caja «Efectivo DOP» donde entra el cobro en efectivo. Créala o registra el ingreso como pendiente y cóbralo en una cuenta.");
 
-    assert_eq!(crate::obtener_ingresos_informales().unwrap().len(), informales_antes, "no quedó ningún ingreso");
+    assert_eq!(crate::comandos::informales::obtener_ingresos_informales().unwrap().len(), informales_antes, "no quedó ningún ingreso");
     let total_despues: f64 = conexion().query_row("SELECT SUM(balance_actual) FROM cuentas_ahorro;", [], |r| r.get(0)).unwrap();
     assert_importe(total_despues, total_antes, "y ninguna cuenta se movió");
     // La caja de dólares es otra: con la de pesos ausente, un cobro en dólares sigue entrando donde le corresponde.
@@ -5127,7 +5141,7 @@ fn p7_eliminar_un_informal_dice_su_causa_y_deja_un_caso_con_su_descripcion_y_mon
     let id = crear_ingreso_informal("01/10/2026".into(), "Clase suelta".into(), importe("120")).unwrap();
     let e = eliminar_ingreso_informal(id, " corto ".into()).unwrap_err();
     assert!(e.starts_with("Explica la corrección en al menos 15 caracteres.") && e.contains("«corto»"), "{e}");
-    assert_eq!(crate::obtener_ingresos_informales().unwrap().len(), 1, "no se borró nada");
+    assert_eq!(crate::comandos::informales::obtener_ingresos_informales().unwrap().len(), 1, "no se borró nada");
 
     let caso = eliminar_ingreso_informal(id, motivo_de_prueba()).unwrap();
     let casos = casos_de_correccion();
@@ -5135,7 +5149,7 @@ fn p7_eliminar_un_informal_dice_su_causa_y_deja_un_caso_con_su_descripcion_y_mon
     assert_eq!(&caso, numero);
     assert_eq!((tipo.as_str(), *referencia, descripcion.as_str(), divisa.as_deref()), ("ingreso informal", id, "Clase suelta", Some("DOP")));
     assert_importe(importe_caso.unwrap(), 120.0, "monto del ingreso");
-    assert!(crate::obtener_ingresos_informales().unwrap().is_empty());
+    assert!(crate::comandos::informales::obtener_ingresos_informales().unwrap().is_empty());
 }
 
 #[test]
@@ -5173,8 +5187,8 @@ fn p9_eliminar_un_cobro_en_efectivo_en_dolares_revierte_la_caja_de_dolares() {
 // Completan c34–c44 con los mensajes exactos, los valores por omisión, el contador de cuotas, el listado con sus
 // recordatorios y el borrado. Fijan lo que los siete comandos hacen HOY.
 
-fn entrada_de_prestamo(tipo: &str, monto: &str, cuotas: Option<(i32, i32)>, cuota: &str, dia: i32) -> crate::PrestamoInput {
-    crate::PrestamoInput {
+fn entrada_de_prestamo(tipo: &str, monto: &str, cuotas: Option<(i32, i32)>, cuota: &str, dia: i32) -> crate::comandos::prestamos::PrestamoInput {
+    crate::comandos::prestamos::PrestamoInput {
         tipo_prestamo: tipo.into(),
         monto_prestamo: importe(monto),
         institucion_financiera: "Banco Ejemplo".into(),
@@ -5204,21 +5218,21 @@ fn fila_de_prestamo(id: i64) -> FilaDePrestamo {
 #[test]
 fn q1_crear_un_prestamo_guarda_sus_cifras_y_el_saldo_por_omision_es_el_monto() {
     let _g = entorno_aislado();
-    let id = crate::crear_prestamo(entrada_de_prestamo("vehiculo", "50000.50", Some((60, 58)), "1250.25", 15)).unwrap();
+    let id = crate::comandos::prestamos::crear_prestamo(entrada_de_prestamo("vehiculo", "50000.50", Some((60, 58)), "1250.25", 15)).unwrap();
     let (tipo, monto, totales, pendientes, cuota, dia, saldo, limite) = fila_de_prestamo(id);
     assert_eq!((tipo.as_str(), totales, pendientes, dia, limite), ("vehiculo", Some(60), Some(58), 15, None));
     assert_importe(monto, 50000.5, "monto");
     assert_importe(cuota, 1250.25, "cuota");
     assert_importe(saldo.unwrap(), 50000.5, "sin saldo declarado se asume el monto íntegro");
 
-    let con_saldo = crate::crear_prestamo(crate::PrestamoInput { saldo_actual: Some(importe("40000")), ..entrada_de_prestamo("consumo", "50000", Some((12, 12)), "100", 5) }).unwrap();
+    let con_saldo = crate::comandos::prestamos::crear_prestamo(crate::comandos::prestamos::PrestamoInput { saldo_actual: Some(importe("40000")), ..entrada_de_prestamo("consumo", "50000", Some((12, 12)), "100", 5) }).unwrap();
     assert_importe(fila_de_prestamo(con_saldo).6.unwrap(), 40000.0, "el saldo declarado manda");
 }
 
 #[test]
 fn q2_un_prestamo_flexible_ignora_las_cuotas_que_se_le_den() {
     let _g = entorno_aislado();
-    let id = crate::crear_prestamo(entrada_de_prestamo("flexible", "1000", Some((10, 20)), "50", 5)).unwrap();
+    let id = crate::comandos::prestamos::crear_prestamo(entrada_de_prestamo("flexible", "1000", Some((10, 20)), "50", 5)).unwrap();
     let (_, _, totales, pendientes, ..) = fila_de_prestamo(id);
     assert_eq!((totales, pendientes), (None, None), "ni siquiera valida que 20 > 10: no hay cuotas que contar");
 }
@@ -5226,10 +5240,10 @@ fn q2_un_prestamo_flexible_ignora_las_cuotas_que_se_le_den() {
 #[test]
 fn q3_crear_rechaza_lo_que_no_tiene_sentido_con_su_mensaje_y_en_su_orden() {
     let _g = entorno_aislado();
-    let e = |entrada: crate::PrestamoInput| crate::crear_prestamo(entrada).unwrap_err();
+    let e = |entrada: crate::comandos::prestamos::PrestamoInput| crate::comandos::prestamos::crear_prestamo(entrada).unwrap_err();
     assert_eq!(e(entrada_de_prestamo("vehiculo", "100", None, "10", 5)), "Las cuotas totales son requeridas.");
     assert_eq!(
-        e(crate::PrestamoInput { cuotas_pendientes: None, ..entrada_de_prestamo("vehiculo", "100", Some((12, 12)), "10", 5) }),
+        e(crate::comandos::prestamos::PrestamoInput { cuotas_pendientes: None, ..entrada_de_prestamo("vehiculo", "100", Some((12, 12)), "10", 5) }),
         "Las cuotas pendientes son requeridas."
     );
     assert_eq!(
@@ -5240,7 +5254,7 @@ fn q3_crear_rechaza_lo_que_no_tiene_sentido_con_su_mensaje_y_en_su_orden() {
         assert_eq!(e(entrada_de_prestamo("vehiculo", "100", Some((12, 12)), "10", dia)), "El día de pago debe ser un día válido del mes (1-31).");
     }
     assert_eq!(
-        e(crate::PrestamoInput { limite_credito: Some(importe("500")), ..entrada_de_prestamo("vehiculo", "100", Some((12, 12)), "10", 5) }),
+        e(crate::comandos::prestamos::PrestamoInput { limite_credito: Some(importe("500")), ..entrada_de_prestamo("vehiculo", "100", Some((12, 12)), "10", 5) }),
         "Solo una línea revolvente tiene límite de crédito."
     );
     // El orden: primero las cuotas, después el día, al final el límite.
@@ -5254,39 +5268,39 @@ fn q4_actualizar_rechaza_inexistente_tarjeta_inexistente_dia_y_limite_con_su_men
     let _g = entorno_aislado();
     let auto = crear_prestamo_de_prueba("vehiculo", 100_000.0, 12.0, 5_000.0, Some((100, 89)), None);
     let linea = crear_prestamo_de_prueba("flexible", 100_000.0, 12.0, 5_000.0, None, Some(150_000.0));
-    let base = |id: i64| crate::ActualizarPrestamoInput { id, tasa_actual: 12.0, monto_cuota: importe("5000"), dia_pago: 25, limite_credito: None, tarjeta_id: None };
-    let e = |entrada: crate::ActualizarPrestamoInput| crate::actualizar_prestamo(entrada).unwrap_err();
+    let base = |id: i64| crate::comandos::prestamos::ActualizarPrestamoInput { id, tasa_actual: 12.0, monto_cuota: importe("5000"), dia_pago: 25, limite_credito: None, tarjeta_id: None };
+    let e = |entrada: crate::comandos::prestamos::ActualizarPrestamoInput| crate::comandos::prestamos::actualizar_prestamo(entrada).unwrap_err();
 
     assert_eq!(e(base(987_654)), "No se encontró el financiamiento 987654.");
-    assert_eq!(e(crate::ActualizarPrestamoInput { dia_pago: 32, ..base(auto) }), "El día de pago debe ser un día válido del mes (1-31).");
-    assert_eq!(e(crate::ActualizarPrestamoInput { dia_pago: 0, ..base(987_654) }), "El día de pago debe ser un día válido del mes (1-31).", "el día se comprueba antes de buscar el financiamiento");
-    assert_eq!(e(crate::ActualizarPrestamoInput { limite_credito: Some(importe("1")), ..base(auto) }), "Solo una línea revolvente tiene límite de crédito.");
-    assert_eq!(e(crate::ActualizarPrestamoInput { tarjeta_id: Some(999_999), ..base(linea) }), "No se encontró la tarjeta 999999.");
+    assert_eq!(e(crate::comandos::prestamos::ActualizarPrestamoInput { dia_pago: 32, ..base(auto) }), "El día de pago debe ser un día válido del mes (1-31).");
+    assert_eq!(e(crate::comandos::prestamos::ActualizarPrestamoInput { dia_pago: 0, ..base(987_654) }), "El día de pago debe ser un día válido del mes (1-31).", "el día se comprueba antes de buscar el financiamiento");
+    assert_eq!(e(crate::comandos::prestamos::ActualizarPrestamoInput { limite_credito: Some(importe("1")), ..base(auto) }), "Solo una línea revolvente tiene límite de crédito.");
+    assert_eq!(e(crate::comandos::prestamos::ActualizarPrestamoInput { tarjeta_id: Some(999_999), ..base(linea) }), "No se encontró la tarjeta 999999.");
     // Con la línea sí puede llevar límite, y se guarda.
-    crate::actualizar_prestamo(crate::ActualizarPrestamoInput { limite_credito: Some(importe("200000")), ..base(linea) }).unwrap();
+    crate::comandos::prestamos::actualizar_prestamo(crate::comandos::prestamos::ActualizarPrestamoInput { limite_credito: Some(importe("200000")), ..base(linea) }).unwrap();
     assert_importe(fila_de_prestamo(linea).7.unwrap(), 200_000.0, "límite corregido");
 }
 
 #[test]
 fn q5_pagar_y_declarar_sobre_un_financiamiento_inexistente_dicen_su_mensaje_y_no_asientan_nada() {
     let _g = entorno_aislado();
-    assert_eq!(crate::pagar_cuota_prestamo(404, None).unwrap_err(), "No se encontró el financiamiento 404.");
-    assert_eq!(crate::declarar_saldo_prestamo(404, importe("10"), None).unwrap_err(), "No se encontró el financiamiento 404.");
-    assert!(crate::obtener_movimientos_prestamo(404).unwrap().is_empty(), "sin financiamiento no hay movimientos");
+    assert_eq!(crate::comandos::prestamos::pagar_cuota_prestamo(404, None).unwrap_err(), "No se encontró el financiamiento 404.");
+    assert_eq!(crate::comandos::prestamos::declarar_saldo_prestamo(404, importe("10"), None).unwrap_err(), "No se encontró el financiamiento 404.");
+    assert!(crate::comandos::prestamos::obtener_movimientos_prestamo(404).unwrap().is_empty(), "sin financiamiento no hay movimientos");
 }
 
 #[test]
 fn q6_el_contador_de_cuotas_baja_de_uno_en_uno_sin_pasar_de_cero_y_la_linea_no_lo_tiene() {
     let _g = entorno_aislado();
     let amortizable = crear_prestamo_de_prueba("vehiculo", 10_000.0, 12.0, 1_000.0, Some((12, 1)), None);
-    crate::pagar_cuota_prestamo(amortizable, Some("01/10/2026".into())).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(amortizable, Some("01/10/2026".into())).unwrap();
     assert_eq!(cuotas_pendientes(amortizable), Some(0));
-    crate::pagar_cuota_prestamo(amortizable, Some("01/11/2026".into())).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(amortizable, Some("01/11/2026".into())).unwrap();
     assert_eq!(cuotas_pendientes(amortizable), Some(0), "no baja de cero");
-    assert_eq!(crate::obtener_movimientos_prestamo(amortizable).unwrap().len(), 2, "pero el pago se asienta igual");
+    assert_eq!(crate::comandos::prestamos::obtener_movimientos_prestamo(amortizable).unwrap().len(), 2, "pero el pago se asienta igual");
 
     let linea = crear_prestamo_de_prueba("flexible", 10_000.0, 12.0, 1_000.0, None, Some(20_000.0));
-    crate::pagar_cuota_prestamo(linea, Some("01/10/2026".into())).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(linea, Some("01/10/2026".into())).unwrap();
     assert_eq!(cuotas_pendientes(linea), None, "la línea no cuenta cuotas");
 }
 
@@ -5294,10 +5308,10 @@ fn q6_el_contador_de_cuotas_baja_de_uno_en_uno_sin_pasar_de_cero_y_la_linea_no_l
 fn q7_la_fecha_por_omision_de_un_pago_es_hoy_y_una_declaracion_deja_el_desglose_en_cero_interes() {
     let _g = entorno_aislado();
     let id = crear_prestamo_de_prueba("flexible", 10_000.0, 12.0, 1_000.0, None, Some(20_000.0));
-    crate::pagar_cuota_prestamo(id, None).unwrap();
-    crate::declarar_saldo_prestamo(id, importe("9500"), None).unwrap();
+    crate::comandos::prestamos::pagar_cuota_prestamo(id, None).unwrap();
+    crate::comandos::prestamos::declarar_saldo_prestamo(id, importe("9500"), None).unwrap();
     let hoy = chrono::Local::now().format("%d/%m/%Y").to_string();
-    let movs = crate::obtener_movimientos_prestamo(id).unwrap();
+    let movs = crate::comandos::prestamos::obtener_movimientos_prestamo(id).unwrap();
     assert_eq!(movs.len(), 2);
     assert!(movs.iter().all(|m| m.fecha == hoy), "sin fecha, hoy");
     let declaracion = &movs[0];
@@ -5319,7 +5333,7 @@ fn q8_el_listado_trae_el_cupo_la_tarjeta_y_los_recordatorios_de_pago() {
     conexion().execute("UPDATE prestamos SET dia_pago = ? WHERE id = ?;", params![dia_hoy, por_pagar]).unwrap();
     conexion().execute("UPDATE prestamos SET tarjeta_id = ? WHERE id = ?;", params![tarjeta, linea]).unwrap();
 
-    let lista = crate::obtener_prestamos().unwrap();
+    let lista = crate::comandos::prestamos::obtener_prestamos().unwrap();
     assert_eq!(lista.iter().map(|p| p.id).collect::<Vec<_>>(), vec![por_pagar, auto, linea], "el más nuevo primero");
     let l = lista.iter().find(|p| p.id == linea).unwrap();
     assert!(l.es_revolvente);
@@ -5339,11 +5353,11 @@ fn q8_el_listado_trae_el_cupo_la_tarjeta_y_los_recordatorios_de_pago() {
 fn q9_eliminar_un_financiamiento_no_tiene_guardas_y_se_lleva_sus_movimientos() {
     let _g = entorno_aislado();
     let id = crear_prestamo_de_prueba("flexible", 10_000.0, 12.0, 1_000.0, None, Some(20_000.0));
-    crate::pagar_cuota_prestamo(id, Some("01/10/2026".into())).unwrap();
-    crate::eliminar_prestamo(id).unwrap();
-    assert!(crate::obtener_prestamos().unwrap().is_empty());
-    assert!(crate::obtener_movimientos_prestamo(id).unwrap().is_empty(), "el libro se va con él (ON DELETE CASCADE)");
-    assert!(crate::eliminar_prestamo(id).is_ok(), "borrar uno que ya no está no es un error");
+    crate::comandos::prestamos::pagar_cuota_prestamo(id, Some("01/10/2026".into())).unwrap();
+    crate::comandos::prestamos::eliminar_prestamo(id).unwrap();
+    assert!(crate::comandos::prestamos::obtener_prestamos().unwrap().is_empty());
+    assert!(crate::comandos::prestamos::obtener_movimientos_prestamo(id).unwrap().is_empty(), "el libro se va con él (ON DELETE CASCADE)");
+    assert!(crate::comandos::prestamos::eliminar_prestamo(id).is_ok(), "borrar uno que ya no está no es un error");
 }
 
 // --- A-03, vertical «tarjetas» (parte 1: listar, crear y límites): caracterización antes de extraer ---
@@ -5351,7 +5365,7 @@ fn q9_eliminar_un_financiamiento_no_tiene_guardas_y_se_lleva_sus_movimientos() {
 // Fijan lo que `obtener_tarjetas`, `crear_tarjeta` y `actualizar_limites_tarjeta` hacen HOY.
 
 fn alta_de_tarjeta(entidad: &str, nombre: &str, limite: &str, corte: i32, pago: i32) -> Result<i64, String> {
-    crate::crear_tarjeta(
+    crate::comandos::tarjetas::crear_tarjeta(
         entidad.into(), nombre.into(),
         importe(limite), importe("2000"), importe("300"), importe("400"),
         importe("500"), importe("600"), importe("700"), importe("800"),
@@ -5413,7 +5427,7 @@ fn r2_crear_tarjeta_recorta_y_exige_entidad_y_nombre_y_rechaza_limites_negativos
 fn r3_actualizar_limites_guarda_cada_importe_el_ajuste_que_se_borra_y_la_politica_se_normaliza() {
     let _g = entorno_aislado();
     let id = alta_de_tarjeta("B", "T", "100", 15, 5).unwrap();
-    crate::actualizar_limites_tarjeta(
+    crate::comandos::tarjetas::actualizar_limites_tarjeta(
         id, importe("10"), importe("20"), importe("30"), importe("40"), importe("50"), importe("60"),
         Some(importe("7")), Some(importe("0")), Some("traduce".into()),
     )
@@ -5426,11 +5440,11 @@ fn r3_actualizar_limites_guarda_cada_importe_el_ajuste_que_se_borra_y_la_politic
     assert_eq!(f.14.as_deref(), Some("traduce"));
     assert_importe(f.6, 500.0, "el balance no se toca");
 
-    crate::actualizar_limites_tarjeta(id, importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), None, None, Some("cualquier cosa".into())).unwrap();
+    crate::comandos::tarjetas::actualizar_limites_tarjeta(id, importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), None, None, Some("cualquier cosa".into())).unwrap();
     let f = fila_de_tarjeta(id);
     assert_eq!((f.12, f.13), (None, None), "sin ajuste se borra el que hubiera");
     assert_eq!(f.14.as_deref(), Some("origen"), "una política desconocida cae en «origen»");
-    crate::actualizar_limites_tarjeta(id, importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), None, None, None).unwrap();
+    crate::comandos::tarjetas::actualizar_limites_tarjeta(id, importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), None, None, None).unwrap();
     assert_eq!(fila_de_tarjeta(id).14.as_deref(), Some("origen"), "ausente también");
 }
 
@@ -5438,7 +5452,7 @@ fn r3_actualizar_limites_guarda_cada_importe_el_ajuste_que_se_borra_y_la_politic
 fn r4_actualizar_los_limites_de_una_tarjeta_inexistente_o_con_un_limite_negativo_se_rechaza() {
     let _g = entorno_aislado();
     assert_eq!(
-        crate::actualizar_limites_tarjeta(
+        crate::comandos::tarjetas::actualizar_limites_tarjeta(
             987_654, importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), importe("1"), None, None, None,
         )
         .unwrap_err(),
@@ -5446,7 +5460,7 @@ fn r4_actualizar_los_limites_de_una_tarjeta_inexistente_o_con_un_limite_negativo
     );
     let id = alta_de_tarjeta("B", "T", "100", 15, 5).unwrap();
     for (sobregiro, ajustado) in [("-1", None), ("1", Some("-1"))] {
-        let e = crate::actualizar_limites_tarjeta(
+        let e = crate::comandos::tarjetas::actualizar_limites_tarjeta(
             id, importe("1"), importe("1"), importe(sobregiro), importe("1"), importe("1"), importe("1"),
             ajustado.map(importe), None, None,
         )
@@ -5464,9 +5478,9 @@ fn r5_el_listado_trae_el_cupo_la_politica_y_las_alertas_de_corte_y_pago() {
     // Corte hoy, pago dentro de 10 días (o su equivalente con el mes de 30 días).
     let pago = if hoy + 10 <= 31 { hoy + 10 } else { hoy + 10 - 31 };
     let id = alta_de_tarjeta("Banco Ejemplo", "Visa Ejemplo", "1000", hoy, pago.max(1)).unwrap();
-    crate::actualizar_limites_tarjeta(id, importe("1000"), importe("2000"), importe("300"), importe("400"), importe("700"), importe("800"), Some(importe("800")), None, Some("traduce".into())).unwrap();
+    crate::comandos::tarjetas::actualizar_limites_tarjeta(id, importe("1000"), importe("2000"), importe("300"), importe("400"), importe("700"), importe("800"), Some(importe("800")), None, Some("traduce".into())).unwrap();
 
-    let t = crate::obtener_tarjetas().unwrap().into_iter().find(|t| t.id == id).unwrap();
+    let t = crate::comandos::tarjetas::obtener_tarjetas().unwrap().into_iter().find(|t| t.id == id).unwrap();
     assert_eq!(t.politica_liquidacion, "traduce");
     assert_importe(t.limite_efectivo_pesos, 800.0, "el límite ajustado manda");
     assert_importe(t.limite_efectivo_dolares, 2000.0, "sin ajuste, el aprobado");
@@ -5485,7 +5499,7 @@ fn r6_un_limite_ajustado_mayor_que_el_aprobado_no_lo_supera_y_el_listado_no_fall
     let _g = entorno_aislado();
     let id = alta_de_tarjeta("B", "T", "1000", 15, 5).unwrap();
     conexion().execute("UPDATE tarjetas SET limite_ajustado_pesos = 5000.0 WHERE id = ?;", params![id]).unwrap();
-    let t = crate::obtener_tarjetas().unwrap().into_iter().find(|t| t.id == id).unwrap();
+    let t = crate::comandos::tarjetas::obtener_tarjetas().unwrap().into_iter().find(|t| t.id == id).unwrap();
     assert_importe(t.limite_efectivo_pesos, 1000.0, "el aprobado en bruto");
     assert_importe(t.disponible_pesos, 1000.0 + 300.0 - 500.0, "aprobado + sobregiro - balance");
 }
@@ -5496,7 +5510,7 @@ fn r7_las_tarjetas_se_listan_en_el_orden_en_que_se_crearon_y_una_politica_ausent
     let a = alta_de_tarjeta("B", "Primera", "100", 15, 5).unwrap();
     let b = alta_de_tarjeta("B", "Segunda", "100", 15, 5).unwrap();
     conexion().execute("UPDATE tarjetas SET politica_liquidacion = NULL WHERE id = ?;", params![a]).unwrap();
-    let lista = crate::obtener_tarjetas().unwrap();
+    let lista = crate::comandos::tarjetas::obtener_tarjetas().unwrap();
     assert_eq!(lista.iter().map(|t| t.id).collect::<Vec<_>>(), vec![a, b], "orden de creación, sin ORDER BY");
     assert_eq!(lista[0].politica_liquidacion, "origen");
 }
@@ -5514,7 +5528,7 @@ fn ab1_los_abonos_de_una_tarjeta_salen_del_mas_nuevo_al_mas_viejo_con_su_cuenta_
     registrar_pago_tarjeta(tarjeta, "01/10/2026".to_string(), monto(100.0), "USD".to_string(), Some(cuenta), 60.0).unwrap();
     registrar_pago_tarjeta(tarjeta, "02/10/2026".to_string(), monto(200.0), "USD".to_string(), None, 0.0).unwrap();
 
-    let abonos = crate::obtener_abonos_tarjeta(tarjeta).unwrap();
+    let abonos = crate::comandos::abonos::obtener_abonos_tarjeta(tarjeta).unwrap();
     assert_eq!(abonos.len(), 2);
     let (nuevo, viejo) = (&abonos[0], &abonos[1]);
     assert_eq!((nuevo.fecha_pago.as_str(), nuevo.divisa.as_str(), nuevo.cuenta_nombre.as_deref()), ("02/10/2026", "USD", Some("Efectivo USD")), "sin cuenta se paga de la caja de dólares");
@@ -5530,9 +5544,9 @@ fn ab2_solo_se_listan_los_abonos_de_la_tarjeta_pedida() {
     let a = crear_tarjeta(1_000.0, 0.0);
     let b = crear_tarjeta(1_000.0, 0.0);
     registrar_pago_tarjeta(a, "01/10/2026".to_string(), monto(10.0), "DOP".to_string(), None, 0.0).unwrap();
-    assert_eq!(crate::obtener_abonos_tarjeta(a).unwrap().len(), 1);
-    assert!(crate::obtener_abonos_tarjeta(b).unwrap().is_empty());
-    assert!(crate::obtener_abonos_tarjeta(987_654).unwrap().is_empty(), "una tarjeta inexistente no es un error");
+    assert_eq!(crate::comandos::abonos::obtener_abonos_tarjeta(a).unwrap().len(), 1);
+    assert!(crate::comandos::abonos::obtener_abonos_tarjeta(b).unwrap().is_empty());
+    assert!(crate::comandos::abonos::obtener_abonos_tarjeta(987_654).unwrap().is_empty(), "una tarjeta inexistente no es un error");
 }
 
 #[test]
@@ -5634,9 +5648,9 @@ fn av2_la_fecha_y_la_divisa_se_validan_antes_que_el_cargo_con_su_mensaje() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Avance", "DOP", 0.0);
-    let e = crate::registrar_avance_efectivo(tarjeta, cuenta, " ayer ".into(), importe("100"), "DOP".into(), "quincenal".into(), None, None, None).unwrap_err();
+    let e = crate::comandos::avances::registrar_avance_efectivo(tarjeta, cuenta, " ayer ".into(), importe("100"), "DOP".into(), "quincenal".into(), None, None, None).unwrap_err();
     assert_eq!(e, "La fecha «ayer» no se entiende. Se espera dd/mm/aaaa.", "la fecha, recortada, va antes que el tipo de cargo");
-    let e = crate::registrar_avance_efectivo(tarjeta, cuenta, "01/10/2026".into(), importe("100"), "EUR".into(), "quincenal".into(), None, None, None).unwrap_err();
+    let e = crate::comandos::avances::registrar_avance_efectivo(tarjeta, cuenta, "01/10/2026".into(), importe("100"), "EUR".into(), "quincenal".into(), None, None, None).unwrap_err();
     assert!(e.contains("EUR"), "la divisa va antes que el tipo de cargo: {e}");
 }
 
@@ -5645,7 +5659,7 @@ fn av3_el_resumen_de_registrar_y_la_nota_son_los_de_siempre() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(5_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Avance", "DOP", 0.0);
-    let resumen = crate::registrar_avance_efectivo(
+    let resumen = crate::comandos::avances::registrar_avance_efectivo(
         tarjeta, cuenta, "  01/10/2026 ".into(), importe("800.00"), "DOP".into(), "porcentaje".into(), Some(6.25), None, Some("  para el taller  ".into()),
     )
     .unwrap();
@@ -5655,7 +5669,7 @@ fn av3_el_resumen_de_registrar_y_la_nota_son_los_de_siempre() {
         .unwrap();
     assert_eq!((fecha.as_str(), nota.as_deref()), ("01/10/2026", Some("para el taller")), "fecha y nota recortadas");
 
-    crate::registrar_avance_efectivo(tarjeta, cuenta, "02/10/2026".into(), importe("100"), "DOP".into(), "exonerado".into(), None, None, Some("   ".into())).unwrap();
+    crate::comandos::avances::registrar_avance_efectivo(tarjeta, cuenta, "02/10/2026".into(), importe("100"), "DOP".into(), "exonerado".into(), None, None, Some("   ".into())).unwrap();
     let nota_en_blanco: Option<String> = conexion().query_row("SELECT nota FROM avances_efectivo ORDER BY id DESC LIMIT 1;", [], |r| r.get(0)).unwrap();
     assert_eq!(nota_en_blanco, None, "una nota en blanco se guarda como ausente");
 }
@@ -5665,30 +5679,30 @@ fn av4_el_listado_trae_el_tipo_de_cargo_la_cuenta_y_la_nota() {
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Avance", "DOP", 0.0);
-    crate::registrar_avance_efectivo(tarjeta, cuenta, "01/10/2026".into(), importe("300"), "DOP".into(), "fijo".into(), None, Some(importe("25")), Some("nota".into())).unwrap();
-    let a = &crate::obtener_avances_tarjeta(tarjeta).unwrap()[0];
+    crate::comandos::avances::registrar_avance_efectivo(tarjeta, cuenta, "01/10/2026".into(), importe("300"), "DOP".into(), "fijo".into(), None, Some(importe("25")), Some("nota".into())).unwrap();
+    let a = &crate::comandos::avances::obtener_avances_tarjeta(tarjeta).unwrap()[0];
     assert_eq!((a.fecha.as_str(), a.divisa.as_str(), a.tipo_cargo.as_str(), a.cuenta_ahorro_id, a.cuenta_nombre.as_str(), a.nota.as_deref()), ("01/10/2026", "DOP", "fijo", cuenta, "Cuenta Avance", Some("nota")));
     assert_eq!(a.tasa, None, "un cargo fijo no tiene tasa");
     assert_importe(a.cargo, 25.0, "cargo");
-    assert!(crate::obtener_avances_tarjeta(987_654).unwrap().is_empty());
+    assert!(crate::comandos::avances::obtener_avances_tarjeta(987_654).unwrap().is_empty());
 }
 
 #[test]
 fn av5_revertir_un_avance_dice_su_causa_deja_un_caso_y_su_resumen_es_el_de_siempre() {
     let _g = entorno_aislado();
     assert_eq!(
-        crate::revertir_avance_efectivo(404, motivo_de_prueba()).unwrap_err(),
+        crate::comandos::avances::revertir_avance_efectivo(404, motivo_de_prueba()).unwrap_err(),
         "No se encontró avance de efectivo con identificador 404."
     );
     let tarjeta = crear_tarjeta(5_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Avance", "DOP", 1_000.0);
     avance(tarjeta, cuenta, "800.00", "porcentaje", Some(6.25), None).unwrap();
     let id: i64 = conexion().query_row("SELECT id FROM avances_efectivo;", [], |r| r.get(0)).unwrap();
-    let e = crate::revertir_avance_efectivo(id, "corto".into()).unwrap_err();
+    let e = crate::comandos::avances::revertir_avance_efectivo(id, "corto".into()).unwrap_err();
     assert!(e.starts_with("Explica la corrección en al menos 15 caracteres.") && e.contains("«corto»"), "{e}");
     assert_eq!(filas_de_avances(), 1, "no se borró nada");
 
-    let resumen = crate::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
+    let resumen = crate::comandos::avances::revertir_avance_efectivo(id, motivo_de_prueba()).unwrap();
     let anio = chrono::Local::now().format("%Y").to_string();
     assert_eq!(resumen, format!("La deuda de la tarjeta baja DOP 850.00 y la cuenta devuelve DOP 800.00. Caso COR-{anio}-0001."));
     let casos = casos_de_correccion();
@@ -5707,10 +5721,10 @@ fn bo1_las_bonificaciones_salen_de_la_mas_nueva_a_la_mas_vieja_con_los_datos_de_
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(10_000.0, 0.0);
     let otra = crear_tarjeta(10_000.0, 50.0);
-    crate::crear_bonificacion("01/10/2026".into(), tarjeta, importe("120.50"), "DOP".into(), "Primera".into(), None).unwrap();
-    crate::crear_bonificacion("02/10/2026".into(), otra, importe("5"), "USD".into(), "Segunda".into(), None).unwrap();
+    crate::comandos::bonificaciones::crear_bonificacion("01/10/2026".into(), tarjeta, importe("120.50"), "DOP".into(), "Primera".into(), None).unwrap();
+    crate::comandos::bonificaciones::crear_bonificacion("02/10/2026".into(), otra, importe("5"), "USD".into(), "Segunda".into(), None).unwrap();
 
-    let lista = crate::obtener_bonificaciones().unwrap();
+    let lista = crate::comandos::bonificaciones::obtener_bonificaciones().unwrap();
     assert_eq!(lista.len(), 2);
     let (nueva, vieja) = (&lista[0], &lista[1]);
     assert_eq!((nueva.concepto.as_str(), nueva.divisa.as_str(), nueva.tarjeta_id, nueva.fecha.as_str()), ("Segunda", "USD", otra, "02/10/2026"));
@@ -5723,16 +5737,16 @@ fn bo1_las_bonificaciones_salen_de_la_mas_nueva_a_la_mas_vieja_con_los_datos_de_
 #[test]
 fn bo2_eliminar_una_bonificacion_inexistente_y_liquidar_lo_que_no_se_puede_dicen_su_mensaje() {
     let _g = entorno_aislado();
-    let e = crate::eliminar_bonificacion(404).unwrap_err();
+    let e = crate::comandos::bonificaciones::eliminar_bonificacion(404).unwrap_err();
     assert!(e.contains("404"), "debe nombrar la bonificación que falta: {e}");
 
-    let e = crate::liquidar_consumo_pendiente(404, importe("10")).unwrap_err();
+    let e = crate::comandos::gastos::liquidar_consumo_pendiente(404, importe("10")).unwrap_err();
     assert!(e.contains("404"), "debe nombrar el consumo que falta: {e}");
 
     // Un gasto en efectivo (no pendiente) no se liquida.
     let tarjeta = crear_tarjeta(0.0, 0.0);
     let otros: i64 = conexion().query_row("SELECT id FROM categorias WHERE nombre = 'Otros';", [], |r| r.get(0)).unwrap();
-    let gasto = crate::crear_gasto(GastoInput {
+    let gasto = crate::comandos::gastos::crear_gasto(GastoInput {
         fecha: "01/10/2026".to_string(),
         monto: importe("100"),
         divisa: "DOP".to_string(),
@@ -5745,7 +5759,7 @@ fn bo2_eliminar_una_bonificacion_inexistente_y_liquidar_lo_que_no_se_puede_dicen
         tasa_cambio: None,
     })
     .unwrap();
-    let e = crate::liquidar_consumo_pendiente(gasto, importe("100")).unwrap_err();
+    let e = crate::comandos::gastos::liquidar_consumo_pendiente(gasto, importe("100")).unwrap_err();
     assert!(e.contains("no está pendiente de liquidación"), "{e}");
 }
 
@@ -5775,7 +5789,7 @@ fn gt1_los_gastos_salen_del_mas_nuevo_al_mas_viejo_con_el_nombre_de_su_categoria
     fijar_balance_cuenta("Efectivo DOP", 1_000.0);
     let a = crear_gasto(gasto_de_prueba("Primero", "40.25", "DOP", "efectivo")).unwrap();
     let b = crear_gasto(gasto_de_prueba("Segundo", "10", "DOP", "efectivo")).unwrap();
-    let lista = crate::obtener_gastos().unwrap();
+    let lista = crate::comandos::gastos::obtener_gastos().unwrap();
     assert_eq!(lista.iter().map(|g| g.id).collect::<Vec<_>>(), vec![b, a], "el más nuevo primero");
     let primero = lista.iter().find(|g| g.id == a).unwrap();
     assert_eq!((primero.descripcion.as_str(), primero.categoria_nombre.as_str(), primero.metodo_pago.as_str(), primero.fecha.as_str()), ("Primero", "Otros", "efectivo", "05/10/2026"));
@@ -5793,12 +5807,12 @@ fn gt2_un_consumo_pendiente_lista_su_estado_de_conversion_y_uno_liquidado_su_imp
     let mut entrada = gasto_de_prueba("Compra en dólares", "100", "USD", "tarjeta");
     entrada.tarjeta_id = Some(tarjeta);
     let id = crear_gasto(entrada).unwrap();
-    let pendiente = crate::obtener_gastos().unwrap().into_iter().find(|g| g.id == id).unwrap();
+    let pendiente = crate::comandos::gastos::obtener_gastos().unwrap().into_iter().find(|g| g.id == id).unwrap();
     assert_eq!(pendiente.estado_conversion.as_deref(), Some("pendiente"));
     assert!(pendiente.monto_liquidado.is_none());
 
-    crate::liquidar_consumo_pendiente(id, importe("6050")).unwrap();
-    let liquidado = crate::obtener_gastos().unwrap().into_iter().find(|g| g.id == id).unwrap();
+    crate::comandos::gastos::liquidar_consumo_pendiente(id, importe("6050")).unwrap();
+    let liquidado = crate::comandos::gastos::obtener_gastos().unwrap().into_iter().find(|g| g.id == id).unwrap();
     assert_eq!(liquidado.estado_conversion.as_deref(), Some("liquidado"));
     assert_importe(liquidado.monto_liquidado.unwrap(), 6050.0, "importe liquidado");
     assert_importe(liquidado.tasa_conversion.unwrap(), 60.5, "tasa deducida");
@@ -5861,17 +5875,17 @@ fn su1_los_mensajes_de_crear_corregir_y_editar_son_los_de_siempre() {
     assert!(crear(None).is_ok());
 
     let sub = crear(Some("05/03/2026")).unwrap();
-    assert_eq!(crate::corregir_proximo_cobro(sub, " ayer ".into()).unwrap_err(), "«ayer» no se entiende como fecha. Se espera dd/mm/aaaa.");
-    assert_eq!(crate::corregir_proximo_cobro(9_999, "15/03/2026".into()).unwrap_err(), "No se encontró la suscripción que se intenta corregir.");
+    assert_eq!(crate::comandos::suscripciones::corregir_proximo_cobro(sub, " ayer ".into()).unwrap_err(), "«ayer» no se entiende como fecha. Se espera dd/mm/aaaa.");
+    assert_eq!(crate::comandos::suscripciones::corregir_proximo_cobro(9_999, "15/03/2026".into()).unwrap_err(), "No se encontró la suscripción que se intenta corregir.");
     assert_eq!(
-        crate::actualizar_suscripcion(9_999, "X".into(), importe("15"), tarjeta, "mensual".into(), 5, "DOP".into(), None).unwrap_err(),
+        crate::comandos::suscripciones::actualizar_suscripcion(9_999, "X".into(), importe("15"), tarjeta, "mensual".into(), 5, "DOP".into(), None).unwrap_err(),
         "No se encontró la suscripción que se intenta editar."
     );
     assert_eq!(
-        crate::actualizar_suscripcion(sub, "X".into(), importe("15"), tarjeta, "mensual".into(), 5, "DOP".into(), Some("ayer".into())).unwrap_err(),
+        crate::comandos::suscripciones::actualizar_suscripcion(sub, "X".into(), importe("15"), tarjeta, "mensual".into(), 5, "DOP".into(), Some("ayer".into())).unwrap_err(),
         "La fecha del próximo cobro «ayer» no se entiende. Se espera dd/mm/aaaa."
     );
-    assert!(crate::eliminar_suscripcion(9_999).is_ok(), "borrar una que no está no es un error");
+    assert!(crate::comandos::suscripciones::eliminar_suscripcion(9_999).is_ok(), "borrar una que no está no es un error");
 }
 
 #[test]
@@ -5882,7 +5896,7 @@ fn su2_las_suscripciones_se_listan_por_nombre_con_los_datos_de_su_tarjeta() {
         crear_suscripcion(nombre.into(), importe("10"), tarjeta, "mensual".into(), 5, "USD".into(), Some("05/03/2026".into())).unwrap();
     }
     let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 1);
-    let lista = crate::suscripciones_con_aviso(&reloj).unwrap();
+    let lista = crate::comandos::suscripciones::suscripciones_con_aviso(&reloj).unwrap();
     assert_eq!(lista.iter().map(|s| s.plataforma_para_pruebas()).collect::<Vec<_>>(), vec!["Alfa", "Medio", "Zeta"]);
 }
 
@@ -5890,10 +5904,10 @@ fn su2_las_suscripciones_se_listan_por_nombre_con_los_datos_de_su_tarjeta() {
 fn su3_confirmar_dice_su_causa_cuando_no_hay_suscripcion_o_no_hay_nada_que_confirmar() {
     let _g = entorno_aislado();
     let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 20);
-    assert_eq!(crate::confirmar_pendiente(9_999, &reloj, None).unwrap_err(), "No se encontró la suscripción.");
+    assert_eq!(crate::comandos::suscripciones::confirmar_pendiente(9_999, &reloj, None).unwrap_err(), "No se encontró la suscripción.");
     let (sub, _) = suscripcion_mensual(15, "15/03/2026");
     assert_eq!(
-        crate::confirmar_pendiente(sub, &reloj, None).unwrap_err(),
+        crate::comandos::suscripciones::confirmar_pendiente(sub, &reloj, None).unwrap_err(),
         "Esta suscripción no tiene períodos pendientes de confirmar."
     );
 }
@@ -5904,7 +5918,7 @@ fn su4_descartar_sin_motivo_que_explique_dice_cuanto_falta_y_no_avanza_nada() {
     let (sub, _) = suscripcion_mensual(15, "15/01/2026");
     let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 20);
     let antes = proximo_cobro_de(sub);
-    let e = crate::confirmar_pendiente(sub, &reloj, Some("  corto ".into())).unwrap_err();
+    let e = crate::comandos::suscripciones::confirmar_pendiente(sub, &reloj, Some("  corto ".into())).unwrap_err();
     assert!(e.starts_with("Explica la corrección en al menos 15 caracteres.") && e.contains("«corto»"), "{e}");
     assert_eq!(proximo_cobro_de(sub), antes, "el puntero no se movió");
 }
@@ -5915,16 +5929,16 @@ fn su5_los_mensajes_del_cobro_y_de_confirmar_son_los_de_siempre() {
     let (_sub, _) = suscripcion_mensual(15, "15/03/2026");
     let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 20);
     assert_eq!(
-        crate::procesar_suscripciones_con(&reloj).unwrap().cargos,
+        crate::comandos::suscripciones::procesar_suscripciones_con(&reloj).unwrap().cargos,
         vec!["Cargo automático realizado para Plataforma (DOP 500.00) con fecha 15/03/2026".to_string()]
     );
     let (varios, _) = suscripcion_mensual(15, "15/01/2026");
     let reloj = crate::puertos::reloj::RelojFijo::en(2026, 3, 20);
     assert_eq!(
-        crate::confirmar_pendiente(varios, &reloj, None).unwrap(),
+        crate::comandos::suscripciones::confirmar_pendiente(varios, &reloj, None).unwrap(),
         "Asentado el cargo de Plataforma con fecha 15/01/2026."
     );
-    let descartado = crate::confirmar_pendiente(varios, &reloj, Some("El proveedor no lo cobró este mes".into())).unwrap();
+    let descartado = crate::comandos::suscripciones::confirmar_pendiente(varios, &reloj, Some("El proveedor no lo cobró este mes".into())).unwrap();
     assert!(descartado.starts_with("Período del 15/02/2026 descartado. Caso "), "{descartado}");
     let (importe_caso, divisa): (Option<f64>, Option<String>) = conexion()
         .query_row("SELECT importe, divisa FROM correcciones WHERE tipo = 'período de suscripción' ORDER BY id DESC LIMIT 1;", [], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -5936,9 +5950,9 @@ fn su5_los_mensajes_del_cobro_y_de_confirmar_son_los_de_siempre() {
 fn su6_editar_conserva_el_ultimo_pago_y_la_fecha_se_rechaza_antes_que_la_divisa() {
     let _g = entorno_aislado();
     let (sub, tarjeta) = suscripcion_mensual(15, "15/03/2026");
-    crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
+    crate::comandos::suscripciones::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
     assert_eq!(ultimo_pago(sub).as_deref(), Some("15/03/2026"));
-    crate::actualizar_suscripcion(sub, "Otra".into(), importe("15"), tarjeta, "mensual".into(), 16, "DOP".into(), Some("16/04/2026".into())).unwrap();
+    crate::comandos::suscripciones::actualizar_suscripcion(sub, "Otra".into(), importe("15"), tarjeta, "mensual".into(), 16, "DOP".into(), Some("16/04/2026".into())).unwrap();
     assert_eq!(ultimo_pago(sub).as_deref(), Some("15/03/2026"), "editar no reinicia el marcador");
 
     let e = crear_suscripcion("X".into(), importe("15"), tarjeta, "mensual".into(), 5, "XYZ".into(), Some("ayer".into())).unwrap_err();
@@ -5963,7 +5977,7 @@ fn su7_un_cobro_automatico_que_falla_no_corta_los_demas_se_deshace_y_se_informa_
         )
         .unwrap();
 
-    let r = crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
+    let r = crate::comandos::suscripciones::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
 
     assert_eq!(r.cargos.len(), 2, "las dos sanas se cobraron: {:?}", r.cargos);
     assert!(r.cargos[0].contains("Primera") && r.cargos[1].contains("Tercera"));
@@ -5980,7 +5994,7 @@ fn su7_un_cobro_automatico_que_falla_no_corta_los_demas_se_deshace_y_se_informa_
 
     // Al arrancar de nuevo, con la causa resuelta, se reintenta y se cobra.
     conexion().execute_batch("DROP TRIGGER falla_a_proposito;").unwrap();
-    let r = crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 21)).unwrap();
+    let r = crate::comandos::suscripciones::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 21)).unwrap();
     assert_eq!((r.cargos.len(), r.fallos.len()), (1, 0));
     assert!(r.cargos[0].contains("Rota"));
 }
@@ -5988,11 +6002,11 @@ fn su7_un_cobro_automatico_que_falla_no_corta_los_demas_se_deshace_y_se_informa_
 // --- Archivo de cuentas (RC): las cuentas se archivan, no se borran ---
 
 fn cuenta_activa(id: i64) -> bool {
-    crate::obtener_cuentas().unwrap().iter().any(|c| c.id == id)
+    crate::comandos::cuentas::obtener_cuentas().unwrap().iter().any(|c| c.id == id)
 }
 
 fn cuenta_archivada(id: i64) -> bool {
-    crate::obtener_cuentas_archivadas().unwrap().iter().any(|c| c.id == id)
+    crate::comandos::cuentas::obtener_cuentas_archivadas().unwrap().iter().any(|c| c.id == id)
 }
 
 fn dejar_en_cero(id: i64) {
@@ -6006,7 +6020,7 @@ fn ar1_la_caja_de_efectivo_no_se_archiva() {
         .query_row("SELECT id FROM cuentas_ahorro WHERE es_caja_efectivo = 1 AND divisa = 'DOP';", [], |r| r.get(0))
         .unwrap();
     dejar_en_cero(caja);
-    let e = crate::archivar_cuenta(caja).unwrap_err();
+    let e = crate::comandos::cuentas::archivar_cuenta(caja).unwrap_err();
     assert!(e.contains("caja de efectivo"), "explica por qué: {e}");
     assert!(cuenta_activa(caja), "la caja sigue activa aunque esté en cero");
 }
@@ -6019,23 +6033,23 @@ fn ar2_archivar_exige_saldo_exactamente_cero_y_distingue_a_favor_de_pendiente() 
     let vacia = crear_cuenta("Vacía", "DOP", 0.0);
 
     assert_eq!(
-        crate::archivar_cuenta(a_favor).unwrap_err(),
+        crate::comandos::cuentas::archivar_cuenta(a_favor).unwrap_err(),
         "No se puede archivar la cuenta «Con centavo a favor»: tiene DOP 0.01 a favor. Retira o transfiere ese dinero hasta dejarla en cero."
     );
     assert_eq!(
-        crate::archivar_cuenta(pendiente).unwrap_err(),
+        crate::comandos::cuentas::archivar_cuenta(pendiente).unwrap_err(),
         "No se puede archivar la cuenta «Con centavo pendiente»: tiene un saldo pendiente de USD -0.01 por conciliar. Déjala en cero antes de archivarla."
     );
     assert!(cuenta_activa(a_favor) && cuenta_activa(pendiente), "los rechazos no cambiaron el estado");
 
-    crate::archivar_cuenta(vacia).unwrap();
+    crate::comandos::cuentas::archivar_cuenta(vacia).unwrap();
     assert!(!cuenta_activa(vacia) && cuenta_archivada(vacia), "sale de las operativas y entra en las archivadas");
-    assert_eq!(crate::archivar_cuenta(vacia).unwrap_err(), "La cuenta «Vacía» ya está archivada.");
-    assert!(crate::archivar_cuenta(987_654).unwrap_err().contains("987654"));
+    assert_eq!(crate::comandos::cuentas::archivar_cuenta(vacia).unwrap_err(), "La cuenta «Vacía» ya está archivada.");
+    assert!(crate::comandos::cuentas::archivar_cuenta(987_654).unwrap_err().contains("987654"));
 
-    crate::reactivar_cuenta(vacia).unwrap();
+    crate::comandos::cuentas::reactivar_cuenta(vacia).unwrap();
     assert!(cuenta_activa(vacia) && !cuenta_archivada(vacia));
-    assert_eq!(crate::reactivar_cuenta(vacia).unwrap_err(), "La cuenta «Vacía» no está archivada.");
+    assert_eq!(crate::comandos::cuentas::reactivar_cuenta(vacia).unwrap_err(), "La cuenta «Vacía» no está archivada.");
 }
 
 #[test]
@@ -6046,7 +6060,7 @@ fn ar3_archivar_conserva_el_id_el_nombre_la_divisa_y_todo_lo_que_la_referenciaba
     let cuenta = crear_cuenta("Cuenta con historia", "DOP", 5_000.0);
     // Todas las relaciones que apuntan a una cuenta: gasto, transferencia, avance, factura, informal y abono.
     crear_gasto(transferencia(100.0, "Alimentación", "Compra", cuenta)).unwrap();
-    crate::transferir_entre_cuentas("20/09/2026".into(), otra, cuenta, monto(500.0), monto(500.0), monto(0.0), "Traspaso".into()).unwrap();
+    crate::comandos::cuentas::transferir_entre_cuentas("20/09/2026".into(), otra, cuenta, monto(500.0), monto(500.0), monto(0.0), "Traspaso".into()).unwrap();
     avance(tarjeta, cuenta, "1350.00", "exonerado", None, None).unwrap();
     let factura_cobrada = crear_ingreso(factura("AR-001", 5_000.0, 15.0)).unwrap();
     marcar_ingreso_pagado(factura_cobrada, cuenta, "20/09/2026".into(), monto(4_250.0)).unwrap();
@@ -6070,17 +6084,17 @@ fn ar3_archivar_conserva_el_id_el_nombre_la_divisa_y_todo_lo_que_la_referenciaba
     };
     let antes = referencias();
     assert!(antes >= 6, "se montaron las seis relaciones: {antes}");
-    assert!(crate::archivar_cuenta(cuenta).is_err(), "con saldo no se archiva");
+    assert!(crate::comandos::cuentas::archivar_cuenta(cuenta).is_err(), "con saldo no se archiva");
 
     dejar_en_cero(cuenta); // el saldo ya se movió con cada operación; aquí se aísla lo que importa: los vínculos
-    crate::archivar_cuenta(cuenta).unwrap();
+    crate::comandos::cuentas::archivar_cuenta(cuenta).unwrap();
 
     assert_eq!(referencias(), antes, "ninguna fila perdió su cuenta");
     let (nombre, divisa): (String, String) = conexion()
         .query_row("SELECT nombre, divisa FROM cuentas_ahorro WHERE id = ?;", [cuenta], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap();
     assert_eq!((nombre.as_str(), divisa.as_str()), ("Cuenta con historia", "DOP"));
-    let historial = crate::obtener_transacciones_cuentas().unwrap();
+    let historial = crate::comandos::cuentas::obtener_transacciones_cuentas().unwrap();
     assert!(
         historial.iter().any(|t| t.cuenta_destino_nombre == "Cuenta con historia"),
         "el historial sigue nombrando a la archivada por su id"
@@ -6095,15 +6109,15 @@ fn ar4_ninguna_operacion_nueva_acepta_una_cuenta_archivada() {
     let cerrada = crear_cuenta("Cerrada", "DOP", 0.0);
     let factura_id = crear_ingreso(factura("AR-002", 5_000.0, 0.0)).unwrap();
     let informal_id = crear_ingreso_informal("20/09/2026".into(), "Trabajo".into(), monto(300.0)).unwrap();
-    crate::archivar_cuenta(cerrada).unwrap();
+    crate::comandos::cuentas::archivar_cuenta(cerrada).unwrap();
     let total = || -> f64 { conexion().query_row("SELECT SUM(balance_actual) FROM cuentas_ahorro;", [], |r| r.get(0)).unwrap() };
     let antes = total();
     let gastos = total_gastos();
 
     let casos: Vec<(&str, Result<(), String>)> = vec![
         ("gasto", crear_gasto(transferencia(10.0, "Alimentación", "Compra", cerrada)).map(|_| ())),
-        ("transferencia desde", crate::transferir_entre_cuentas("20/09/2026".into(), cerrada, otra, monto(5.0), monto(5.0), monto(0.0), "x".into()).map(|_| ())),
-        ("transferencia hacia", crate::transferir_entre_cuentas("20/09/2026".into(), otra, cerrada, monto(5.0), monto(5.0), monto(0.0), "x".into()).map(|_| ())),
+        ("transferencia desde", crate::comandos::cuentas::transferir_entre_cuentas("20/09/2026".into(), cerrada, otra, monto(5.0), monto(5.0), monto(0.0), "x".into()).map(|_| ())),
+        ("transferencia hacia", crate::comandos::cuentas::transferir_entre_cuentas("20/09/2026".into(), otra, cerrada, monto(5.0), monto(5.0), monto(0.0), "x".into()).map(|_| ())),
         ("abono", registrar_pago_tarjeta(tarjeta, "20/09/2026".into(), monto(5.0), "DOP".into(), Some(cerrada), 0.0)),
         ("avance", avance(tarjeta, cerrada, "50.00", "exonerado", None, None).map(|_| ())),
         ("cobro de factura", marcar_ingreso_pagado(factura_id, cerrada, "20/09/2026".into(), monto(100.0))),
@@ -6123,19 +6137,19 @@ fn ar5_revertir_un_movimiento_historico_de_una_cuenta_archivada_exige_reactivarl
     let _g = entorno_aislado();
     let a = crear_cuenta("A", "DOP", 1_000.0);
     let b = crear_cuenta("B", "DOP", 0.0);
-    crate::transferir_entre_cuentas("20/09/2026".into(), a, b, monto(500.0), monto(500.0), monto(0.0), "ida".into()).unwrap();
-    crate::transferir_entre_cuentas("21/09/2026".into(), b, a, monto(500.0), monto(500.0), monto(0.0), "vuelta".into()).unwrap();
-    crate::archivar_cuenta(b).unwrap();
+    crate::comandos::cuentas::transferir_entre_cuentas("20/09/2026".into(), a, b, monto(500.0), monto(500.0), monto(0.0), "ida".into()).unwrap();
+    crate::comandos::cuentas::transferir_entre_cuentas("21/09/2026".into(), b, a, monto(500.0), monto(500.0), monto(0.0), "vuelta".into()).unwrap();
+    crate::comandos::cuentas::archivar_cuenta(b).unwrap();
     let ida: i64 = conexion().query_row("SELECT id FROM transacciones_cuentas WHERE descripcion = 'ida';", [], |r| r.get(0)).unwrap();
 
     // Revertir la ida le quitaría 500 a B, que está archivada: no se altera en silencio una cuenta cerrada.
-    let e = crate::eliminar_transaccion_cuenta(ida, motivo_de_prueba()).unwrap_err();
+    let e = crate::comandos::cuentas::eliminar_transaccion_cuenta(ida, motivo_de_prueba()).unwrap_err();
     assert!(e.contains("archivada"), "{e}");
     assert_importe(saldo_cuenta_id(b), 0.0, "B sigue en cero");
     assert_eq!(total_transferencias(), 2, "y el historial íntegro");
 
-    crate::reactivar_cuenta(b).unwrap();
-    crate::eliminar_transaccion_cuenta(ida, motivo_de_prueba()).unwrap();
+    crate::comandos::cuentas::reactivar_cuenta(b).unwrap();
+    crate::comandos::cuentas::eliminar_transaccion_cuenta(ida, motivo_de_prueba()).unwrap();
     assert_eq!(total_transferencias(), 1);
 }
 
@@ -6157,13 +6171,13 @@ fn ar7_el_nombre_de_una_archivada_sigue_ocupado_y_se_explica() {
     let _g = entorno_aislado();
     let vieja = crear_cuenta("Vieja", "DOP", 0.0);
     let otra = crear_cuenta("Otra", "DOP", 0.0);
-    crate::archivar_cuenta(vieja).unwrap();
+    crate::comandos::cuentas::archivar_cuenta(vieja).unwrap();
 
-    let e = crate::crear_cuenta("Vieja".into(), "DOP".into(), monto(0.0), None, None).unwrap_err();
+    let e = crate::comandos::cuentas::crear_cuenta("Vieja".into(), "DOP".into(), monto(0.0), None, None).unwrap_err();
     assert_eq!(e, "Ya existe una cuenta archivada llamada «Vieja». Reactívala o elige otro nombre.");
-    let e = crate::actualizar_cuenta(otra, "Vieja".into(), None, None).unwrap_err();
+    let e = crate::comandos::cuentas::actualizar_cuenta(otra, "Vieja".into(), None, None).unwrap_err();
     assert_eq!(e, "Ya existe una cuenta archivada llamada «Vieja». Reactívala o elige otro nombre.");
-    assert!(crate::actualizar_cuenta(otra, "Otra renombrada".into(), None, None).is_ok(), "otros nombres siguen libres");
+    assert!(crate::comandos::cuentas::actualizar_cuenta(otra, "Otra renombrada".into(), None, None).is_ok(), "otros nombres siguen libres");
 }
 
 #[test]
@@ -6174,7 +6188,7 @@ fn ar4b_ni_siquiera_una_operacion_de_importe_cero_se_registra_en_una_cuenta_arch
     let cerrada = crear_cuenta("Cerrada", "DOP", 0.0);
     let factura_id = crear_ingreso(factura("AR-003", 5_000.0, 0.0)).unwrap();
     let informal_id = crear_ingreso_informal("20/09/2026".into(), "Trabajo".into(), monto(300.0)).unwrap();
-    crate::archivar_cuenta(cerrada).unwrap();
+    crate::comandos::cuentas::archivar_cuenta(cerrada).unwrap();
 
     for (que, r) in [
         ("cobro de factura por cero", marcar_ingreso_pagado(factura_id, cerrada, "20/09/2026".into(), monto(0.0))),
@@ -6193,11 +6207,11 @@ fn ar4b_ni_siquiera_una_operacion_de_importe_cero_se_registra_en_una_cuenta_arch
 // --- Desactivar tarjetas (RC): las tarjetas se desactivan, no se borran ---
 
 fn tarjeta_activa(id: i64) -> bool {
-    crate::obtener_tarjetas().unwrap().iter().any(|t| t.id == id)
+    crate::comandos::tarjetas::obtener_tarjetas().unwrap().iter().any(|t| t.id == id)
 }
 
 fn tarjeta_inactiva(id: i64) -> bool {
-    crate::obtener_tarjetas_inactivas().unwrap().iter().any(|t| t.id == id)
+    crate::comandos::tarjetas::obtener_tarjetas_inactivas().unwrap().iter().any(|t| t.id == id)
 }
 
 fn con_limites(id: i64, dop: f64, usd: f64) {
@@ -6214,8 +6228,8 @@ fn tarjeta_de(suscripcion: i64) -> i64 {
     conexion().query_row("SELECT tarjeta_id FROM suscripciones WHERE id = ?;", [suscripcion], |r| r.get(0)).unwrap()
 }
 
-fn traslado(suscripcion: i64, destino: i64) -> crate::TrasladoElegido {
-    crate::TrasladoElegido { suscripcion_id: suscripcion, destino_id: destino }
+fn traslado(suscripcion: i64, destino: i64) -> crate::comandos::cierre_de_tarjetas::TrasladoElegido {
+    crate::comandos::cierre_de_tarjetas::TrasladoElegido { suscripcion_id: suscripcion, destino_id: destino }
 }
 
 #[test]
@@ -6223,14 +6237,14 @@ fn ta1_una_tarjeta_en_cero_y_sin_suscripciones_se_desactiva_y_conserva_su_histor
     let _g = entorno_aislado();
     let tarjeta = crear_tarjeta(0.0, 0.0);
     let otra = crear_tarjeta(0.0, 0.0);
-    crate::cerrar_tarjeta(tarjeta, vec![]).unwrap();
+    crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(tarjeta, vec![]).unwrap();
     assert!(!tarjeta_activa(tarjeta) && tarjeta_inactiva(tarjeta), "sale de las activas y entra en las inactivas");
     assert!(tarjeta_activa(otra), "la otra no se toca");
-    let inactiva = crate::obtener_tarjetas_inactivas().unwrap();
+    let inactiva = crate::comandos::tarjetas::obtener_tarjetas_inactivas().unwrap();
     assert_eq!(inactiva.len(), 1, "las inactivas solo llevan su identidad, sin balances");
     let n: i64 = conexion().query_row("SELECT COUNT(*) FROM tarjetas WHERE id = ?;", [tarjeta], |r| r.get(0)).unwrap();
     assert_eq!(n, 1, "la fila sigue ahí");
-    assert!(crate::cerrar_tarjeta(tarjeta, vec![]).unwrap_err().contains("ya está desactivada"));
+    assert!(crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(tarjeta, vec![]).unwrap_err().contains("ya está desactivada"));
 }
 
 #[test]
@@ -6238,9 +6252,9 @@ fn ta2_una_tarjeta_con_deuda_o_saldo_a_favor_de_un_centavo_no_se_desactiva_y_lo_
     let _g = entorno_aislado();
     let con_deuda = crear_tarjeta(0.01, 0.0);
     let a_favor = crear_tarjeta(0.0, -0.01);
-    let e = crate::cerrar_tarjeta(con_deuda, vec![]).unwrap_err();
+    let e = crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(con_deuda, vec![]).unwrap_err();
     assert_eq!(e, "No se puede desactivar la tarjeta «Banco Ejemplo Tarjeta Ejemplo»: debe DOP 0.01. Págala hasta dejarla en cero antes de cerrarla.");
-    let e = crate::cerrar_tarjeta(a_favor, vec![]).unwrap_err();
+    let e = crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(a_favor, vec![]).unwrap_err();
     assert!(e.contains("tiene USD 0.01 a favor del titular") && e.contains("reembolso"), "{e}");
     assert!(tarjeta_activa(con_deuda) && tarjeta_activa(a_favor), "los rechazos no cambiaron el estado");
 }
@@ -6253,7 +6267,7 @@ fn ta3_la_vista_previa_muestra_todas_las_suscripciones_con_su_divisa_y_una_suger
     let en_pesos = suscripcion_en(cierra, "Streaming", "500", "DOP", "15/03/2026");
     let en_dolares = suscripcion_en(cierra, "Nube", "10", "USD", "20/03/2026");
 
-    let v = crate::previsualizar_cierre_tarjeta(cierra).unwrap();
+    let v = crate::comandos::cierre_de_tarjetas::previsualizar_cierre_tarjeta(cierra).unwrap();
     assert!(v.bloqueos.is_empty() && v.activa);
     assert_eq!(v.lineas.len(), 2);
     let linea = |id| v.lineas.iter().find(|l| l.suscripcion_id == id).unwrap();
@@ -6277,7 +6291,7 @@ fn ta4_dos_suscripciones_no_se_recomiendan_sobre_el_mismo_cupo() {
     con_limites(holgada, 5_000.0, 100.0);
     let a = suscripcion_en(cierra, "A", "800", "DOP", "15/03/2026");
     let b = suscripcion_en(cierra, "B", "800", "DOP", "15/03/2026");
-    let v = crate::previsualizar_cierre_tarjeta(cierra).unwrap();
+    let v = crate::comandos::cierre_de_tarjetas::previsualizar_cierre_tarjeta(cierra).unwrap();
     let destino = |id| v.lineas.iter().find(|l| l.suscripcion_id == id).unwrap().destino_sugerido;
     assert_eq!((destino(a), destino(b)), (Some(holgada), Some(holgada)), "la justa no aguanta dos de 800");
 }
@@ -6292,9 +6306,9 @@ fn ta5_un_destino_que_no_vale_o_sin_cupo_rechaza_todo_sin_cambios_parciales() {
     con_limites(corta, 100.0, 100.0);
     let a = suscripcion_en(cierra, "A", "60", "DOP", "15/03/2026");
     let b = suscripcion_en(cierra, "B", "60", "DOP", "15/03/2026");
-    crate::cerrar_tarjeta(cerrada, vec![]).unwrap();
+    crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(cerrada, vec![]).unwrap();
 
-    let intentos: Vec<(&str, Vec<crate::TrasladoElegido>, &str)> = vec![
+    let intentos: Vec<(&str, Vec<crate::comandos::cierre_de_tarjetas::TrasladoElegido>, &str)> = vec![
         ("misma tarjeta", vec![traslado(a, buena), traslado(b, cierra)], "es la misma tarjeta que se cierra"),
         ("inexistente", vec![traslado(a, buena), traslado(b, 987_654)], "no existe"),
         ("desactivada", vec![traslado(a, buena), traslado(b, cerrada)], "está desactivada"),
@@ -6303,7 +6317,7 @@ fn ta5_un_destino_que_no_vale_o_sin_cupo_rechaza_todo_sin_cambios_parciales() {
         ("sin cupo agregado", vec![traslado(a, corta), traslado(b, corta)], "no tiene cupo en DOP"),
     ];
     for (que, traslados, esperado) in intentos {
-        let e = crate::cerrar_tarjeta(cierra, traslados).expect_err(que);
+        let e = crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(cierra, traslados).expect_err(que);
         assert!(e.contains(esperado), "{que}: {e}");
         assert_eq!((tarjeta_de(a), tarjeta_de(b)), (cierra, cierra), "{que}: ninguna se movió");
         assert!(tarjeta_activa(cierra), "{que}: la tarjeta sigue activa");
@@ -6317,7 +6331,7 @@ fn ta6_el_traslado_cambia_solo_la_referencia_futura_y_deja_su_rastro() {
     let destino = crear_tarjeta(0.0, 0.0);
     let s = suscripcion_en(cierra, "Streaming", "500", "DOP", "15/03/2026");
     // Un cargo ya asentado en la tarjeta que se cierra, y pagado: debe seguir vinculado a ella.
-    crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
+    crate::comandos::suscripciones::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 10_000.0);
     registrar_pago_tarjeta(cierra, "21/03/2026".into(), monto(500.0), "DOP".into(), Some(cuenta), 0.0).unwrap();
     assert_importe(balances_tarjeta(cierra).0, 0.0, "pagada: la tarjeta queda en cero con su historial a cuestas");
@@ -6329,7 +6343,7 @@ fn ta6_el_traslado_cambia_solo_la_referencia_futura_y_deja_su_rastro() {
     let antes = leer();
     let gasto_viejo: i64 = conexion().query_row("SELECT COUNT(*) FROM gastos WHERE tarjeta_id = ?;", [cierra], |r| r.get(0)).unwrap();
 
-    let r = crate::cerrar_tarjeta(cierra, vec![traslado(s, destino)]).unwrap();
+    let r = crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(cierra, vec![traslado(s, destino)]).unwrap();
     assert!(r.contains("1 suscripción(es) trasladada(s)"), "{r}");
 
     assert_eq!(antes, leer(), "frecuencia, importe, divisa y calendario intactos");
@@ -6356,7 +6370,7 @@ fn ta7_un_fallo_en_el_segundo_traslado_deshace_todo_y_la_tarjeta_sigue_activa() 
         ))
         .unwrap();
 
-    let e = crate::cerrar_tarjeta(cierra, vec![traslado(primera, destino), traslado(segunda, destino)]).unwrap_err();
+    let e = crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(cierra, vec![traslado(primera, destino), traslado(segunda, destino)]).unwrap_err();
     assert!(e.contains("fallo sintético"), "{e}");
 
     assert_eq!((tarjeta_de(primera), tarjeta_de(segunda)), (cierra, cierra), "la primera, ya movida, volvió");
@@ -6371,9 +6385,9 @@ fn ta8_el_cobro_automatico_tras_el_cierre_carga_la_tarjeta_nueva_y_no_la_antigua
     let cierra = crear_tarjeta(0.0, 0.0);
     let destino = crear_tarjeta(0.0, 0.0);
     let s = suscripcion_en(cierra, "Streaming", "500", "DOP", "15/03/2026");
-    crate::cerrar_tarjeta(cierra, vec![traslado(s, destino)]).unwrap();
+    crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(cierra, vec![traslado(s, destino)]).unwrap();
 
-    let r = crate::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
+    let r = crate::comandos::suscripciones::procesar_suscripciones_con(&crate::puertos::reloj::RelojFijo::en(2026, 3, 20)).unwrap();
     assert_eq!((r.cargos.len(), r.fallos.len()), (1, 0));
     assert_importe(balances_tarjeta(destino).0, 500.0, "el cargo cae en la tarjeta destino");
     assert_importe(balances_tarjeta(cierra).0, 0.0, "y la desactivada no recibe nada");
@@ -6385,13 +6399,13 @@ fn ta9_reactivar_no_devuelve_las_suscripciones_ni_sus_fechas() {
     let cierra = crear_tarjeta(0.0, 0.0);
     let destino = crear_tarjeta(0.0, 0.0);
     let s = suscripcion_en(cierra, "Streaming", "500", "DOP", "15/03/2026");
-    crate::cerrar_tarjeta(cierra, vec![traslado(s, destino)]).unwrap();
+    crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(cierra, vec![traslado(s, destino)]).unwrap();
 
-    crate::reactivar_tarjeta(cierra).unwrap();
+    crate::comandos::cierre_de_tarjetas::reactivar_tarjeta(cierra).unwrap();
     assert!(tarjeta_activa(cierra) && !tarjeta_inactiva(cierra));
     assert_eq!(tarjeta_de(s), destino, "la suscripción sigue donde se trasladó");
-    assert!(crate::reactivar_tarjeta(cierra).unwrap_err().contains("no está desactivada"));
-    let v = crate::previsualizar_cierre_tarjeta(cierra).unwrap();
+    assert!(crate::comandos::cierre_de_tarjetas::reactivar_tarjeta(cierra).unwrap_err().contains("no está desactivada"));
+    let v = crate::comandos::cierre_de_tarjetas::previsualizar_cierre_tarjeta(cierra).unwrap();
     assert!(v.lineas.is_empty(), "queda sin suscripciones hasta que el titular las reasigne");
 }
 
@@ -6401,7 +6415,7 @@ fn ta10_ninguna_operacion_nueva_acepta_una_tarjeta_desactivada() {
     let cerrada = crear_tarjeta(0.0, 0.0);
     let activa = crear_tarjeta(0.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 10_000.0);
-    crate::cerrar_tarjeta(cerrada, vec![]).unwrap();
+    crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(cerrada, vec![]).unwrap();
     let deuda_antes = balances_tarjeta(cerrada);
     let gastos = total_gastos();
 
@@ -6414,7 +6428,7 @@ fn ta10_ninguna_operacion_nueva_acepta_una_tarjeta_desactivada() {
         ("consumo", crear_gasto(consumo).map(|_| ())),
         ("abono", registrar_pago_tarjeta(cerrada, "10/03/2026".into(), monto(5.0), "DOP".into(), Some(cuenta), 0.0)),
         ("avance", avance(cerrada, cuenta, "50.00", "exonerado", None, None).map(|_| ())),
-        ("bonificación", crate::crear_bonificacion("10/03/2026".into(), cerrada, monto(5.0), "DOP".into(), "Cashback".into(), None).map(|_| ())),
+        ("bonificación", crate::comandos::bonificaciones::crear_bonificacion("10/03/2026".into(), cerrada, monto(5.0), "DOP".into(), "Cashback".into(), None).map(|_| ())),
         ("alta de suscripción", crear_suscripcion("Nueva".into(), importe("10"), cerrada, "mensual".into(), 5, "DOP".into(), None).map(|_| ())),
     ];
     for (que, r) in casos {
@@ -6423,7 +6437,7 @@ fn ta10_ninguna_operacion_nueva_acepta_una_tarjeta_desactivada() {
     }
     // Una suscripción existente tampoco puede editarse hacia una tarjeta desactivada.
     let s = suscripcion_en(activa, "Streaming", "500", "DOP", "15/03/2026");
-    let e = crate::actualizar_suscripcion(s, "Streaming".into(), importe("500"), cerrada, "mensual".into(), 15, "DOP".into(), Some("15/03/2026".into())).unwrap_err();
+    let e = crate::comandos::suscripciones::actualizar_suscripcion(s, "Streaming".into(), importe("500"), cerrada, "mensual".into(), 15, "DOP".into(), Some("15/03/2026".into())).unwrap_err();
     assert!(e.contains("desactivada"), "{e}");
     assert_eq!(tarjeta_de(s), activa);
     assert_eq!(balances_tarjeta(cerrada), deuda_antes, "la deuda no cambió");
@@ -6436,14 +6450,14 @@ fn ta11_revertir_un_movimiento_historico_de_una_tarjeta_desactivada_exige_reacti
     let tarjeta = crear_tarjeta(1_000.0, 0.0);
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 10_000.0);
     registrar_pago_tarjeta(tarjeta, "10/03/2026".into(), monto(1_000.0), "DOP".into(), Some(cuenta), 0.0).unwrap();
-    crate::cerrar_tarjeta(tarjeta, vec![]).unwrap();
+    crate::comandos::cierre_de_tarjetas::cerrar_tarjeta(tarjeta, vec![]).unwrap();
 
     // Revertir el abono subiría la deuda de una tarjeta cerrada: no se altera en silencio.
-    let e = crate::revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap_err();
+    let e = crate::comandos::abonos::revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap_err();
     assert!(e.contains("desactivada"), "{e}");
     assert_importe(balances_tarjeta(tarjeta).0, 0.0, "la tarjeta sigue en cero");
 
-    crate::reactivar_tarjeta(tarjeta).unwrap();
-    crate::revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
+    crate::comandos::cierre_de_tarjetas::reactivar_tarjeta(tarjeta).unwrap();
+    crate::comandos::abonos::revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
     assert_importe(balances_tarjeta(tarjeta).0, 1_000.0, "reactivada, la reversión procede");
 }

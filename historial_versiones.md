@@ -5,6 +5,22 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 ---
 
 ## 🚀 Versión 1.108.0 (Versión Actual) - 2026-10-15
+**`main.rs` deja de ser un archivo de 1 900 líneas: los 67 comandos se reparten en `src-tauri/src/comandos/`, un módulo por agregado.** Cambio de estructura (M2 del informe de deuda técnica): es un **movimiento puro**, sin cambiar firmas, nombres de comando, lógica, mensajes ni esquema.
+
+### 🔧 Qué se hace
+* **`comandos/`** con 16 módulos: `abonos`, `avances`, `bonificaciones`, `capital`, `catalogos` (categorías y clientes), `cierre_de_tarjetas`, `correcciones`, `cuentas`, `gastos`, `informales`, `ingresos`, `prestamos`, `respaldos`, `suscripciones`, `tarjetas` y `ayudantes` (los cinco `con_*_como` / `con_*` / `lee_*` y `hoy_dd_mm_aaaa`, lo único que abre conexión).
+* **`main.rs`** queda en ~105 líneas: los `mod`, `fn main` y el registro `generate_handler!` con rutas `comandos::modulo::nombre`.
+* **Visibilidad:** los comandos pasan a `pub` (lo exige `generate_handler!` entre módulos); las cuatro estructuras de entrada (`GastoInput`, `IngresoInput`, `PrestamoInput`, `ActualizarPrestamoInput`) pasan a `pub`, y los campos de los DTO a `pub`, porque las pruebas de caracterización viven ahora fuera del módulo que los define. Es un crate binario: nada se expone hacia fuera.
+* **Pruebas estructurales:** `los_comandos_no_abren_transacciones_diferidas_a_mano` y `ninguna_acumulacion_en_sql_escribe_sin_redondear` recorren `main.rs` **y** todos los módulos (`comandos::FUENTES`), con el mismo rigor (cinco `obtener_conexion`, ningún `transaccion(&mut conn, true)` suelto, listados con `lee_*`, escrituras con `con_*`). Prueba nueva: `la_lista_de_fuentes_cubre_todos_los_modulos_de_comandos` impide que un módulo nuevo quede fuera de ese recorrido.
+* **`caracterizacion.rs`** usa rutas explícitas `crate::comandos::modulo::nombre` (sin reexportar con `pub use comandos::*`, que ocultaría dónde vive cada comando).
+* **`tipos-ipc.d.ts`:** mismas líneas que antes; solo cambia el **orden** de las entradas, que sigue el orden de lectura de los archivos (`main.rs`, luego `comandos/*.rs` alfabéticamente).
+* Un comentario de documentación que estaba pegado a `obtener_bonificaciones` pero describía `liquidar_consumo_pendiente` viaja ahora con este último.
+
+### Verificación
+`cargo test` (891 pruebas: las 890 de antes más la nueva) y `npm test` (608) en verde; `tipos:comprobar` verde; mutaciones comprobadas (conexión suelta, listado con `con_*`, comando sin registrar, comando sin flecha, módulo fuera de `FUENTES`): cada una hace fallar la prueba esperada.
+
+---
+
 **rusqlite sube de 0.29.0 a 0.40.2** (SQLite empaquetado 3.41.2 a 3.53.2, `libsqlite3-sys` 0.26 a 0.38). Deuda técnica B3. No cambia ningún comportamiento.
 
 ### 🔧 Qué se hace

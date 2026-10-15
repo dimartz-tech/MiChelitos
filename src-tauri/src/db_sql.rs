@@ -1959,15 +1959,16 @@ mod pruebas_de_transaccion {
 
     #[test]
     fn los_comandos_no_abren_transacciones_diferidas_a_mano() {
-        // Los comandos de `main.rs` abren su transacción solo por `db_sql::transaccion` (o por los ayudantes `con_*` /
+        // Los comandos (`main.rs` y `comandos/*.rs`) abren su transacción solo por `db_sql::transaccion` (o por los ayudantes `con_*` /
         // `lee_*` que la usan): una `conn.transaction()` suelta volvería al modo diferido sin que nadie lo decida.
-        let fuente = include_str!("main.rs");
+        let fuente = crate::comandos::fuente_de_comandos();
+        let fuente = fuente.as_str();
         assert!(!fuente.contains(".transaction()"), "usa db_sql::transaccion(&mut conn, escritura)");
         // Ya no queda ninguna operación suelta: todo comando escribe por un ayudante `con_*`.
         assert!(!fuente.contains("transaccion(&mut conn, true)"), "un comando abre su transacción de escritura a mano");
         // Solo los cinco ayudantes genéricos `con_*_como` abren conexión; ningún comando lo hace por su cuenta.
         assert_eq!(fuente.matches("db_sql::obtener_conexion()").count(), 5, "un comando abre su conexión a mano");
-        // Cada función de main.rs: un listado usa solo `lee_*`, y nada que escriba usa `lee_*`.
+        // Cada función de los comandos: un listado usa solo `lee_*`, y nada que escriba usa `lee_*`.
         let mut revisadas = 0;
         for trozo in fuente.split("\nfn ").skip(1).chain(fuente.split("\npub fn ").skip(1)) {
             let nombre = trozo.split('(').next().unwrap().split('<').next().unwrap();
