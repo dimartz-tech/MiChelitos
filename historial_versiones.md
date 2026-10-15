@@ -4,7 +4,7 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.110.0 (Versión Actual) - 2026-10-15
+## 🚀 Versión 1.107.0 (Versión Actual) - 2026-10-15
 **Mantenimiento de deuda técnica de prioridad baja.** Sin cambios de comportamiento.
 
 ### 🔧 Qué se hace
