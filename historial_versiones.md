@@ -4,7 +4,17 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.107.0 (Versión Actual) - 2026-10-15
+## 🚀 Versión 1.108.0 (Versión Actual) - 2026-10-15
+**rusqlite sube de 0.29.0 a 0.40.2** (SQLite empaquetado 3.41.2 a 3.53.2, `libsqlite3-sys` 0.26 a 0.38). Deuda técnica B3. No cambia ningún comportamiento.
+
+### 🔧 Qué se hace
+* **Salto directo, sin adaptar código de producción:** compila con `-D warnings` y las 890 pruebas existentes pasan sin tocarlas. Las dependencias que arrastra (`hashlink`, `libsqlite3-sys`, `sqlite-wasm-rs`) se movieron por sí solas; no se actualizó nada más.
+* **Riesgos del análisis previo y por qué no afectan:** códigos de error extendidos (0.32): los textos comparados («CHECK constraint failed», «UNIQUE constraint failed», «locked») no cambian y el código primario sigue siendo el mismo; `execute` con varias sentencias (0.35): la app usa `execute_batch` para eso; `u64`/`usize` sin `ToSql` (0.38): la app no los enlaza; mínimo SQLite 3.34.1: se cumple de sobra.
+* **Pruebas de caracterización nuevas** (`contrato_rusqlite.rs`): versión de SQLite empaquetada mínima, `execute`/`prepare` con varias sentencias frente a `execute_batch`, código `DatabaseBusy` y mensaje «locked», códigos de UNIQUE y CHECK, disparador `RAISE(ABORT)` y enlace de enteros como `i64`.
+
+---
+
+## Versión 1.107.0 - 2026-10-15
 **Mantenimiento de deuda técnica de prioridad baja.** Sin cambios de comportamiento.
 
 ### 🔧 Qué se hace
