@@ -1,6 +1,6 @@
 # Comparar vistas con datos reales
 
-Comprueba que **dos versiones del frontend pintan lo mismo** con tus datos de verdad: las once pestañas, una al lado de la otra, sin tocar la base viva ni mostrar importes. Existe para la división de `ui.ts` (ver `division_de_ui.md`): mover código sin romper nada solo se demuestra con datos reales, porque con datos de juguete casi todas las ramas de una vista quedan sin ejecutar.
+Comprueba que **dos versiones del frontend pintan lo mismo** con tus datos de verdad: las once pestañas, una al lado de la otra, sin tocar la base viva ni mostrar importes. Existe para la división de `ui.ts` (ver `docs/historico/division_de_ui.md`): mover código sin romper nada solo se demuestra con datos reales, porque con datos de juguete casi todas las ramas de una vista quedan sin ejecutar.
 
 ## Cómo se usa
 

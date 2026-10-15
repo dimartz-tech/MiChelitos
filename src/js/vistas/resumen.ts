@@ -4,7 +4,7 @@
 // usa `this` de ningún objeto mezclado ni `AppAPI` global: todo entra por el
 // constructor, así que se puede probar en Node con dobles
 // (`pruebas/js/vistas/resumen.test.js`). El cuerpo es el de `ui.ts`; solo cambian
-// los accesos a lo compartido (ver `division_de_ui_limpia.md`).
+// los accesos a lo compartido (ver `docs/historico/division_de_ui_limpia.md`).
 
 import type { ApiDe, Formato, Pantalla, Referencias, Reloj, Vista } from '../ui/servicios';
 
