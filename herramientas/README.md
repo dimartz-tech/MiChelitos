@@ -5,6 +5,8 @@
 ```bash
 python3 herramientas/revisar.py            # todo
 python3 herramientas/revisar.py --rapido   # sin las pruebas
+python3 herramientas/revisar.py --exigir-importes   # falla (3) si no hay base viva
+python3 -m unittest herramientas/pruebas_revisar.py # pruebas de la propia revisión
 ```
 
 Sustituye a la lista de comprobaciones que había que recordar y recomponer
@@ -44,3 +46,7 @@ que no tener revisor.
 Solo se comparan importes de 1 000 en adelante. Por debajo, cualquier ejemplo
 coincide por casualidad con algo —`1.00`, `100.00`— y el aviso acabaría
 ignorándose, que es la forma habitual en que una comprobación deja de servir.
+
+### En integración continua
+
+`.github/workflows/ci.yml` corre tipos, JavaScript, Rust (`cargo test --locked`) y esta revisión en cada pull request. El ejecutor no tiene la base viva, así que los importes **no se comprueban allí**: `revisar.py` lo dice (anotación `::warning::` y «PARCIAL» en lugar de «Listo para publicar»). Si la referencia base no existe sale con código 2 en vez de dar un visto bueno vacío.

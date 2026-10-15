@@ -1,0 +1,63 @@
+# Integración continua: nada llega a main sin pasar tipos, pruebas de JavaScript
+# y de Rust, y la revisión de privacidad y versión.
+#
+# Límite conocido: el ejecutor no tiene la base viva del titular, así que la
+# comprobación de importes de `revisar.py` queda parcial aquí (lo avisa con una
+# anotación). Esa parte se sigue haciendo en local antes de publicar.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Tipos y JavaScript
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run tipos
+      - name: tipos-ipc.d.ts al día
+        run: node herramientas/generar_tipos_ipc.mjs --comprobar
+      - run: npm test
+
+  rust:
+    name: Rust
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      # Basta cargo test: no se compila la app completa ni se empaqueta.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+  revisar:
+    name: Revisión (privacidad y versión)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # el diff contra la rama base necesita el historial
+      - name: Pruebas de la propia revisión
+        run: python3 -m unittest herramientas/pruebas_revisar.py
+      - name: Revisar el diff contra la rama base
+        if: github.event_name == 'pull_request'
+        run: python3 herramientas/revisar.py --rapido --base "origin/${{ github.base_ref }}"
