@@ -32,7 +32,7 @@ jobs:
       - run: npm ci
       - run: npm run tipos
       - name: tipos-ipc.d.ts al día
-        run: node herramientas/generar_tipos_ipc.mjs --comprobar
+        run: npm run tipos:comprobar
       - run: npm test
 
   rust:
