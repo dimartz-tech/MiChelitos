@@ -10,7 +10,7 @@ Tres comprobaciones, en orden de lo que más duele que falle:
 
     1. Privacidad — que nada del diff identifique finanzas reales.
     2. Coherencia de versión — que el número no se desincronice entre
-       los cuatro archivos que lo declaran.
+       los cinco sitios que lo declaran.
     3. Pruebas — Rust, JavaScript y comprobación de tipos.
 
 **Este archivo no contiene ningún dato del titular.** Los importes con los
@@ -21,11 +21,16 @@ visto bueno que no ha comprobado nada.
 Uso:
     python3 herramientas/revisar.py            # contra origin/main
     python3 herramientas/revisar.py --base X   # contra otra referencia
+    python3 herramientas/revisar.py --exigir-importes   # falla si no hay base viva
+
+Códigos de salida: 0 todo bien; 1 hallazgos; 2 la referencia base no existe;
+3 se pidió --exigir-importes y la base viva no estaba disponible.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sqlite3
 import subprocess
@@ -48,6 +53,11 @@ IMPORTE = re.compile(r"\d[\d_,]*\.\d{2}\b")
 # Un revisor contiene por fuerza los patrones que busca, y señalarse a sí
 # mismo enseñaría a ignorar sus propios avisos.
 EXENTOS = ("herramientas/",)
+
+# Se activa cuando no se pudo comprobar los importes contra la base viva. El
+# visto bueno final lo dice: «Listo para publicar» no puede significar «no he
+# mirado lo más importante».
+IMPORTES_SIN_COMPROBAR = False
 
 
 def ejecutar(orden: list[str], cwd: Path = RAIZ) -> tuple[int, str]:
@@ -144,8 +154,13 @@ def revisar_privacidad(base: str) -> list[str]:
 
     reales = importes_reales()
     if reales is None:
+        global IMPORTES_SIN_COMPROBAR
+        IMPORTES_SIN_COMPROBAR = True
         print(f"  · base viva no disponible en {BASE_DE_DATOS}")
         print("    NO se comprobaron los importes. El visto bueno es parcial.")
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print("::warning::revisar.py no pudo comprobar los importes contra la base "
+                  "viva (no existe en el ejecutor). Hazlo en local antes de publicar.")
         return fallos
 
     for archivo, linea in anadidas:
@@ -219,7 +234,18 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--base", default="origin/main", help="referencia con la que comparar")
     p.add_argument("--rapido", action="store_true", help="omitir las pruebas")
+    p.add_argument("--exigir-importes", action="store_true",
+                   help="fallar (código 3) si la base viva no está disponible")
     args = p.parse_args()
+
+    # Si la referencia no existe, `git diff base...HEAD` falla y no revisa
+    # nada: un visto bueno sin haber mirado. Mejor negarse (típico de un
+    # checkout superficial de integración continua).
+    codigo, salida = ejecutar(["git", "rev-parse", "--verify", "--quiet", f"{args.base}^{{commit}}"])
+    if codigo != 0:
+        print(f"La referencia base «{args.base}» no existe en este repositorio; "
+              "no se puede revisar el diff. En CI usa fetch-depth: 0.")
+        return 2
 
     bloques = [("Privacidad", lambda: revisar_privacidad(args.base)),
                ("Versión", revisar_version)]
@@ -241,6 +267,12 @@ def main() -> int:
     if total:
         print(f"{total} hallazgo(s). No publiques hasta resolverlos.")
         return 1
+    if IMPORTES_SIN_COMPROBAR:
+        if args.exigir_importes:
+            print("Sin hallazgos, pero los importes no se pudieron comprobar y se exigían.")
+            return 3
+        print("Sin hallazgos, pero PARCIAL: faltó comprobar los importes contra la base viva.")
+        return 0
     print("Listo para publicar.")
     return 0
 
