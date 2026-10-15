@@ -251,6 +251,7 @@ impl RepositorioTarjetas for AlmacenSqlite<'_> {
         Ok(())
     }
 
+    #[cfg(test)]
     fn deuda(&self, tarjeta_id: i64, divisa: Divisa) -> Result<Dinero, ErrorAlmacen> {
         let columna = match divisa {
             Divisa::Usd => "balance_dolares",
@@ -518,20 +519,6 @@ impl RepositorioCuentas for AlmacenSqlite<'_> {
             .ok_or(ErrorAlmacen::CajaDeEfectivoAusente { divisa })
     }
 
-    fn es_caja(&self, cuenta_id: i64) -> Result<bool, ErrorAlmacen> {
-        let marca: Option<i64> = self
-            .tx
-            .query_row(
-                "SELECT es_caja_efectivo FROM cuentas_ahorro WHERE id = ?;",
-                [cuenta_id],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(fallo)?;
-        let marca = marca.ok_or(ErrorAlmacen::NoEncontrado { entidad: "cuenta", id: cuenta_id })?;
-        Ok(marca == 1)
-    }
-
     fn estado_de_cuenta(&self, cuenta_id: i64) -> Result<EstadoDeCuenta, ErrorAlmacen> {
         let fila: Option<(String, f64, String, i64, i64)> = self
             .tx
@@ -686,7 +673,6 @@ mod tests {
             cuenta_saldo: dop(100000.0),
             cuenta_vacia_id,
             caja_id,
-            caja_saldo: dop(0.0),
             tarjeta_id,
             tarjeta_deuda: dop(500.0),
             tarjeta_vacia_id,

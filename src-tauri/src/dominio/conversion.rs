@@ -86,6 +86,7 @@ impl Conversion {
         Ok(Conversion { origen, destino, tasa })
     }
 
+    #[cfg(test)]
     pub fn origen(&self) -> Dinero {
         self.origen
     }
