@@ -34,10 +34,6 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.109.0 - 2026-10-15
-
----
-
 ## Versión 1.112.0 - 2026-10-15
 **Parches y menores de Tauri y serde.** Deuda técnica B3. No cambia ningún comportamiento de la app ni el código: solo `Cargo.lock`.
 
