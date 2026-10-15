@@ -4,7 +4,7 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.108.0 (Versión Actual) - 2026-10-15
+## 🚀 Versión 1.109.0 (Versión Actual) - 2026-10-15
 **`main.rs` deja de ser un archivo de 1 900 líneas: los 67 comandos se reparten en `src-tauri/src/comandos/`, un módulo por agregado.** Cambio de estructura (M2 del informe de deuda técnica): es un **movimiento puro**, sin cambiar firmas, nombres de comando, lógica, mensajes ni esquema.
 
 ### 🔧 Qué se hace
@@ -21,6 +21,7 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
+## Versión 1.108.0 - 2026-10-15
 **rusqlite sube de 0.29.0 a 0.40.2** (SQLite empaquetado 3.41.2 a 3.53.2, `libsqlite3-sys` 0.26 a 0.38). Deuda técnica B3. No cambia ningún comportamiento.
 
 ### 🔧 Qué se hace
