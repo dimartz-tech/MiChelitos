@@ -19,6 +19,8 @@ mod puertos;
 #[cfg(test)]
 mod caracterizacion;
 #[cfg(test)]
+mod contrato_rusqlite;
+#[cfg(test)]
 mod gherkin;
 #[cfg(test)]
 mod caso_de_uso_gherkin;
