@@ -11,6 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VistaEfectivo, MANEJADORES_EFECTIVO, puenteEfectivo } from '../../../src/js/vistas/efectivo.js';
+import { nombresDelPuente } from '../ayudas/manejadores_html.js';
 
 const CUENTAS = [
     { id: 1, nombre: 'Cuenta Alfa', divisa: 'DOP', balance_actual: 1000, entidad: null, comision_pago_impuestos: null },
@@ -132,7 +133,7 @@ test('dibujo: fecha de hoy inyectada, importes con el formato inyectado y sin la
 test('puente: todo appUI.x() que la plantilla escribe existe en lo que se expone, y delega en la vista', async () => {
     const t = montar({ campos: { efe_inf_fec: 'f', efe_inf_mon: '1', efe_inf_div: 'DOP', efe_inf_des: 'x' } });
     await t.vista.render();
-    const usados = [...t.pantalla.contenido.innerHTML.matchAll(/\bappUI\.(\w+)\(/g)].map(m => m[1]);
+    const usados = [...nombresDelPuente(t.pantalla.contenido.innerHTML)];
     assert.ok(usados.length >= 2, 'la plantilla debe tener manejadores');
     const puente = puenteEfectivo(t.vista);
     assert.deepEqual([...MANEJADORES_EFECTIVO].sort(), Object.keys(puente).sort());

@@ -9,7 +9,7 @@
 import type { CuentaAhorro } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { escaparHtml } from '../nucleo/html.js';
+import { alEnviar, escaparHtml } from '../nucleo/html.js';
 
 type ApiEfectivo = ApiDe<'obtenerCuentas' | 'crearCobroEfectivoInformal' | 'transferirEntreCuentas'>;
 
@@ -23,7 +23,7 @@ export interface DependenciasEfectivo {
     ahora: Reloj;
 }
 
-/** Los manejadores en línea (`onsubmit="appUI.…"`) que la plantilla escribe. */
+/** Las acciones delegadas (`data-accion-enviar`) que la plantilla escribe. */
 export const MANEJADORES_EFECTIVO = ['handleAgregarEfectivoInformal', 'handleRetirarAEfectivo'] as const;
 export type ManejadorEfectivo = (typeof MANEJADORES_EFECTIVO)[number];
 
@@ -74,7 +74,7 @@ export class VistaEfectivo implements Vista {
                     <div class="card" style="height: fit-content;">
                         <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">💸 Entrada Informal a Efectivo</h3>
                         <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Registra una entrada de dinero informal directamente en caja.</p>
-                        <form id="form-add-efectivo-informal" onsubmit="appUI.handleAgregarEfectivoInformal(event)">
+                        <form id="form-add-efectivo-informal" ${alEnviar('handleAgregarEfectivoInformal')}>
                             <div class="form-group">
                                 <label for="efe_inf_fec">Fecha *</label>
                                 <input type="text" id="efe_inf_fec" class="form-control" value="${escaparHtml(hoyStr)}" required>
@@ -106,7 +106,7 @@ export class VistaEfectivo implements Vista {
                     <div class="card" style="height: fit-content;">
                         <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">🏦 Retiro desde Cuenta Bancaria</h3>
                         <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Transfiere fondos de una cuenta bancaria a efectivo.</p>
-                        <form id="form-retirar-a-efectivo" onsubmit="appUI.handleRetirarAEfectivo(event)">
+                        <form id="form-retirar-a-efectivo" ${alEnviar('handleRetirarAEfectivo')}>
                             <div class="form-group">
                                 <label for="efe_ret_fec">Fecha *</label>
                                 <input type="text" id="efe_ret_fec" class="form-control" value="${escaparHtml(hoyStr)}" required>
@@ -186,7 +186,7 @@ export class VistaEfectivo implements Vista {
 
 /**
  * Lo que `window.appUI` expone de esta vista: un puente que delega en la
- * instancia. Los atributos `onsubmit="appUI.…"` no cambian.
+ * instancia. Los atributos `data-accion*` no cambian.
  */
 export function puenteEfectivo(vista: VistaEfectivo): Record<ManejadorEfectivo, (e: EventoDeFormulario) => Promise<void>> {
     return {

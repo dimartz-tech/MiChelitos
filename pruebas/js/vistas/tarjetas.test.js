@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
+import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
 import { VistaTarjetas, MANEJADORES_TARJETAS, puenteTarjetas } from '../../../src/js/vistas/tarjetas.js';
 
 const tarjeta = (extra = {}) => ({
@@ -139,7 +139,7 @@ test('las bonificaciones se suman por divisa y sin ellas se dice «—»', async
     const t = montar({ bonificaciones: [BONIFICACION(), BONIFICACION({ id: 12, monto: 5 }), BONIFICACION({ id: 13, monto: 7, divisa: 'USD' })] });
     await t.vista.render();
     assert.match(t.pantalla.contenido.innerHTML, /Total acreditado: <strong>DOP #30#<\/strong> · <strong>USD #7#<\/strong>/);
-    assert.match(t.pantalla.contenido.innerHTML, /appUI\.handleEliminarBonificacion\(13\)/);
+    assert.deepEqual(llamadasDelManejador(t.pantalla.contenido.innerHTML, 'handleEliminarBonificacion').filter(a => a[0] === 13), [[13]]);
     const vacio = montar();
     await vacio.vista.render();
     assert.doesNotMatch(vacio.pantalla.contenido.innerHTML, /Total acreditado/);
@@ -372,7 +372,7 @@ test('el historial de abonos se carga al abrirlo, se oculta al repetir y trae el
     assert.match(caja.innerHTML, /USD #80#/);
     assert.match(caja.innerHTML, /sin cuenta asociada · tasa 58\.5/);
     assert.doesNotMatch(caja.innerHTML, /DOP #20#[\s\S]*tasa 1</);       // una tasa de 1 no se muestra
-    assert.match(caja.innerHTML, /appUI\.handleRevertirAbono\(41, 7\)/);
+    assert.deepEqual(llamadasDelManejador(caja.innerHTML, 'handleRevertirAbono').filter(a => a[0] === 41), [[41, 7]]);
     await t.vista.alternarAbonos(7);
     assert.equal(caja.hidden, true);
     assert.equal(t.llamadas.length, 1, 'al ocultarlo no vuelve a consultar');
@@ -398,7 +398,7 @@ test('el historial de avances: cargo por tipo, nota y botón de deshacer; sin av
     assert.match(caja.innerHTML, /cargo 6\.25% = DOP #5#/);
     assert.match(caja.innerHTML, /Para la renta/);
     assert.match(caja.innerHTML, /exonerado/);
-    assert.match(caja.innerHTML, /appUI\.handleRevertirAvance\(52, 7\)/);
+    assert.deepEqual(llamadasDelManejador(caja.innerHTML, 'handleRevertirAvance').filter(a => a[0] === 52), [[52, 7]]);
     const vacio = el({ hidden: true });
     await montar({ campos: { avances_7: vacio } }).vista.alternarAvances(7);
     assert.match(vacio.innerHTML, /Sin avances registrados/);
@@ -566,7 +566,7 @@ test('todo appUI.x( que escribe la plantilla y su ventana está en el puente, y 
     t.vista.abrirEdicionLimitesTarjeta(JSON.stringify(tarjeta()));
     await t.vista.abrirCierreTarjeta(7);
     const html = t.pantalla.contenido.innerHTML + t.registro.abonos_7.innerHTML + t.registro.avances_7.innerHTML + t.modales[0].html + t.modales[1].html;
-    const llamados = new Set([...html.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
+    const llamados = nombresDelPuente(html);
     for (const nombre of llamados) assert.ok(MANEJADORES_TARJETAS.includes(nombre), `falta ${nombre} en el puente`);
     for (const nombre of MANEJADORES_TARJETAS) assert.ok(llamados.has(nombre), `${nombre} está en el puente pero ninguna plantilla lo usa`);
 });
@@ -687,7 +687,7 @@ test('las tarjetas inactivas van aparte, en un bloque plegable, con su estado en
     assert.match(html, /<details[\s\S]*Tarjetas inactivas \(1\)/);
     assert.match(html, /Banco &lt;Viejo&gt; - Clásica/);
     assert.match(html, /· Inactiva/, 'el estado va en texto, no solo en el estilo');
-    assert.match(html, /appUI\.handleReactivarTarjeta\(9\)/);
+    assert.deepEqual(llamadasDelManejador(html, 'handleReactivarTarjeta'), [[9]]);
     const bloque = html.slice(html.indexOf('Tarjetas inactivas'));
     assert.doesNotMatch(bloque.slice(0, bloque.indexOf('</details>')), /#\d+#/, 'ningún importe en las inactivas');
     const sin = montar({});

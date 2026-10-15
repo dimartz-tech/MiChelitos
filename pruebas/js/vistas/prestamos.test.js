@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { llamadasDelManejador } from '../ayudas/manejadores_html.js';
+import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
 import { VistaPrestamos, MANEJADORES_PRESTAMOS, puentePrestamos } from '../../../src/js/vistas/prestamos.js';
 
 const prestamo = (extra = {}) => ({
@@ -373,12 +373,12 @@ test('abrir el menú: detiene el clic, lo ancla al botón y ofrece «abonar» so
     assert.equal(t.menus.length, 1);
     assert.equal(t.menus[0].id, 'menu-pasivo');
     assert.deepEqual(t.menus[0].ancla, { right: 300, top: 50, bottom: 80 });
-    assert.match(t.menus[0].html, /data-accion="abonar"/);
+    assert.match(t.menus[0].html, /data-opcion="abonar"/);
     t.vista.abrirMenuPasivo(eventoDeMenu(), DATOS().prestamos[3]);   // cuotas pendientes = 0
-    assert.doesNotMatch(t.menus[1].html, /data-accion="abonar"/);
-    for (const a of ['conciliar', 'editar', 'eliminar']) assert.match(t.menus[1].html, new RegExp(`data-accion="${a}"`));
+    assert.doesNotMatch(t.menus[1].html, /data-opcion="abonar"/);
+    for (const a of ['conciliar', 'editar', 'eliminar']) assert.match(t.menus[1].html, new RegExp(`data-opcion="${a}"`));
     t.vista.abrirMenuPasivo(eventoDeMenu(), DATOS().prestamos[2]);   // una línea siempre puede abonar
-    assert.match(t.menus[2].html, /data-accion="abonar"/);
+    assert.match(t.menus[2].html, /data-opcion="abonar"/);
 });
 
 test('cada renglón del menú hace su acción sobre ese financiamiento', async () => {
@@ -413,7 +413,7 @@ test('todo appUI.x( que escribe la plantilla y su ventana está en el puente', a
     await t.vista.render();
     await t.vista.abrirEdicionPrestamo(DATOS().prestamos[2]);
     const html = t.pantalla.contenido.innerHTML + t.modales[0].html;
-    const llamados = new Set([...html.matchAll(/appUI\.(\w+)\(/g)].map(m => m[1]));
+    const llamados = nombresDelPuente(html);
     assert.ok(llamados.size >= 4, [...llamados].join());
     for (const nombre of llamados) assert.ok(MANEJADORES_PRESTAMOS.includes(nombre), `falta ${nombre} en el puente`);
 });

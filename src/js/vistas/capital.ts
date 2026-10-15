@@ -15,7 +15,7 @@
 
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { argumentoJs, escaparHtml } from '../nucleo/html.js';
+import { accion, alEnviar, escaparHtml } from '../nucleo/html.js';
 
 type ApiCapital = ApiDe<'obtenerCapital' | 'guardarCapital'>;
 
@@ -56,7 +56,7 @@ export interface DependenciasCapital {
     ahora: Reloj;
 }
 
-/** Los manejadores en línea (`onsubmit`/`onclick` → `appUI.…`) que la plantilla escribe. */
+/** Las acciones delegadas (`data-accion*` → `appUI.…`) que la plantilla escribe. */
 export const MANEJADORES_CAPITAL = [
     'handleAgregarCertificado', 'handleEliminarCertificado',
     'handleAgregarBolsa', 'handleEliminarBolsa',
@@ -90,7 +90,7 @@ export class VistaCapital implements Vista {
                 <!-- Certificados -->
                 <div class="card">
                     <h3 style="font-family: var(--font-heading); font-size: 1.1rem; margin-bottom: 1rem;">🏦 Certificados Financieros</h3>
-                    <form id="form-add-certificado" onsubmit="appUI.handleAgregarCertificado(event)" style="border-bottom:1px dashed var(--border-color); padding-bottom:1rem; margin-bottom:1rem;">
+                    <form id="form-add-certificado" ${alEnviar('handleAgregarCertificado')} style="border-bottom:1px dashed var(--border-color); padding-bottom:1rem; margin-bottom:1rem;">
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Banco *</label>
@@ -133,7 +133,7 @@ export class VistaCapital implements Vista {
                                     <span style="font-size:0.7rem; color:var(--accent-primary); font-style:italic;">${escaparHtml(c.tipo_pago || 'A cuenta')}</span>
                                 </div>
                                 <div style="text-align:right; margin-top:0.2rem;">
-                                    <button onclick="appUI.handleEliminarCertificado(${i})" style="background:none; border:none; color:var(--color-danger); cursor:pointer; font-size:0.7rem;">Eliminar</button>
+                                    <button ${accion('handleEliminarCertificado', i)} style="background:none; border:none; color:var(--color-danger); cursor:pointer; font-size:0.7rem;">Eliminar</button>
                                 </div>
                                 ${c.alerta_vencimiento ? `
                                     <div class="badge danger" style="width:100%; text-align:center; font-size:0.65rem; margin-top:0.3rem; padding:2px;">${escaparHtml(c.alerta_msg)}</div>
@@ -146,7 +146,7 @@ export class VistaCapital implements Vista {
                 <!-- Bolsa -->
                 <div class="card">
                     <h3 style="font-family: var(--font-heading); font-size: 1.1rem; margin-bottom: 1rem;">📈 Bolsa de Valores</h3>
-                    <form id="form-add-bolsa" onsubmit="appUI.handleAgregarBolsa(event)" style="border-bottom:1px dashed var(--border-color); padding-bottom:1rem; margin-bottom:1rem;">
+                    <form id="form-add-bolsa" ${alEnviar('handleAgregarBolsa')} style="border-bottom:1px dashed var(--border-color); padding-bottom:1rem; margin-bottom:1rem;">
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Emisor *</label>
@@ -189,7 +189,7 @@ export class VistaCapital implements Vista {
                                     <span style="font-size:0.7rem; color:#10b981; font-style:italic;">${escaparHtml(b.tipo_pago || 'A cuenta')}</span>
                                 </div>
                                 <div style="text-align:right; margin-top:0.2rem;">
-                                    <button onclick="appUI.handleEliminarBolsa(${i})" style="background:none; border:none; color:var(--color-danger); cursor:pointer; font-size:0.7rem;">Eliminar</button>
+                                    <button ${accion('handleEliminarBolsa', i)} style="background:none; border:none; color:var(--color-danger); cursor:pointer; font-size:0.7rem;">Eliminar</button>
                                 </div>
                                 ${b.alerta_vencimiento ? `
                                     <div class="badge danger" style="width:100%; text-align:center; font-size:0.65rem; margin-top:0.3rem; padding:2px;">${escaparHtml(b.alerta_msg)}</div>
@@ -202,7 +202,7 @@ export class VistaCapital implements Vista {
                 <!-- Bienes Físicos -->
                 <div class="card">
                     <h3 style="font-family: var(--font-heading); font-size: 1.1rem; margin-bottom: 1rem;">🏢 Propiedades</h3>
-                    <form id="form-add-propiedad" onsubmit="appUI.handleAgregarPropiedad(event)" style="border-bottom:1px dashed var(--border-color); padding-bottom:1rem; margin-bottom:1rem;">
+                    <form id="form-add-propiedad" ${alEnviar('handleAgregarPropiedad')} style="border-bottom:1px dashed var(--border-color); padding-bottom:1rem; margin-bottom:1rem;">
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Tipo *</label>
@@ -236,7 +236,7 @@ export class VistaCapital implements Vista {
                             ${inmobiliario.map((p: Bien) => `
                                 <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.4rem; border-radius:4px; margin-bottom:0.2rem;">
                                     <span>${escaparHtml(p.nombre)}</span>
-                                    <span>DOP ${formato.importe(p.valor_estimado)} <button onclick="appUI.handleEliminarPropiedad('inmobiliario', ${argumentoJs(p.id)})" style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
+                                    <span>DOP ${formato.importe(p.valor_estimado)} <button ${accion('handleEliminarPropiedad', 'inmobiliario', p.id)} style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
                                 </div>
                             `).join('')}
                         ` : ''}
@@ -246,7 +246,7 @@ export class VistaCapital implements Vista {
                             ${vehiculos.map((p: Bien) => `
                                 <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.4rem; border-radius:4px; margin-bottom:0.2rem;">
                                     <span>${escaparHtml(p.nombre)}</span>
-                                    <span>DOP ${formato.importe(p.valor_estimado)} <button onclick="appUI.handleEliminarPropiedad('vehiculos', ${argumentoJs(p.id)})" style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
+                                    <span>DOP ${formato.importe(p.valor_estimado)} <button ${accion('handleEliminarPropiedad', 'vehiculos', p.id)} style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
                                 </div>
                             `).join('')}
                         ` : ''}
@@ -256,7 +256,7 @@ export class VistaCapital implements Vista {
                             ${maquinaria.map((p: Bien) => `
                                 <div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.4rem; border-radius:4px; margin-bottom:0.2rem;">
                                     <span>${escaparHtml(p.nombre)}</span>
-                                    <span>DOP ${formato.importe(p.valor_estimado)} <button onclick="appUI.handleEliminarPropiedad('maquinaria', ${argumentoJs(p.id)})" style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
+                                    <span>DOP ${formato.importe(p.valor_estimado)} <button ${accion('handleEliminarPropiedad', 'maquinaria', p.id)} style="background:none; border:none; color:var(--color-danger); cursor:pointer; margin-left:0.4rem;">🗑️</button></span>
                                 </div>
                             `).join('')}
                         ` : ''}
@@ -388,7 +388,7 @@ export class VistaCapital implements Vista {
 
 /**
  * Lo que `window.appUI` expone de esta vista: un puente que delega en la
- * instancia. Los atributos `onsubmit`/`onclick` no cambian.
+ * instancia. Los atributos `data-accion*` no cambian.
  */
 export function puenteCapital(vista: VistaCapital): {
     handleAgregarCertificado: (e: EventoDeFormulario) => Promise<void>;

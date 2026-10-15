@@ -7,7 +7,7 @@
 
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { escaparHtml } from '../nucleo/html.js';
+import { alCambiar, alEnviar, escaparHtml } from '../nucleo/html.js';
 
 type ApiCuentas = ApiDe<'obtenerCuentas' | 'obtenerTransaccionesCuentas' | 'transferirEntreCuentas'>;
 
@@ -21,7 +21,7 @@ export interface DependenciasCuentas {
     ahora: Reloj;
 }
 
-/** Los manejadores en línea (`onsubmit`/`oninput`/`onchange` → `appUI.…`) que la plantilla escribe. */
+/** Las acciones delegadas (`data-accion*` → `appUI.…`) que la plantilla escribe. */
 export const MANEJADORES_CUENTAS = ['handleTransferirCuentas', 'rotularDivisasTransferencia'] as const;
 export type ManejadorCuentas = (typeof MANEJADORES_CUENTAS)[number];
 
@@ -70,21 +70,21 @@ export class VistaCuentas implements Vista {
                     <div class="card" style="height: fit-content;">
                         <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">🔄 Transferencia / Cambio</h3>
                         <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Permite transferir fondos y registrar el cambio de divisas (Pesos <-> Dólares).</p>
-                        <form id="form-transfer-cuentas" onsubmit="appUI.handleTransferirCuentas(event)">
+                        <form id="form-transfer-cuentas" ${alEnviar('handleTransferirCuentas')}>
                             <div class="form-group">
                                 <label for="tra_fec">Fecha *</label>
                                 <input type="text" id="tra_fec" class="form-control" value="${escaparHtml(hoyStr)}" required>
                             </div>
                             <div class="form-group">
                                 <label for="tra_ori">Cuenta Origen *</label>
-                                <select id="tra_ori" class="form-control" onchange="appUI.rotularDivisasTransferencia()" required>
+                                <select id="tra_ori" class="form-control" ${alCambiar('rotularDivisasTransferencia')} required>
                                     <option value="" disabled selected>Seleccione...</option>
                                     ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                                 </select>
                             </div>
                             <div class="form-group">
                                 <label for="tra_des">Cuenta Destino *</label>
-                                <select id="tra_des" class="form-control" onchange="appUI.rotularDivisasTransferencia()" required>
+                                <select id="tra_des" class="form-control" ${alCambiar('rotularDivisasTransferencia')} required>
                                     <option value="" disabled selected>Seleccione...</option>
                                     ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                                 </select>
@@ -233,7 +233,7 @@ export class VistaCuentas implements Vista {
 
 /**
  * Lo que `window.appUI` expone de esta vista: un puente que delega en la
- * instancia. Los atributos `onsubmit`/`oninput` no cambian.
+ * instancia. Los atributos `data-accion*` no cambian.
  */
 export function puenteCuentas(vista: VistaCuentas): {
     handleTransferirCuentas: (e: EventoDeFormulario) => Promise<void>;
