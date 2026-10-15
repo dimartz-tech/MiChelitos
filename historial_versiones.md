@@ -4,7 +4,37 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.112.0 (Versión Actual) - 2026-10-15
+## 🚀 Versión 1.113.0 (Versión Actual) - 2026-10-15
+**Pruebas de caracterización de las sumas y comparaciones de saldo sobre `REAL` (deuda técnica A2, primera mitad).** Solo añade pruebas: **no cambia ningún comportamiento de producción** (el único cambio fuera del archivo nuevo es declarar el módulo de pruebas en `main.rs`).
+
+### 🔍 Inventario (resultado del análisis)
+* **Cero `SUM(`/`AVG(`/`TOTAL(` en SQL de producción** (`src-tauri/src`, excluyendo pruebas). Las ~65 apariciones del análisis previo eran código de pruebas o `.reduce` de la interfaz. Las sumas de dominio son enteros (`Dinero::sumar` en centavos; `Totales::patrimonio` y `sumar_entradas` en `guardar_capital.rs`).
+* **Acumulaciones en escritura** (lo único que hace aritmética sobre `REAL` en SQL): `adaptadores/sqlite/gastos.rs:243-244` (`ROUND(balance + ?, 2)` en tarjetas), `:497-500` (`ajustar_saldo`: lee a `Dinero`, suma en centavos y escribe), `adaptadores/sqlite/prestamos.rs:142` (escribe el saldo ya calculado).
+* **Comparaciones de saldo cero** en la propia sentencia: `gastos.rs:357` (`desactivar_tarjeta`) y `:550` (`archivar_cuenta`), ambas con `ROUND(x * 100) = 0`.
+* **Lecturas `REAL -> Dinero`** por `Dinero::nuevo(f64)` (`(x * 100).round()`, **sin tolerancia**: `TOLERANCIA_REPRESENTACION_CENTAVOS` es una constante solo de pruebas que mide la escala de las tasas). Lugares en `adaptadores/sqlite/gastos.rs`: 105, 111, 136, 213, 271, 327, 446, 452, 536, 583, 602, 619.
+* **`ROUND(x, 2)` en migraciones**: `db_sql.rs:428` (saldo prorrateado de préstamos), `:894` (`monto_pagado * tasa`), `:642, 1020, 1059` (limpieza de fracciones).
+* **Donde sí se suma en `f64`: la interfaz.** ~25 `reduce((s, x) => s + x.campo, 0)` en `src/js/vistas/` (`dashboard`, `resumen`, `gastos`, `cuentas`, `prestamos`, `tarjetas`): fuera del alcance de esta tarea, anotado para el paso de centralizar.
+
+### 🧪 Pruebas nuevas (`sumas_en_centavos.rs`, 24)
+* Acumulación exacta en centavos con importes «feos» (0.10, 0.07, 19.99, 1 234 567.89…, 3 000 movimientos pseudoaleatorios con signo) en `ajustar_saldo` y `ajustar_deuda` (pesos y dólares), incluida magnitud hasta 9·10¹² pesos.
+* Viaje `REAL -> Dinero -> REAL` exacto para 4 millones de centavos consecutivos y 200 000 aleatorios hasta 10¹⁴.
+* Guarda estructural: ningún `SUM(`/`AVG(`/`TOTAL(` en SQL de producción (y que el recorrido de fuentes no pase en vacío).
+* Comparaciones de cero: `0.1 + 0.2 - 0.3` deja `0.0` exacto y permite archivar la cuenta y desactivar la tarjeta; un centavo (también a favor) bloquea ambas; el esquema rechaza el REAL con deriva (`CHECK`); umbral de `ROUND(x * 100) = 0`.
+* Motor: `SUM` de SQLite (3.53) es exacto donde la suma ingenua de `f64` no; `ROUND` de SQLite con y sin decimales.
+
+### ⚠️ Hallazgos fijados (sin corregir; los decide el titular)
+* `hallazgo_round_de_sql_decide_la_mitad_por_el_binario_y_dinero_por_los_digitos`: `ROUND(2.675, 2)` y `ROUND(1.005, 2)` de SQLite bajan; `Dinero::desde_texto` sube. Solo afecta a las migraciones que redondean un producto.
+* `hallazgo_dinero_nuevo_por_f64_decide_distinto_que_por_texto_en_las_mitades`: `Dinero::nuevo(f64)` baja un centavo en 18 349 de 400 000 «mitades» donde el texto sube. En producción no se ve (los importes entran por texto y el REAL leído nunca es una mitad).
+* `hallazgo_archivar_toma_por_cero_hasta_medio_centavo_exclusive`: `ROUND(x * 100) = 0` da por cero hasta ±0.004; inalcanzable con el `CHECK` activo.
+* `hallazgo_ajustar_saldo_y_ajustar_deuda_reabsorben_la_deriva_ya_guardada`: un REAL con deriva (solo con el `CHECK` apagado) se «limpia» en el primer movimiento.
+* `hallazgo_la_suma_ingenua_de_f64_se_aparta_de_la_exacta_con_muchos_importes`: lo que hace el `reduce` de la interfaz; con 5 000 importes la deriva es ~10⁻⁴ centavos (invisible con dos decimales).
+
+### Verificación
+`cargo test` con `-D warnings` en verde (921 pruebas: las 897 de antes más 24). Mutaciones comprobadas, cada una falla alguna prueba nueva: quitar el `ROUND` de `ajustar_deuda`, comparar por igualdad en `archivar_cuenta`, ídem en `desactivar_tarjeta`, truncar en `Dinero::nuevo`, introducir un `SUM(` en una consulta de producción.
+
+---
+
+## Versión 1.112.0 - 2026-10-15
 **Parches y menores de Tauri y serde.** Deuda técnica B3. No cambia ningún comportamiento de la app ni el código: solo `Cargo.lock`.
 
 ### 🔧 Qué se hace
