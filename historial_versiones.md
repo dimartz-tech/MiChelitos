@@ -4,7 +4,20 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.113.0 (Versión Actual) - 2026-10-15
+## 🚀 Versión 1.114.0 (Versión Actual) - 2026-10-28
+**Pestaña Gastos: autocompletado de la descripción, «repetir último» y búsqueda/filtros del historial.** Solo interfaz (`src/js/vistas/gastos.ts`): no cambia ninguna regla de dominio ni se añade ningún comando de Rust.
+
+### ✨ Qué se añade
+* **Autocompletado**: la descripción del formulario ofrece (`<datalist>`) las descripciones ya usadas, sin repetir y sin distinguir mayúsculas, de la más frecuente a la menos y, a igual frecuencia, la más reciente primero (máximo 100).
+* **Repetir último**: al escribir o elegir una descripción existente aparece una oferta con la categoría, el método (con su tarjeta o cuenta) y la divisa del último gasto con ella. **No se rellena nada hasta pulsar «Rellenar con esos datos»**; el monto solo se pone con «Usar el último monto». Lo que ya no existe o no está activo (tarjeta desactivada, cuenta archivada, categoría borrada) no se rellena y la oferta lo dice. Nada se guarda sin el botón «Registrar Gasto».
+* **Búsqueda y filtros del historial**: caja de texto (descripción y categoría, sin mayúsculas ni tildes), filtro de categoría, de método de pago y de periodo («Todos los meses» o solo el mes elegido en el resumen), contador «N de M gastos», total mostrado por divisa (en centavos enteros) y botón «Limpiar». Se redibuja solo la lista, así que la caja conserva el foco; los filtros sobreviven al cambio de mes. El resumen de arriba sigue siendo el del mes, sin filtros, y la pantalla lo aclara cuando hay un filtro activo.
+
+### Verificación
+* 23 pruebas nuevas (`pruebas/js/vistas/gastos_buscar.test.js`), datos inventados. 13 mutaciones sobre lo nuevo (tildes, orden por frecuencia y por recencia, cada filtro, búsqueda en categoría, escape de sugerencias/oferta/caja de texto, tarjeta inactiva, relleno del monto, suma en centavos): todas las detecta alguna prueba.
+
+---
+
+## Versión 1.113.0 - 2026-10-15
 **Pruebas de caracterización de las sumas y comparaciones de saldo sobre `REAL` (deuda técnica A2, primera mitad).** Solo añade pruebas: **no cambia ningún comportamiento de producción** (el único cambio fuera del archivo nuevo es declarar el módulo de pruebas en `main.rs`).
 
 ### 🔍 Inventario (resultado del análisis)

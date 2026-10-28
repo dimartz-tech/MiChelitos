@@ -36,8 +36,170 @@ export interface DependenciasGastos {
 export const MANEJADORES_GASTOS = [
     'handleAgregarGasto', 'actualizarConversionGasto', 'toggleMetodoPago', 'cambiarMetodoDePago',
     'handleSelectGastosMonth', 'abrirLiquidacionConsumo', 'previsualizarTasa', 'handleLiquidacionSubmit',
+    'ofrecerUltimoGasto', 'aplicarUltimoGasto', 'usarUltimoMonto', 'filtrarGastos', 'limpiarFiltrosGastos',
 ] as const;
 export type ManejadorGastos = (typeof MANEJADORES_GASTOS)[number];
+
+
+// --- Ayudas puras (sin DOM): búsqueda, sugerencias y «repetir último» ---------------------
+
+type GastoListado = Awaited<ReturnType<ApiGastos['obtenerGastos']>>[number];
+type CategoriaListada = Awaited<ReturnType<ApiGastos['obtenerCategorias']>>[number];
+type TarjetaListada = Awaited<ReturnType<ApiGastos['obtenerTarjetas']>>[number];
+type CuentaListada = Awaited<ReturnType<ApiGastos['obtenerCuentas']>>[number];
+
+/** Minúsculas, sin tildes ni diacríticos y con los espacios colapsados: para comparar texto del titular. */
+export function normalizarBusqueda(texto: unknown): string {
+    return String(texto ?? '')
+        .normalize('NFD')
+        .replace(/\p{M}/gu, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** Clave de una descripción para agrupar repeticiones: sin distinguir mayúsculas ni espacios sobrantes (las tildes sí cuentan). */
+function claveDeDescripcion(texto: string): string {
+    return texto.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/** `dd/mm/aaaa` → `aaaammdd` (comparable como texto); lo que no encaja queda al fondo. */
+function ordenDeFecha(fecha: string): string {
+    const p = fecha.split('/');
+    return p.length === 3 ? `${p[2].padStart(4, '0')}${p[1].padStart(2, '0')}${p[0].padStart(2, '0')}` : '00000000';
+}
+
+/** ¿`a` es más reciente que `b`? (fecha y, a igual fecha, el id mayor). */
+function esMasReciente(a: GastoListado, b: GastoListado): boolean {
+    const fa = ordenDeFecha(a.fecha), fb = ordenDeFecha(b.fecha);
+    return fa !== fb ? fa > fb : a.id > b.id;
+}
+
+/** Cuántas descripciones distintas se ofrecen como máximo. */
+const MAX_SUGERENCIAS = 100;
+
+/**
+ * Las descripciones ya usadas, sin repetir (sin distinguir mayúsculas), de la más frecuente a la menos;
+ * a igual frecuencia, la usada más recientemente primero. Se muestra la grafía del uso más reciente.
+ */
+export function sugerenciasDeDescripcion(gastos: readonly GastoListado[]): string[] {
+    const grupos = new Map<string, { texto: string; veces: number; ultimo: GastoListado }>();
+    for (const g of gastos) {
+        const clave = claveDeDescripcion(g.descripcion);
+        if (!clave) continue;
+        const grupo = grupos.get(clave);
+        if (!grupo) { grupos.set(clave, { texto: g.descripcion.trim(), veces: 1, ultimo: g }); continue; }
+        grupo.veces++;
+        if (esMasReciente(g, grupo.ultimo)) { grupo.ultimo = g; grupo.texto = g.descripcion.trim(); }
+    }
+    return [...grupos.values()]
+        .sort((a, b) => b.veces - a.veces || (esMasReciente(a.ultimo, b.ultimo) ? -1 : 1))
+        .slice(0, MAX_SUGERENCIAS)
+        .map(g => g.texto);
+}
+
+/** El gasto más reciente cuya descripción es exactamente `descripcion` (sin distinguir mayúsculas); `null` si no hay. */
+export function ultimoGastoConDescripcion(gastos: readonly GastoListado[], descripcion: string): GastoListado | null {
+    const clave = claveDeDescripcion(descripcion);
+    if (!clave) return null;
+    let mejor: GastoListado | null = null;
+    for (const g of gastos) {
+        if (claveDeDescripcion(g.descripcion) === clave && (!mejor || esMasReciente(g, mejor))) mejor = g;
+    }
+    return mejor;
+}
+
+const METODOS_DEL_FORMULARIO = ['efectivo', 'tarjeta', 'transferencia'] as const;
+
+/** Qué se rellenaría con los datos de un gasto anterior, y qué se omite porque ya no existe o no está activo. */
+export interface PlanDeRepeticion {
+    categoriaId: number | null;
+    divisa: 'DOP' | 'USD' | null;
+    metodo: (typeof METODOS_DEL_FORMULARIO)[number] | null;
+    tarjetaId: number | null;
+    cuentaId: number | null;
+    /** Etiqueta legible de lo que se rellenaría (ya sin escapar). */
+    resumen: { categoria: string | null; metodo: string | null; medio: string | null };
+    /** Lo que no se puede rellenar, en palabras. */
+    omitidos: string[];
+}
+
+/**
+ * Decide qué campos del formulario se pueden rellenar con `g`. Solo se ofrece lo que sigue existiendo
+ * entre los catálogos **activos** (`obtenerCategorias/Tarjetas/Cuentas` ya excluyen tarjetas desactivadas y
+ * cuentas archivadas). El monto no entra aquí: se pide aparte.
+ */
+export function planDeRepeticion(
+    g: GastoListado,
+    catalogos: { categorias: readonly CategoriaListada[]; tarjetas: readonly TarjetaListada[]; cuentas: readonly CuentaListada[] },
+): PlanDeRepeticion {
+    const omitidos: string[] = [];
+    const categoria = catalogos.categorias.find(c => c.id === g.categoria_id) ?? null;
+    if (!categoria) omitidos.push('la categoría ya no existe');
+
+    const divisa = g.divisa === 'USD' ? 'USD' : g.divisa === 'DOP' ? 'DOP' : null;
+
+    let metodo: PlanDeRepeticion['metodo'] = null;
+    let tarjetaId: number | null = null;
+    let cuentaId: number | null = null;
+    let medio: string | null = null;
+    const m = (METODOS_DEL_FORMULARIO as readonly string[]).includes(g.metodo_pago) ? g.metodo_pago as PlanDeRepeticion['metodo'] : null;
+    if (m === 'efectivo') {
+        metodo = 'efectivo';
+    } else if (m === 'tarjeta') {
+        const t = g.tarjeta_id == null ? null : catalogos.tarjetas.find(x => x.id === g.tarjeta_id) ?? null;
+        if (t) { metodo = 'tarjeta'; tarjetaId = t.id; medio = `${t.entidad} - ${t.nombre_tarjeta}`; }
+        else omitidos.push('la tarjeta de ese gasto ya no está activa');
+    } else if (m === 'transferencia') {
+        const c = g.cuenta_ahorro_id == null ? null : catalogos.cuentas.find(x => x.id === g.cuenta_ahorro_id) ?? null;
+        if (c) { metodo = 'transferencia'; cuentaId = c.id; medio = c.nombre; }
+        else omitidos.push('la cuenta de ese gasto ya no está activa');
+    } else {
+        omitidos.push('el método de pago no se puede repetir');
+    }
+
+    return {
+        categoriaId: categoria ? categoria.id : null,
+        divisa, metodo, tarjetaId, cuentaId,
+        resumen: { categoria: categoria ? categoria.nombre : null, metodo, medio },
+        omitidos,
+    };
+}
+
+/** Los criterios del historial. `categoria` es el id como texto (`''` = todas); `periodo` `'mes'` limita al mes del resumen. */
+export interface FiltrosDeGastos {
+    texto: string;
+    categoria: string;
+    metodo: string;
+    periodo: 'todos' | 'mes';
+}
+
+export const SIN_FILTROS: Readonly<FiltrosDeGastos> = Object.freeze({ texto: '', categoria: '', metodo: '', periodo: 'todos' });
+
+/** Los gastos que cumplen **todos** los criterios (texto en descripción o categoría, categoría, método y periodo). */
+export function filtrarGastosListados(gastos: readonly GastoListado[], f: FiltrosDeGastos, mes: string): GastoListado[] {
+    const texto = normalizarBusqueda(f.texto);
+    return gastos.filter(g => {
+        if (f.periodo === 'mes' && !g.fecha.endsWith('/' + mes)) return false;
+        if (f.categoria !== '' && String(g.categoria_id) !== f.categoria) return false;
+        if (f.metodo !== '' && g.metodo_pago !== f.metodo) return false;
+        if (texto && !normalizarBusqueda(g.descripcion).includes(texto) && !normalizarBusqueda(g.categoria_nombre).includes(texto)) return false;
+        return true;
+    });
+}
+
+/** Lo que costó cada gasto (columna «Total» del historial), sumado en centavos enteros y por divisa; sin aritmética `f64` sobre importes. */
+export function totalesEnCentavos(gastos: readonly GastoListado[]): Record<string, number> {
+    const centavos = (v: number | null | undefined): number => Math.round((v ?? 0) * 100);
+    const totales: Record<string, number> = {};
+    for (const g of gastos) {
+        const liquidado = g.estado_conversion === 'liquidado';
+        const divisa = liquidado ? 'DOP' : g.divisa;
+        const monto = liquidado ? g.monto_liquidado : g.monto;
+        totales[divisa] = (totales[divisa] ?? 0) + centavos(monto) + centavos(g.costo_adicional);
+    }
+    return totales;
+}
 
 /** Un formulario envía un evento con `preventDefault`; solo eso se usa. */
 interface EventoDeFormulario {
@@ -48,6 +210,17 @@ export class VistaGastos implements Vista {
     /** Mes elegido (`mm/aaaa`); `null` hasta que se elige uno (entonces manda el mes actual). */
     private selectedGastosMonth: string | null = null;
 
+    /** Criterios del historial; sobreviven a redibujar la pestaña (p. ej. al cambiar de mes). */
+    private filtros: FiltrosDeGastos = { ...SIN_FILTROS };
+    /** Lo último que `render` leyó, para filtrar y sugerir sin volver a pedirlo a Rust en cada tecla. */
+    private gastos: GastoListado[] = [];
+    private categorias: CategoriaListada[] = [];
+    private tarjetas: TarjetaListada[] = [];
+    private cuentas: CuentaListada[] = [];
+    private mesVigente = '';
+    /** El gasto anterior que se está ofreciendo repetir (o `null`), con lo que se rellenaría. */
+    private ofrecido: { gasto: GastoListado; plan: PlanDeRepeticion } | null = null;
+
     constructor(private readonly dep: DependenciasGastos) {}
 
     // --- RENDER: GASTOS ---
@@ -57,6 +230,9 @@ export class VistaGastos implements Vista {
         const categorias = await api.obtenerCategorias();
         const tarjetas = await api.obtenerTarjetas();
         const cuentas = await api.obtenerCuentas();
+        this.gastos = gastos; this.categorias = categorias; this.tarjetas = tarjetas; this.cuentas = cuentas;
+        this.ofrecido = null;
+        const sugerencias = sugerenciasDeDescripcion(gastos);
 
         const hoy = ahora();
         const hoyStr = hoy.getDate().toString().padStart(2, '0') + '/' + (hoy.getMonth() + 1).toString().padStart(2, '0') + '/' + hoy.getFullYear();
@@ -80,6 +256,7 @@ export class VistaGastos implements Vista {
         }
 
         const mSelected = this.selectedGastosMonth || mesActualStr;
+        this.mesVigente = mSelected;
         const gastosMes = gastos.filter(g => g.fecha.endsWith('/' + mSelected));
 
         // Separar cálculos por divisa para evitar mezclar DOP y USD
@@ -184,8 +361,14 @@ export class VistaGastos implements Vista {
 
                         <div class="form-group">
                             <label for="gas_des">Descripción *</label>
-                            <input type="text" id="gas_des" class="form-control" placeholder="Combustible, compra insumos..." required>
+                            <input type="text" id="gas_des" class="form-control" placeholder="Combustible, compra insumos..." list="gas_des_sugerencias" autocomplete="off" ${alEscribir('ofrecerUltimoGasto')} required>
+                            <datalist id="gas_des_sugerencias">
+                                ${sugerencias.map(d => `<option value="${escaparHtml(d)}"></option>`).join('')}
+                            </datalist>
                         </div>
+
+                        <!-- Oferta de repetir el último gasto con esa descripción: no rellena nada hasta que se pulsa -->
+                        <div id="gas_repetir" role="status" style="display:none; background:rgba(0, 242, 254, 0.04); padding:0.6rem; border-radius: var(--radius-sm); border:1px solid rgba(0, 242, 254, 0.15); margin-bottom:1rem; font-size:0.78rem;"></div>
 
                         <button type="submit" class="btn" style="width:100%;">🚀 Registrar Gasto</button>
                     </form>
@@ -296,46 +479,23 @@ export class VistaGastos implements Vista {
                     <div class="card">
                         <h3 style="font-family: var(--font-heading); font-size: 1.1rem; margin-bottom: 1rem;">📋 Historial de Egresos</h3>
                         ${gastos.length > 0 ? `
-                            <div class="table-responsive">
-                                <table class="table-modern">
-                                    <thead>
-                                        <tr>
-                                            <th>Descripción</th>
-                                            <th>Categoría</th>
-                                            <th>Fecha</th>
-                                            <th>Método</th>
-                                            <th>Neto</th>
-                                            <th>Costo Adicional</th>
-                                            <th>Total</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${gastos.map(g => {
-                                            const pendiente = g.estado_conversion === 'pendiente';
-                                            const liquidado = g.estado_conversion === 'liquidado';
-                                            // Un consumo liquidado se muestra por lo que realmente
-                                            // costó en pesos; uno pendiente, en su divisa, porque
-                                            // el importe en pesos aún no existe.
-                                            const divisaFinal = liquidado ? 'DOP' : g.divisa;
-                                            const montoFinal = liquidado ? g.monto_liquidado : g.monto;
-                                            return `
-                                            <tr>
-                                                <td>
-                                                    <strong>${escaparHtml(g.descripcion)}</strong>
-                                                    ${pendiente ? `<button ${accion('abrirLiquidacionConsumo', g.id, g.monto, g.divisa, g.descripcion)} class="btn" style="margin-left:0.4rem; padding:0.1rem 0.4rem; font-size:0.65rem; background:rgba(255,193,7,0.15); border:1px solid rgba(255,193,7,0.4); color:#ffc107;" title="El emisor aún no ha fijado el importe en pesos">⏳ Liquidar</button>` : ''}
-                                                    ${liquidado ? `<span style="margin-left:0.4rem; font-size:0.65rem; color:var(--text-muted);" title="Tasa aplicada por el emisor">@ ${Number(g.tasa_conversion).toFixed(4)}</span>` : ''}
-                                                </td>
-                                                <td>${escaparHtml(g.categoria_nombre)}</td>
-                                                <td>${escaparHtml(g.fecha)}</td>
-                                                <td style="text-transform:capitalize;">${escaparHtml(g.metodo_pago)}</td>
-                                                <td class="amount">${escaparHtml(g.divisa)} ${formato.importe(g.monto)}</td>
-                                                <td class="amount expense">${escaparHtml(divisaFinal)} ${formato.importe(g.costo_adicional)}</td>
-                                                <td class="amount" style="font-weight:bold;">${escaparHtml(divisaFinal)} ${formato.importe((montoFinal ?? 0) + g.costo_adicional)}</td>
-                                            </tr>
-                                        `;}).join('')}
-                                    </tbody>
-                                </table>
+                            <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-bottom:0.8rem;">
+                                <input type="search" id="gas_f_txt" class="form-control" style="flex:2 1 12rem; margin:0;" placeholder="Buscar en descripción o categoría..." aria-label="Buscar gastos por descripción o categoría" autocomplete="off" value="${escaparHtml(this.filtros.texto)}" ${alEscribir('filtrarGastos')}>
+                                <select id="gas_f_cat" class="form-control" style="flex:1 1 9rem; margin:0;" aria-label="Filtrar por categoría" ${alCambiar('filtrarGastos')}>
+                                    <option value="">Todas las categorías</option>
+                                    ${categorias.map(c => `<option value="${c.id}" ${String(c.id) === this.filtros.categoria ? 'selected' : ''}>${escaparHtml(c.nombre)}</option>`).join('')}
+                                </select>
+                                <select id="gas_f_met" class="form-control" style="flex:1 1 9rem; margin:0;" aria-label="Filtrar por método de pago" ${alCambiar('filtrarGastos')}>
+                                    <option value="">Todos los métodos</option>
+                                    ${[...new Set(gastos.map(g => g.metodo_pago))].sort().map(m => `<option value="${escaparHtml(m)}" ${m === this.filtros.metodo ? 'selected' : ''}>${escaparHtml(m)}</option>`).join('')}
+                                </select>
+                                <select id="gas_f_per" class="form-control" style="flex:1 1 9rem; margin:0;" aria-label="Periodo del historial" ${alCambiar('filtrarGastos')}>
+                                    <option value="todos" ${this.filtros.periodo === 'todos' ? 'selected' : ''}>Todos los meses</option>
+                                    <option value="mes" ${this.filtros.periodo === 'mes' ? 'selected' : ''}>Solo ${this.formatMonthYearStr(mSelected)}</option>
+                                </select>
+                                <button type="button" class="btn btn-secondary" style="padding:0.3rem 0.8rem; font-size:0.8rem;" ${accion('limpiarFiltrosGastos')}>Limpiar</button>
                             </div>
+                            <div id="gas_historial_lista" aria-live="polite">${this.htmlListaHistorial()}</div>
                         ` : `
                             <p style="color:var(--text-muted); text-align:center; padding:1rem;">No hay gastos registrados.</p>
                         `}
@@ -343,6 +503,147 @@ export class VistaGastos implements Vista {
                 </div>
             </div>
         `;
+    }
+
+    /** El contador, los totales de lo mostrado y la tabla del historial, según los filtros vigentes. */
+    private htmlListaHistorial(): string {
+        const { formato } = this.dep;
+        const alcance = this.filtros.periodo === 'mes' ? this.gastos.filter(g => g.fecha.endsWith('/' + this.mesVigente)) : this.gastos;
+        const gastos = filtrarGastosListados(this.gastos, this.filtros, this.mesVigente);
+        const totales = Object.entries(totalesEnCentavos(gastos));
+        const hayFiltro = this.filtros.texto.trim() !== '' || this.filtros.categoria !== '' || this.filtros.metodo !== '' || this.filtros.periodo !== 'todos';
+        const cabecera = `
+            <div style="display:flex; flex-wrap:wrap; justify-content:space-between; gap:0.5rem; font-size:0.78rem; color:var(--text-secondary); margin-bottom:0.6rem;">
+                <span id="gas_f_contador"><strong>${gastos.length}</strong> de ${alcance.length} gastos</span>
+                <span>${totales.length > 0 ? 'Total mostrado: ' + totales.map(([d, c]) => `${escaparHtml(d)} ${formato.importe(c / 100)}`).join(' · ') : ''}</span>
+            </div>
+            ${hayFiltro ? '<div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:0.6rem;">El resumen de arriba corresponde al mes elegido y no cambia con estos filtros.</div>' : ''}`;
+        if (gastos.length === 0) {
+            return cabecera + '<p style="color:var(--text-muted); text-align:center; padding:1rem; font-size:0.85rem;">Ningún gasto coincide con la búsqueda.</p>';
+        }
+        return cabecera + `
+            <div class="table-responsive">
+                <table class="table-modern">
+                    <thead>
+                        <tr>
+                            <th>Descripción</th>
+                            <th>Categoría</th>
+                            <th>Fecha</th>
+                            <th>Método</th>
+                            <th>Neto</th>
+                            <th>Costo Adicional</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${gastos.map(g => {
+                            const pendiente = g.estado_conversion === 'pendiente';
+                            const liquidado = g.estado_conversion === 'liquidado';
+                            // Un consumo liquidado se muestra por lo que realmente
+                            // costó en pesos; uno pendiente, en su divisa, porque
+                            // el importe en pesos aún no existe.
+                            const divisaFinal = liquidado ? 'DOP' : g.divisa;
+                            const montoFinal = liquidado ? g.monto_liquidado : g.monto;
+                            return `
+                            <tr>
+                                <td>
+                                    <strong>${escaparHtml(g.descripcion)}</strong>
+                                    ${pendiente ? `<button ${accion('abrirLiquidacionConsumo', g.id, g.monto, g.divisa, g.descripcion)} class="btn" style="margin-left:0.4rem; padding:0.1rem 0.4rem; font-size:0.65rem; background:rgba(255,193,7,0.15); border:1px solid rgba(255,193,7,0.4); color:#ffc107;" title="El emisor aún no ha fijado el importe en pesos">⏳ Liquidar</button>` : ''}
+                                    ${liquidado ? `<span style="margin-left:0.4rem; font-size:0.65rem; color:var(--text-muted);" title="Tasa aplicada por el emisor">@ ${Number(g.tasa_conversion).toFixed(4)}</span>` : ''}
+                                </td>
+                                <td>${escaparHtml(g.categoria_nombre)}</td>
+                                <td>${escaparHtml(g.fecha)}</td>
+                                <td style="text-transform:capitalize;">${escaparHtml(g.metodo_pago)}</td>
+                                <td class="amount">${escaparHtml(g.divisa)} ${formato.importe(g.monto)}</td>
+                                <td class="amount expense">${escaparHtml(divisaFinal)} ${formato.importe(g.costo_adicional)}</td>
+                                <td class="amount" style="font-weight:bold;">${escaparHtml(divisaFinal)} ${formato.importe((montoFinal ?? 0) + g.costo_adicional)}</td>
+                            </tr>
+                        `;}).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+    }
+
+    private redibujarHistorial(): void {
+        const lista = this.dep.dom.buscar('gas_historial_lista');
+        if (lista) lista.innerHTML = this.htmlListaHistorial();
+    }
+
+    /** Lee los cuatro controles de búsqueda y redibuja solo la lista (la caja de texto conserva el foco). */
+    filtrarGastos(): void {
+        const { dom } = this.dep;
+        const periodo = dom.buscar<Campo>('gas_f_per')?.value;
+        this.filtros = {
+            texto: dom.buscar<Campo>('gas_f_txt')?.value ?? '',
+            categoria: dom.buscar<Campo>('gas_f_cat')?.value ?? '',
+            metodo: dom.buscar<Campo>('gas_f_met')?.value ?? '',
+            periodo: periodo === 'mes' ? 'mes' : 'todos',
+        };
+        this.redibujarHistorial();
+    }
+
+    limpiarFiltrosGastos(): void {
+        const { dom } = this.dep;
+        this.filtros = { ...SIN_FILTROS };
+        for (const [id, valor] of [['gas_f_txt', ''], ['gas_f_cat', ''], ['gas_f_met', ''], ['gas_f_per', 'todos']] as const) {
+            const campo = dom.buscar<Campo>(id);
+            if (campo) campo.value = valor;
+        }
+        this.redibujarHistorial();
+    }
+
+    // --- REPETIR ÚLTIMO ---
+    /** Al escribir o elegir la descripción: si ya existe, ofrece (sin rellenar nada) repetir los datos del último gasto con ella. */
+    ofrecerUltimoGasto(): void {
+        const { dom, formato } = this.dep;
+        const panel = dom.buscar('gas_repetir');
+        if (!panel) return;
+        const gasto = ultimoGastoConDescripcion(this.gastos, dom.buscar<Campo>('gas_des')?.value ?? '');
+        if (!gasto) {
+            this.ofrecido = null;
+            panel.style.display = 'none';
+            panel.innerHTML = '';
+            return;
+        }
+        const plan = planDeRepeticion(gasto, { categorias: this.categorias, tarjetas: this.tarjetas, cuentas: this.cuentas });
+        this.ofrecido = { gasto, plan };
+        const partes = [plan.resumen.categoria, plan.resumen.metodo, plan.resumen.medio, plan.divisa]
+            .filter((p): p is string => Boolean(p)).map(p => `<strong>${escaparHtml(p)}</strong>`);
+        panel.innerHTML = `
+            <div style="margin-bottom:0.4rem;">Ya registraste «${escaparHtml(gasto.descripcion)}» (último: ${escaparHtml(gasto.fecha)})${partes.length ? ': ' + partes.join(' · ') : ''}.</div>
+            ${plan.omitidos.length ? `<div style="color:var(--text-muted); margin-bottom:0.4rem;">No se rellenará: ${plan.omitidos.map(o => escaparHtml(o)).join('; ')}.</div>` : ''}
+            <div style="display:flex; flex-wrap:wrap; gap:0.4rem;">
+                <button type="button" class="btn btn-secondary" style="padding:0.2rem 0.6rem; font-size:0.72rem;" ${accion('aplicarUltimoGasto')}>Rellenar con esos datos</button>
+                <button type="button" class="btn btn-secondary" style="padding:0.2rem 0.6rem; font-size:0.72rem;" ${accion('usarUltimoMonto')}>Usar el último monto (${escaparHtml(gasto.divisa)} ${formato.importe(gasto.monto)})</button>
+            </div>`;
+        panel.style.display = 'block';
+    }
+
+    /** Rellena categoría, método (con su tarjeta o cuenta) y divisa del gasto ofrecido. No toca el monto, la fecha ni la descripción, y no guarda nada. */
+    aplicarUltimoGasto(): void {
+        const { dom } = this.dep;
+        if (!this.ofrecido) return;
+        const { plan } = this.ofrecido;
+        const poner = (id: string, valor: string): void => { const c = dom.buscar<Campo>(id); if (c) c.value = valor; };
+        if (plan.categoriaId !== null) poner('gas_cat', String(plan.categoriaId));
+        if (plan.divisa) poner('gas_div', plan.divisa);
+        if (plan.metodo) {
+            poner('gas_met', plan.metodo);
+            if (plan.tarjetaId !== null) poner('gas_tar', String(plan.tarjetaId));
+            if (plan.cuentaId !== null) poner('gas_cue', String(plan.cuentaId));
+            this.cambiarMetodoDePago(plan.metodo);
+        } else {
+            this.actualizarConversionGasto();
+        }
+    }
+
+    /** Pone en el monto el del gasto ofrecido (solo si el titular lo pide) y recalcula la previa de conversión. */
+    usarUltimoMonto(): void {
+        const { dom } = this.dep;
+        if (!this.ofrecido) return;
+        const campo = dom.buscar<Campo>('gas_mon');
+        if (campo) campo.value = String(this.ofrecido.gasto.monto);
+        this.actualizarConversionGasto();
     }
 
     private formatMonthYearStr(myStr: string | null | undefined): string {
@@ -554,6 +855,11 @@ export function puenteGastos(vista: VistaGastos): {
     abrirLiquidacionConsumo: (id: number, montoOrigen: number, divisaOrigen: string, descripcion: string) => void;
     previsualizarTasa: (id: number, montoOrigen: number) => void;
     handleLiquidacionSubmit: (e: EventoDeFormulario, id: number, montoOrigen: number) => Promise<void>;
+    ofrecerUltimoGasto: () => void;
+    aplicarUltimoGasto: () => void;
+    usarUltimoMonto: () => void;
+    filtrarGastos: () => void;
+    limpiarFiltrosGastos: () => void;
 } {
     return {
         handleAgregarGasto: e => vista.handleAgregarGasto(e),
@@ -564,5 +870,10 @@ export function puenteGastos(vista: VistaGastos): {
         abrirLiquidacionConsumo: (id, montoOrigen, divisaOrigen, descripcion) => vista.abrirLiquidacionConsumo(id, montoOrigen, divisaOrigen, descripcion),
         previsualizarTasa: (id, montoOrigen) => vista.previsualizarTasa(id, montoOrigen),
         handleLiquidacionSubmit: (e, id, montoOrigen) => vista.handleLiquidacionSubmit(e, id, montoOrigen),
+        ofrecerUltimoGasto: () => vista.ofrecerUltimoGasto(),
+        aplicarUltimoGasto: () => vista.aplicarUltimoGasto(),
+        usarUltimoMonto: () => vista.usarUltimoMonto(),
+        filtrarGastos: () => vista.filtrarGastos(),
+        limpiarFiltrosGastos: () => vista.limpiarFiltrosGastos(),
     };
 }
