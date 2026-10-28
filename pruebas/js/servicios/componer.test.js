@@ -11,9 +11,9 @@ import { MANEJADORES_GASTOS } from '../../../src/js/vistas/gastos.js';
 import { MANEJADORES_TARJETAS } from '../../../src/js/vistas/tarjetas.js';
 import { MANEJADORES_AJUSTES } from '../../../src/js/vistas/ajustes.js';
 
-test('compone las once vistas, cada una con su ruta', () => {
+test('compone las doce vistas, cada una con su ruta', () => {
     const ui = cargarInterfaz();
-    assert.deepEqual([...ui.vistas.keys()].sort(), ['ajustes', 'capital', 'cuentas', 'dashboard', 'efectivo', 'gastos', 'ingresos', 'prestamos', 'resumen', 'suscripciones', 'tarjetas']);
+    assert.deepEqual([...ui.vistas.keys()].sort(), ['ajustes', 'capital', 'cuentas', 'dashboard', 'efectivo', 'evolucion', 'gastos', 'ingresos', 'prestamos', 'resumen', 'suscripciones', 'tarjetas']);
     for (const vista of ui.vistas.values()) assert.equal(typeof vista.render, 'function');
 });
 
