@@ -17,6 +17,7 @@ use crate::dominio::conversion::EstadoConversion;
 use crate::dominio::tarjeta::PoliticaLiquidacion;
 use crate::dominio::dinero::{Dinero, Divisa, TasaCambio};
 use crate::dominio::foto_patrimonio::Foto;
+pub use crate::dominio::resumen_gastos::FilaAgregadoGasto;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -214,6 +215,14 @@ pub trait ConsultaDeGastos {
     fn resumen_de_gasto(&self, id: i64) -> Result<Option<ResumenDeGasto>, ErrorAlmacen>;
     /// Si otra operación creó este gasto (el cargo de un avance, la comisión de un abono), por qué no se borra solo.
     fn motivo_de_no_borrar(&self, id: i64) -> Result<Option<String>, ErrorAlmacen>;
+}
+
+/// Lectura de los gastos agrupados para el resumen por categoría y mes. **Solo lectura.**
+///
+/// Devuelve una fila por día, categoría, divisa y condición de derivado, con los importes ya sumados en **centavos
+/// enteros** (la fila de dominio es `FilaAgregadoGasto`). No incluye los abonos a tarjeta: no son gasto.
+pub trait ConsultaDeGastosPorCategoria {
+    fn gastos_agrupados(&self) -> Result<Vec<FilaAgregadoGasto>, ErrorAlmacen>;
 }
 
 /// Una bonificación tal como la muestra el historial: con los datos de su tarjeta.

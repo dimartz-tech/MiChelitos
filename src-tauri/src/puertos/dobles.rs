@@ -96,6 +96,9 @@ pub struct AlmacenEnMemoria {
     pub dias_de_corte: HashMap<i64, i32>,
     pub politicas: HashMap<i64, PoliticaLiquidacion>,
     pub gastos: HashMap<i64, GastoGuardado>,
+    /// Los gastos ya agrupados que devuelve `ConsultaDeGastosPorCategoria` (el doble de `GastoGuardado` no guarda fecha
+    /// ni categoría: el agrupado real lo cubre SQLite).
+    pub filas_agregadas: Vec<FilaAgregadoGasto>,
     siguiente_id: i64,
     /// Cuando está activo, `insertar` falla. Sirve para provocar un fallo
     /// después de que los saldos ya se hayan movido.
@@ -1539,6 +1542,20 @@ impl ConsultaDeGastos for AlmacenEnMemoria {
     }
     fn motivo_de_no_borrar(&self, id: i64) -> Result<Option<String>, ErrorAlmacen> {
         Ok(self.motivos_de_no_borrar.get(&id).cloned())
+    }
+}
+
+impl AlmacenEnMemoria {
+    /// Siembra lo que leerá el resumen por categoría y mes.
+    pub fn con_filas_agregadas(mut self, filas: Vec<FilaAgregadoGasto>) -> Self {
+        self.filas_agregadas = filas;
+        self
+    }
+}
+
+impl ConsultaDeGastosPorCategoria for AlmacenEnMemoria {
+    fn gastos_agrupados(&self) -> Result<Vec<FilaAgregadoGasto>, ErrorAlmacen> {
+        Ok(self.filas_agregadas.clone())
     }
 }
 
