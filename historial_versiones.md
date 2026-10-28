@@ -4,7 +4,32 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.119.0 (Versión Actual) - 2026-10-28
+## 🚀 Versión 1.120.0 (Versión Actual) - 2026-10-28
+**Resumen de gastos por categoría y mes — base de lectura (PR 1 de 5).** Dominio puro, puerto de lectura, caso de uso y un comando de **solo lectura** (`obtener_resumen_gastos`), con su tipo generado y su función `obtenerResumenGastos` en `api.ts`. **Sin interfaz** (llega en el PR 2), **sin migración** y **sin presupuesto**. No cambia ningún comportamiento existente; la fórmula del Resumen actual (que suma mezclando divisas) **no se toca**.
+
+### ✨ Qué calcula
+* Por categoría y mes: importe (DOP), parte del total en milésimas, mes anterior y variación (puntos básicos, `null` si el anterior es cero), mes anterior **al mismo día** (solo en el mes en curso), promedio de los N meses previos completos y variación contra él, la parte en USD sin convertir (`usd_aparte`) y el número de gastos. Más los totales (la suma de las filas) y los meses con datos para el selector.
+* **USD → DOP**: un consumo liquidado usa el importe en pesos que fijó el emisor; el resto de los dólares se convierte **una vez por cubo** con la tasa de referencia que llega como parámetro (`tasa_usd`; hoy 60.0 desde la interfaz) y que el DTO devuelve para rotular el importe como estimado.
+* **Cargos derivados**: la comisión de un abono y el cargo de un avance (los enlaces de `db_sql::GASTOS_DERIVADOS`, no el texto) se agrupan en una sola fila sintética «Cargos derivados» (id `-1`), sin tocar la base.
+* **Los abonos no son gasto** y no entran. Las cuotas de «Prestamo» cuentan como cualquier gasto.
+* **Mes calendario** por la fecha del gasto (dd/mm/aaaa). El mes en curso es **parcial**: el DTO lo marca (`parcial`, `hasta_dia`), el promedio excluye ese mes y la variación se ofrece también contra el mismo tramo del mes anterior.
+* `excluir_categorias` (por defecto ninguna) para el futuro conmutador «consumo / inversión y obligaciones»; la fila sintética se excluye con `-1`.
+
+### 🏗️ Diseño
+* `dominio/resumen_gastos.rs`: `resumen_por_mes`, todo en `Dinero`/`i64` (porcentajes y variaciones con `dividir_redondeando`; ningún `f64` toca un importe). Redondea una vez por cubo, así que el total es exactamente la suma de las filas; el promedio divide entre los meses que **existían** en los datos.
+* Puerto `ConsultaDeGastosPorCategoria` (adaptador SQLite y doble en memoria). El adaptador lee gasto por gasto como enteros (`CAST(ROUND(importe * 100) AS INTEGER)`) y agrupa **en Rust**: ningún `SUM(` sobre importes, como exige la guarda de `sumas_en_centavos`. Una fecha ilegible falla con un mensaje en lugar de perder el gasto.
+* Adaptaciones al diseño: la fila agregada lleva el **día** (el «mismo día del mes anterior» lo necesita) y `liquidado_origen_centavos` (para separar los dólares liquidados de los que se convierten con la tasa); `FilaAgregadoGasto` vive en el dominio y el puerto la reexporta (el dominio no importa puertos).
+* Comando `obtener_resumen_gastos(anio, mes, nPromedio, tasaUsd, excluirCategorias)` con transacción diferida (`lee_almacen`); todos los importes viajan como **texto exacto**.
+
+### 🧪 Verificación
+* Dominio (19 pruebas): 0.1 + 0.2 por mil exacto en centavos, variación con mes anterior en cero, signo de la variación, promedio sin el mes en curso y con historial corto, redondeo de promedio y de porcentaje, mes parcial y mismo día, categoría de un solo mes, USD liquidado y no liquidado, total = suma de filas, cargos derivados aislados, exclusiones, período inválido y orden.
+* Adaptador SQLite (6) y caracterización de que `pagos_tarjeta` no entra y de que la suma de las filas coincide con la suma directa de los gastos.
+* **Pruebas de integración (`integracion_*`, 9)**: el comando real de punta a punta sobre una base temporal con el esquema real, sembrada con los comandos reales (gastos con retención, abono con comisión, avance con cargo, consumo en dólares liquidado y pendiente); DTO serializado (importes en texto exacto, orden), suma de filas contra suma directa de la tabla, mes parcial, exclusiones, errores legibles, huella de **todas las tablas** idéntica antes y después (no escribe) y un contrato de forma que compara las claves y los tipos del JSON real con `src/js/tipos-ipc.d.ts`.
+* Mutaciones dirigidas (signo de la variación, mes en curso en el promedio, redondeo, derivados, escritura desde el comando, tipo del DTO): cada una hizo fallar al menos una prueba y se restauró.
+
+---
+
+## Versión 1.119.0 - 2026-10-28
 **Historial del patrimonio, parte 2: migración 18 y fotos mensuales.** Se guarda, una vez por mes, una foto del patrimonio (activos, pasivos, patrimonio y líquido, más las partidas que la componen). Sin gráfica (la vista Evolución es otro PR), sin reconstrucción del pasado y sin recomendaciones.
 
 ### ⚠️ Este PR sube el esquema a 18
