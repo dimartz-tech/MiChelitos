@@ -93,3 +93,117 @@ pub fn revertir_abono_tarjeta(id: i64, motivo: String) -> Result<String, String>
         Ok(format!("{} Caso {}.", resumen, r.caso))
     })
 }
+
+/// Una advertencia de la vista previa: el código (para que la interfaz la distinga), su gravedad y el texto ya redactado.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AdvertenciaDeAbono {
+    pub codigo: String,
+    /// `bloqueo` (el registro lo rechazaría), `aviso` o `info`.
+    pub gravedad: String,
+    pub texto: String,
+}
+
+/// La cuenta de la que saldría el dinero.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CuentaDeCobroPrevia {
+    pub id: i64,
+    pub nombre: String,
+    pub divisa: String,
+    pub saldo_actual: String,
+    /// `true` si no se eligió cuenta: es la caja de efectivo de la divisa del abono.
+    pub por_defecto: bool,
+    pub archivada: bool,
+}
+
+/// Lo que haría un abono, antes de registrarlo. **Todos los importes viajan como texto exacto** (`1234.56`).
+#[derive(Serialize, Deserialize, Debug)]
+pub struct VistaPreviaAbono {
+    pub tarjeta_id: i64,
+    pub tarjeta_nombre: String,
+    pub tarjeta_activa: bool,
+    pub divisa: String,
+    pub monto: Option<String>,
+    pub tipo: String,
+    pub tipo_etiqueta: String,
+    pub cuenta: Option<CuentaDeCobroPrevia>,
+    pub con_comision: bool,
+    /// Lo que sale de la cuenta convertido a su divisa, sin comisión.
+    pub debitado: Option<String>,
+    pub comision: Option<String>,
+    pub total_debitado: Option<String>,
+    /// La tasa usada; solo cuando el abono cruza divisas.
+    pub tasa_cambio: Option<String>,
+    pub saldo_resultante: Option<String>,
+    pub balance_actual_pesos: String,
+    pub balance_actual_dolares: String,
+    pub balance_resultante_pesos: String,
+    pub balance_resultante_dolares: String,
+    pub advertencias: Vec<AdvertenciaDeAbono>,
+    /// `false` si alguna advertencia es un bloqueo o falta con qué calcular.
+    pub se_puede_confirmar: bool,
+}
+
+/// La vista previa de un abono con lo que el formulario tiene escrito. **Solo lectura**: no registra nada.
+///
+/// El monto llega como texto sin validar a propósito: uno vacío o ilegible es una advertencia de la vista previa, no
+/// un error de la llamada. El cálculo es el del registro (`aplicacion::previsualizar_abono`).
+#[tauri::command]
+pub fn previsualizar_abono(
+    id: i64,
+    monto: String,
+    divisa: String,
+    cuenta_ahorro_id: Option<i64>,
+    tasa_cambio: f64,
+    tipo: String,
+) -> Result<VistaPreviaAbono, String> {
+    use crate::dominio::abono::TipoDeAbono;
+    let datos = aplicacion::previsualizar_abono::DatosDePrevia {
+        tarjeta_id: id,
+        monto,
+        divisa: Divisa::desde_codigo(&divisa).map_err(|e| e.to_string())?,
+        cuenta_ahorro_id,
+        // Igual que el registro: cero (o menos) es «sin tasa».
+        tasa_cambio: if tasa_cambio > 0.0 { Some(tasa_cambio) } else { None },
+        tipo: TipoDeAbono::desde_codigo(&tipo),
+    };
+    lee_almacen(|a| {
+        let v = aplicacion::previsualizar_abono::previsualizar_abono(datos, a)?;        Ok(a_vista_previa(v))
+    })
+}
+
+fn a_vista_previa(v: aplicacion::previsualizar_abono::VistaPreviaDeAbono) -> VistaPreviaAbono {
+    let texto = ipc::importe_a_texto;
+    VistaPreviaAbono {
+        tarjeta_id: v.tarjeta_id,
+        tarjeta_nombre: v.tarjeta_nombre,
+        tarjeta_activa: v.tarjeta_activa,
+        divisa: v.divisa.codigo().to_string(),
+        monto: v.monto.map(texto),
+        tipo: v.tipo.codigo().to_string(),
+        tipo_etiqueta: v.tipo.etiqueta().to_string(),
+        cuenta: v.cuenta.map(|c| CuentaDeCobroPrevia {
+            id: c.id,
+            nombre: c.nombre,
+            divisa: c.divisa.codigo().to_string(),
+            saldo_actual: texto(c.saldo_actual),
+            por_defecto: c.por_defecto,
+            archivada: c.archivada,
+        }),
+        con_comision: v.con_comision,
+        debitado: v.calculo.map(|c| texto(c.debitado)),
+        comision: v.calculo.and_then(|c| c.comision).map(texto),
+        total_debitado: v.calculo.map(|c| texto(c.total_debitado)),
+        tasa_cambio: v.tasa.map(ipc::tasa_a_texto),
+        saldo_resultante: v.saldo_resultante.map(texto),
+        balance_actual_pesos: texto(v.balance_actual_dop),
+        balance_actual_dolares: texto(v.balance_actual_usd),
+        balance_resultante_pesos: texto(v.balance_resultante_dop),
+        balance_resultante_dolares: texto(v.balance_resultante_usd),
+        advertencias: v
+            .advertencias
+            .iter()
+            .map(|a| AdvertenciaDeAbono { codigo: a.codigo().to_string(), gravedad: a.gravedad().codigo().to_string(), texto: a.texto() })
+            .collect(),
+        se_puede_confirmar: v.se_puede_confirmar,
+    }
+}

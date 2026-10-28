@@ -11,10 +11,23 @@
 // `confirm`, `prompt`, `document` ni `Date` globales: todo entra por el
 // constructor (`pruebas/js/vistas/tarjetas.test.js`). Los cuerpos son los de `ui.ts`.
 
-import type { Tarjeta, VistaPreviaDeCierre } from '../tipos-ipc';
+import type { Tarjeta, VistaPreviaAbono, VistaPreviaDeCierre } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { accion, alCambiar, alEnviar, escaparHtml } from '../nucleo/html.js';
+import { accion, alCambiar, alEnviar, alEscribir, escaparHtml } from '../nucleo/html.js';
+
+/** Espera tras la última pulsación antes de pedir la vista previa del abono (ms). */
+const RETARDO_VISTA_PREVIA_MS = 250;
+
+/**
+ * Un importe en texto exacto (`-1234.56`) con separador de miles. Trabaja sobre las cifras, sin pasar por `Number`:
+ * la vista previa muestra lo que Rust calculó, no una cifra redondeada de nuevo.
+ */
+export function importeDeTexto(texto: string): string {
+    const m = /^(-?)(\d+)(\.\d+)?$/.exec(texto);
+    if (!m) return texto;
+    return `${m[1]}${m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${m[3] ?? ''}`;
+}
 
 type ApiTarjetas = ApiDe<
     | 'obtenerTarjetas'
@@ -26,6 +39,7 @@ type ApiTarjetas = ApiDe<
     | 'obtenerAbonosTarjeta'
     | 'revertirAbonoTarjeta'
     | 'registrarPagoTarjeta'
+    | 'previsualizarAbono'
     | 'simularAvanceEfectivo'
     | 'registrarAvanceEfectivo'
     | 'obtenerAvancesTarjeta'
@@ -52,7 +66,7 @@ export interface DependenciasTarjetas {
 
 /** Las acciones delegadas (`data-accion*` → `appUI.…`) que la plantilla escribe. */
 export const MANEJADORES_TARJETAS = [
-    'handleAbonoTarjeta', 'aplicarTipoAbono',
+    'handleAbonoTarjeta', 'aplicarTipoAbono', 'previsualizarAbono',
     'alternarAvance', 'aplicarTipoAvance', 'handleAvanceEfectivo',
     'alternarAbonos', 'handleRevertirAbono', 'alternarAvances', 'handleRevertirAvance',
     'handleAgregarBonificacion', 'handleEliminarBonificacion',
@@ -75,8 +89,13 @@ interface EtiquetaDeBalance {
 export class VistaTarjetas implements Vista {
     /** La vista previa de cada cierre abierto: el resumen y la confirmación se calculan a partir de ella. */
     private readonly cierres = new Map<number, VistaPreviaDeCierre>();
+    /**
+     * El estado de la vista previa del abono de cada tarjeta: el temporizador del antirrebote y un contador que
+     * invalida las respuestas viejas (si el titular siguió escribiendo, lo último que se pidió es lo único que se pinta).
+     */
+    private readonly previas = new Map<number, { temporizador: ReturnType<typeof setTimeout> | null; secuencia: number }>();
 
-    constructor(private readonly dep: DependenciasTarjetas) {}
+    constructor(private readonly dep: DependenciasTarjetas, private readonly retardoMs: number = RETARDO_VISTA_PREVIA_MS) {}
 
     // --- RENDER: TARJETAS ---
     async render(): Promise<void> {
@@ -252,7 +271,7 @@ export class VistaTarjetas implements Vista {
                                             </div>
                                             <div style="flex:1.2;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Monto</label>
-                                                <input type="number" step="0.01" id="pag_monto_${t.id}" placeholder="0.00" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
+                                                <input type="number" step="0.01" id="pag_monto_${t.id}" placeholder="0.00" class="form-control" style="padding:0.4rem; font-size:0.75rem;" ${alEscribir('previsualizarAbono', t.id)} required>
                                             </div>
                                         </div>
                                         <div style="width:100%;">
@@ -266,15 +285,19 @@ export class VistaTarjetas implements Vista {
                                         <div style="display:flex; gap:0.4rem; align-items:flex-end; width:100%;">
                                             <div style="flex:2;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Cuenta Débito (Opcional)</label>
-                                                <select id="pag_cuenta_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;">
+                                                <select id="pag_cuenta_${t.id}" class="form-control" style="padding:0.4rem; font-size:0.75rem; width:100%;" ${alCambiar('previsualizarAbono', t.id)}>
                                                     <option value="">-- Efectivo (caja por defecto, sin comisión) --</option>
                                                     ${cuentas.map(c => `<option value="${c.id}" data-divisa="${escaparHtml(c.divisa)}">${escaparHtml(c.nombre)} (${escaparHtml(c.divisa)}) - Bal: ${escaparHtml(c.divisa)} ${formato.importe(c.balance_actual)}</option>`).join('')}
                                                 </select>
                                             </div>
                                             <div style="flex:1;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Tasa Cambio</label>
-                                                <input type="number" step="0.01" id="pag_tasa_${t.id}" value="0.00" placeholder="0.00" class="form-control" style="padding:0.4rem; font-size:0.75rem;">
+                                                <input type="number" step="0.01" id="pag_tasa_${t.id}" value="0.00" placeholder="0.00" class="form-control" style="padding:0.4rem; font-size:0.75rem;" ${alEscribir('previsualizarAbono', t.id)}>
                                             </div>
+                                        </div>
+                                        <!-- Vista previa: lo calcula Rust con las mismas funciones que el registro -->
+                                        <div id="pag_previa_${t.id}" hidden aria-live="polite" style="font-size:0.72rem;"></div>
+                                        <div style="display:flex; width:100%;">
                                             <button type="submit" class="btn" style="padding:0.4rem 0.6rem; font-size:0.75rem; height:fit-content; background: linear-gradient(135deg, #10b981, #059669); color:white; flex:1;">Abonar</button>
                                         </div>
                                     </form>
@@ -484,6 +507,108 @@ export class VistaTarjetas implements Vista {
      * forma opaca al enviar el formulario.
      */
     aplicarTipoAbono(id: number, cortePesos: number, corteDolares: number, balPesos: number, balDolares: number): void {
+        this.rellenarMontoSegunTipo(id, cortePesos, corteDolares, balPesos, balDolares);
+        // El monto (o la divisa, o el tipo) cambió: la vista previa se recalcula.
+        this.previsualizarAbono(id);
+    }
+
+    /**
+     * Pide la vista previa del abono con lo que el formulario tiene escrito, tras un breve retardo (antirrebote). La
+     * cuenta, los importes, las comisiones y las advertencias los calcula Rust con las funciones del registro; aquí
+     * solo se dibujan. Una respuesta vieja nunca pisa a una más reciente.
+     */
+    previsualizarAbono(id: number): void {
+        const estado = this.previas.get(id) ?? { temporizador: null, secuencia: 0 };
+        this.previas.set(id, estado);
+        if (estado.temporizador !== null) clearTimeout(estado.temporizador);
+        const mia = ++estado.secuencia;
+        estado.temporizador = setTimeout(() => {
+            estado.temporizador = null;
+            // Una ayuda, no una operación: si la página ya no tiene el formulario, no hay nada que decir.
+            void this.calcularVistaPrevia(id, mia).catch(() => undefined);
+        }, this.retardoMs);
+    }
+
+    private async calcularVistaPrevia(id: number, mia: number): Promise<void> {
+        const { api, dom } = this.dep;
+        const caja = dom.buscar(`pag_previa_${id}`);
+        const monto = dom.buscar<Campo>(`pag_monto_${id}`);
+        const divisa = dom.buscar<Campo>(`pag_div_${id}`);
+        // Si la pestaña se volvió a dibujar, no hay formulario al que atender.
+        if (!caja || !monto || !divisa) return;
+        const vigente = (): boolean => this.previas.get(id)?.secuencia === mia;
+
+        const texto = monto.value.trim();
+        if (texto === '') {
+            caja.hidden = true;
+            caja.innerHTML = '';
+            return;
+        }
+        const cuenta = dom.buscar<Campo>(`pag_cuenta_${id}`)?.value ?? '';
+        const tasa = Number(dom.buscar<Campo>(`pag_tasa_${id}`)?.value) || 0;
+        const tipo = dom.buscar<Campo>(`pag_tipo_${id}`)?.value ?? 'personalizado';
+        try {
+            const previa = await api.previsualizarAbono(id, texto, divisa.value, cuenta ? Number(cuenta) : null, tasa, tipo);
+            if (!vigente()) return;
+            caja.hidden = false;
+            caja.innerHTML = this.htmlDeVistaPrevia(previa);
+        } catch (err) {
+            if (!vigente()) return;
+            // La vista previa es una ayuda: si falla, el formulario sigue funcionando y el registro valida igual.
+            caja.hidden = false;
+            caja.innerHTML = `<div class="alert-banner warning" style="padding:0.4rem 0.6rem; font-size:0.72rem;"><span>⚠️</span><div>No se pudo calcular la vista previa (${escaparHtml(String(err))}). Aún puedes abonar: el registro valida los datos igualmente.</div></div>`;
+        }
+    }
+
+    private htmlDeVistaPrevia(v: VistaPreviaAbono): string {
+        const e = escaparHtml;
+        const imp = importeDeTexto;
+        // Los valores llegan como texto plano y se escapan aquí, una sola vez.
+        const COLORES = { normal: 'inherit', alerta: '#f59e0b', peligro: '#ef4444' } as const;
+        const fila = (rotulo: string, valor: string, tono: keyof typeof COLORES = 'normal', negrita = false): string =>
+            `<div style="display:flex; justify-content:space-between; gap:0.5rem;"><span style="color:var(--text-muted);">${e(rotulo)}</span><span style="text-align:right; color:${COLORES[tono]};${negrita ? ' font-weight:700;' : ''}">${e(valor)}</span></div>`;
+        const aFavor = (t: string): boolean => t.startsWith('-');
+        const balance = (t: string, d: string): string =>
+            aFavor(t) ? `${d} ${imp(t.slice(1))} a favor` : `${d} ${imp(t)}`;
+
+        const c = v.cuenta;
+        const filas: string[] = [];
+        filas.push(fila('Tarjeta', `${v.tarjeta_nombre} · ${v.divisa}`));
+        filas.push(fila('Abono', v.monto === null ? '—' : `${v.divisa} ${imp(v.monto)} (${v.tipo_etiqueta})`));
+        if (c) {
+            const origen = c.por_defecto ? `${c.nombre} (por defecto)` : c.nombre;
+            filas.push(fila('Sale de', `${origen} · saldo ${c.divisa} ${imp(c.saldo_actual)}`, c.por_defecto ? 'alerta' : 'normal'));
+        }
+        if (v.debitado !== null && c) {
+            if (v.tasa_cambio !== null) {
+                filas.push(fila('Tasa de cambio', `${v.tasa_cambio} → equivale a ${c.divisa} ${imp(v.debitado)}`));
+            }
+            filas.push(fila('Comisión', v.comision !== null ? `${c.divisa} ${imp(v.comision)} (0.20 %)` : 'Sin comisión (efectivo)'));
+            filas.push(fila('Total debitado', `${c.divisa} ${imp(v.total_debitado ?? v.debitado)}`, 'normal', true));
+        }
+        if (v.saldo_resultante !== null && c) {
+            filas.push(fila('Saldo resultante de la cuenta', `${c.divisa} ${imp(v.saldo_resultante)}`, aFavor(v.saldo_resultante) ? 'peligro' : 'normal'));
+        }
+        filas.push(fila('Balance resultante de la tarjeta', `${balance(v.balance_resultante_pesos, 'DOP')} · ${balance(v.balance_resultante_dolares, 'USD')}`));
+
+        const avisos = v.advertencias.map(a => {
+            const clase = a.gravedad === 'bloqueo' ? 'danger' : a.gravedad === 'aviso' ? 'warning' : 'info';
+            const icono = a.gravedad === 'bloqueo' ? '⛔' : a.gravedad === 'aviso' ? '⚠️' : 'ℹ️';
+            return `<div class="alert-banner ${clase}" data-advertencia="${e(a.codigo)}" style="padding:0.3rem 0.5rem; font-size:0.72rem;"><span>${icono}</span><div>${e(a.texto)}</div></div>`;
+        });
+        // Solo falta la tasa: al abonar el formulario la pide, así que no es un rechazo.
+        const soloFaltaLaTasa = v.advertencias.filter(a => a.gravedad === 'bloqueo').every(a => a.codigo === 'falta_tasa');
+        const cierre = v.se_puede_confirmar
+            ? ''
+            : soloFaltaLaTasa
+                ? `<div>Falta la tasa de cambio: al pulsar Abonar se te pedirá.</div>`
+                : `<div style="color:#ef4444;">Con estos datos el abono se rechazaría: corrige lo indicado antes de abonar.</div>`;
+
+        return `<div style="display:flex; flex-direction:column; gap:0.25rem; padding:0.5rem; border:1px solid var(--border-color); border-radius:6px; background:rgba(255,255,255,0.02);">
+            <div style="font-weight:600;">Vista previa del abono</div>${filas.join('')}${avisos.join('')}${cierre}</div>`;
+    }
+
+    private rellenarMontoSegunTipo(id: number, cortePesos: number, corteDolares: number, balPesos: number, balDolares: number): void {
         const { avisos, formato, dom } = this.dep;
         const tipo = dom.elemento<Campo>(`pag_tipo_${id}`).value;
         const divisa = dom.elemento<Campo>(`pag_div_${id}`).value;
@@ -1081,6 +1206,7 @@ export class VistaTarjetas implements Vista {
 export function puenteTarjetas(vista: VistaTarjetas): {
     handleAbonoTarjeta: (e: EventoDeFormulario, id: number) => Promise<void>;
     aplicarTipoAbono: (id: number, cortePesos: number, corteDolares: number, balPesos: number, balDolares: number) => void;
+    previsualizarAbono: (id: number) => void;
     alternarAvance: (id: number) => void;
     aplicarTipoAvance: (id: number) => void;
     handleAvanceEfectivo: (e: EventoDeFormulario, id: number) => Promise<void>;
@@ -1100,6 +1226,7 @@ export function puenteTarjetas(vista: VistaTarjetas): {
     return {
         handleAbonoTarjeta: (e, id) => vista.handleAbonoTarjeta(e, id),
         aplicarTipoAbono: (id, cortePesos, corteDolares, balPesos, balDolares) => vista.aplicarTipoAbono(id, cortePesos, corteDolares, balPesos, balDolares),
+        previsualizarAbono: id => vista.previsualizarAbono(id),
         alternarAvance: id => vista.alternarAvance(id),
         aplicarTipoAvance: id => vista.aplicarTipoAvance(id),
         handleAvanceEfectivo: (e, id) => vista.handleAvanceEfectivo(e, id),

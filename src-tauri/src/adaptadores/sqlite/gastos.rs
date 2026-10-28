@@ -296,6 +296,33 @@ impl RepositorioTarjetas for AlmacenSqlite<'_> {
     }
 }
 
+impl ConsultaParaAbono for AlmacenSqlite<'_> {
+    fn situacion_de_tarjeta(&self, tarjeta_id: i64) -> Result<SituacionDeTarjeta, ErrorAlmacen> {
+        type Fila = (String, i64, f64, f64, f64, f64);
+        let fila: Option<Fila> = self
+            .tx
+            .query_row(
+                "SELECT entidad || ' ' || nombre_tarjeta, activa, balance_pesos, balance_dolares, balance_corte_pesos, balance_corte_dolares
+                 FROM tarjetas WHERE id = ?;",
+                [tarjeta_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            )
+            .optional()
+            .map_err(fallo)?;
+        let (nombre, activa, dop, usd, corte_dop, corte_usd) =
+            fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id })?;
+        let d = |x: f64, divisa: Divisa| Dinero::nuevo(x, divisa).map_err(|e| ErrorAlmacen::Fallo(e.to_string()));
+        Ok(SituacionDeTarjeta {
+            nombre,
+            activa: activa == 1,
+            balance_dop: d(dop, Divisa::Dop)?,
+            balance_usd: d(usd, Divisa::Usd)?,
+            corte_dop: d(corte_dop, Divisa::Dop)?,
+            corte_usd: d(corte_usd, Divisa::Usd)?,
+        })
+    }
+}
+
 impl TarjetasParaCierre for AlmacenSqlite<'_> {
     fn tarjetas_para_cierre(&self) -> Result<Vec<TarjetaParaCierre>, ErrorAlmacen> {
         use crate::dominio::cierre_tarjeta::CupoDeDivisa;

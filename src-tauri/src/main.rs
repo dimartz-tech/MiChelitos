@@ -82,6 +82,7 @@ fn main() {
             comandos::avances::obtener_avances_tarjeta,
             comandos::avances::revertir_avance_efectivo,
             comandos::abonos::obtener_abonos_tarjeta,
+            comandos::abonos::previsualizar_abono,
             comandos::cuentas::crear_cuenta,
             comandos::cuentas::actualizar_cuenta,
             comandos::cuentas::archivar_cuenta,

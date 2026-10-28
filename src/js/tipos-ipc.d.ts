@@ -4,6 +4,9 @@
 
 // --- Lo que Rust devuelve ---
 export type AbonoTarjeta = { id: number; fecha_pago: string; monto_pagado: number; divisa: string; cuenta_ahorro_id: number | null; cuenta_nombre: string | null; tasa_cambio: number | null };
+export type AdvertenciaDeAbono = { codigo: string; gravedad: string; texto: string };
+export type CuentaDeCobroPrevia = { id: number; nombre: string; divisa: string; saldo_actual: string; por_defecto: boolean; archivada: boolean };
+export type VistaPreviaAbono = { tarjeta_id: number; tarjeta_nombre: string; tarjeta_activa: boolean; divisa: string; monto: string | null; tipo: string; tipo_etiqueta: string; cuenta: CuentaDeCobroPrevia | null; con_comision: boolean; debitado: string | null; comision: string | null; total_debitado: string | null; tasa_cambio: string | null; saldo_resultante: string | null; balance_actual_pesos: string; balance_actual_dolares: string; balance_resultante_pesos: string; balance_resultante_dolares: string; advertencias: AdvertenciaDeAbono[]; se_puede_confirmar: boolean };
 export type SimulacionAvance = { monto: number; cargo: number; a_la_tarjeta: number; a_la_cuenta: number };
 export type AvanceEfectivo = { id: number; fecha: string; monto: number; divisa: string; tipo_cargo: string; tasa: number | null; cargo: number; cuenta_ahorro_id: number; cuenta_nombre: string; nota: string | null };
 export type BonificacionDto = { id: number; fecha: string; tarjeta_id: number; entidad: string; nombre_tarjeta: string; monto: number; divisa: string; concepto: string; gasto_id: number | null };
@@ -37,6 +40,7 @@ export type Comandos = {
     registrar_pago_tarjeta: { args: { id: number; fecha: string; monto: string; divisa: string; cuentaAhorroId?: number | null; tasaCambio: number }; ret: null };
     obtener_abonos_tarjeta: { args: { tarjetaId: number }; ret: AbonoTarjeta[] };
     revertir_abono_tarjeta: { args: { id: number; motivo: string }; ret: string };
+    previsualizar_abono: { args: { id: number; monto: string; divisa: string; cuentaAhorroId?: number | null; tasaCambio: number; tipo: string }; ret: VistaPreviaAbono };
     simular_avance_efectivo: { args: { monto: string; divisa: string; tipoCargo: string; porcentaje?: number | null; cargoFijo?: string | null }; ret: SimulacionAvance };
     registrar_avance_efectivo: { args: { tarjetaId: number; cuentaAhorroId: number; fecha: string; monto: string; divisa: string; tipoCargo: string; porcentaje?: number | null; cargoFijo?: string | null; nota?: string | null }; ret: string };
     obtener_avances_tarjeta: { args: { tarjetaId: number }; ret: AvanceEfectivo[] };
