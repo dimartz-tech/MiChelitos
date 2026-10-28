@@ -4,7 +4,7 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.119.0 (Versión Actual) - 2026-10-28
+## 🚀 Versión 1.116.0 (Versión Actual) - 2026-10-28
 **Gastos: cuatro afinaciones de las sugerencias (seguimiento del PR #152).** Solo frontend (`src/js/vistas/gastos.ts`); sin Rust ni cambios de base de datos.
 
 ### ✨ Qué cambia
