@@ -58,9 +58,16 @@ export function normalizarBusqueda(texto: unknown): string {
         .trim();
 }
 
-/** Clave de una descripción para agrupar repeticiones: sin distinguir mayúsculas ni espacios sobrantes (las tildes sí cuentan). */
+/** Clave de una descripción para agrupar repeticiones: sin distinguir mayúsculas, tildes ni espacios sobrantes. */
 function claveDeDescripcion(texto: string): string {
-    return texto.toLowerCase().replace(/\s+/g, ' ').trim();
+    return normalizarBusqueda(texto);
+}
+
+const ETIQUETAS_DE_METODO: Readonly<Record<string, string>> = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia' };
+
+/** Etiqueta legible de un método de pago (el valor interno no cambia); un valor desconocido se muestra tal cual. */
+export function etiquetaDeMetodo(metodo: string): string {
+    return ETIQUETAS_DE_METODO[metodo] ?? metodo;
 }
 
 /** `dd/mm/aaaa` → `aaaammdd` (comparable como texto); lo que no encaja queda al fondo. */
@@ -79,7 +86,7 @@ function esMasReciente(a: GastoListado, b: GastoListado): boolean {
 const MAX_SUGERENCIAS = 100;
 
 /**
- * Las descripciones ya usadas, sin repetir (sin distinguir mayúsculas), de la más frecuente a la menos;
+ * Las descripciones ya usadas, sin repetir (sin distinguir mayúsculas ni tildes), de la más frecuente a la menos;
  * a igual frecuencia, la usada más recientemente primero. Se muestra la grafía del uso más reciente.
  */
 export function sugerenciasDeDescripcion(gastos: readonly GastoListado[]): string[] {
@@ -98,15 +105,30 @@ export function sugerenciasDeDescripcion(gastos: readonly GastoListado[]): strin
         .map(g => g.texto);
 }
 
-/** El gasto más reciente cuya descripción es exactamente `descripcion` (sin distinguir mayúsculas); `null` si no hay. */
+/** Con menos caracteres que esto, un prefijo no se toma como pista (evita ofertas por una sola letra). */
+const MIN_PREFIJO = 2;
+
+/**
+ * El gasto más reciente cuya descripción coincide con lo escrito, sin distinguir mayúsculas ni tildes.
+ * 1) Una descripción idéntica gana siempre (aunque otras empiecen igual).
+ * 2) Si no, un prefijo (de al menos {@link MIN_PREFIJO} caracteres) vale solo si todas las coincidencias son UNA
+ *    misma descripción; si hay varias distintas es ambiguo y no se ofrece nada (adivinar rellenaría datos de otro gasto).
+ */
 export function ultimoGastoConDescripcion(gastos: readonly GastoListado[], descripcion: string): GastoListado | null {
     const clave = claveDeDescripcion(descripcion);
     if (!clave) return null;
-    let mejor: GastoListado | null = null;
+    const porClave = new Map<string, GastoListado>();
     for (const g of gastos) {
-        if (claveDeDescripcion(g.descripcion) === clave && (!mejor || esMasReciente(g, mejor))) mejor = g;
+        const k = claveDeDescripcion(g.descripcion);
+        if (!k) continue;
+        const previo = porClave.get(k);
+        if (!previo || esMasReciente(g, previo)) porClave.set(k, g);
     }
-    return mejor;
+    const exacto = porClave.get(clave);
+    if (exacto) return exacto;
+    if (clave.length < MIN_PREFIJO) return null;
+    const candidatos = [...porClave.entries()].filter(([k]) => k.startsWith(clave));
+    return candidatos.length === 1 ? candidatos[0][1] : null;
 }
 
 const METODOS_DEL_FORMULARIO = ['efectivo', 'tarjeta', 'transferencia'] as const;
@@ -487,7 +509,7 @@ export class VistaGastos implements Vista {
                                 </select>
                                 <select id="gas_f_met" class="form-control" style="flex:1 1 9rem; margin:0;" aria-label="Filtrar por método de pago" ${alCambiar('filtrarGastos')}>
                                     <option value="">Todos los métodos</option>
-                                    ${[...new Set(gastos.map(g => g.metodo_pago))].sort().map(m => `<option value="${escaparHtml(m)}" ${m === this.filtros.metodo ? 'selected' : ''}>${escaparHtml(m)}</option>`).join('')}
+                                    ${[...new Set(gastos.map(g => g.metodo_pago))].sort().map(m => `<option value="${escaparHtml(m)}" ${m === this.filtros.metodo ? 'selected' : ''}>${escaparHtml(etiquetaDeMetodo(m))}</option>`).join('')}
                                 </select>
                                 <select id="gas_f_per" class="form-control" style="flex:1 1 9rem; margin:0;" aria-label="Periodo del historial" ${alCambiar('filtrarGastos')}>
                                     <option value="todos" ${this.filtros.periodo === 'todos' ? 'selected' : ''}>Todos los meses</option>
@@ -553,7 +575,7 @@ export class VistaGastos implements Vista {
                                 </td>
                                 <td>${escaparHtml(g.categoria_nombre)}</td>
                                 <td>${escaparHtml(g.fecha)}</td>
-                                <td style="text-transform:capitalize;">${escaparHtml(g.metodo_pago)}</td>
+                                <td>${escaparHtml(etiquetaDeMetodo(g.metodo_pago))}</td>
                                 <td class="amount">${escaparHtml(g.divisa)} ${formato.importe(g.monto)}</td>
                                 <td class="amount expense">${escaparHtml(divisaFinal)} ${formato.importe(g.costo_adicional)}</td>
                                 <td class="amount" style="font-weight:bold;">${escaparHtml(divisaFinal)} ${formato.importe((montoFinal ?? 0) + g.costo_adicional)}</td>
@@ -607,7 +629,7 @@ export class VistaGastos implements Vista {
         }
         const plan = planDeRepeticion(gasto, { categorias: this.categorias, tarjetas: this.tarjetas, cuentas: this.cuentas });
         this.ofrecido = { gasto, plan };
-        const partes = [plan.resumen.categoria, plan.resumen.metodo, plan.resumen.medio, plan.divisa]
+        const partes = [plan.resumen.categoria, plan.resumen.metodo ? etiquetaDeMetodo(plan.resumen.metodo) : null, plan.resumen.medio, plan.divisa]
             .filter((p): p is string => Boolean(p)).map(p => `<strong>${escaparHtml(p)}</strong>`);
         panel.innerHTML = `
             <div style="margin-bottom:0.4rem;">Ya registraste «${escaparHtml(gasto.descripcion)}» (último: ${escaparHtml(gasto.fecha)})${partes.length ? ': ' + partes.join(' · ') : ''}.</div>
