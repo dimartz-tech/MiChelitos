@@ -6,6 +6,7 @@
 // `data-accion="…"`, y `navegar` (el menú, los enlaces de las vistas) llama a `navigate`.
 
 import { accionesGenerales, delegar, type Acciones } from './ui/delegacion.js';
+import { enmascarar } from './ui/mascaras.js';
 import type { ApiDe, Avisos, Dom, Enrutador } from './ui/servicios';
 
 export interface EntornoDeInicio {
@@ -42,6 +43,7 @@ export function iniciarAplicacion({ enrutador, avisos, dom, api, acciones }: Ent
     const repetidas = Object.keys(generales).filter(nombre => nombre in acciones);
     if (repetidas.length > 0) throw new Error(`Acciones generales pisadas por una vista: ${repetidas.join(', ')}.`);
     delegar(document, { ...acciones, ...generales });
+    enmascarar(document);
 
     const arrancar = (): void => {
         // 1. Cargar la pestaña predeterminada (Dashboard)
