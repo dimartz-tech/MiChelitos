@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { accionesDe } from '../ayudas/manejadores_html.js';
 import {
     VistaGastos, MANEJADORES_GASTOS, puenteGastos,
-    normalizarBusqueda, sugerenciasDeDescripcion, ultimoGastoConDescripcion, planDeRepeticion,
+    normalizarBusqueda, etiquetaDeMetodo, sugerenciasDeDescripcion, ultimoGastoConDescripcion, planDeRepeticion,
     filtrarGastosListados, totalesEnCentavos, SIN_FILTROS,
 } from '../../../src/js/vistas/gastos.js';
 import { cargarInterfaz } from '../ayudas/cargar_interfaz.js';
@@ -97,7 +97,8 @@ test('el último gasto con la descripción es el de fecha mayor, sin distinguir 
     const b = gasto({ descripcion: 'taxi', fecha: '09/03/2027', categoria_id: 2 });
     const c = gasto({ descripcion: 'Taxi', fecha: '15/02/2027', categoria_id: 3 });
     assert.equal(ultimoGastoConDescripcion([a, b, c], ' TAXI '), b);
-    assert.equal(ultimoGastoConDescripcion([a, b, c], 'Tax'), null);
+    assert.equal(ultimoGastoConDescripcion([a, b, c], 'Tax'), b, 'un prefijo único también coincide');
+    assert.equal(ultimoGastoConDescripcion([a, b, c], 'Taxis'), null);
     assert.equal(ultimoGastoConDescripcion([a, b, c], ''), null);
 });
 
@@ -356,4 +357,69 @@ test('el HTML de la pestaña solo usa acciones del puente', async () => {
     const nombres = new Set(accionesDe(t.pantalla.contenido.innerHTML + t.lista()).map(a => a.nombre));
     for (const n of ['ofrecerUltimoGasto', 'filtrarGastos', 'limpiarFiltrosGastos']) assert.ok(nombres.has(n), n);
     for (const n of nombres) assert.ok(MANEJADORES_GASTOS.includes(n), n);
+});
+
+// --- afinaciones: tildes, prefijos y etiquetas de método ---
+
+test('sugerencias: «Cafe» y «Café» son una sola, con la grafía del uso más reciente', () => {
+    const g = [
+        gasto({ descripcion: 'Cafe', fecha: '01/03/2027' }),
+        gasto({ descripcion: 'Café', fecha: '09/03/2027' }),
+        gasto({ descripcion: 'CAFÉ ', fecha: '05/03/2027' }),
+        gasto({ descripcion: 'Pan', fecha: '04/03/2027' }),
+    ];
+    assert.deepEqual(sugerenciasDeDescripcion(g), ['Café', 'Pan']);
+    const h = [gasto({ descripcion: 'Café', fecha: '01/03/2027' }), gasto({ descripcion: 'cafe', fecha: '09/03/2027' })];
+    assert.deepEqual(sugerenciasDeDescripcion(h), ['cafe']);
+});
+
+test('repetir último: coincide ignorando tildes y mayúsculas', () => {
+    const a = gasto({ descripcion: 'Café', fecha: '01/03/2027' });
+    const b = gasto({ descripcion: 'cafe', fecha: '09/03/2027' });
+    assert.equal(ultimoGastoConDescripcion([a, b], 'CAFE'), b);
+    assert.equal(ultimoGastoConDescripcion([a, b], 'café'), b);
+});
+
+test('repetir último: un prefijo único ofrece el último gasto de esa descripción', () => {
+    const a = gasto({ descripcion: 'Combustible', fecha: '01/03/2027' });
+    const b = gasto({ descripcion: 'combustible', fecha: '09/03/2027' });
+    const c = gasto({ descripcion: 'Pan', fecha: '10/03/2027' });
+    assert.equal(ultimoGastoConDescripcion([a, b, c], 'Comb'), b);
+    assert.equal(ultimoGastoConDescripcion([a, b, c], 'combustíb'), b);
+});
+
+test('repetir último: un prefijo ambiguo no ofrece nada; una descripción idéntica gana al prefijo; una letra no basta', () => {
+    const a = gasto({ descripcion: 'Taxi al centro', fecha: '01/03/2027' });
+    const b = gasto({ descripcion: 'Taxi al aeropuerto', fecha: '09/03/2027' });
+    const c = gasto({ descripcion: 'Taxi', fecha: '02/03/2027' });
+    assert.equal(ultimoGastoConDescripcion([a, b], 'Taxi'), null);
+    assert.equal(ultimoGastoConDescripcion([a, b, c], 'taxi'), c);
+    assert.equal(ultimoGastoConDescripcion([a], 'T'), null);
+    assert.equal(ultimoGastoConDescripcion([a], 'Ta'), a);
+    assert.equal(ultimoGastoConDescripcion([a], 'Zapato'), null);
+});
+
+test('repetir último con prefijo: ofrece sin rellenar nada y muestra la descripción completa', async () => {
+    const t = montar({ gastos: [gasto({ descripcion: 'Combustible', monto: 40 })] });
+    await t.vista.render();
+    escribir(t, 'gas_des', 'comb');
+    t.vista.ofrecerUltimoGasto();
+    assert.equal(t.campos.gas_repetir.style.display, 'block');
+    assert.match(t.campos.gas_repetir.innerHTML, /«Combustible»/);
+    assert.equal(t.campos.gas_des.value, 'comb');
+    assert.equal(t.campos.gas_mon.value, '');
+    assert.match(t.campos.gas_repetir.innerHTML, /<strong>Efectivo<\/strong>/);
+});
+
+test('etiquetas de método: legibles en el filtro, el historial y la oferta, con el valor interno intacto', async () => {
+    assert.equal(etiquetaDeMetodo('efectivo'), 'Efectivo');
+    assert.equal(etiquetaDeMetodo('tarjeta'), 'Tarjeta');
+    assert.equal(etiquetaDeMetodo('transferencia'), 'Transferencia');
+    assert.equal(etiquetaDeMetodo('cheque'), 'cheque');
+    const t = montar({ gastos: [gasto({ metodo_pago: 'transferencia', cuenta_ahorro_id: 4 })] });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.match(html, /<option value="transferencia" >Transferencia<\/option>/);
+    assert.match(html, /<td>Transferencia<\/td>/);
+    assert.doesNotMatch(html, /text-transform:capitalize/);
 });
