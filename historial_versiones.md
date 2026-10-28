@@ -4,7 +4,28 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.120.0 (Versión Actual) - 2026-10-28
+## 🚀 Versión 1.121.0 (Versión Actual) - 2026-10-28
+**Resumen › «Gasto por categoría» (PR 2 de 5): la interfaz sobre `obtener_resumen_gastos`.** Solo interfaz: **sin Rust nuevo, sin migración, sin presupuesto y sin tendencia** (llegan después). La fórmula de «Gastos y Cargos (Este Mes)» y el resto del Resumen **no se tocan**.
+
+### ✨ Qué se ve
+* Un bloque nuevo al final de la pestaña Resumen: selector de **mes** (los meses con datos, más el elegido, con «Anterior»/«Siguiente»), **«Promedio de N meses»** (2, 3 o 6; por defecto 3) y el conmutador **«Incluir inversión y obligaciones»** (por defecto todo incluido; apagado excluye por nombre —«Impuestos», «Maquinaria/Equipos», «Prestamo», «Renta»/«Alquiler»— con los ids del catálogo, nunca escritos a mano, y dice qué quedó fuera).
+* Total en pesos, etiqueta **«parcial, hasta el día N»** en el mes en curso y la parte en dólares como nota: «incluye USD x ≈ DOP y a tasa T · estimado». Esos dólares **ya están dentro del total en pesos** (así los entrega Rust): es una nota, no un sumando.
+* Tabla accesible (`<table>`, `<caption>`, `th scope`): categoría, importe, % del total con mini barra (HTML/CSS propio, `role="img"` con texto alternativo), variación contra el mes anterior y contra el promedio con **flecha y texto** («sube», «baja», «igual», «—» sin referencia; el color solo refuerza). En mes parcial, además, la comparación con el mismo tramo del mes anterior. «Cargos derivados» va al final con su nota.
+* Estados: cargando, mes sin gastos y error del comando (mensaje claro dentro del bloque; el resto del Resumen se dibuja igual).
+
+### 🏗️ Diseño
+* `vistas/resumen_gastos.ts`: funciones puras (formato, flechas, etiquetas, ids por nombre, HTML de controles y tabla); `vistas/resumen.ts`: estado del bloque, peticiones y puente (`resumenGastoMes`, `resumenGastoMover`, `resumenGastoPromedio`, `resumenGastoConmutar`; acciones delegadas, sin `on*=`).
+* Los importes llegan como texto y se formatean sobre el texto: `importeDeTexto` salió de `tarjetas.ts` a `nucleo/importe_texto.ts` (una sola implementación; `tarjetas.ts` la reexporta) y se le añadió `porTasaEnTexto` (BigInt) para la estimación en pesos de la nota.
+* Un contador de secuencia descarta respuestas (y errores) viejos si el titular cambia de mes rápido o reabre la pestaña; tras repintar, el foco vuelve al control tocado. Todo texto de categoría pasa por `escaparHtml`.
+* La tasa es la de referencia ya existente (`TASA_USD_A_DOP`, inyectada como `referencias.tasaUsdADop`).
+
+### 🧪 Verificación
+* Unitarias de las funciones puras y de la tabla (escape hostil, parcial, dólares, estados, controles); interacción con `cargarInterfaz` (mes, N, conmutador, error del comando, catálogo caído, respuesta vieja y error tardío descartados, reapertura, foco); la prueba de contrato de acciones exige las cuatro nuevas.
+* Mutaciones dirigidas (signo de la flecha, etiqueta parcial, exclusión por nombre, escape, descarte de respuesta vieja): cada una hizo fallar al menos una prueba y se restauró.
+
+---
+
+## Versión 1.120.0 - 2026-10-28
 **Resumen de gastos por categoría y mes — base de lectura (PR 1 de 5).** Dominio puro, puerto de lectura, caso de uso y un comando de **solo lectura** (`obtener_resumen_gastos`), con su tipo generado y su función `obtenerResumenGastos` en `api.ts`. **Sin interfaz** (llega en el PR 2), **sin migración** y **sin presupuesto**. No cambia ningún comportamiento existente; la fórmula del Resumen actual (que suma mezclando divisas) **no se toca**.
 
 ### ✨ Qué calcula

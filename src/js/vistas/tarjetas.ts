@@ -15,19 +15,13 @@ import type { Tarjeta, VistaPreviaAbono, VistaPreviaDeCierre } from '../tipos-ip
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Reloj, Vista } from '../ui/servicios';
 
 import { ATRIBUTOS_DE_FECHA, accion, alCambiar, alEnviar, alEscribir, escaparHtml } from '../nucleo/html.js';
+import { importeDeTexto } from '../nucleo/importe_texto.js';
 
 /** Espera tras la última pulsación antes de pedir la vista previa del abono (ms). */
 const RETARDO_VISTA_PREVIA_MS = 250;
 
-/**
- * Un importe en texto exacto (`-1234.56`) con separador de miles. Trabaja sobre las cifras, sin pasar por `Number`:
- * la vista previa muestra lo que Rust calculó, no una cifra redondeada de nuevo.
- */
-export function importeDeTexto(texto: string): string {
-    const m = /^(-?)(\d+)(\.\d+)?$/.exec(texto);
-    if (!m) return texto;
-    return `${m[1]}${m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${m[3] ?? ''}`;
-}
+// `importeDeTexto` vive en `nucleo/importe_texto.ts` (la usan también otras vistas); se reexporta por compatibilidad.
+export { importeDeTexto };
 
 type ApiTarjetas = ApiDe<
     | 'obtenerTarjetas'
