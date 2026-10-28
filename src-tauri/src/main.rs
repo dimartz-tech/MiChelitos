@@ -61,6 +61,7 @@ fn main() {
             comandos::suscripciones::descartar_periodo_pendiente,
             comandos::suscripciones::procesar_suscripciones,
             comandos::capital::obtener_capital,
+            comandos::patrimonio::obtener_patrimonio,
             comandos::capital::guardar_capital,
             comandos::prestamos::obtener_prestamos,
             comandos::prestamos::crear_prestamo,

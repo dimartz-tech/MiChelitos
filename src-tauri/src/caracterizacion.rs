@@ -6563,3 +6563,143 @@ fn pv2_la_vista_previa_advierte_sin_fallar_ni_escribir_con_datos_incompletos() {
     assert!(crate::comandos::abonos::previsualizar_abono(tarjeta, "1.00".into(), "EUR".into(), None, 0.0, "personalizado".into()).is_err());
     assert_eq!(huella_de_la_base(), antes);
 }
+
+// ---------------------------------------------------------------------------
+//  Integración del patrimonio: el comando REAL `obtener_patrimonio` de punta a punta, sobre una base temporal con el
+//  esquema real y un `capital.json` temporal. Datos inventados, con céntimos poco redondos.
+// ---------------------------------------------------------------------------
+
+fn archivo_de_capital() -> String {
+    std::fs::read_to_string(crate::db_nosql::obtener_ruta_nosql("capital")).expect("leer capital temporal")
+}
+
+/// Un escenario con de todo: cajas de efectivo con saldo, cuentas DOP/USD, archivadas con y sin saldo, tarjetas
+/// activas e inactivas (con y sin deuda), un préstamo con saldo y uno antiguo sin saldo llevado, y capital.
+fn escenario_de_patrimonio() {
+    let _ = std::fs::remove_file(crate::db_nosql::obtener_ruta_nosql("capital"));
+    escribir_capital_de_prueba(&serde_json::json!({
+        "certificados": [{"banco": "Banco Ejemplo", "monto": 100_000.07, "tasa": 8.5, "vencimiento": "31/12/2030", "tipo_pago": "A cuenta"}],
+        "bolsa": [{"emisor": "Emisor Ejemplo", "monto": 20_000.13}],
+        "propiedades": {"inmobiliario": [{"id": "i1", "valor_estimado": 3_000_000.01}], "vehiculos": [], "maquinaria": []}
+    }));
+    let c = conexion();
+    c.execute("UPDATE cuentas_ahorro SET balance_actual = 1234.56 WHERE es_caja_efectivo = 1 AND divisa = 'DOP';", []).unwrap();
+    c.execute("UPDATE cuentas_ahorro SET balance_actual = 12.34 WHERE es_caja_efectivo = 1 AND divisa = 'USD';", []).unwrap();
+    crear_cuenta("Ahorro Ejemplo", "DOP", 250_033.19);
+    crear_cuenta("Ahorro Dólares Ejemplo", "USD", 123.45);
+    crear_cuenta("Vieja sin saldo", "DOP", 0.0);
+    crear_cuenta("Vieja con saldo", "DOP", 43.21);
+    c.execute("UPDATE cuentas_ahorro SET archivada = 1 WHERE nombre LIKE 'Vieja%';", []).unwrap();
+    crear_tarjeta(10_000.37, 100.19);
+    let cerrada_con_deuda = crear_tarjeta(12.34, 0.0);
+    let cerrada_a_cero = crear_tarjeta(0.0, 0.0);
+    c.execute("UPDATE tarjetas SET activa = 0 WHERE id IN (?, ?);", params![cerrada_con_deuda, cerrada_a_cero]).unwrap();
+    crear_prestamo_de_prueba("consumo", 50_000.11, 12.0, 1_000.0, Some((60, 59)), None);
+    let antiguo = crear_prestamo_de_prueba("consumo", 700.05, 12.0, 100.0, Some((12, 12)), None);
+    c.execute("UPDATE prestamos SET saldo_actual = NULL WHERE id = ?;", [antiguo]).unwrap();
+}
+
+#[test]
+fn integracion_patrimonio_las_dos_cifras_de_punta_a_punta() {
+    let _g = entorno_aislado();
+    escenario_de_patrimonio();
+    let p = crate::comandos::patrimonio::obtener_patrimonio().unwrap();
+    assert_eq!(p.capital, "3120000.21");
+    assert_eq!((p.efectivo_dop.as_str(), p.efectivo_usd.as_str()), ("1234.56", "12.34"));
+    assert_eq!(p.liquidez_dop, "251310.96", "efectivo + ahorro + archivada con saldo; la archivada a cero no suma");
+    assert_eq!((p.liquidez_usd.as_str(), p.liquidez_usd_en_dop.as_str()), ("135.79", "8147.40"));
+    assert_eq!((p.tarjetas_dop.as_str(), p.tarjetas_usd.as_str(), p.tarjetas_usd_en_dop.as_str()), ("10012.71", "100.19", "6011.40"));
+    assert_eq!(p.prestamos, "50700.16", "el antiguo sin saldo llevado cuenta por su monto");
+    assert_eq!(p.total_pasivos, "66724.27");
+    assert_eq!(p.neto_actual, "3053275.94");
+    assert_eq!(p.neto_con_liquidez, "3312734.30");
+    assert_eq!((p.tasa_usd_a_dop.as_str(), p.tasa_estimada), ("60.00", true));
+    assert!(p.partidas.iter().any(|x| x.nombre.contains("Vieja con saldo (archivada)") && x.importe == "43.21"));
+    assert!(p.partidas.iter().any(|x| x.nombre.contains("Vieja sin saldo") && x.importe == "0.00"), "la archivada a cero figura con cero");
+}
+
+#[test]
+fn integracion_patrimonio_la_cifra_actual_coincide_con_la_formula_vigente_de_resumen() {
+    let _g = entorno_aislado();
+    escenario_de_patrimonio();
+    let p = crate::comandos::patrimonio::obtener_patrimonio().unwrap();
+    // La fórmula de `resumen.ts`, en f64 y sobre las tarjetas ACTIVAS (las que lista `obtener_tarjetas`).
+    let capital = crate::comandos::capital::obtener_capital().unwrap()["totales"]["patrimonio"].as_f64().unwrap();
+    let tarjetas: f64 = crate::comandos::tarjetas::obtener_tarjetas()
+        .unwrap()
+        .iter()
+        .map(|t| t.balance_pesos + t.balance_dolares * 60.0)
+        .sum();
+    let prestamos: f64 = crate::comandos::prestamos::obtener_prestamos().unwrap().iter().map(|x| x.saldo_actual).sum();
+    let resumen_vigente = capital - (tarjetas + prestamos);
+    let neto: f64 = p.neto_actual.parse().unwrap();
+    // hallazgo: Resumen ignora las tarjetas INACTIVAS con deuda; el núcleo las cuenta (12.34 aquí). Una tarjeta solo se
+    // desactiva con saldo cero, así que en uso normal no ocurre; si ocurriera, la deuda no puede desaparecer del neto.
+    assert!((resumen_vigente - 12.34 - neto).abs() < 0.005, "resumen {resumen_vigente} vs núcleo {neto}");
+}
+
+#[test]
+fn integracion_patrimonio_el_comando_no_escribe_nada() {
+    let _g = entorno_aislado();
+    escenario_de_patrimonio();
+    let base_antes = huella_de_la_base();
+    let capital_antes = archivo_de_capital();
+    let _ = crate::comandos::patrimonio::obtener_patrimonio().unwrap();
+    let _ = crate::comandos::patrimonio::obtener_patrimonio().unwrap();
+    assert_eq!(huella_de_la_base(), base_antes, "la base no cambió");
+    assert_eq!(archivo_de_capital(), capital_antes, "el capital no cambió");
+}
+
+#[test]
+fn integracion_patrimonio_sin_datos_da_cero_y_un_capital_danado_es_un_error() {
+    let _g = entorno_aislado();
+    let _ = std::fs::remove_file(crate::db_nosql::obtener_ruta_nosql("capital"));
+    let p = crate::comandos::patrimonio::obtener_patrimonio().unwrap();
+    assert_eq!((p.neto_actual.as_str(), p.neto_con_liquidez.as_str(), p.capital.as_str()), ("0.00", "0.00", "0.00"));
+    std::fs::write(crate::db_nosql::obtener_ruta_nosql("capital"), "{ no es json").unwrap();
+    assert!(crate::comandos::patrimonio::obtener_patrimonio().is_err(), "un capital dañado no se toma por cero");
+    let _ = std::fs::remove_file(crate::db_nosql::obtener_ruta_nosql("capital"));
+}
+
+#[test]
+fn integracion_patrimonio_el_dto_serializado_trae_importes_como_texto_exacto() {
+    let _g = entorno_aislado();
+    escenario_de_patrimonio();
+    let json = serde_json::to_value(crate::comandos::patrimonio::obtener_patrimonio().unwrap()).unwrap();
+    assert_eq!(json["neto_actual"], serde_json::json!("3053275.94"));
+    assert_eq!(json["neto_con_liquidez"], serde_json::json!("3312734.30"));
+    assert_eq!(json["tasa_estimada"], serde_json::json!(true));
+    for clave in ["capital", "liquidez_dop", "tarjetas_usd_en_dop", "prestamos", "total_pasivos"] {
+        assert!(json[clave].is_string(), "{clave} debe viajar como texto, no como número");
+    }
+    for partida in json["partidas"].as_array().unwrap() {
+        assert!(partida["importe"].is_string() && partida["importe_dop"].is_string());
+    }
+}
+
+/// Las claves de un tipo `export type Nombre = { a: ...; b: ... }` de `tipos-ipc.d.ts`, ordenadas.
+fn claves_declaradas(ts: &str, tipo: &str) -> Vec<String> {
+    let cabecera = format!("export type {tipo} = {{");
+    let inicio = ts.find(&cabecera).unwrap_or_else(|| panic!("no hay tipo {tipo}")) + cabecera.len();
+    let cuerpo = &ts[inicio..ts[inicio..].find("};").unwrap() + inicio];
+    let mut claves: Vec<String> = cuerpo.split(';').filter_map(|c| c.split(':').next()).map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect();
+    claves.sort();
+    claves
+}
+
+fn claves_de(valor: &serde_json::Value) -> Vec<String> {
+    let mut claves: Vec<String> = valor.as_object().unwrap().keys().cloned().collect();
+    claves.sort();
+    claves
+}
+
+#[test]
+fn integracion_patrimonio_contrato_de_forma_con_tipos_ipc() {
+    let _g = entorno_aislado();
+    escenario_de_patrimonio();
+    let ts = include_str!("../../src/js/tipos-ipc.d.ts");
+    let json = serde_json::to_value(crate::comandos::patrimonio::obtener_patrimonio().unwrap()).unwrap();
+    assert_eq!(claves_de(&json), claves_declaradas(ts, "Patrimonio"), "el DTO real y tipos-ipc.d.ts declaran claves distintas");
+    assert_eq!(claves_de(&json["partidas"][0]), claves_declaradas(ts, "PartidaPatrimonio"));
+    assert!(ts.contains("obtener_patrimonio: { args: {  }; ret: Patrimonio }"));
+}

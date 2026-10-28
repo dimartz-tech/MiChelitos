@@ -407,6 +407,11 @@ const AppAPI = {
         return await invoke('obtener_capital');
     },
 
+    // Patrimonio con sus dos cifras (importes como texto exacto). Solo lectura; lo compone el núcleo.
+    async obtenerPatrimonio() {
+        return await invoke('obtener_patrimonio');
+    },
+
     // El documento de capital es JSON libre (propiedades, certificados, bolsa…):
     // Rust lo recibe como `Value`, así que aquí el `any` es explícito y deliberado.
     async guardarCapital(capitalData: any) {
