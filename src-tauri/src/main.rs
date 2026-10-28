@@ -24,6 +24,8 @@ mod contrato_rusqlite;
 #[cfg(test)]
 mod sumas_en_centavos;
 #[cfg(test)]
+mod integracion_patrimonio;
+#[cfg(test)]
 mod gherkin;
 #[cfg(test)]
 mod caso_de_uso_gherkin;
@@ -63,6 +65,9 @@ fn main() {
             comandos::capital::obtener_capital,
             comandos::patrimonio::obtener_patrimonio,
             comandos::capital::guardar_capital,
+            comandos::fotos_patrimonio::tomar_foto_patrimonio,
+            comandos::fotos_patrimonio::asegurar_foto_del_mes,
+            comandos::fotos_patrimonio::obtener_fotos_patrimonio,
             comandos::prestamos::obtener_prestamos,
             comandos::prestamos::crear_prestamo,
             comandos::prestamos::pagar_cuota_prestamo,

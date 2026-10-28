@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 17;
+pub const VERSION_OBJETIVO: u32 = 18;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -178,6 +178,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 17,
             nombre: "las tarjetas se desactivan, no se borran",
             aplicar: crate::db_sql::migracion_17_desactivar_tarjetas,
+        },
+        Migracion {
+            version: 18,
+            nombre: "historial del patrimonio",
+            aplicar: crate::db_sql::migracion_18_historial_del_patrimonio,
         },
     ]
 }
@@ -1245,5 +1250,185 @@ mod tests_centavos {
         let resultado = super::super::db_sql::verificar_centavos_exactos_para_pruebas(&tx);
 
         assert!(resultado.is_err(), "la verificación tiene que rechazarlo");
+    }
+}
+
+#[cfg(test)]
+mod tests_patrimonio {
+    use super::*;
+
+    fn migrada() -> Connection {
+        let mut c = Connection::open_in_memory().unwrap();
+        ejecutar(&mut c).unwrap();
+        c.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        c
+    }
+
+    fn foto(c: &Connection, anio: i64, mes: i64, fecha: &str, origen: &str, activos: rusqlite::types::Value, pasivos: i64, patrimonio: i64) -> rusqlite::Result<usize> {
+        c.execute(
+            "INSERT INTO patrimonio_fotos (anio, mes, fecha, origen, tasa_usd_dop, activos_c, pasivos_c, patrimonio_c, liquido_c)
+             VALUES (?, ?, ?, ?, 58123456789, ?, ?, ?, 1234)",
+            rusqlite::params![anio, mes, fecha, origen, activos, pasivos, patrimonio],
+        )
+    }
+    fn entero(v: i64) -> rusqlite::types::Value {
+        rusqlite::types::Value::Integer(v)
+    }
+
+    #[test]
+    fn de_cero_a_18_crea_las_dos_tablas_y_deja_la_version() {
+        let c = migrada();
+        assert_eq!(version_de(&c).unwrap(), 18);
+        for t in ["patrimonio_fotos", "patrimonio_partidas"] {
+            let n: i64 = c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", [t], |r| r.get(0)).unwrap();
+            assert_eq!(n, 1, "{t}");
+        }
+    }
+
+    #[test]
+    fn la_migracion_18_es_idempotente_aplicada_dos_veces() {
+        let mut c = migrada();
+        foto(&c, 2026, 3, "05/03/2026", "real", entero(10_001_37), 1_000_11, 9_001_26).unwrap();
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_18_historial_del_patrimonio(&tx).unwrap();
+        tx.commit().unwrap();
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM patrimonio_fotos", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "volver a aplicarla no toca lo guardado");
+        assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0, "una base ya migrada no repite nada");
+    }
+
+    #[test]
+    fn el_esquema_rechaza_un_centimo_roto_un_texto_y_un_patrimonio_que_no_cuadra() {
+        let c = migrada();
+        // Un REAL con fracción conserva su tipo y el CHECK de typeof lo detiene.
+        assert!(foto(&c, 2026, 3, "05/03/2026", "real", rusqlite::types::Value::Real(100.5), 0, 100).is_err());
+        assert!(foto(&c, 2026, 3, "05/03/2026", "real", rusqlite::types::Value::Text("abc".into()), 0, 0).is_err());
+        // patrimonio != activos - pasivos
+        assert!(foto(&c, 2026, 3, "05/03/2026", "real", entero(10_000_01), 500_00, 9_000_00).is_err());
+        // y el que cuadra entra
+        assert!(foto(&c, 2026, 3, "05/03/2026", "real", entero(10_000_01), 500_00, 9_500_01).is_ok());
+    }
+
+    #[test]
+    fn el_esquema_rechaza_mes_fuera_de_rango_origen_invalido_y_fecha_que_no_es_del_mes() {
+        let c = migrada();
+        assert!(foto(&c, 2026, 0, "05/00/2026", "real", entero(1), 0, 1).is_err());
+        assert!(foto(&c, 2026, 13, "05/13/2026", "real", entero(1), 0, 1).is_err());
+        assert!(foto(&c, 2026, 3, "05/03/2026", "inventada", entero(1), 0, 1).is_err());
+        assert!(foto(&c, 2026, 3, "05/04/2026", "real", entero(1), 0, 1).is_err(), "la fecha es de abril, el mes es marzo");
+        assert!(foto(&c, 2026, 3, "2026-03-05", "real", entero(1), 0, 1).is_err(), "formato dd/mm/aaaa");
+        for origen in ["real", "manual", "capital", "reconstruida"] {
+            let mes = match origen {
+                "real" => 1,
+                "manual" => 2,
+                "capital" => 3,
+                _ => 4,
+            };
+            assert!(foto(&c, 2026, mes, &format!("05/{mes:02}/2026"), origen, entero(1), 0, 1).is_ok(), "{origen}");
+        }
+    }
+
+    #[test]
+    fn solo_hay_una_foto_por_mes() {
+        let c = migrada();
+        foto(&c, 2026, 3, "05/03/2026", "real", entero(1), 0, 1).unwrap();
+        assert!(foto(&c, 2026, 3, "06/03/2026", "manual", entero(2), 0, 2).is_err());
+    }
+
+    fn partida(c: &Connection, foto_id: i64, rubro: &str, importe: rusqlite::types::Value) -> rusqlite::Result<usize> {
+        c.execute(
+            "INSERT INTO patrimonio_partidas (foto_id, rubro, referencia, divisa, importe_c, importe_dop_c) VALUES (?, ?, 'x', 'USD', ?, 1)",
+            rusqlite::params![foto_id, rubro, importe],
+        )
+    }
+
+    #[test]
+    fn las_partidas_validan_rubro_e_importe_y_se_borran_con_su_foto() {
+        let c = migrada();
+        foto(&c, 2026, 3, "05/03/2026", "real", entero(1), 0, 1).unwrap();
+        let id = c.last_insert_rowid();
+        assert!(partida(&c, id, "criptomoneda", entero(1)).is_err());
+        assert!(partida(&c, id, "cuenta", rusqlite::types::Value::Real(1.5)).is_err());
+        assert!(partida(&c, 9999, "cuenta", entero(1)).is_err(), "la foto debe existir");
+        for r in ["cuenta", "efectivo", "certificado", "bolsa", "inmobiliario", "vehiculo", "maquinaria", "tarjeta", "prestamo"] {
+            partida(&c, id, r, entero(1)).unwrap();
+        }
+        c.execute("DELETE FROM patrimonio_fotos WHERE id = ?", [id]).unwrap();
+        let restantes: i64 = c.query_row("SELECT COUNT(*) FROM patrimonio_partidas", [], |r| r.get(0)).unwrap();
+        assert_eq!(restantes, 0, "la cascada se llevó las partidas");
+    }
+
+    #[test]
+    fn una_foto_sellada_y_sus_partidas_no_se_tocan_en_la_base() {
+        let c = migrada();
+        foto(&c, 2026, 3, "05/03/2026", "real", entero(5), 0, 5).unwrap();
+        let id = c.last_insert_rowid();
+        partida(&c, id, "cuenta", entero(5)).unwrap();
+        c.execute("UPDATE patrimonio_fotos SET sellada = 1 WHERE id = ?", [id]).unwrap();
+        assert!(c.execute("UPDATE patrimonio_fotos SET activos_c = 9, patrimonio_c = 9", []).is_err());
+        assert!(c.execute("DELETE FROM patrimonio_fotos", []).is_err());
+        assert!(partida(&c, id, "cuenta", entero(1)).is_err());
+        assert!(c.execute("UPDATE patrimonio_partidas SET importe_c = 77", []).is_err());
+        assert!(c.execute("DELETE FROM patrimonio_partidas", []).is_err());
+    }
+
+    /// Una copia textual de todas las tablas anteriores a la 18 (filas completas, en orden de inserción).
+    fn volcado(c: &Connection) -> Vec<(String, String)> {
+        let tablas: Vec<String> = c
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'patrimonio_%' ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect();
+        tablas
+            .into_iter()
+            .map(|t| {
+                let columnas: Vec<String> = c
+                    .prepare(&format!("SELECT name FROM pragma_table_info('{t}') ORDER BY cid"))
+                    .unwrap()
+                    .query_map([], |r| r.get(0))
+                    .unwrap()
+                    .map(|x| x.unwrap())
+                    .collect();
+                let fila = columnas.iter().map(|k| format!("quote(\"{k}\")")).collect::<Vec<_>>().join(" || '~' || ");
+                let cuerpo: String = c
+                    .query_row(&format!("SELECT COALESCE(group_concat({fila}, '|'), '') FROM \"{t}\""), [], |r| r.get(0))
+                    .unwrap();
+                (t, cuerpo)
+            })
+            .collect()
+    }
+
+    /// Una base en la versión 17 con datos del esquema real (inventados), migrada a la 18: todo lo anterior se conserva.
+    #[test]
+    fn integracion_migrar_de_17_a_18_conserva_todo_lo_sembrado() {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        for m in catalogo() {
+            if m.version > 17 {
+                break;
+            }
+            let tx = c.transaction().unwrap();
+            (m.aplicar)(&tx).unwrap();
+            tx.execute_batch(&format!("PRAGMA user_version = {};", m.version)).unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(version_de(&c).unwrap(), 17);
+        c.execute_batch(
+            "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES ('Ahorro inventado', 'DOP', 12345.67), ('Dólares inventados', 'USD', 987.65);
+             INSERT INTO tarjetas (entidad, nombre_tarjeta, fecha_corte, fecha_limite_pago, balance_pesos, balance_dolares) VALUES ('Banco X', 'Visa inventada', 10, 25, 4321.09, 12.34);
+             INSERT INTO prestamos (tipo_prestamo, monto_prestamo, institucion_financiera, tasa_actual, monto_cuota, dia_pago, saldo_actual) VALUES ('consumo', 80000.55, 'Banco Y', 12.5, 3500.25, 15, 70000.55);",
+        )
+        .unwrap();
+        let antes = volcado(&c);
+        assert!(antes.iter().any(|(t, cuerpo)| t == "cuentas_ahorro" && cuerpo.contains("12345.67")), "la siembra llegó");
+
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!((informe.version_inicial, informe.version_final), (17, 18));
+        assert_eq!(informe.aplicadas, vec!["historial del patrimonio"]);
+        assert_eq!(volcado(&c), antes, "ninguna fila de las tablas anteriores cambió");
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM patrimonio_fotos", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0, "las tablas nuevas nacen vacías: no se reconstruye el pasado");
     }
 }

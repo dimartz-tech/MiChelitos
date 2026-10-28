@@ -5,6 +5,7 @@ pub mod avances;
 pub mod bonificaciones;
 pub mod catalogos;
 pub mod cierre_de_tarjetas;
+pub mod fotos_patrimonio;
 pub mod gastos;
 pub mod cuentas;
 pub mod cobrar_suscripcion;
