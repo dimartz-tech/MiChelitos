@@ -10,7 +10,7 @@
 
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Modales, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { accion, alCambiar, alEnviar, alEscribir, escaparHtml, manejador } from '../nucleo/html.js';
+import { ATRIBUTOS_DE_FECHA, accion, alCambiar, alEnviar, alEscribir, escaparHtml, manejador } from '../nucleo/html.js';
 
 type ApiGastos = ApiDe<
     | 'obtenerGastos'
@@ -317,7 +317,7 @@ export class VistaGastos implements Vista {
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gas_fec">Fecha *</label>
-                                <input type="text" id="gas_fec" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" required>
+                                <input type="text" id="gas_fec" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} required>
                             </div>
                             <div class="form-group">
                                 <label for="gas_div">Divisa</label>

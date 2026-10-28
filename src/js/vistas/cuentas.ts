@@ -7,7 +7,7 @@
 
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { alCambiar, alEnviar, escaparHtml } from '../nucleo/html.js';
+import { ATRIBUTOS_DE_FECHA, alCambiar, alEnviar, escaparHtml } from '../nucleo/html.js';
 
 type ApiCuentas = ApiDe<'obtenerCuentas' | 'obtenerTransaccionesCuentas' | 'transferirEntreCuentas'>;
 
@@ -73,7 +73,7 @@ export class VistaCuentas implements Vista {
                         <form id="form-transfer-cuentas" ${alEnviar('handleTransferirCuentas')}>
                             <div class="form-group">
                                 <label for="tra_fec">Fecha *</label>
-                                <input type="text" id="tra_fec" class="form-control" value="${escaparHtml(hoyStr)}" required>
+                                <input type="text" id="tra_fec" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} required>
                             </div>
                             <div class="form-group">
                                 <label for="tra_ori">Cuenta Origen *</label>
