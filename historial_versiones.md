@@ -4,7 +4,36 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.117.0 (Versión Actual) - 2026-10-28
+## 🚀 Versión 1.118.0 (Versión Actual) - 2026-10-28
+**Fechas con separador automático.** Al teclear una fecha en un campo de texto, la `/` entre día, mes y año se pone sola: «28102026» queda «28/10/2026» sin pulsar `/`. Solo interfaz; el formato interno (dd/mm/aaaa) y las validaciones de Rust no cambian.
+
+### ✨ Cómo se comporta
+* «2» → «2»; «28» → «28/»; «281» → «28/1»; «2810» → «28/10/»; «28102026» → «28/10/2026». Si se teclea la `/` a mano no se duplica («28/» + `/` sigue siendo «28/»).
+* `-` y `.` valen como `/` solo cuando ocupan el lugar del separador (tras el día o el mes); en otro sitio, igual que letras, espacios y símbolos, se descartan. Máximo 10 caracteres.
+* **Pegado**: «28102026», «28/10/2026», «28-10-2026», «28.10.2026» y «28 10 2026» dan «28/10/2026».
+* **Año de dos dígitos**: «28/10/26» NO se expande; queda tal cual y el backend lo rechaza con su mensaje de siempre (no existía una regla de expansión). Un día o mes de un dígito cerrado con `/` («5/3/2026») tampoco se rellena con cero.
+* **Borrado**: con Retroceso/Supr no se vuelve a poner la `/` final, así que el Retroceso no se atasca en la barra automática («28/» → «28» → se puede seguir). Las barras que ya hay se respetan y se quitan con el siguiente Retroceso.
+* **Edición en medio**: el cursor se queda tras el mismo carácter que tenía a su izquierda; al borrar un dígito en medio no se desplaza el resto de la fecha; al insertar uno, los dígitos se reparten de nuevo y el cursor salta la barra automática.
+* Solo corrige cuando hace falta (si el texto ya está bien no se reasigna el valor: no se interrumpe a un lector de pantalla ni se mueve el cursor); el pegado y el autocompletado del navegador pasan por el mismo camino. Campos de solo lectura, deshabilitados o en composición (IME) no se tocan.
+
+### 🏗️ Diseño
+* `nucleo/fechas.ts`: `enmascararFecha(texto, cursor, borrando)` → `{ texto, cursor }`, función pura que recibe el texto **después** de la edición del navegador.
+* `ui/mascaras.ts`: **un solo oyente** de `input` en `document`, conectado desde `app.ts`; actúa sobre campos con `data-mascara="fecha"` y restaura el cursor con `setSelectionRange`. Sin atributos `on*`.
+* `ATRIBUTOS_DE_FECHA` (`nucleo/html.ts`) es la única definición de `data-mascara="fecha" inputmode="numeric" maxlength="10" autocomplete="off"`; las plantillas lo interpolan. Se mantienen `placeholder`, `label`, `required` y el valor inicial.
+* 14 campos: abono (`pag_fecha_*`), avance (`avc_fecha_*`), bonificación (`bon_fecha`), gasto (`gas_fec`), factura e informal (`fec_em`, `fecha_inf`), cobros (`cob_fec_*`, `cob_fec_inf_*`), edición de factura (`edit_fec_em_*`), certificado y bolsa (`cer_ven`, `bol_ven`), efectivo (`efe_inf_fec`, `efe_ret_fec`) y traspaso (`tra_fec`). Los cuatro últimos que no tenían `placeholder` reciben el mismo «dd/mm/aaaa». Los `<input type="date">` no se tocan.
+
+### 🧪 Verificación
+* Unitarias de la función pura (tecleo carácter a carácter, Retroceso/Supr, edición en medio, pegado, basura, exceso de longitud, cursor y 3000 casos pseudoaleatorios de forma, longitud, cursor e idempotencia), simulando lo que hace el navegador alrededor.
+* Oyente con un campo que se comporta como el del navegador, incluido uno sacado de la plantilla real de Gastos con valor inicial; y comprobación de que `app.ts` lo engancha.
+* Contrato: recorre todas las plantillas y el `index.html` y exige la máscara en todo campo con `placeholder="dd/mm/aaaa"` o con id de fecha; un campo de fecha nuevo sin máscara hace fallar la prueba.
+* Mutaciones (barra no insertada tras el mes, barra duplicada, cursor perdido, letras aceptadas, barra automática al borrar, sin saltar la barra, más de 10 caracteres, campo olvidado en una plantilla, máscara sin enganchar, solo lectura ignorado): cada una hizo fallar al menos una prueba y se restauró.
+
+### ⚠️ Límite
+* Probada en Node con un DOM de juguete; el comportamiento real del cursor en WKWebView (tecleo rápido, pegado, edición en medio) se confirma a mano.
+
+---
+
+## Versión 1.117.0 - 2026-10-28
 **Una fórmula única para el patrimonio, con dos cifras a la vista.** Hallazgo previo: no existía «el» patrimonio. `Totales::patrimonio()` sumaba solo el capital; el «Patrimonio Neto» de Resumen se componía en la interfaz, en `f64` (capital − tarjetas, con los dólares a la constante 60 − préstamos); el «Patrimonio Total» del Dashboard era solo capital; y las cuentas de ahorro y el efectivo no entraban en ninguna. Decisión del titular (D1): el patrimonio incluye cuentas y efectivo, y durante **esta versión** se muestran **ambas** cifras para compararlas. **No hay migración.**
 
 ### ✨ Qué cambia para el titular
