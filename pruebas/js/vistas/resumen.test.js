@@ -39,6 +39,8 @@ function datos(extra = {}) {
     };
 }
 
+const RESUMEN_VACIO = { anio: 2027, mes: 3, parcial: true, hasta_dia: 5, tasa_usd: '50.00', meses_promedio: 3, id_cargos_derivados: -1, filas: [], totales: {}, meses_disponibles: [] };
+
 async function dibujar({ d = datos(), tasa = 50 } = {}) {
     const pantalla = { contenido: { innerHTML: '' } };
     const llamadas = [];
@@ -53,7 +55,11 @@ async function dibujar({ d = datos(), tasa = 50 } = {}) {
             obtenerSuscripciones: responde('obtenerSuscripciones', d.suscripciones),
             obtenerPrestamos: responde('obtenerPrestamos', d.prestamos),
             obtenerPatrimonio: responde('obtenerPatrimonio', d.patrimonio),
+            // El bloque «Gasto por categoría» tiene sus propias pruebas (resumen_gastos.test.js); aquí solo no debe estorbar.
+            obtenerCategorias: responde('obtenerCategorias', []),
+            obtenerResumenGastos: responde('obtenerResumenGastos', RESUMEN_VACIO),
         },
+        dom: { buscar: () => null, elemento: () => { throw new Error('no se esperaba'); } },
         formato: { importe: v => `#${Number(v).toFixed(2)}#` },
         pantalla,
         ahora: () => new Date(2027, 2, 5),
@@ -79,12 +85,12 @@ function alMesAnual(html) {
     return Number(m[1]);
 }
 
-test('consulta las ocho fuentes y dibuja el título', async () => {
+test('consulta las ocho fuentes (más el resumen de gastos por categoría) y dibuja el título', async () => {
     const { html, llamadas } = await dibujar();
     assert.match(html, /Resumen Ejecutivo/);
     assert.deepEqual([...llamadas].sort(), [
         'obtenerCapital', 'obtenerGastos', 'obtenerIngresos', 'obtenerIngresosInformales', 'obtenerPatrimonio',
-        'obtenerPrestamos', 'obtenerSuscripciones', 'obtenerTarjetas',
+        'obtenerPrestamos', 'obtenerResumenGastos', 'obtenerSuscripciones', 'obtenerTarjetas',
     ]);
 });
 
@@ -223,11 +229,11 @@ test('sin capital que devolver (null) la vista no falla', async () => {
     assert.equal(importeDe(html, 'Patrimonio Neto'), -650);
 });
 
-test('no tiene manejadores en línea: el puente no cuelga nada de appUI', async () => {
+test('no tiene manejadores en línea: el puente solo cuelga los controles del bloque «Gasto por categoría»', async () => {
     const { html } = await dibujar();
-    assert.doesNotMatch(html, /appUI\./);
-    const vista = new VistaResumen({ api: {}, formato: {}, pantalla: {}, ahora: () => new Date(), referencias: { tasaUsdADop: 1 } });
-    assert.deepEqual(puenteResumen(vista), {});
+    assert.doesNotMatch(html, /appUI\.|\son[a-z]+=/);
+    const vista = new VistaResumen({ api: {}, formato: {}, pantalla: {}, dom: {}, ahora: () => new Date(), referencias: { tasaUsdADop: 1 } });
+    assert.deepEqual(Object.keys(puenteResumen(vista)).sort(), ['resumenGastoConmutar', 'resumenGastoMes', 'resumenGastoMover', 'resumenGastoPromedio']);
 });
 
 const PATRIMONIO = {
