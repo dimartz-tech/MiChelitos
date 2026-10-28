@@ -9,7 +9,7 @@
 import type { Ingreso } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { accion, alCambiar, alEnviar, escaparHtml, manejador } from '../nucleo/html.js';
+import { ATRIBUTOS_DE_FECHA, accion, alCambiar, alEnviar, escaparHtml, manejador } from '../nucleo/html.js';
 
 /** Las dos pestañas del formulario de ingresos: sus paneles y los botones que los alternan (acción `activarPestana`). */
 const PANELES_COBRO = ['tauri-form-formal', 'tauri-form-informal'];
@@ -101,7 +101,7 @@ export class VistaIngresos implements Vista {
                             </div>
                             <div class="form-group">
                                 <label for="fec_em">Fecha de Emisión *</label>
-                                <input type="text" id="fec_em" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" required>
+                                <input type="text" id="fec_em" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} required>
                             </div>
                             <div class="form-group">
                                 <label for="cli_select">Cliente *</label>
@@ -134,7 +134,7 @@ export class VistaIngresos implements Vista {
                         <form id="form-add-informal" ${alEnviar('handleAgregarIngresoInformal')}>
                             <div class="form-group">
                                 <label for="fecha_inf">Fecha *</label>
-                                <input type="text" id="fecha_inf" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" required>
+                                <input type="text" id="fecha_inf" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} required>
                             </div>
                             <div class="form-group">
                                 <label for="monto_inf">Monto DOP *</label>
@@ -337,7 +337,7 @@ export class VistaIngresos implements Vista {
                         </div>
                         <div class="form-group">
                             <label>Fecha de Emisión *</label>
-                            <input type="text" id="edit_fec_em_${i.id}" class="form-control" value="${escaparHtml(i.fecha_emision)}" required>
+                            <input type="text" id="edit_fec_em_${i.id}" class="form-control" value="${escaparHtml(i.fecha_emision)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} required>
                         </div>
                         <div class="form-group">
                             <label>Cliente *</label>
@@ -485,7 +485,7 @@ export class VistaIngresos implements Vista {
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Fecha *</label>
-                                <input type="text" id="cob_fec_${id}" class="form-control" placeholder="dd/mm/aaaa" required>
+                                <input type="text" id="cob_fec_${id}" class="form-control" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} required>
                             </div>
                             <div class="form-group">
                                 <label>Monto Recibido *</label>
@@ -544,7 +544,7 @@ export class VistaIngresos implements Vista {
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Fecha *</label>
-                                <input type="text" id="cob_fec_inf_${id}" class="form-control" placeholder="dd/mm/aaaa" required>
+                                <input type="text" id="cob_fec_inf_${id}" class="form-control" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} required>
                             </div>
                             <div class="form-group">
                                 <label>Monto Recibido *</label>

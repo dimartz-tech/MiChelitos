@@ -35,11 +35,11 @@ function montar({ cargos = [], fallos = [], falla = false, tema = null, colapsad
     const almacen = new Map();
     if (tema) almacen.set('desktop-theme', tema);
     if (colapsado !== null) almacen.set('sidebar-collapsed', colapsado);
-    const programados = [], mostrados = [], avisos = [], escuchas = {}, llamadasDeVista = [];
+    const programados = [], mostrados = [], avisos = [], escuchas = {}, todas = {}, llamadasDeVista = [];
     const previos = { document: globalThis.document, window: globalThis.window, localStorage: globalThis.localStorage, setTimeout: globalThis.setTimeout };
     globalThis.document = {
         readyState: listo ? 'complete' : 'loading', body: cuerpo,
-        addEventListener: (tipo, fn) => { escuchas[tipo] = fn; },
+        addEventListener: (tipo, fn) => { escuchas[tipo] = fn; (todas[tipo] ??= []).push(fn); },
         querySelectorAll: () => navs,
         querySelector: sel => (sel === '.sidebar-nav .nav-item.active' ? navs.find(n => n.clases.has('active')) ?? null : sel === '.app-sidebar' ? sidebar : null),
     };
@@ -59,7 +59,7 @@ function montar({ cargos = [], fallos = [], falla = false, tema = null, colapsad
         cancelBubble: false, preventDefault() {},
     });
     return {
-        navs, botones, sidebar, cuerpo, almacen, programados, mostrados, avisos, escuchas, navigate, llamadasDeVista,
+        navs, botones, sidebar, cuerpo, almacen, programados, mostrados, avisos, escuchas, todas, navigate, llamadasDeVista,
         restaurar: () => { Object.assign(globalThis, previos); },
     };
 }
@@ -164,4 +164,12 @@ test('la navegación superior ignora la preferencia obsoleta de menú colapsado'
     assert.equal(t.sidebar.clases.has('collapsed'), false);
     assert.equal(t.botones['sidebar-collapse-btn'], undefined);
     assert.equal(t.almacen.get('sidebar-collapsed'), 'true');
+}));
+
+test('al arrancar engancha además la máscara de fechas: un campo con data-mascara="fecha" recibe la «/» sola', () => conApp({}, t => {
+    assert.equal(t.todas.input.length, 2, 'la delegación de eventos y la máscara de fechas escuchan «input»');
+    const atributos = { 'data-mascara': 'fecha' };
+    const campo = { value: '2810', selectionStart: 4, getAttribute: n => atributos[n] ?? null, parentElement: null, setSelectionRange() {} };
+    for (const oyente of t.todas.input) oyente({ target: campo, inputType: 'insertText', cancelBubble: false });
+    assert.equal(campo.value, '28/10/');
 }));
