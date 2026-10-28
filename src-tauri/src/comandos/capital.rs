@@ -46,13 +46,16 @@ fn marcar_alerta_de_vencimiento(entrada: &mut Value, hoy: NaiveDate) {
     }
 }
 
+/// Guarda el capital. Devuelve un **aviso** si el capital se guardó pero la foto del patrimonio que lo acompaña no se pudo
+/// tomar: el guardado nunca falla por eso.
 #[tauri::command]
-pub fn guardar_capital(data: Value) -> Result<(), String> {
+pub fn guardar_capital(data: Value) -> Result<Option<String>, String> {
     // Se exige lo que entra o cambia contra lo que ya estaba guardado; ver
     // `aplicacion::guardar_capital`.
     // Si el archivo existe pero no se puede leer, **no se guarda**: sustituirlo por lo que llegue destruiría lo que hubiera.
     let guardado = db_nosql::leer_coleccion("capital")?;
     let limpio = aplicacion::guardar_capital::preparar_para_guardar(data, &guardado)
         .map_err(|e| e.to_string())?;
-    db_nosql::guardar_coleccion("capital", &limpio)
+    db_nosql::guardar_coleccion("capital", &limpio)?;
+    Ok(super::fotos_patrimonio::foto_tras_guardar_capital(&limpio))
 }

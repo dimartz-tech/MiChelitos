@@ -13,7 +13,7 @@ export interface EntornoDeInicio {
     enrutador: Enrutador;
     avisos: Avisos;
     dom: Dom;
-    api: ApiDe<'procesarSuscripciones'>;
+    api: ApiDe<'procesarSuscripciones' | 'asegurarFotoDelMes'>;
     /** El puente de las vistas (`window.appUI`): las acciones a las que apuntan los `data-accion`. */
     acciones: Acciones;
 }
@@ -48,6 +48,16 @@ export function iniciarAplicacion({ enrutador, avisos, dom, api, acciones }: Ent
     const arrancar = (): void => {
         // 1. Cargar la pestaña predeterminada (Dashboard)
         navigate('dashboard');
+
+        // 2a. La foto mensual del patrimonio: solo se toma si todavía no existe la del mes. Un fallo se avisa, no bloquea.
+        api.asegurarFotoDelMes().then(({ creada, foto }) => {
+            if (!creada) return;
+            if (foto && foto.calidad === 'con_aviso') {
+                avisos.mostrar('Se tomó la foto del patrimonio de este mes, pero con aviso: no se pudo leer todo el capital y se contó como cero.', 'error');
+            } else {
+                avisos.mostrar('Se tomó la foto del patrimonio de este mes.');
+            }
+        }).catch(err => avisos.mostrar(`No se pudo tomar la foto del patrimonio de este mes: ${String(err)}`, 'error'));
 
         // 2. Procesar cargos de suscripciones pendientes al iniciar
         setTimeout(() => {

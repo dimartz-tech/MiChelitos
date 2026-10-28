@@ -19,6 +19,9 @@ export type TrasladoElegido = { suscripcion_id: number; destino_id: number };
 export type CasoCorreccion = { numero_caso: string; fecha: string; tipo: string; referencia_id: number; descripcion: string; importe: number | null; divisa: string | null; motivo: string };
 export type CuentaAhorro = { id: number; nombre: string; divisa: string; balance_actual: number; entidad: string | null; comision_pago_impuestos: number | null };
 export type TransaccionCuenta = { id: number; fecha: string; cuenta_origen_id: number; cuenta_origen_nombre: string; cuenta_destino_id: number; cuenta_destino_nombre: string; monto_origen: number; monto_destino: number; tasa_cambio: number; cargo: number; descripcion: string | null };
+export type PartidaFoto = { rubro: string; referencia: string; divisa: string; importe: string; importe_dop: string };
+export type FotoPatrimonio = { id: number; anio: number; mes: number; fecha: string; origen: string; sellada: boolean; tasa_usd_dop: string; activos: string; pasivos: string; patrimonio: string; liquido: string; calidad: string; partidas: PartidaFoto[] };
+export type FotoAsegurada = { creada: boolean; foto: FotoPatrimonio | null };
 export type Gasto = { id: number; fecha: string; monto: number; divisa: string; descripcion: string; categoria_id: number; categoria_nombre: string; metodo_pago: string; costo_adicional: number; tarjeta_id: number | null; cuenta_ahorro_id: number | null; estado_conversion: string | null; monto_liquidado: number | null; tasa_conversion: number | null };
 export type IngresoInformal = { id: number; fecha: string; descripcion: string; monto: number; estatus: string; institucion_deposito: string | null; fecha_pago: string | null; monto_recibido: number | null };
 export type Ingreso = { id: number; numero_factura: string; cliente_id: number; cliente_nombre: string; cliente_rnc: string; fecha_emision: string; estatus: string; monto_total: number; porcentaje_retencion: number; monto_retenido: number; institucion_deposito: string | null; fecha_pago: string | null; monto_recibido: number | null };
@@ -51,7 +54,7 @@ export type Comandos = {
     crear_bonificacion: { args: { fecha: string; tarjetaId: number; monto: string; divisa: string; concepto: string; gastoId?: number | null }; ret: number };
     eliminar_bonificacion: { args: { id: number }; ret: null };
     obtener_capital: { args: {  }; ret: any };
-    guardar_capital: { args: { data: any }; ret: null };
+    guardar_capital: { args: { data: any }; ret: string | null };
     obtener_categorias: { args: {  }; ret: Categoria[] };
     crear_categoria: { args: { nombre: string }; ret: Categoria };
     eliminar_categoria: { args: { id: number }; ret: null };
@@ -71,6 +74,9 @@ export type Comandos = {
     transferir_entre_cuentas: { args: { fecha: string; origenId: number; destinoId: number; montoOrigen: string; montoDestino: string; cargo: string; descripcion: string }; ret: null };
     obtener_transacciones_cuentas: { args: {  }; ret: TransaccionCuenta[] };
     eliminar_transaccion_cuenta: { args: { id: number; motivo: string }; ret: string };
+    tomar_foto_patrimonio: { args: { origen: string; tasaUsdDop?: string | null }; ret: FotoPatrimonio };
+    asegurar_foto_del_mes: { args: { tasaUsdDop?: string | null }; ret: FotoAsegurada };
+    obtener_fotos_patrimonio: { args: {  }; ret: FotoPatrimonio[] };
     obtener_gastos: { args: {  }; ret: Gasto[] };
     crear_gasto: { args: { input: GastoInput }; ret: number };
     liquidar_consumo_pendiente: { args: { id: number; montoLiquidado: string }; ret: number };

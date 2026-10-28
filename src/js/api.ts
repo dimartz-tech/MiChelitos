@@ -418,6 +418,21 @@ const AppAPI = {
         return await invoke('guardar_capital', { data: capitalData });
     },
 
+    // --- HISTORIAL DEL PATRIMONIO (fotos mensuales) ---
+    async obtenerFotosPatrimonio() {
+        return await invoke('obtener_fotos_patrimonio');
+    },
+
+    /** `origen`: `manual` o `capital`. La tasa USD→DOP es opcional (texto); sin ella, la sugerida. */
+    async tomarFotoPatrimonio(origen: 'manual' | 'capital', tasaUsdDop?: string) {
+        return await invoke('tomar_foto_patrimonio', { origen, tasaUsdDop: tasaUsdDop ?? null });
+    },
+
+    /** Al arrancar: toma la foto del mes solo si falta. */
+    async asegurarFotoDelMes() {
+        return await invoke('asegurar_foto_del_mes', { tasaUsdDop: null });
+    },
+
     // --- FINANCIAMIENTOS / DEUDAS ---
     async obtenerPrestamos() {
         return await invoke('obtener_prestamos');

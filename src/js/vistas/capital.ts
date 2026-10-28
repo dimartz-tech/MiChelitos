@@ -280,12 +280,18 @@ export class VistaCapital implements Vista {
             const capital = await api.obtenerCapital();
             if (!capital.certificados) capital.certificados = [];
             capital.certificados.push({ banco: ban, monto: mon, tasa: tas, vencimiento: ven, tipo_pago: pag });
-            await api.guardarCapital(capital);
+            await this.guardar(capital);
             avisos.mostrar("Certificado guardado.");
             await enrutador.mostrar('capital');
         } catch (err) {
             avisos.mostrar(String(err), 'error');
         }
+    }
+
+    /** Guarda el capital. Si se guardó pero la foto del patrimonio que lo acompaña no se pudo tomar, lo avisa (no es un fallo del guardado). */
+    private async guardar(capital: Awaited<ReturnType<ApiCapital['obtenerCapital']>>): Promise<void> {
+        const aviso = await this.dep.api.guardarCapital(capital);
+        if (aviso) this.dep.avisos.mostrar(aviso, 'error');
     }
 
     async handleEliminarCertificado(idx: number): Promise<void> {
@@ -294,7 +300,7 @@ export class VistaCapital implements Vista {
             try {
                 const capital = await api.obtenerCapital();
                 capital.certificados.splice(idx, 1);
-                await api.guardarCapital(capital);
+                await this.guardar(capital);
                 avisos.mostrar("Certificado retirado.");
                 await enrutador.mostrar('capital');
             } catch (err) {
@@ -317,7 +323,7 @@ export class VistaCapital implements Vista {
             const capital = await api.obtenerCapital();
             if (!capital.bolsa) capital.bolsa = [];
             capital.bolsa.push({ emisor: emi, monto: mon, tasa: tas, vencimiento: ven, tipo_pago: pag });
-            await api.guardarCapital(capital);
+            await this.guardar(capital);
             avisos.mostrar("Inversión de bolsa guardada.");
             await enrutador.mostrar('capital');
         } catch (err) {
@@ -331,7 +337,7 @@ export class VistaCapital implements Vista {
             try {
                 const capital = await api.obtenerCapital();
                 capital.bolsa.splice(idx, 1);
-                await api.guardarCapital(capital);
+                await this.guardar(capital);
                 avisos.mostrar("Inversión liquidada.");
                 await enrutador.mostrar('capital');
             } catch (err) {
@@ -360,7 +366,7 @@ export class VistaCapital implements Vista {
                 nombre: nom,
                 valor_estimado: val
             });
-            await api.guardarCapital(capital);
+            await this.guardar(capital);
             avisos.mostrar("Propiedad registrada.");
             await enrutador.mostrar('capital');
         } catch (err) {
@@ -375,7 +381,7 @@ export class VistaCapital implements Vista {
                 const capital = await api.obtenerCapital();
                 if (capital.propiedades && capital.propiedades[tipo]) {
                     capital.propiedades[tipo] = capital.propiedades[tipo].filter((p: Bien) => p.id !== id);
-                    await api.guardarCapital(capital);
+                    await this.guardar(capital);
                     avisos.mostrar("Bien eliminado.");
                     await enrutador.mostrar('capital');
                 }

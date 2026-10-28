@@ -15,7 +15,8 @@
 use crate::dominio::bonificacion::Bonificacion;
 use crate::dominio::conversion::EstadoConversion;
 use crate::dominio::tarjeta::PoliticaLiquidacion;
-use crate::dominio::dinero::{Dinero, Divisa};
+use crate::dominio::dinero::{Dinero, Divisa, TasaCambio};
+use crate::dominio::foto_patrimonio::Foto;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +33,8 @@ pub enum ErrorAlmacen {
     CuentaArchivada { nombre: String },
     /// Se intentó mover deuda de una tarjeta desactivada. Una tarjeta cerrada no recibe operaciones nuevas.
     TarjetaInactiva { nombre: String },
+    /// La foto del patrimonio de ese mes está sellada: es inmutable.
+    FotoSellada { anio: i32, mes: u32 },
     Fallo(String),
 }
 
@@ -55,6 +58,11 @@ impl fmt::Display for ErrorAlmacen {
                 f,
                 "La tarjeta «{}» está desactivada: reactívala antes de usarla en una operación.",
                 nombre
+            ),
+            ErrorAlmacen::FotoSellada { anio, mes } => write!(
+                f,
+                "La foto del patrimonio de {:02}/{} está sellada: un mes cerrado no se modifica.",
+                mes, anio
             ),
             ErrorAlmacen::Fallo(detalle) => write!(f, "Error de almacenamiento: {}", detalle),
         }
@@ -1104,4 +1112,83 @@ pub trait LecturaDePatrimonio {
     fn cuentas_de_patrimonio(&self) -> Result<Vec<crate::dominio::patrimonio::CuentaDePatrimonio>, ErrorAlmacen>;
     fn tarjetas_de_patrimonio(&self) -> Result<Vec<crate::dominio::patrimonio::TarjetaDePatrimonio>, ErrorAlmacen>;
     fn prestamos_de_patrimonio(&self) -> Result<Vec<crate::dominio::patrimonio::PrestamoDePatrimonio>, ErrorAlmacen>;
+}
+
+// --- Historial del patrimonio: fotos mensuales ---
+
+/// Una foto guardada, sin sus partidas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FotoLeida {
+    pub id: i64,
+    pub anio: i32,
+    pub mes: u32,
+    pub fecha: String,
+    pub origen: String,
+    pub sellada: bool,
+    pub tasa_usd_dop: TasaCambio,
+    pub activos: Dinero,
+    pub pasivos: Dinero,
+    pub patrimonio: Dinero,
+    pub liquido: Dinero,
+    pub calidad: String,
+}
+
+/// Una partida guardada.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartidaLeida {
+    pub rubro: String,
+    pub referencia: String,
+    pub divisa: Divisa,
+    pub importe: Dinero,
+    pub importe_dop: Dinero,
+}
+
+/// Persistencia de las fotos del patrimonio. Una foto por mes; una foto **sellada** es inmutable.
+pub trait RepositorioDeFotos {
+    /// Guarda la foto de su mes y **reemplaza sus partidas**: tomarla dos veces en el mes deja una sola. Es
+    /// `ErrorAlmacen::FotoSellada` si la foto de ese mes ya está sellada (no se toca nada).
+    fn guardar_foto(&mut self, foto: &Foto) -> Result<i64, ErrorAlmacen>;
+    fn existe_foto(&self, anio: i32, mes: u32) -> Result<bool, ErrorAlmacen>;
+    /// Sella las fotos de meses **anteriores** a `(anio, mes)` que aún no lo estén. Devuelve cuántas selló.
+    fn sellar_anteriores(&mut self, anio: i32, mes: u32) -> Result<usize, ErrorAlmacen>;
+    /// Todas, de la más antigua a la más reciente (por año y mes).
+    fn fotos(&self) -> Result<Vec<FotoLeida>, ErrorAlmacen>;
+    fn partidas_de(&self, foto_id: i64) -> Result<Vec<PartidaLeida>, ErrorAlmacen>;
+}
+
+/// Una cuenta tal como la necesita la foto.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CuentaParaFoto {
+    pub nombre: String,
+    pub saldo: Dinero,
+    pub es_caja_efectivo: bool,
+    pub archivada: bool,
+}
+
+/// Una tarjeta tal como la necesita la foto: lo que se **debe** en cada divisa.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TarjetaParaFoto {
+    pub nombre: String,
+    pub activa: bool,
+    pub deuda_pesos: Dinero,
+    pub deuda_dolares: Dinero,
+}
+
+/// Un financiamiento tal como lo necesita la foto: lo que queda por pagar.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrestamoParaFoto {
+    pub nombre: String,
+    pub saldo: Dinero,
+}
+
+/// Lo que la base aporta a la foto (el capital viene aparte, de su documento).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SituacionParaFoto {
+    pub cuentas: Vec<CuentaParaFoto>,
+    pub tarjetas: Vec<TarjetaParaFoto>,
+    pub prestamos: Vec<PrestamoParaFoto>,
+}
+
+pub trait ConsultaDePatrimonio {
+    fn situacion_para_foto(&self) -> Result<SituacionParaFoto, ErrorAlmacen>;
 }

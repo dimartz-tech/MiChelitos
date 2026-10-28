@@ -1,6 +1,7 @@
 pub mod abonos;
 pub mod catalogos;
 pub mod cuentas;
+pub mod fotos;
 pub mod gastos;
 pub mod ingresos;
 pub mod patrimonio;
