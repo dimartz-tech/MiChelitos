@@ -18,8 +18,8 @@ import { cargarInterfaz } from '../ayudas/cargar_interfaz.js';
 const rutasDelMenu = () => accionesDe(leerHtml()).filter(a => a.nombre === 'navegar').map(a => a.args[0]);
 const rutasRegistradas = () => [...cargarInterfaz().vistas.keys()];
 
-test('el menú tiene las once pestañas', () => {
-    assert.equal(new Set(rutasDelMenu()).size, 11);
+test('el menú tiene las doce pestañas', () => {
+    assert.equal(new Set(rutasDelMenu()).size, 12);
 });
 
 test('cada pestaña del menú tiene su vista registrada (si no, caería en el Dashboard)', () => {
@@ -43,7 +43,7 @@ test('cada vista registrada dibuja su propia pestaña con el enrutador real, no 
         vista.render = async () => { dibujos.set(ruta, ruta); };
         await interfaz.enrutador.mostrar(ruta);
     }
-    assert.equal(dibujos.size, 11);
+    assert.equal(dibujos.size, 12);
 });
 
 test('una ruta que nadie reconoce cae en el Dashboard, como siempre (con el enrutador real)', async () => {

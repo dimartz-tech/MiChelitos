@@ -4,7 +4,29 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.120.0 (Versión Actual) - 2026-10-28
+## 🚀 Versión 1.122.0 (Versión Actual) - 2026-10-28
+**Historial del patrimonio, parte 3: pestaña «Evolución».** Solo interfaz sobre los comandos que ya existían (`obtener_fotos_patrimonio`, `tomar_foto_patrimonio`). **Sin Rust nuevo, sin migración (el esquema sigue en 18), sin reconstrucción del pasado y sin recomendaciones.**
+
+### ✨ Qué hay
+* Pestaña nueva **Evolución** (menú, `vistas/evolucion.ts`, registrada en `vistas/registro.ts`; ahora son doce).
+* **Gráfica SVG propia** (sin librerías) generada por una función pura, `nucleo/grafica.ts`: serie seleccionable «Total / Líquido», eje con etiquetas legibles, círculo para la foto real y rombo hueco con tramo punteado para la estimada o reconstruida (hoy solo habrá reales), colores por variables CSS de la aplicación (`--accent-primary`, `--color-success`, `--color-danger`, `--border-color`, `--text-secondary`; sirve en claro y oscuro), `role="img"` con título y descripción generados («Patrimonio total de A en ene 2027 a B en mar 2027», con mínimo y máximo).
+* **Tabla alternativa accesible** (`caption`, `th scope`): mes, fecha, origen, activos, pasivos, patrimonio, variación frente a la foto anterior (signo, flecha **y** texto) y calidad (`con_aviso` visible con símbolo y texto).
+* **Resumen** de la variación del último mes en monto y porcentaje; **desglose por partidas** de la foto elegida con selector de mes (rubro, referencia, divisa, importe, importe en DOP).
+* **Tomar foto ahora** (origen `manual`) con campo opcional de tasa USD→DOP (texto; acepta la coma decimal; sugerida 60.00). Si el mes está sellado, el comando lo rechaza y la interfaz lo explica.
+* Estados: sin fotos, una sola foto («se necesita al menos otra foto para mostrar variación», sin gráfica vacía) y error del comando.
+
+### 🔢 Dinero
+* Los importes llegan como **texto** y no pasan por `Number`: `nucleo/evolucion.ts` los convierte a **centavos enteros (`bigint`)**; variaciones, porcentajes (centésimas de punto, mitad lejos de cero; base cero sin porcentaje; base negativa sobre su valor absoluto) y la escala del eje se calculan en enteros, y las etiquetas se formatean sobre ellos. Solo la coordenada final (una décima de píxel) pasa a número. Probado con importes por encima de 2^53 centavos.
+* Los colores de variación usan `--color-success` / `--color-danger` (no existen `--income` / `--expense`; sí `.amount.income|expense`, que no sirven dentro de un SVG).
+
+### 🧪 Verificación
+* `grafica.test.js` (17): 0, 1, 2 y N fotos, orden por año/mes, escala exacta, negativos, valores iguales, rangos cortos y largos, serie líquida, estimadas, colores como variables, etiquetas del eje, descripción accesible, escape del id. `evolucion.test.js` (nucleo, 11), `vistas/evolucion.test.js` (14) e `interaccion/evolucion.test.js` (9: cambiar serie y mes, tomar foto con y sin tasa, coma decimal, tasa inválida, error, mes sellado, error de lectura y vacío con el enrutador real).
+* Contratos actualizados: doce pestañas en menú, rutas, composición y acciones; tres manejadores nuevos en el puente (`handleCambiarSerieEvolucion`, `handleCambiarMesEvolucion`, `handleTomarFotoEvolucion`) cubiertos por pruebas de interacción; la prueba de escape de HTML cubre la vista nueva.
+* Mutaciones dirigidas (escala vertical, orden de las fotos, signo de la variación, escape de la referencia de una partida, serie equivocada): cada una hizo fallar varias pruebas y se restauró con edición dirigida.
+
+---
+
+## Versión 1.120.0 - 2026-10-28
 **Resumen de gastos por categoría y mes — base de lectura (PR 1 de 5).** Dominio puro, puerto de lectura, caso de uso y un comando de **solo lectura** (`obtener_resumen_gastos`), con su tipo generado y su función `obtenerResumenGastos` en `api.ts`. **Sin interfaz** (llega en el PR 2), **sin migración** y **sin presupuesto**. No cambia ningún comportamiento existente; la fórmula del Resumen actual (que suma mezclando divisas) **no se toca**.
 
 ### ✨ Qué calcula

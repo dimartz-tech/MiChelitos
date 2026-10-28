@@ -15,6 +15,7 @@ import { VistaIngresos, puenteIngresos } from './ingresos.js';
 import { VistaPrestamos, puentePrestamos } from './prestamos.js';
 import { VistaAjustes, puenteAjustes } from './ajustes.js';
 import { VistaTarjetas, puenteTarjetas } from './tarjetas.js';
+import { VistaEvolucion, puenteEvolucion } from './evolucion.js';
 import { VistaResumen, puenteResumen } from './resumen.js';
 import { VistaSuscripciones, puenteSuscripciones } from './suscripciones.js';
 
@@ -32,6 +33,9 @@ export function registrarVistas(registro: RegistroDeVistas, servicios: Servicios
 
     const resumen = new VistaResumen({ ...servicios, api });
     registro.registrar('resumen', resumen, puenteResumen(resumen));
+
+    const evolucion = new VistaEvolucion({ ...servicios, api });
+    registro.registrar('evolucion', evolucion, puenteEvolucion(evolucion));
 
     const dashboard = new VistaDashboard({ ...servicios, api });
     registro.registrar('dashboard', dashboard, puenteDashboard(dashboard));
