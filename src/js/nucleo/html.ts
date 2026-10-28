@@ -85,3 +85,15 @@ export const alEnviar = (nombre: string, ...args: unknown[]): string => manejado
 export const alCambiar = (nombre: string, ...args: unknown[]): string => manejador('change', nombre, args);
 /** Entrada de texto en un campo. */
 export const alEscribir = (nombre: string, ...args: unknown[]): string => manejador('input', nombre, args);
+
+// --- Campos de fecha con separador automático ----------------------------------------------
+
+/** El atributo que pide una máscara de entrada (`ui/mascaras.ts` la aplica: un oyente, `document`). */
+export const ATRIBUTO_DE_MASCARA = 'data-mascara';
+
+/**
+ * Lo que lleva todo campo de fecha de texto (dd/mm/aaaa): la máscara que pone la `/` sola
+ * (`nucleo/fechas.ts`), teclado numérico, 10 caracteres como máximo y sin autocompletado del
+ * navegador. Se interpola en la etiqueta: `<input type="text" id="x" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA}>`.
+ */
+export const ATRIBUTOS_DE_FECHA = `${ATRIBUTO_DE_MASCARA}="fecha" inputmode="numeric" maxlength="10" autocomplete="off"`;

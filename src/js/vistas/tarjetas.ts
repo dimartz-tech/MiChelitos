@@ -14,7 +14,7 @@
 import type { Tarjeta, VistaPreviaAbono, VistaPreviaDeCierre } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { accion, alCambiar, alEnviar, alEscribir, escaparHtml } from '../nucleo/html.js';
+import { ATRIBUTOS_DE_FECHA, accion, alCambiar, alEnviar, alEscribir, escaparHtml } from '../nucleo/html.js';
 
 /** Espera tras la última pulsación antes de pedir la vista previa del abono (ms). */
 const RETARDO_VISTA_PREVIA_MS = 250;
@@ -260,7 +260,7 @@ export class VistaTarjetas implements Vista {
                                         <div style="display:flex; gap:0.4rem; align-items:flex-end; width:100%;">
                                             <div style="flex:1.2;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
-                                                <input type="text" id="pag_fecha_${t.id}" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
+                                                <input type="text" id="pag_fecha_${t.id}" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
                                             </div>
                                             <div style="flex:1;">
                                                 <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Divisa</label>
@@ -316,7 +316,7 @@ export class VistaTarjetas implements Vista {
                                             <div style="display:flex; gap:0.4rem; align-items:flex-end;">
                                                 <div style="flex:1.2;">
                                                     <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
-                                                    <input type="text" id="avc_fecha_${t.id}" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
+                                                    <input type="text" id="avc_fecha_${t.id}" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} class="form-control" style="padding:0.4rem; font-size:0.75rem;" required>
                                                 </div>
                                                 <div style="flex:1;">
                                                     <label style="font-size:0.65rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Divisa</label>
@@ -403,7 +403,7 @@ export class VistaTarjetas implements Vista {
                     <form ${alEnviar('handleAgregarBonificacion')} style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
                         <div style="flex:1; min-width:110px;">
                             <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Fecha</label>
-                            <input type="text" id="bon_fecha" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" class="form-control" style="padding:0.4rem; font-size:0.78rem;" required>
+                            <input type="text" id="bon_fecha" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} class="form-control" style="padding:0.4rem; font-size:0.78rem;" required>
                         </div>
                         <div style="flex:1.6; min-width:170px;">
                             <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:0.2rem;">Tarjeta</label>

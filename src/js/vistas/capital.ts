@@ -15,7 +15,7 @@
 
 import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { accion, alEnviar, escaparHtml } from '../nucleo/html.js';
+import { ATRIBUTOS_DE_FECHA, accion, alEnviar, escaparHtml } from '../nucleo/html.js';
 
 type ApiCapital = ApiDe<'obtenerCapital' | 'guardarCapital'>;
 
@@ -108,7 +108,7 @@ export class VistaCapital implements Vista {
                             </div>
                             <div class="form-group">
                                 <label>Vence *</label>
-                                <input type="text" id="cer_ven" class="form-control" placeholder="dd/mm/aaaa" style="padding:0.5rem;" required>
+                                <input type="text" id="cer_ven" class="form-control" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} style="padding:0.5rem;" required>
                             </div>
                         </div>
                         <div class="form-group">
@@ -164,7 +164,7 @@ export class VistaCapital implements Vista {
                             </div>
                             <div class="form-group">
                                 <label>Vence *</label>
-                                <input type="text" id="bol_ven" class="form-control" placeholder="dd/mm/aaaa" style="padding:0.5rem;" required>
+                                <input type="text" id="bol_ven" class="form-control" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} style="padding:0.5rem;" required>
                             </div>
                         </div>
                         <div class="form-group">

@@ -9,7 +9,7 @@
 import type { CuentaAhorro } from '../tipos-ipc';
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
-import { alEnviar, escaparHtml } from '../nucleo/html.js';
+import { ATRIBUTOS_DE_FECHA, alEnviar, escaparHtml } from '../nucleo/html.js';
 
 type ApiEfectivo = ApiDe<'obtenerCuentas' | 'crearCobroEfectivoInformal' | 'transferirEntreCuentas'>;
 
@@ -77,7 +77,7 @@ export class VistaEfectivo implements Vista {
                         <form id="form-add-efectivo-informal" ${alEnviar('handleAgregarEfectivoInformal')}>
                             <div class="form-group">
                                 <label for="efe_inf_fec">Fecha *</label>
-                                <input type="text" id="efe_inf_fec" class="form-control" value="${escaparHtml(hoyStr)}" required>
+                                <input type="text" id="efe_inf_fec" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} required>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
@@ -109,7 +109,7 @@ export class VistaEfectivo implements Vista {
                         <form id="form-retirar-a-efectivo" ${alEnviar('handleRetirarAEfectivo')}>
                             <div class="form-group">
                                 <label for="efe_ret_fec">Fecha *</label>
-                                <input type="text" id="efe_ret_fec" class="form-control" value="${escaparHtml(hoyStr)}" required>
+                                <input type="text" id="efe_ret_fec" class="form-control" value="${escaparHtml(hoyStr)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} required>
                             </div>
                             <div class="form-group">
                                 <label for="efe_ret_ori">Cuenta Origen (Banco) *</label>
