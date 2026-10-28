@@ -1852,6 +1852,101 @@ pub fn migracion_17_desactivar_tarjetas(tx: &Transaction) -> Result<(), ErrorMig
     )
 }
 
+const MIG18: &str = "historial del patrimonio";
+
+/// Las fotos mensuales del patrimonio y sus partidas.
+///
+/// * **`patrimonio_fotos`**: una foto por mes (`UNIQUE(anio, mes)`). Los importes son **`INTEGER` en centavos** y cada
+///   columna lleva `CHECK(typeof(x) = 'integer')`: SQLite convertiría en silencio un `REAL` a entero por afinidad, y el
+///   `typeof` es lo que impide que un céntimo roto entre. `patrimonio_c = activos_c - pasivos_c` lo exige el esquema, no
+///   solo el código. La tasa USD→DOP se guarda **por foto** en nanounidades enteras (`TasaCambio::micro_unidades`).
+///   `sellada = 1` marca una foto de un mes cerrado: es inmutable (disparadores de abajo).
+/// * **`patrimonio_partidas`**: de qué se compone la foto. `importe_c` va en la divisa de origen e `importe_dop_c`
+///   convertido con la tasa de la foto. Se borran con su foto (`ON DELETE CASCADE`).
+///
+/// Los disparadores protegen la foto sellada en la propia base. Rehacer una foto sellada exigirá una acción explícita con
+/// motivo (patrón de `correcciones`); no existe todavía y por eso nada puede modificarla.
+pub fn migracion_18_historial_del_patrimonio(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::paso(
+        tx,
+        MIG18,
+        "crear patrimonio_fotos",
+        "CREATE TABLE IF NOT EXISTS patrimonio_fotos (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             anio INTEGER NOT NULL CHECK(typeof(anio) = 'integer' AND anio BETWEEN 2000 AND 2999),
+             mes INTEGER NOT NULL CHECK(typeof(mes) = 'integer' AND mes BETWEEN 1 AND 12),
+             fecha TEXT NOT NULL CHECK(fecha GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]'),
+             origen TEXT NOT NULL CHECK(origen IN ('real', 'manual', 'capital', 'reconstruida')),
+             sellada INTEGER NOT NULL DEFAULT 0 CHECK(sellada IN (0, 1)),
+             tasa_usd_dop INTEGER NOT NULL CHECK(typeof(tasa_usd_dop) = 'integer' AND tasa_usd_dop > 0),
+             activos_c INTEGER NOT NULL CHECK(typeof(activos_c) = 'integer'),
+             pasivos_c INTEGER NOT NULL CHECK(typeof(pasivos_c) = 'integer'),
+             patrimonio_c INTEGER NOT NULL CHECK(typeof(patrimonio_c) = 'integer'),
+             liquido_c INTEGER NOT NULL CHECK(typeof(liquido_c) = 'integer'),
+             calidad TEXT NOT NULL DEFAULT 'completa' CHECK(calidad IN ('completa', 'con_aviso', 'estimada')),
+             UNIQUE (anio, mes),
+             CHECK (patrimonio_c = activos_c - pasivos_c),
+             CHECK (substr(fecha, 4, 2) = printf('%02d', mes) AND substr(fecha, 7, 4) = printf('%04d', anio))
+         );",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG18,
+        "crear patrimonio_partidas",
+        "CREATE TABLE IF NOT EXISTS patrimonio_partidas (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             foto_id INTEGER NOT NULL REFERENCES patrimonio_fotos(id) ON DELETE CASCADE,
+             rubro TEXT NOT NULL CHECK(rubro IN ('cuenta', 'efectivo', 'certificado', 'bolsa', 'inmobiliario',
+                                                 'vehiculo', 'maquinaria', 'tarjeta', 'prestamo')),
+             referencia TEXT NOT NULL,
+             divisa TEXT NOT NULL CHECK(divisa IN ('DOP', 'USD')),
+             importe_c INTEGER NOT NULL CHECK(typeof(importe_c) = 'integer'),
+             importe_dop_c INTEGER NOT NULL CHECK(typeof(importe_dop_c) = 'integer')
+         );",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG18,
+        "indice de partidas por foto",
+        "CREATE INDEX IF NOT EXISTS idx_patrimonio_partidas_foto ON patrimonio_partidas(foto_id);",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG18,
+        "disparador: una foto sellada no se modifica",
+        "CREATE TRIGGER IF NOT EXISTS patrimonio_fotos_sellada_no_se_modifica BEFORE UPDATE ON patrimonio_fotos
+         WHEN OLD.sellada = 1
+         BEGIN
+             SELECT RAISE(ABORT, 'Una foto sellada del patrimonio no se modifica.');
+         END;",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG18,
+        "disparador: una foto sellada no se borra",
+        "CREATE TRIGGER IF NOT EXISTS patrimonio_fotos_sellada_no_se_borra BEFORE DELETE ON patrimonio_fotos
+         WHEN OLD.sellada = 1
+         BEGIN
+             SELECT RAISE(ABORT, 'Una foto sellada del patrimonio no se borra.');
+         END;",
+    )?;
+    for (evento, fila, nombre) in [("INSERT", "NEW", "se_llena"), ("UPDATE", "OLD", "se_modifica"), ("DELETE", "OLD", "se_vacia")] {
+        migraciones::paso(
+            tx,
+            MIG18,
+            &format!("disparador: las partidas de una foto sellada no {nombre}"),
+            &format!(
+                "CREATE TRIGGER IF NOT EXISTS patrimonio_partidas_sellada_no_{nombre} BEFORE {evento} ON patrimonio_partidas
+                 WHEN (SELECT sellada FROM patrimonio_fotos WHERE id = {fila}.foto_id) = 1
+                 BEGIN
+                     SELECT RAISE(ABORT, 'Las partidas de una foto sellada del patrimonio no se tocan.');
+                 END;"
+            ),
+        )?;
+    }
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
@@ -1979,8 +2074,8 @@ mod pruebas_de_transaccion {
                 continue;
             }
             let es_listado = nombre.starts_with("obtener_") || nombre.starts_with("previsualizar_") || nombre == "suscripciones_con_aviso";
-            let usa_lectura = ["lee_almacen(", "lee_catalogos(", "lee_cuentas(", "lee_prestamos(", "lee_tarjetas("].iter().any(|h| cuerpo.contains(h));
-            let usa_escritura = ["con_almacen(", "con_catalogos(", "con_cuentas(", "con_prestamos(", "con_tarjetas("].iter().any(|h| cuerpo.contains(h));
+            let usa_lectura = ["lee_almacen(", "lee_catalogos(", "lee_cuentas(", "lee_prestamos(", "lee_tarjetas(", "lee_fotos("].iter().any(|h| cuerpo.contains(h));
+            let usa_escritura = ["con_almacen(", "con_catalogos(", "con_cuentas(", "con_prestamos(", "con_tarjetas(", "con_fotos("].iter().any(|h| cuerpo.contains(h));
             if es_listado {
                 assert!(!usa_escritura, "{nombre} es un listado y no debe ocupar el turno de escritura");
                 revisadas += usize::from(usa_lectura);
