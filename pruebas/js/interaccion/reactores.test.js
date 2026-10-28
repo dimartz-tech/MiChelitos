@@ -4,13 +4,15 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cargarInterfaz } from '../ayudas/cargar_interfaz.js';
+import { cargarInterfaz, AUSENTE } from '../ayudas/cargar_interfaz.js';
 import { noLlamoANada } from '../ayudas/afirmar.js';
 
 // --- aplicarTipoAbono: el monto que se prefija es el que se enviará ---
 
 const abono = (tipo, divisa, monto = '') => ({
     pag_tipo_3: tipo, pag_div_3: divisa, pag_monto_3: { value: monto, readOnly: false },
+    // Rellenar el monto también pide la vista previa del abono (con retardo); aquí no hay caja donde pintarla.
+    pag_previa_3: AUSENTE,
 });
 
 test('abono «al corte» en DOP: prefija el saldo al corte en pesos con dos decimales y bloquea el campo', () => {

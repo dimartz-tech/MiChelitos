@@ -62,7 +62,7 @@ pub struct SuscripcionEnMemoria {
     pub fecha_ultimo_pago: Option<String>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AlmacenEnMemoria {
     pub suscripciones: Vec<SuscripcionEnMemoria>,
     /// La descripción de cada gasto y el motivo por el que no se borra solo (el doble de `GastoGuardado` no los guarda).
@@ -91,6 +91,8 @@ pub struct AlmacenEnMemoria {
     pub inactivas: std::collections::HashSet<i64>,
     /// Límites de cada tarjeta, por divisa: `(aprobado, sobregiro)` en centavos. Sin entrada, cupo cero.
     pub cupos: HashMap<(i64, Divisa), (i64, i64)>,
+    /// Balance al corte de cada tarjeta, por divisa. Sin entrada, cero.
+    pub cortes: HashMap<(i64, Divisa), Dinero>,
     pub dias_de_corte: HashMap<i64, i32>,
     pub politicas: HashMap<i64, PoliticaLiquidacion>,
     pub gastos: HashMap<i64, GastoGuardado>,
@@ -229,6 +231,11 @@ impl AlmacenEnMemoria {
     pub fn con_cupo(mut self, id: i64, divisa: Divisa, aprobado: f64, sobregiro: f64) -> Self {
         let c = |u: f64| Dinero::nuevo(u, divisa).unwrap().centavos();
         self.cupos.insert((id, divisa), (c(aprobado), c(sobregiro)));
+        self
+    }
+
+    pub fn con_corte(mut self, id: i64, corte: Dinero) -> Self {
+        self.cortes.insert((id, corte.divisa()), corte);
         self
     }
 
@@ -474,6 +481,23 @@ impl RepositorioTarjetas for AlmacenEnMemoria {
             return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
         }
         Ok(EstadoDeTarjeta { nombre: format!("Banco Tarjeta {tarjeta_id}"), activa: !self.inactivas.contains(&tarjeta_id) })
+    }
+}
+
+impl ConsultaParaAbono for AlmacenEnMemoria {
+    fn situacion_de_tarjeta(&self, tarjeta_id: i64) -> Result<SituacionDeTarjeta, ErrorAlmacen> {
+        if !self.tarjetas.contains(&tarjeta_id) {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "tarjeta", id: tarjeta_id });
+        }
+        let corte = |divisa: Divisa| *self.cortes.get(&(tarjeta_id, divisa)).unwrap_or(&Dinero::cero(divisa));
+        Ok(SituacionDeTarjeta {
+            nombre: format!("Banco Tarjeta {tarjeta_id}"),
+            activa: !self.inactivas.contains(&tarjeta_id),
+            balance_dop: self.deuda_en(tarjeta_id, Divisa::Dop),
+            balance_usd: self.deuda_en(tarjeta_id, Divisa::Usd),
+            corte_dop: corte(Divisa::Dop),
+            corte_usd: corte(Divisa::Usd),
+        })
     }
 }
 

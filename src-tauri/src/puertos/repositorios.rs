@@ -256,6 +256,23 @@ pub trait ConsultaDeAbonos {
     fn resumen_de_abono(&self, id: i64) -> Result<Option<ResumenDeAbono>, ErrorAlmacen>;
 }
 
+/// Lo que la vista previa de un abono necesita saber de la tarjeta: estado y balances en las dos divisas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SituacionDeTarjeta {
+    pub nombre: String,
+    pub activa: bool,
+    pub balance_dop: Dinero,
+    pub balance_usd: Dinero,
+    pub corte_dop: Dinero,
+    pub corte_usd: Dinero,
+}
+
+/// Lectura de la tarjeta para previsualizar un abono. **Solo lectura**: no hay ninguna escritura en este puerto.
+pub trait ConsultaParaAbono {
+    /// `NoEncontrado` si la tarjeta no existe.
+    fn situacion_de_tarjeta(&self, tarjeta_id: i64) -> Result<SituacionDeTarjeta, ErrorAlmacen>;
+}
+
 /// La categoría de sistema «Otros», a la que van las comisiones y los cargos que se asientan solos.
 pub trait CategoriaDeSistema {
     fn categoria_de_sistema(&self) -> Result<i64, ErrorAlmacen>;
