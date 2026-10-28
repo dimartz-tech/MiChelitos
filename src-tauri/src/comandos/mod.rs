@@ -20,6 +20,7 @@ pub mod ingresos;
 pub mod patrimonio;
 pub mod prestamos;
 pub mod respaldos;
+pub mod resumen;
 pub mod suscripciones;
 pub mod tarjetas;
 
@@ -43,6 +44,7 @@ pub(crate) const FUENTES: &[(&str, &str)] = &[
     ("comandos/patrimonio.rs", include_str!("patrimonio.rs")),
     ("comandos/prestamos.rs", include_str!("prestamos.rs")),
     ("comandos/respaldos.rs", include_str!("respaldos.rs")),
+    ("comandos/resumen.rs", include_str!("resumen.rs")),
     ("comandos/suscripciones.rs", include_str!("suscripciones.rs")),
     ("comandos/tarjetas.rs", include_str!("tarjetas.rs")),
 ];

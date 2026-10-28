@@ -17,5 +17,6 @@ pub mod gasto;
 pub mod ingreso;
 pub mod patrimonio;
 pub mod prestamo;
+pub mod resumen_gastos;
 pub mod suscripcion;
 pub mod tarjeta;

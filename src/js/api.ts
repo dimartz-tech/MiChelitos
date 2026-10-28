@@ -183,6 +183,15 @@ const AppAPI = {
         return await invoke('obtener_gastos');
     },
 
+    /**
+     * El resumen de gastos por categoría y mes (solo lectura). `tasaUsd` es la tasa de referencia para los dólares sin
+     * liquidar (la respuesta la devuelve para rotular el importe como estimado); `excluirCategorias` son ids de
+     * categoría (la fila de cargos derivados se excluye con `id_cargos_derivados`). Todos los importes vuelven como texto.
+     */
+    async obtenerResumenGastos(anio: number, mes: number, nPromedio: number, tasaUsd: number, excluirCategorias: number[] = []) {
+        return await invoke('obtener_resumen_gastos', { anio, mes, nPromedio, tasaUsd, excluirCategorias });
+    },
+
     async crearGasto(gastoData: import('./tipos-ipc').GastoInput) {
         return await invoke('crear_gasto', { input: gastoData });
     },
