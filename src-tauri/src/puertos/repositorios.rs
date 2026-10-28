@@ -1097,3 +1097,11 @@ pub trait RepositorioTransferencias {
 pub trait AlmacenTransferencias: RepositorioCuentas + RepositorioTransferencias {}
 
 impl<T> AlmacenTransferencias for T where T: RepositorioCuentas + RepositorioTransferencias {}
+
+/// Lo que el patrimonio necesita leer, en una sola transacción diferida: todas las cuentas (activas y archivadas), todas
+/// las tarjetas (activas e inactivas) con sus balances y todos los préstamos con su saldo. **Solo lectura.**
+pub trait LecturaDePatrimonio {
+    fn cuentas_de_patrimonio(&self) -> Result<Vec<crate::dominio::patrimonio::CuentaDePatrimonio>, ErrorAlmacen>;
+    fn tarjetas_de_patrimonio(&self) -> Result<Vec<crate::dominio::patrimonio::TarjetaDePatrimonio>, ErrorAlmacen>;
+    fn prestamos_de_patrimonio(&self) -> Result<Vec<crate::dominio::patrimonio::PrestamoDePatrimonio>, ErrorAlmacen>;
+}

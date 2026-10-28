@@ -12,6 +12,7 @@ pub mod correcciones;
 pub mod informales;
 pub mod ingresos;
 pub mod prestamos;
+pub mod patrimonio;
 pub mod previsualizar_abono;
 pub mod tarjetas;
 pub mod guardar_capital;

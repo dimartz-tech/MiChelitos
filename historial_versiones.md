@@ -4,7 +4,31 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.116.0 (Versión Actual) - 2026-10-28
+## 🚀 Versión 1.117.0 (Versión Actual) - 2026-10-28
+**Una fórmula única para el patrimonio, con dos cifras a la vista.** Hallazgo previo: no existía «el» patrimonio. `Totales::patrimonio()` sumaba solo el capital; el «Patrimonio Neto» de Resumen se componía en la interfaz, en `f64` (capital − tarjetas, con los dólares a la constante 60 − préstamos); el «Patrimonio Total» del Dashboard era solo capital; y las cuentas de ahorro y el efectivo no entraban en ninguna. Decisión del titular (D1): el patrimonio incluye cuentas y efectivo, y durante **esta versión** se muestran **ambas** cifras para compararlas. **No hay migración.**
+
+### ✨ Qué cambia para el titular
+* Resumen y Dashboard muestran, **debajo de la cifra de siempre (que no se toca)**, dos cifras rotuladas: «Patrimonio neto (capital − deudas)» y «Patrimonio neto incluyendo cuentas y efectivo». Una nota indica los dólares incluidos y la tasa, rotulada **estimada** (60 pesos por dólar, no una cotización).
+* La segunda cifra es la primera más las cuentas de ahorro (efectivo incluido), las cuentas en dólares convertidas, y las cuentas archivadas **solo si guardan saldo**. Las tarjetas inactivas con deuda cuentan; con saldo cero no aportan.
+
+### 🏗️ Diseño
+* `dominio/patrimonio.rs::componer(entradas) -> Foto`: función pura, todo en `Dinero` (centavos), tasa como `TasaCambio`. Devuelve `neto_actual` (capital − tarjetas − préstamos, la fórmula vigente) y `neto_con_liquidez`, más los subtotales y un desglose por partida (activo/pasivo, importe original y en pesos). La parte de capital reutiliza `Totales::patrimonio` (no se duplica la suma).
+* Caso de uso `aplicacion/patrimonio.rs` (solo lectura, almacén por `&`), puerto `LecturaDePatrimonio` y adaptador SQLite solo con `SELECT`, en una transacción diferida.
+* Comando `obtener_patrimonio` (`lee_almacen`), DTO con importes como **texto exacto** (`ipc::importe_a_texto`); tipos regenerados y `api.obtenerPatrimonio`. La interfaz lo consulta de forma tolerante: si falla, la pantalla sigue y lo dice.
+* Interfaz sin manejadores en línea y todo texto por `escaparHtml`.
+
+### 🧪 Verificación
+* Pruebas de caracterización de la fórmula vigente (`Totales::patrimonio`; la resta de Resumen con tarjetas USD a 60 y préstamos), con datos inventados.
+* Pruebas de integración (`integracion_patrimonio_*`): el comando real sobre una base temporal con el esquema real y un `capital.json` temporal; las dos cifras, la coincidencia de la cifra actual con la fórmula de `resumen.ts`, el DTO serializado, huella de la base y del capital idéntica antes y después (no escribe), capital dañado = error, y un contrato de forma que compara las claves del DTO real con `tipos-ipc.d.ts`.
+* Mutaciones (signo de pasivos, cuentas archivadas, conversión USD, escritura desde el comando, transacción de escritura, clave del contrato): cada una hizo fallar pruebas y se restauró.
+
+### ⚠️ Diferencias detectadas (documentadas con pruebas, sin esconderlas)
+* **Redondeo** (`hallazgo_redondeo_por_partida`): el núcleo redondea al centavo cada partida en dólares y suma; la interfaz anterior sumaba sin redondear y mostraba el total. Con la tasa vigente (60, entera) coinciden siempre; con una tasa de centésimas de centavo difieren en un centavo.
+* **Tarjetas inactivas con deuda**: Resumen las ignoraba; el núcleo las cuenta. En uso normal no ocurre (una tarjeta solo se desactiva con saldo cero).
+
+---
+
+## Versión 1.116.0 - 2026-10-28
 **Gastos: cuatro afinaciones de las sugerencias (seguimiento del PR #152).** Solo frontend (`src/js/vistas/gastos.ts`); sin Rust ni cambios de base de datos.
 
 ### ✨ Qué cambia

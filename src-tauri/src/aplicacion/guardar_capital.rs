@@ -347,6 +347,30 @@ mod tests {
         json!({"banco": "Banco Ejemplo", "monto": monto, "tasa": 8.5, "vencimiento": "31/12/2030", "tipo_pago": "A cuenta"})
     }
 
+    // --- Caracterización de `Totales::patrimonio` (la parte de capital del patrimonio) ---
+
+    #[test]
+    fn caracterizacion_el_patrimonio_de_capital_suma_los_cinco_grupos_y_nada_mas() {
+        let t = totales_de(&json!({
+            "certificados": [{"monto": 100_000.07}, {"monto": 0.03}],
+            "bolsa": [{"monto": "20000.13"}],
+            "propiedades": {
+                "inmobiliario": [{"valor_estimado": 3_000_000.01}],
+                "vehiculos": [{"valor_estimado": 450_000.55}],
+                "maquinaria": [{"valor_estimado": 12_345.67}]
+            }
+        }));
+        assert_eq!(t.certificados.centavos(), 10_000_010);
+        assert_eq!(t.patrimonio().centavos(), 10_000_010 + 2_000_013 + 300_000_001 + 45_000_055 + 1_234_567);
+    }
+
+    #[test]
+    fn caracterizacion_lo_ilegible_cuenta_cero_y_un_capital_vacio_suma_cero() {
+        assert_eq!(totales_de(&vacio()).patrimonio().centavos(), 0);
+        let t = totales_de(&json!({"certificados": [{"monto": "no es un importe"}, {"monto": 10.5}, {}], "bolsa": []}));
+        assert_eq!(t.patrimonio().centavos(), 1_050, "lo que no se entiende no se inventa ni impide ver el resto");
+    }
+
     // --- Importes ---
 
     #[test]
