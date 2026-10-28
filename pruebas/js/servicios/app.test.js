@@ -27,7 +27,7 @@ const elemento = (extra = {}) => {
     };
 };
 
-function montar({ cargos = [], fallos = [], falla = false, tema = null, colapsado = null, listo = true } = {}) {
+function montar({ cargos = [], fallos = [], falla = false, tema = null, colapsado = null, listo = true, foto = { creada: false, foto: null }, fallaFoto = false } = {}) {
     const navs = ['dashboard', 'gastos', 'ajustes'].map(r => elemento({ id: `nav-btn-${r}`, clases: r === 'ajustes' ? ['nav-item', 'active'] : ['nav-item'] }));
     const botones = { 'theme-toggle-btn': elemento() };
     const sidebar = elemento();
@@ -50,7 +50,9 @@ function montar({ cargos = [], fallos = [], falla = false, tema = null, colapsad
         enrutador: { mostrar: async ruta => { mostrados.push(ruta); } },
         avisos: { mostrar: (mensaje, tipo) => avisos.push({ mensaje, tipo }) },
         dom: { elemento: id => botones[id], buscar: id => botones[id] ?? navs.find(n => n.id === id) ?? null },
-        api: { procesarSuscripciones: () => (falla ? Promise.reject(new Error('sin red')) : Promise.resolve({ cargos, fallos })) },
+        api: {
+            asegurarFotoDelMes: () => (fallaFoto ? Promise.reject(new Error('base ocupada')) : Promise.resolve(foto)),
+            procesarSuscripciones: () => (falla ? Promise.reject(new Error('sin red')) : Promise.resolve({ cargos, fallos })) },
         acciones: { accionDeVista: (...args) => llamadasDeVista.push(args) },
     });
     // Pulsar un elemento con `data-accion="navegar"`: lo que hace un botón del menú.
@@ -93,6 +95,34 @@ test('si el documento aún se está leyendo, espera a DOMContentLoaded para arra
     assert.deepEqual(t.mostrados, []);
     t.escuchas.DOMContentLoaded();
     assert.deepEqual(t.mostrados, ['dashboard']);
+}));
+
+test('al arrancar asegura la foto del patrimonio: si ya existía no avisa nada', () => conApp({}, async t => {
+    await asentar();
+    assert.deepEqual(t.avisos, []);
+}));
+
+test('si hubo que tomar la foto del mes lo avisa, y si quedó con aviso lo dice como error', async () => {
+    await conApp({ foto: { creada: true, foto: { calidad: 'completa' } } }, async t => {
+        await asentar();
+        assert.deepEqual(t.avisos, [{ mensaje: 'Se tomó la foto del patrimonio de este mes.', tipo: undefined }]);
+    });
+    await conApp({ foto: { creada: true, foto: { calidad: 'con_aviso' } } }, async t => {
+        await asentar();
+        assert.equal(t.avisos.length, 1);
+        assert.equal(t.avisos[0].tipo, 'error');
+        assert.match(t.avisos[0].mensaje, /con aviso/);
+    });
+});
+
+test('si la foto del patrimonio falla, se avisa sin bloquear el arranque ni los cobros', () => conApp({ fallaFoto: true, cargos: ['Cargo de Netflix'] }, async t => {
+    await asentar();
+    assert.deepEqual(t.mostrados, ['dashboard'], 'la pantalla inicial se mostró igual');
+    assert.equal(t.avisos.length, 1);
+    assert.match(t.avisos[0].mensaje, /No se pudo tomar la foto del patrimonio.*base ocupada/);
+    t.programados[0].fn();
+    await asentar();
+    assert.ok(t.avisos.some(a => a.mensaje === 'Cargo de Netflix'), 'las suscripciones se procesan igual');
 }));
 
 test('a los 1,5 s procesa las suscripciones: avisa cada cargo y redibuja la pestaña activa', () => conApp({ cargos: ['Cargo de Netflix', 'Cargo de Spotify'] }, async t => {

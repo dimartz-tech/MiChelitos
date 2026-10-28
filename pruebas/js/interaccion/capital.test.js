@@ -41,6 +41,14 @@ test('agregar certificado: se añade al final del capital; el monto se guarda co
     redibujo(ui, 'capital');
 });
 
+test('si el capital se guardó pero la foto del patrimonio no se pudo tomar, Rust devuelve un aviso y la vista lo muestra sin fingir fallo', async () => {
+    const aviso = 'El capital se guardó, pero no se pudo tomar la foto del patrimonio: base ocupada';
+    const ui = cargarInterfaz({ campos: cert, api: api({ guardarCapital: () => aviso }) });
+    await ui.appUI.handleAgregarCertificado(crearEvento());
+    assert.ok(ui.avisos.some(a => a.tipo === 'error' && a.mensaje === aviso), JSON.stringify(ui.avisos));
+    assert.ok(ui.avisos.some(a => a.tipo === 'success' && /Certificado guardado/.test(a.mensaje)), 'el guardado se sigue anunciando');
+});
+
 test('agregar certificado sin lista previa en el capital: la crea', async () => {
     const ui = cargarInterfaz({ campos: cert, api: { obtenerCapital: () => ({}) } });
     await ui.appUI.handleAgregarCertificado(crearEvento());

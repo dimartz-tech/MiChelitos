@@ -4,7 +4,32 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.118.0 (Versión Actual) - 2026-10-28
+## 🚀 Versión 1.119.0 (Versión Actual) - 2026-10-28
+**Historial del patrimonio, parte 2: migración 18 y fotos mensuales.** Se guarda, una vez por mes, una foto del patrimonio (activos, pasivos, patrimonio y líquido, más las partidas que la componen). Sin gráfica (la vista Evolución es otro PR), sin reconstrucción del pasado y sin recomendaciones.
+
+### ⚠️ Este PR sube el esquema a 18
+**La app instalada (v17) no abre una base v18** (`BaseMasNueva`: es el comportamiento esperado). No instalar sin respaldo y ensayo previo. Todo se probó con bases temporales; no se tocó `~/.michelitos`.
+
+### 🗄️ Migración 18 «historial del patrimonio»
+* `patrimonio_fotos`: una por mes (`UNIQUE(anio, mes)`), `mes` 1–12, `fecha` dd/mm/aaaa coherente con año y mes, `origen` (`real`, `manual`, `capital`, `reconstruida`), `sellada`, `tasa_usd_dop` por foto (nanounidades enteras de `TasaCambio`), importes **INTEGER en centavos con `CHECK(typeof(x)='integer')`**, `CHECK(patrimonio_c = activos_c - pasivos_c)` y `calidad` (`completa`, `con_aviso`, `estimada`).
+* `patrimonio_partidas`: `foto_id` con `ON DELETE CASCADE`, `rubro` (cuenta, efectivo, certificado, bolsa, inmobiliario, vehiculo, maquinaria, tarjeta, prestamo), `referencia`, `divisa`, `importe_c` (divisa de origen) e `importe_dop_c` (con la tasa de la foto).
+* Disparadores: una foto sellada y sus partidas no se modifican ni se borran (defensa en la propia base). Rehacer una foto sellada con motivo de ≥15 caracteres queda solo diseñado.
+
+### 🏗️ Diseño
+* `dominio/foto_patrimonio.rs`: `Foto::construir` recibe partidas ya calculadas (la función `componer` del PR 1 se enchufará después). Tarjetas y préstamos son pasivos (un saldo a favor resta del pasivo). Constante `TASA_USD_DOP_SUGERIDA = 60.0`.
+* Puerto `RepositorioDeFotos` + `ConsultaDePatrimonio`, doble en memoria y adaptador SQLite (`INSERT … ON CONFLICT(anio, mes) DO UPDATE … WHERE sellada = 0`): idempotente. Al guardar la foto de un mes se sellan las de meses anteriores. Todo en una transacción de escritura.
+* Casos de uso y comandos `tomar_foto_patrimonio` (manual o tras el capital), `asegurar_foto_del_mes` (al arrancar; no escribe si ya existe) y `obtener_fotos_patrimonio`. Importes como texto exacto.
+* Reglas: cuentas archivadas y tarjetas inactivas en cero no generan partida (con saldo, sí); `capital.json` ilegible o con un importe ilegible deja la foto `con_aviso` y cuenta cero.
+* `guardar_capital` toma la foto después de guardar y **devuelve un aviso** (`string | null`) si ella falla; el guardado no falla. La vista de capital muestra ese aviso.
+* Interfaz: `app.ts` llama a `asegurarFotoDelMes` al arrancar con aviso no bloqueante.
+
+### 🧪 Verificación
+* Unitarias (dominio, caso de uso con doble, adaptador SQLite, migración) e **integración** (prefijo `integracion_`): comandos reales sobre una base temporal migrada desde cero, varios meses con reloj inyectado, sellado, foto manual, USD con tasa por foto, capital ilegible, respaldo→restauración, migración 17→18 con datos y contrato de forma contra `tipos-ipc.d.ts`.
+* Mutaciones (todas hicieron fallar al menos una prueba): upsert sin `WHERE sellada=0`, sin el CHECK del patrimonio, sin cascada, `asegurar` que escribe si ya existe, sin sellado, tasa fija, cuenta archivada en cero, pasivos como activos, guardado de capital sin foto, clave renombrada en un DTO, migración que altera un saldo anterior.
+
+---
+
+## Versión 1.118.0 - 2026-10-28
 **Fechas con separador automático.** Al teclear una fecha en un campo de texto, la `/` entre día, mes y año se pone sola: «28102026» queda «28/10/2026» sin pulsar `/`. Solo interfaz; el formato interno (dd/mm/aaaa) y las validaciones de Rust no cambian.
 
 ### ✨ Cómo se comporta

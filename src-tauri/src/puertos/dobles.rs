@@ -1636,3 +1636,98 @@ impl AlmacenSuscripciones for AlmacenEnMemoria {
     }
 }
 
+
+/// Las fotos del patrimonio en memoria, con la situación que las alimenta.
+///
+/// Reproduce las dos reglas del adaptador SQLite que importan a los casos de uso: una foto por mes y la sellada no se
+/// toca. `escrituras` cuenta los `guardar_foto` que llegaron a escribir (para afirmar que algo **no** escribió).
+#[derive(Debug, Default)]
+pub struct FotosEnMemoria {
+    pub situacion: SituacionParaFoto,
+    pub guardadas: Vec<(FotoLeida, Vec<PartidaLeida>)>,
+    pub escrituras: usize,
+    pub fallar_al_guardar: bool,
+}
+
+impl FotosEnMemoria {
+    pub fn con_situacion(situacion: SituacionParaFoto) -> Self {
+        FotosEnMemoria { situacion, ..Default::default() }
+    }
+}
+
+impl RepositorioDeFotos for FotosEnMemoria {
+    fn guardar_foto(&mut self, foto: &crate::dominio::foto_patrimonio::Foto) -> Result<i64, ErrorAlmacen> {
+        if self.fallar_al_guardar {
+            return Err(ErrorAlmacen::Fallo("fallo simulado".into()));
+        }
+        let partidas: Vec<PartidaLeida> = foto
+            .partidas
+            .iter()
+            .map(|p| PartidaLeida {
+                rubro: p.rubro.codigo().to_string(),
+                referencia: p.referencia.clone(),
+                divisa: p.importe.divisa(),
+                importe: p.importe,
+                importe_dop: p.importe_dop,
+            })
+            .collect();
+        let id = (self.guardadas.len() + 1) as i64;
+        let leida = |id: i64, sellada: bool| FotoLeida {
+            id,
+            anio: foto.anio,
+            mes: foto.mes,
+            fecha: foto.fecha.clone(),
+            origen: foto.origen.codigo().to_string(),
+            sellada,
+            tasa_usd_dop: foto.tasa_usd_dop,
+            activos: foto.activos,
+            pasivos: foto.pasivos,
+            patrimonio: foto.patrimonio,
+            liquido: foto.liquido,
+            calidad: foto.calidad.codigo().to_string(),
+        };
+        if let Some(existente) = self.guardadas.iter_mut().find(|(f, _)| f.anio == foto.anio && f.mes == foto.mes) {
+            if existente.0.sellada {
+                return Err(ErrorAlmacen::FotoSellada { anio: foto.anio, mes: foto.mes });
+            }
+            let id = existente.0.id;
+            *existente = (leida(id, false), partidas);
+            self.escrituras += 1;
+            return Ok(id);
+        }
+        self.guardadas.push((leida(id, false), partidas));
+        self.escrituras += 1;
+        Ok(id)
+    }
+
+    fn existe_foto(&self, anio: i32, mes: u32) -> Result<bool, ErrorAlmacen> {
+        Ok(self.guardadas.iter().any(|(f, _)| f.anio == anio && f.mes == mes))
+    }
+
+    fn sellar_anteriores(&mut self, anio: i32, mes: u32) -> Result<usize, ErrorAlmacen> {
+        let mut selladas = 0;
+        for (f, _) in self.guardadas.iter_mut() {
+            if !f.sellada && (f.anio * 12 + f.mes as i32) < (anio * 12 + mes as i32) {
+                f.sellada = true;
+                selladas += 1;
+            }
+        }
+        Ok(selladas)
+    }
+
+    fn fotos(&self) -> Result<Vec<FotoLeida>, ErrorAlmacen> {
+        let mut todas: Vec<FotoLeida> = self.guardadas.iter().map(|(f, _)| f.clone()).collect();
+        todas.sort_by_key(|f| (f.anio, f.mes));
+        Ok(todas)
+    }
+
+    fn partidas_de(&self, foto_id: i64) -> Result<Vec<PartidaLeida>, ErrorAlmacen> {
+        Ok(self.guardadas.iter().find(|(f, _)| f.id == foto_id).map(|(_, p)| p.clone()).unwrap_or_default())
+    }
+}
+
+impl ConsultaDePatrimonio for FotosEnMemoria {
+    fn situacion_para_foto(&self) -> Result<SituacionParaFoto, ErrorAlmacen> {
+        Ok(self.situacion.clone())
+    }
+}

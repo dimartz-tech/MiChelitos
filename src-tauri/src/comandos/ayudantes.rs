@@ -7,6 +7,7 @@
 
 use crate::adaptadores::sqlite::catalogos::CatalogosSqlite;
 use crate::adaptadores::sqlite::cuentas::CuentasSqlite;
+use crate::adaptadores::sqlite::fotos::FotosSqlite;
 use crate::adaptadores::sqlite::gastos::AlmacenSqlite;
 use crate::adaptadores::sqlite::prestamos::PrestamosSqlite;
 use crate::adaptadores::sqlite::tarjetas::TarjetasSqlite;
@@ -108,6 +109,21 @@ pub(super) fn con_cuentas<T>(f: impl FnOnce(&mut CuentasSqlite) -> Result<T, Str
 /// Un listado: transacción diferida, que no ocupa el turno de escritura.
 pub(super) fn lee_cuentas<T>(f: impl FnOnce(&mut CuentasSqlite) -> Result<T, String>) -> Result<T, String> {
     con_cuentas_como(false, f)
+}
+
+/// Corre `f` sobre las fotos del patrimonio dentro de una transacción y la confirma si salió bien.
+pub(super) fn con_fotos_como<T>(escritura: bool, f: impl FnOnce(&mut FotosSqlite) -> Result<T, String>) -> Result<T, String> {
+    en_transaccion(escritura, |tx| f(&mut FotosSqlite::nuevo(tx)))
+}
+
+/// Una operación que **escribe**: transacción `IMMEDIATE` (ver `db_sql::transaccion`).
+pub(super) fn con_fotos<T>(f: impl FnOnce(&mut FotosSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_fotos_como(true, f)
+}
+
+/// Un listado: transacción diferida, que no ocupa el turno de escritura.
+pub(super) fn lee_fotos<T>(f: impl FnOnce(&mut FotosSqlite) -> Result<T, String>) -> Result<T, String> {
+    con_fotos_como(false, f)
 }
 
 /// La fecha de hoy como la guarda la aplicación: `dd/mm/aaaa`.
