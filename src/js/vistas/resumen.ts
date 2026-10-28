@@ -9,12 +9,14 @@
 import type { ApiDe, Formato, Pantalla, Referencias, Reloj, Vista } from '../ui/servicios';
 
 import { escaparHtml } from '../nucleo/html.js';
+import { consultarPatrimonio, htmlCifrasDePatrimonio } from './patrimonio_cifras.js';
 
 type ApiResumen = ApiDe<
     | 'obtenerCapital'
     | 'obtenerIngresos'
     | 'obtenerIngresosInformales'
     | 'obtenerGastos'
+    | 'obtenerPatrimonio'
     | 'obtenerPrestamos'
     | 'obtenerSuscripciones'
     | 'obtenerTarjetas'
@@ -41,6 +43,8 @@ export class VistaResumen implements Vista {
         const tarjetas = await api.obtenerTarjetas();
         const suscripciones = await api.obtenerSuscripciones();
         const prestamos = await api.obtenerPrestamos();
+        // Las dos cifras del patrimonio las compone el núcleo; la cifra de arriba (la de siempre) se conserva tal cual.
+        const patrimonio = await consultarPatrimonio(api);
 
         const hoy = ahora();
         const mesAnioActual = "/" + (hoy.getMonth() + 1).toString().padStart(2, '0') + '/' + hoy.getFullYear();
@@ -160,6 +164,8 @@ export class VistaResumen implements Vista {
                     </div>
                 </div>
             </div>
+
+            ${htmlCifrasDePatrimonio(patrimonio, formato)}
 
             <div class="grid-2">
                 <!-- Activos -->

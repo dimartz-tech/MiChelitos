@@ -22,6 +22,8 @@ export type TransaccionCuenta = { id: number; fecha: string; cuenta_origen_id: n
 export type Gasto = { id: number; fecha: string; monto: number; divisa: string; descripcion: string; categoria_id: number; categoria_nombre: string; metodo_pago: string; costo_adicional: number; tarjeta_id: number | null; cuenta_ahorro_id: number | null; estado_conversion: string | null; monto_liquidado: number | null; tasa_conversion: number | null };
 export type IngresoInformal = { id: number; fecha: string; descripcion: string; monto: number; estatus: string; institucion_deposito: string | null; fecha_pago: string | null; monto_recibido: number | null };
 export type Ingreso = { id: number; numero_factura: string; cliente_id: number; cliente_nombre: string; cliente_rnc: string; fecha_emision: string; estatus: string; monto_total: number; porcentaje_retencion: number; monto_retenido: number; institucion_deposito: string | null; fecha_pago: string | null; monto_recibido: number | null };
+export type PartidaPatrimonio = { tipo: string; rubro: string; nombre: string; divisa: string; importe: string; importe_dop: string };
+export type Patrimonio = { tasa_usd_a_dop: string; tasa_estimada: boolean; capital: string; liquidez_dop: string; liquidez_usd: string; liquidez_usd_en_dop: string; efectivo_dop: string; efectivo_usd: string; tarjetas_dop: string; tarjetas_usd: string; tarjetas_usd_en_dop: string; prestamos: string; total_pasivos: string; neto_actual: string; neto_con_liquidez: string; partidas: PartidaPatrimonio[] };
 export type Prestamo = { id: number; tipo_prestamo: string; monto_prestamo: number; institucion_financiera: string; tasa_actual: number; cuotas_totales: number | null; cuotas_pendientes: number | null; monto_cuota: number; dia_pago: number; saldo_actual: number; limite_credito: number | null; tarjeta_id: number | null; tarjeta_nombre: string | null; dia_corte: number | null; disponible: number | null; es_revolvente: boolean; alerta_pago: boolean; dias_pago_msg: string };
 export type MovimientoPrestamo = { id: number; fecha: string; tipo: string; monto: number; interes: number; capital: number; saldo_resultante: number };
 export type Suscripcion = { id: number; plataforma: string; monto: number; tarjeta_id: number; frecuencia: string; dia_facturacion: number; fecha_ultimo_pago: string | null; divisa: string; entidad: string; nombre_tarjeta: string; fecha_proximo_cobro: string | null; pendientes: string[]; avisa: boolean; impedimento: string | null };
@@ -83,6 +85,7 @@ export type Comandos = {
     marcar_ingreso_pagado: { args: { id: number; cuentaAhorroId: number; fecha: string; montoRecibido: string }; ret: null };
     actualizar_ingreso: { args: { id: number; numeroFactura: string; clienteId: number; fechaEmision: string; montoTotal: string; porcentajeRetencion: number; cobroParcial?: string | null; motivo?: string | null }; ret: string };
     eliminar_ingreso: { args: { id: number; motivo: string }; ret: string };
+    obtener_patrimonio: { args: {  }; ret: Patrimonio };
     obtener_prestamos: { args: {  }; ret: Prestamo[] };
     crear_prestamo: { args: { input: PrestamoInput }; ret: number };
     actualizar_prestamo: { args: { input: ActualizarPrestamoInput }; ret: null };

@@ -41,6 +41,7 @@ async function dibujar({ d = datos() } = {}) {
             obtenerIngresosInformales: responde('obtenerIngresosInformales', d.informales),
             obtenerTarjetas: responde('obtenerTarjetas', d.tarjetas),
             obtenerPrestamos: responde('obtenerPrestamos', d.prestamos),
+            obtenerPatrimonio: responde('obtenerPatrimonio', d.patrimonio),
         },
         formato: { importe: v => `#${Number(v).toFixed(2)}#` },
         pantalla,
@@ -58,11 +59,11 @@ const importeTras = (html, etiqueta) => {
     return Number(m[1]);
 };
 
-test('consulta las seis fuentes y dibuja el título', async () => {
+test('consulta las siete fuentes y dibuja el título', async () => {
     const { html, llamadas } = await dibujar();
     assert.match(html, /Dashboard General/);
     assert.deepEqual([...llamadas].sort(), [
-        'obtenerCapital', 'obtenerGastos', 'obtenerIngresos', 'obtenerIngresosInformales', 'obtenerPrestamos', 'obtenerTarjetas',
+        'obtenerCapital', 'obtenerGastos', 'obtenerIngresos', 'obtenerIngresosInformales', 'obtenerPatrimonio', 'obtenerPrestamos', 'obtenerTarjetas',
     ]);
 });
 
@@ -137,4 +138,33 @@ test('sus enlaces son la acción general «navegar», no manejadores de appUI; e
     assert.deepEqual([...nombresDelPuente(html)], []);
     assert.doesNotMatch(html, /appUI\./);
     assert.deepEqual(puenteDashboard(new VistaDashboard({})), {});
+});
+
+const PATRIMONIO = {
+    tasa_usd_a_dop: '60.00', tasa_estimada: true, capital: '11500.00',
+    liquidez_dop: '251310.96', liquidez_usd: '135.79', liquidez_usd_en_dop: '8147.40', efectivo_dop: '1234.56', efectivo_usd: '12.34',
+    tarjetas_dop: '10012.71', tarjetas_usd: '100.19', tarjetas_usd_en_dop: '6011.40', prestamos: '50700.16', total_pasivos: '66724.27',
+    neto_actual: '3053275.94', neto_con_liquidez: '3312734.30', partidas: [],
+};
+
+test('muestra las dos cifras del patrimonio rotuladas, sin quitar la de siempre y con la tasa como estimada', async () => {
+    const { html } = await dibujar({ d: datos({ patrimonio: PATRIMONIO }) });
+    const m1 = /Patrimonio neto \(capital − deudas\)[\s\S]*?DOP #(-?[\d.]+)#/.exec(html);
+    const m2 = /Patrimonio neto incluyendo cuentas y efectivo[\s\S]*?DOP #(-?[\d.]+)#/.exec(html);
+    assert.equal(m1 && m1[1], '3053275.94');
+    assert.equal(m2 && m2[1], '3312734.30');
+    assert.match(html, /60\.00 pesos por dólar \(tasa estimada, no una cotización\)/);
+    assert.equal(importeTras(html, 'Patrimonio Total'), 11500, 'la cifra de siempre sigue');
+});
+
+test('si el patrimonio no se puede calcular, la pantalla sigue y lo dice', async () => {
+    const { html } = await dibujar({ d: datos({ patrimonio: null }) });
+    assert.match(html, /No se pudo calcular el patrimonio con cuentas y efectivo/);
+    assert.equal(importeTras(html, 'Patrimonio Total'), 11500);
+});
+
+test('el texto del patrimonio se escapa', async () => {
+    const { html } = await dibujar({ d: datos({ patrimonio: { ...PATRIMONIO, tasa_usd_a_dop: '<img src=x>' } }) });
+    assert.doesNotMatch(html, /<img src=x>/);
+    assert.match(html, /&lt;img src=x&gt;/);
 });
