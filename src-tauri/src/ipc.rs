@@ -82,9 +82,48 @@ impl<'de> Deserialize<'de> for ImporteDecimal {
     }
 }
 
+/// Un importe como **texto exacto** para la interfaz: `-1234.56`, calculado sobre los centavos, sin coma flotante.
+/// Es la ida del viaje cuya vuelta es `ImporteDecimal`.
+pub fn importe_a_texto(d: Dinero) -> String {
+    let centavos = d.centavos();
+    let signo = if centavos < 0 { "-" } else { "" };
+    let abs = centavos.unsigned_abs();
+    format!("{signo}{}.{:02}", abs / 100, abs % 100)
+}
+
+/// Una tasa de cambio como texto exacto, con al menos dos decimales: `58.75`, `59.123456`.
+pub fn tasa_a_texto(t: crate::dominio::dinero::TasaCambio) -> String {
+    let nano = t.micro_unidades();
+    let escala = crate::dominio::dinero::ESCALA_TASA_CAMBIO;
+    let mut decimales = format!("{:09}", nano % escala);
+    while decimales.len() > 2 && decimales.ends_with('0') {
+        decimales.pop();
+    }
+    format!("{}.{decimales}", nano / escala)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn el_texto_de_salida_es_exacto_y_vuelve_por_la_misma_puerta() {
+        for c in [0, 1, -1, 99, 100, 123_456, -123_456, 900_719_925_474_099] {
+            let d = Dinero::de_centavos(c, Divisa::Dop);
+            assert_eq!(centavos_desde_texto(&importe_a_texto(d)).unwrap(), c, "{}", importe_a_texto(d));
+        }
+        assert_eq!(importe_a_texto(Dinero::de_centavos(-5, Divisa::Usd)), "-0.05");
+        assert_eq!(importe_a_texto(Dinero::de_centavos(100_700, Divisa::Usd)), "1007.00");
+    }
+
+    #[test]
+    fn la_tasa_sale_con_al_menos_dos_decimales() {
+        use crate::dominio::dinero::TasaCambio;
+        assert_eq!(tasa_a_texto(TasaCambio::nueva(58.75).unwrap()), "58.75");
+        assert_eq!(tasa_a_texto(TasaCambio::nueva(60.0).unwrap()), "60.00");
+        assert_eq!(tasa_a_texto(TasaCambio::nueva(59.123456).unwrap()), "59.123456");
+    }
+
 
     fn leer(json: &str) -> Result<ImporteDecimal, serde_json::Error> {
         serde_json::from_str(json)

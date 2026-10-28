@@ -71,6 +71,19 @@ const AppAPI = {
         return await invoke('obtener_abonos_tarjeta', { tarjetaId: Number(tarjetaId) });
     },
 
+    /** Lo que haría un abono con lo escrito en el formulario, sin registrarlo (solo lectura; el cálculo es el del registro). */
+    async previsualizarAbono(id: number | string, monto: string, divisa: string, cuentaAhorroId: number | null = null, tasaCambio: number | string = 0, tipo: string = 'personalizado') {
+        return await invoke('previsualizar_abono', {
+            id: Number(id),
+            // Texto, tal como se escribió: un monto vacío o ilegible vuelve como advertencia, no como error.
+            monto: String(monto),
+            divisa,
+            cuentaAhorroId: cuentaAhorroId ? Number(cuentaAhorroId) : null,
+            tasaCambio: Number(tasaCambio || 0),
+            tipo,
+        });
+    },
+
     async revertirAbonoTarjeta(id: number | string, motivo: string) {
         return await invoke('revertir_abono_tarjeta', { id: Number(id), motivo });
     },

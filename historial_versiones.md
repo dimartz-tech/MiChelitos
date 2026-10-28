@@ -4,7 +4,35 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.114.0 (Versión Actual) - 2026-10-28
+## 🚀 Versión 1.115.0 (Versión Actual) - 2026-10-28
+**Vista previa del abono a tarjeta antes de confirmar.** En la pestaña Tarjetas, el formulario de abono muestra —y actualiza mientras se escribe— qué va a pasar si se pulsa «Abonar». Motivo: en el análisis de uso, 6 de 19 abonos terminaron revertidos o corregidos, siempre por la misma familia de causas (cuenta de origen equivocada, tarjeta equivocada, re-registro de un grupo de abonos con otra cuenta).
+
+### ✨ Qué muestra
+* Tarjeta y divisa; monto y tipo (saldo actual / balance al corte / monto libre).
+* **Cuenta de origen efectiva**: si no se eligió, dice «Efectivo DOP (por defecto)» o «Efectivo USD (por defecto)» y que no lleva comisión.
+* Comisión del 0,20 % (cuando aplica) y **total debitado**; tasa de cambio y equivalente cuando el abono es en otra divisa que la cuenta.
+* **Saldo resultante de la cuenta** y **balance resultante de la tarjeta** (pesos y dólares; un balance negativo se rotula «a favor»).
+* Advertencias en texto claro, de más grave a menos: bloqueos (monto cero o inválido, cuenta archivada, tarjeta inactiva, caja de efectivo inexistente, falta la tasa), avisos (la cuenta quedaría en negativo, el abono supera el balance y deja saldo a favor, no se eligió cuenta, el monto no coincide con el tipo elegido) e información (cruce de divisas).
+
+### 🏗️ Diseño (una sola fórmula)
+* Nuevo `dominio/abono.rs`: `calcular_abono` (pura: conversión, comisión, total), `TipoDeAbono`, `Advertencia` (con gravedad y texto) e `importe_legible`. **`registrar_pago_tarjeta` ahora usa esa misma función** y la nueva `cuenta_de_cobro` (cuenta elegida o caja por defecto); la lógica no se duplica ni en la vista previa ni en JavaScript.
+* Nuevo caso de uso `aplicacion/previsualizar_abono.rs`, de **solo lectura**: recibe el almacén por referencia compartida (`&`), de modo que el compilador impide escribir. Puerto de lectura nuevo `ConsultaParaAbono` (estado y balances de la tarjeta), con adaptador SQLite y doble en memoria.
+* Comando `previsualizar_abono` (transacción diferida `lee_almacen`). Todos los importes viajan **como texto exacto** (`ipc::importe_a_texto`), sin `f64` nuevo para dinero; el monto llega como texto sin validar para que uno vacío o ilegible sea una advertencia y no un error de la llamada.
+* Interfaz: acciones delegadas `previsualizarAbono` (`alEscribir` en monto y tasa, `alCambiar` en cuenta; divisa y tipo entran por `aplicarTipoAbono`). Antirrebote de 250 ms, descarte de respuestas viejas por contador de secuencia, y si el comando falla se muestra un mensaje sin bloquear el formulario (el registro valida igualmente). Todo texto de Rust pasa por `escaparHtml`; los importes se agrupan por miles sobre las cifras del texto, sin `Number`.
+* Cambio de comportamiento: **ninguno** en el registro de abonos (el reordenamiento calcula la comisión antes de ajustar la deuda en lugar de después; una falla ahí ya deshacía la transacción entera).
+
+### 🧪 Verificación
+* Prueba de propiedad (`la_vista_previa_coincide_con_el_estado_real_tras_registrar_el_abono`): 14 casos (pesos/dólares, con y sin cuenta, con y sin comisión, saldo a favor, cuenta insuficiente, cruce de divisas con redondeo, tasa sin cruce); la vista previa coincide con el estado real tras registrar sobre una copia del mismo estado (saldos, balances, comisión, gasto de comisión, cuenta del abono). `la_vista_previa_no_modifica_nada` compara una huella del estado antes y después. `la_vista_previa_y_el_registro_rechazan_lo_mismo` cruza el veredicto de ambas.
+* Lo mismo sobre SQLite real (`pv1`, `pv2`): huella de **todas las tablas** idéntica antes y después de la vista previa, y coincidencia con el abono registrado por el comando real.
+* 11 pruebas de la vista (formato, escape, antirrebote, carrera de respuestas, fallo del comando, contrato de acciones).
+* Mutaciones dirigidas a lo nuevo (comisión, signo del saldo resultante, advertencia de negativo, escritura desde la vista previa, carrera): cada una hizo fallar al menos una prueba y se restauró.
+
+### ⚠️ Hallazgo fijado (sin corregir; lo decide el titular)
+* `hallazgo_la_tasa_sin_cruce_de_divisas_no_convierte_pero_se_guarda`: un abono con cuenta guarda la tasa recibida (columna del abono y «Tasa N» en la descripción de la comisión) aunque no haya cruce de divisas y no se haya usado. No daña saldos; la vista previa no muestra la tasa si no hubo cruce.
+
+---
+
+## Versión 1.114.0 - 2026-10-28
 **Pestaña Gastos: autocompletado de la descripción, «repetir último» y búsqueda/filtros del historial.** Solo interfaz (`src/js/vistas/gastos.ts`): no cambia ninguna regla de dominio ni se añade ningún comando de Rust.
 
 ### ✨ Qué se añade

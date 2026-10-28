@@ -1,5 +1,6 @@
 // Núcleo de dominio: reglas puras, sin SQL, sin Tauri y sin acceso al reloj real.
 
+pub mod abono;
 pub mod avance;
 pub mod bonificacion;
 pub mod capital;

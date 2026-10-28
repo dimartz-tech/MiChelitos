@@ -12,7 +12,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
-import { VistaTarjetas, MANEJADORES_TARJETAS, puenteTarjetas } from '../../../src/js/vistas/tarjetas.js';
+import { VistaTarjetas, MANEJADORES_TARJETAS, puenteTarjetas, importeDeTexto } from '../../../src/js/vistas/tarjetas.js';
 
 const tarjeta = (extra = {}) => ({
     id: 7, entidad: 'Banco Beta', nombre_tarjeta: 'Oro', fecha_corte: 15, fecha_limite_pago: 5,
@@ -50,7 +50,7 @@ const selectorCuentas = (valor, opciones) => ({
 /** Responde después, como el WebView real. */
 const tarde = valor => new Promise(resolver => setTimeout(() => resolver(valor), 2));
 
-function montar({ tarjetas = [tarjeta()], inactivas = [], previa = PREVIA(), prestamos = [], bonificaciones = [], campos = {}, falla = {}, confirmar = true, motivo = 'Registrado por error en la tarjeta equivocada', respuesta = '58.5', abonos = [], avances = [], cuentas = CUENTAS } = {}) {
+function montar({ tarjetas = [tarjeta()], inactivas = [], previa = PREVIA(), prestamos = [], bonificaciones = [], campos = {}, falla = {}, confirmar = true, motivo = 'Registrado por error en la tarjeta equivocada', respuesta = '58.5', abonos = [], avances = [], cuentas = CUENTAS, previaDeAbono = null } = {}) {
     const llamadas = [], avisos = [], rutas = [], confirmaciones = [], preguntas = [], motivos = [], modales = [];
     const reg = (nombre, valor) => async (...a) => { llamadas.push([nombre, ...a]); if (falla[nombre]) throw new Error(falla[nombre]); return valor; };
     const api = {
@@ -64,6 +64,7 @@ function montar({ tarjetas = [tarjeta()], inactivas = [], previa = PREVIA(), pre
         obtenerAvancesTarjeta: async id => { llamadas.push(['obtenerAvancesTarjeta', id]); return avances; },
         revertirAvanceEfectivo: reg('revertirAvanceEfectivo', 'Avance revertido (prueba).'), actualizarLimitesTarjeta: reg('actualizarLimitesTarjeta'),
         obtenerTarjetasInactivas: async () => inactivas,
+        previsualizarAbono: async (...a) => { llamadas.push(['previsualizarAbono', ...a]); if (falla.previsualizarAbono) throw new Error(falla.previsualizarAbono); return typeof previaDeAbono === 'function' ? previaDeAbono(...a) : previaDeAbono; },
         previsualizarCierreTarjeta: async id => { llamadas.push(['previsualizarCierreTarjeta', id]); if (falla.previsualizarCierreTarjeta) throw new Error(falla.previsualizarCierreTarjeta); return previa; },
         cerrarTarjeta: reg('cerrarTarjeta', 'Tarjeta Banco Beta Oro desactivada. 2 suscripción(es) trasladada(s).'), reactivarTarjeta: reg('reactivarTarjeta'),
     };
@@ -83,7 +84,7 @@ function montar({ tarjetas = [tarjeta()], inactivas = [], previa = PREVIA(), pre
         motivo: { pedir: (titulo, texto) => { motivos.push({ titulo, texto }); return tarde(motivo); } },
         modales: { abrir: (id, html) => { modales.push({ id, html }); registro[id] = el({ innerHTML: html }); } },
         ahora: () => new Date(2027, 2, 10),
-    });
+    }, 3); // retardo de la vista previa del abono: unos milisegundos, para esperarlo en la prueba
     return { vista, llamadas, avisos, rutas, confirmaciones, preguntas, motivos, modales, pantalla, registro, evento: { preventDefault() { this.evitado = (this.evitado || 0) + 1; } } };
 }
 
@@ -693,6 +694,190 @@ test('las tarjetas inactivas van aparte, en un bloque plegable, con su estado en
     const sin = montar({});
     await sin.vista.render();
     assert.doesNotMatch(sin.pantalla.contenido.innerHTML, /Tarjetas inactivas/);
+});
+
+// --- Vista previa del abono (1.115.0): Rust calcula, la vista solo dibuja ---
+
+const PREVIA_ABONO = (extra = {}) => ({
+    tarjeta_id: 7, tarjeta_nombre: 'Banco Beta Oro', tarjeta_activa: true, divisa: 'DOP', monto: '1187.50',
+    tipo: 'personalizado', tipo_etiqueta: 'Monto libre',
+    cuenta: { id: 1, nombre: 'Cuenta <Pesos>', divisa: 'DOP', saldo_actual: '4700.00', por_defecto: false, archivada: false },
+    con_comision: true, debitado: '1187.50', comision: '2.38', total_debitado: '1189.88', tasa_cambio: null,
+    saldo_resultante: '3810.12', balance_actual_pesos: '2750.00', balance_actual_dolares: '120.00',
+    balance_resultante_pesos: '1562.50', balance_resultante_dolares: '120.00', advertencias: [], se_puede_confirmar: true, ...extra,
+});
+const esperar = ms => new Promise(r => setTimeout(r, ms));
+/** Los campos del formulario de abono de la tarjeta 7. */
+const formularioAbono = (extra = {}) => ({
+    pag_previa_7: el({ hidden: true }), pag_monto_7: el({ value: '1187.50' }), pag_div_7: el({ value: 'DOP' }),
+    pag_cuenta_7: el({ value: '1' }), pag_tasa_7: el({ value: '0.00' }), pag_tipo_7: el({ value: 'personalizado' }),
+    pag_fecha_7: el({ value: '10/03/2027' }), ...extra,
+});
+
+test('el formulario de abono declara la vista previa con acciones delegadas, sin atributos on*', async () => {
+    const t = montar({});
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.match(html, /id="pag_previa_7"/);
+    assert.doesNotMatch(html, /\son[a-z]+=/);
+    const campo = id => html.match(new RegExp(`<(?:input|select)[^>]*id="${id}"[^>]*>`))[0];
+    assert.match(campo('pag_monto_7'), /data-accion-escribir="previsualizarAbono"[^>]*data-args="\[7\]"/);
+    assert.match(campo('pag_tasa_7'), /data-accion-escribir="previsualizarAbono"/);
+    assert.match(campo('pag_cuenta_7'), /data-accion-cambiar="previsualizarAbono"/);
+    assert.ok(MANEJADORES_TARJETAS.includes('previsualizarAbono'));
+    assert.equal(typeof puenteTarjetas(t.vista).previsualizarAbono, 'function');
+});
+
+test('la vista previa pide a Rust lo escrito, muestra cuenta, comisión, total y resultados, y escapa los nombres', async () => {
+    const t = montar({ campos: formularioAbono(), previaDeAbono: PREVIA_ABONO() });
+    t.vista.previsualizarAbono(7);
+    await esperar(30);
+    assert.deepEqual(t.llamadas, [['previsualizarAbono', 7, '1187.50', 'DOP', 1, 0, 'personalizado']]);
+    const caja = t.registro.pag_previa_7;
+    assert.equal(caja.hidden, false);
+    assert.match(caja.innerHTML, /Banco Beta Oro/);
+    assert.match(caja.innerHTML, /Cuenta &lt;Pesos&gt;/);
+    assert.doesNotMatch(caja.innerHTML, /<Pesos>/);
+    assert.match(caja.innerHTML, /Comisión[\s\S]*DOP 2\.38 \(0\.20 %\)/);
+    assert.match(caja.innerHTML, /Total debitado[\s\S]*DOP 1,189\.88/);
+    assert.match(caja.innerHTML, /Saldo resultante de la cuenta[\s\S]*DOP 3,810\.12/);
+    assert.match(caja.innerHTML, /Balance resultante de la tarjeta[\s\S]*DOP 1,562\.50[\s\S]*USD 120\.00/);
+});
+
+test('sin cuenta elegida la vista previa dice «por defecto» y «sin comisión»; con dólares muestra la tasa y el equivalente', async () => {
+    const efectivo = montar({ campos: formularioAbono({ pag_cuenta_7: el({ value: '' }) }), previaDeAbono: PREVIA_ABONO({
+        cuenta: { id: 12, nombre: 'Efectivo DOP', divisa: 'DOP', saldo_actual: '1187.50', por_defecto: true, archivada: false },
+        con_comision: false, comision: null, total_debitado: '1187.50', saldo_resultante: '0.00',
+        advertencias: [{ codigo: 'efectivo_por_defecto', gravedad: 'aviso', texto: 'No elegiste cuenta de origen.' }],
+    }) });
+    efectivo.vista.previsualizarAbono(7);
+    await esperar(30);
+    assert.equal(efectivo.llamadas[0][4], null, 'sin cuenta se manda null');
+    const html = efectivo.registro.pag_previa_7.innerHTML;
+    assert.match(html, /Efectivo DOP \(por defecto\)/);
+    assert.match(html, /Sin comisión \(efectivo\)/);
+    assert.match(html, /alert-banner warning[\s\S]*No elegiste cuenta/);
+
+    const cruce = montar({ campos: formularioAbono({ pag_div_7: el({ value: 'USD' }), pag_tasa_7: el({ value: '58.75' }) }), previaDeAbono: PREVIA_ABONO({
+        divisa: 'USD', monto: '100.00', debitado: '5875.00', comision: '11.75', total_debitado: '5886.75', tasa_cambio: '58.75', saldo_resultante: '-886.75',
+        advertencias: [{ codigo: 'cuenta_en_negativo', gravedad: 'aviso', texto: 'La cuenta quedaría en negativo: DOP -886.75.' }],
+    }) });
+    cruce.vista.previsualizarAbono(7);
+    await esperar(30);
+    assert.match(cruce.registro.pag_previa_7.innerHTML, /Tasa de cambio[\s\S]*58\.75 → equivale a DOP 5,875\.00/);
+    assert.match(cruce.registro.pag_previa_7.innerHTML, /#ef4444[^>]*>DOP -886\.75/, 'el saldo negativo se resalta');
+});
+
+test('las advertencias salen con su gravedad, el texto de Rust escapado y un saldo a favor se rotula «a favor»', async () => {
+    const t = montar({ campos: formularioAbono(), previaDeAbono: PREVIA_ABONO({
+        balance_resultante_pesos: '-427.25', se_puede_confirmar: false,
+        advertencias: [
+            { codigo: 'cuenta_archivada', gravedad: 'bloqueo', texto: 'La cuenta «<b>X</b>» está archivada.' },
+            { codigo: 'supera_el_balance', gravedad: 'aviso', texto: 'El abono supera el balance.' },
+            { codigo: 'cruza_divisas', gravedad: 'info', texto: 'Se convierte.' },
+        ] }) });
+    t.vista.previsualizarAbono(7);
+    await esperar(30);
+    const html = t.registro.pag_previa_7.innerHTML;
+    assert.match(html, /alert-banner danger[^>]*data-advertencia="cuenta_archivada"/);
+    assert.match(html, /alert-banner warning[^>]*data-advertencia="supera_el_balance"/);
+    assert.match(html, /alert-banner info[^>]*data-advertencia="cruza_divisas"/);
+    assert.doesNotMatch(html, /<b>X<\/b>/);
+    assert.match(html, /&lt;b&gt;X&lt;\/b&gt;/);
+    assert.match(html, /DOP 427\.25 a favor/);
+    assert.match(html, /el abono se rechazaría/);
+});
+
+test('si solo falta la tasa, la vista previa no habla de rechazo: el formulario la pedirá', async () => {
+    const t = montar({ campos: formularioAbono(), previaDeAbono: PREVIA_ABONO({ debitado: null, comision: null, total_debitado: null, saldo_resultante: null, se_puede_confirmar: false,
+        advertencias: [{ codigo: 'falta_tasa', gravedad: 'bloqueo', texto: 'Indica la tasa.' }] }) });
+    t.vista.previsualizarAbono(7);
+    await esperar(30);
+    assert.match(t.registro.pag_previa_7.innerHTML, /se te pedirá/);
+    assert.doesNotMatch(t.registro.pag_previa_7.innerHTML, /se rechazaría/);
+});
+
+test('con el monto vacío no hay vista previa y no se llama a Rust', async () => {
+    const t = montar({ campos: formularioAbono({ pag_monto_7: el({ value: '  ' }), pag_previa_7: el({ hidden: false, innerHTML: 'viejo' }) }), previaDeAbono: PREVIA_ABONO() });
+    t.vista.previsualizarAbono(7);
+    await esperar(30);
+    assert.deepEqual(t.llamadas, []);
+    assert.equal(t.registro.pag_previa_7.hidden, true);
+    assert.equal(t.registro.pag_previa_7.innerHTML, '');
+});
+
+test('el antirrebote junta varias pulsaciones en una sola petición, con lo último escrito', async () => {
+    const t = montar({ campos: formularioAbono(), previaDeAbono: PREVIA_ABONO() });
+    for (const v of ['1', '10', '100', '1000']) {
+        t.registro.pag_monto_7.value = v;
+        t.vista.previsualizarAbono(7);
+    }
+    await esperar(40);
+    assert.equal(t.llamadas.length, 1);
+    assert.equal(t.llamadas[0][2], '1000');
+});
+
+test('una respuesta vieja no pisa a una más reciente (carrera)', async () => {
+    const resolvedores = [];
+    const t = montar({ campos: formularioAbono(), previaDeAbono: () => new Promise(r => resolvedores.push(r)) });
+    t.vista.previsualizarAbono(7);
+    await esperar(30);              // la primera petición sale y queda pendiente
+    t.registro.pag_monto_7.value = '2100.00';
+    t.vista.previsualizarAbono(7);
+    await esperar(30);              // la segunda sale también
+    assert.equal(resolvedores.length, 2);
+    resolvedores[1](PREVIA_ABONO({ monto: '2100.00', tarjeta_nombre: 'NUEVA' }));
+    await esperar(5);
+    resolvedores[0](PREVIA_ABONO({ monto: '1187.50', tarjeta_nombre: 'VIEJA' }));   // llega tarde
+    await esperar(5);
+    assert.match(t.registro.pag_previa_7.innerHTML, /NUEVA/);
+    assert.doesNotMatch(t.registro.pag_previa_7.innerHTML, /VIEJA/);
+});
+
+test('una respuesta que llega después de volver a escribir se descarta aunque la nueva petición aún no haya salido', async () => {
+    const resolvedores = [];
+    const t = montar({ campos: formularioAbono(), previaDeAbono: () => new Promise(r => resolvedores.push(r)) });
+    t.vista.previsualizarAbono(7);
+    await esperar(30);
+    t.vista.previsualizarAbono(7);  // el titular siguió escribiendo; su petición aún no sale
+    resolvedores[0](PREVIA_ABONO({ tarjeta_nombre: 'OBSOLETA' }));
+    await esperar(1);
+    assert.equal(t.registro.pag_previa_7.innerHTML, '');
+});
+
+test('si el comando falla se dice con claridad, el formulario sigue utilizable y no se dispara un aviso de error', async () => {
+    const t = montar({ campos: formularioAbono(), falla: { previsualizarAbono: 'base ocupada <x>' } });
+    t.vista.previsualizarAbono(7);
+    await esperar(30);
+    const html = t.registro.pag_previa_7.innerHTML;
+    assert.match(html, /No se pudo calcular la vista previa/);
+    assert.match(html, /base ocupada &lt;x&gt;/);
+    assert.match(html, /Aún puedes abonar/);
+    assert.equal(t.registro.pag_previa_7.hidden, false);
+    assert.deepEqual(t.avisos, []);
+    // Y abonar sigue funcionando.
+    await t.vista.handleAbonoTarjeta(t.evento, 7);
+    assert.equal(t.llamadas.filter(l => l[0] === 'registrarPagoTarjeta').length, 1);
+});
+
+test('aplicarTipoAbono rellena el monto y recalcula la vista previa; sin formulario en la página no hace nada', async () => {
+    const t = montar({ campos: formularioAbono({ pag_tipo_7: el({ value: 'corte' }), pag_monto_7: el({ value: '' }) }), previaDeAbono: PREVIA_ABONO() });
+    t.vista.aplicarTipoAbono(7, 150, 40, 200, 60);
+    assert.equal(t.registro.pag_monto_7.value, '150.00');
+    await esperar(30);
+    assert.equal(t.llamadas[0][2], '150.00');
+    assert.equal(t.llamadas[0][6], 'corte');
+    const sin = montar({ previaDeAbono: PREVIA_ABONO() });
+    sin.vista.previsualizarAbono(7);
+    await esperar(30);
+    assert.deepEqual(sin.llamadas, []);
+});
+
+test('el separador de miles trabaja sobre las cifras del texto, sin pasar por Number', () => {
+    assert.equal(importeDeTexto('1234567.89'), '1,234,567.89');
+    assert.equal(importeDeTexto('-886.75'), '-886.75');
+    assert.equal(importeDeTexto('900719925474099.99'), '900,719,925,474,099.99');
+    assert.equal(importeDeTexto('no es importe'), 'no es importe');
 });
 
 test('reactivar envía el id, avisa que las suscripciones no vuelven solas y redibuja; si Rust rechaza, solo avisa', async () => {
