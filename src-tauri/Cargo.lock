@@ -1723,7 +1723,7 @@ dependencies = [
 
 [[package]]
 name = "michelitos-tauri"
-version = "1.120.0"
+version = "1.122.0"
 dependencies = [
  "chrono",
  "rusqlite",
