@@ -4,7 +4,26 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.115.0 (Versión Actual) - 2026-10-28
+## 🚀 Versión 1.119.0 (Versión Actual) - 2026-10-28
+**Gastos: cuatro afinaciones de las sugerencias (seguimiento del PR #152).** Solo frontend (`src/js/vistas/gastos.ts`); sin Rust ni cambios de base de datos.
+
+### ✨ Qué cambia
+* **Sugerencias de descripción**: «Cafe» y «Café» (y «CAFÉ») se agrupan como una sola, igual que ya hacía la búsqueda de texto; se muestra la grafía del uso más reciente.
+* **«Repetir último» con prefijo**: además de la descripción completa (ahora también sin distinguir tildes), un prefijo de al menos 2 caracteres ofrece el último gasto cuando coincide con **una única** descripción. La oferta sigue sin rellenar nada hasta pulsar el botón; el monto solo con «Usar el último monto».
+* **Etiquetas de método legibles** («Efectivo», «Tarjeta», «Transferencia») en el filtro del historial; el valor que se filtra no cambia.
+* **Un solo ayudante** (`etiquetaDeMetodo`) usado también en la columna de método del historial (antes CSS `capitalize` sobre el valor crudo) y en el resumen de la oferta de repetir.
+
+### 🧭 Decisión sobre prefijos ambiguos
+* Una descripción idéntica (ignorando tildes y mayúsculas) gana siempre, aunque otras empiecen igual («Taxi» frente a «Taxi al centro»).
+* Si no hay idéntica y el prefijo coincide con **varias descripciones distintas**, no se ofrece nada: elegir una (la más frecuente o reciente) rellenaría categoría, método y medio de un gasto que el titular quizá no pensaba. Una sola letra tampoco ofrece nada.
+
+### 🧪 Verificación
+* 6 pruebas nuevas con datos inventados (agrupación con tildes, coincidencia sin tildes, prefijo único, ambiguo, idéntica sobre prefijo, etiquetas) y una aserción ajustada del PR #152 (un prefijo único ya coincide).
+* Mutaciones: quitar la normalización de tildes (3 pruebas fallan), aceptar prefijos ambiguos (1), etiqueta sin traducir (2) y filtro con valor crudo (1); todas restauradas.
+
+---
+
+## Versión 1.115.0 - 2026-10-28
 **Vista previa del abono a tarjeta antes de confirmar.** En la pestaña Tarjetas, el formulario de abono muestra —y actualiza mientras se escribe— qué va a pasar si se pulsa «Abonar». Motivo: en el análisis de uso, 6 de 19 abonos terminaron revertidos o corregidos, siempre por la misma familia de causas (cuenta de origen equivocada, tarjeta equivocada, re-registro de un grupo de abonos con otra cuenta).
 
 ### ✨ Qué muestra
