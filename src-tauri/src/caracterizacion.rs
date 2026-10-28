@@ -6461,3 +6461,105 @@ fn ta11_revertir_un_movimiento_historico_de_una_tarjeta_desactivada_exige_reacti
     crate::comandos::abonos::revertir_abono_tarjeta(ultimo_abono(), motivo_de_prueba()).unwrap();
     assert_importe(balances_tarjeta(tarjeta).0, 1_000.0, "reactivada, la reversión procede");
 }
+
+// --- Vista previa del abono (1.115.0), sobre SQLite real ---
+
+/// Todo el contenido de la base como texto, tabla por tabla: la huella que la vista previa no debe alterar.
+fn huella_de_la_base() -> String {
+    let c = conexion();
+    let tablas: Vec<String> = c
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let mut huella = String::new();
+    for tabla in tablas {
+        let mut stmt = c.prepare(&format!("SELECT * FROM \"{tabla}\";")).unwrap();
+        let columnas = stmt.column_count();
+        let filas: Vec<String> = stmt
+            .query_map([], |r| {
+                let mut f = String::new();
+                for i in 0..columnas {
+                    f.push_str(&format!("{:?};", r.get::<_, rusqlite::types::Value>(i)?));
+                }
+                Ok(f)
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        huella.push_str(&format!("{tabla}:{}\n", filas.join("|")));
+    }
+    huella
+}
+
+fn texto_a_f64(t: &str) -> f64 {
+    t.parse().unwrap()
+}
+
+#[test]
+fn pv1_la_vista_previa_no_escribe_y_coincide_con_el_abono_real_en_sqlite() {
+    let _g = entorno_aislado();
+    // (monto, divisa, con cuenta?, tasa): pesos y dólares, con y sin cuenta, cruzando divisas y con saldo a favor.
+    let casos: [(&str, &str, bool, f64); 6] = [
+        ("1187.50", "DOP", true, 0.0),
+        ("1187.50", "DOP", false, 0.0),
+        ("50.00", "USD", true, 58.75),
+        ("20.00", "USD", false, 0.0),
+        ("3177.25", "DOP", true, 0.0),
+        ("33.33", "DOP", true, 0.0),
+    ];
+    for (n, (monto_txt, divisa, con_cuenta, tasa)) in casos.into_iter().enumerate() {
+        let tarjeta = crear_tarjeta(2_500.0, 120.0);
+        let cuenta = crear_cuenta(&format!("Cuenta de prueba {n}"), "DOP", 5_000.0);
+        let elegida = con_cuenta.then_some(cuenta);
+
+        let antes = huella_de_la_base();
+        let v = crate::comandos::abonos::previsualizar_abono(tarjeta, monto_txt.to_string(), divisa.to_string(), elegida, tasa, "personalizado".to_string()).unwrap();
+        assert_eq!(huella_de_la_base(), antes, "la vista previa escribió ({monto_txt} {divisa})");
+        assert!(v.se_puede_confirmar, "{:?}", v.advertencias);
+
+        let caja_antes = (balance_cuenta("Efectivo DOP"), balance_cuenta("Efectivo USD"));
+        let gastos_antes = total_gastos();
+        registrar_pago_tarjeta(tarjeta, "01/01/2027".to_string(), importe(monto_txt), divisa.to_string(), elegida, tasa).unwrap();
+
+        let (bp, bd) = balances_tarjeta(tarjeta);
+        assert_importe(bp, texto_a_f64(&v.balance_resultante_pesos), "balance en pesos");
+        assert_importe(bd, texto_a_f64(&v.balance_resultante_dolares), "balance en dólares");
+        let cuenta_real = v.cuenta.as_ref().unwrap();
+        assert_importe(balance_cuenta(&cuenta_real.nombre), texto_a_f64(v.saldo_resultante.as_ref().unwrap()), "saldo de la cuenta");
+        assert_eq!(cuenta_real.por_defecto, !con_cuenta);
+        if !con_cuenta {
+            assert!(v.comision.is_none() && !v.con_comision, "en efectivo no hay comisión");
+            assert_eq!(cuenta_real.nombre, if divisa == "USD" { "Efectivo USD" } else { "Efectivo DOP" });
+            assert_eq!(total_gastos(), gastos_antes, "sin comisión no se asienta gasto");
+        } else {
+            assert_eq!(total_gastos(), gastos_antes + 1, "la comisión se asienta como gasto");
+            let comision: f64 = conexion().query_row("SELECT monto FROM gastos ORDER BY id DESC LIMIT 1;", [], |r| r.get(0)).unwrap();
+            assert_importe(comision, texto_a_f64(v.comision.as_ref().unwrap()), "comisión");
+        }
+        // La otra caja no se movió.
+        let (otra, antes_otra) = if divisa == "USD" { ("Efectivo DOP", caja_antes.0) } else { ("Efectivo USD", caja_antes.1) };
+        assert_importe(balance_cuenta(otra), antes_otra, "la otra caja");
+    }
+}
+
+#[test]
+fn pv2_la_vista_previa_advierte_sin_fallar_ni_escribir_con_datos_incompletos() {
+    let _g = entorno_aislado();
+    let tarjeta = crear_tarjeta(100.0, 0.0);
+    let cuenta = crear_cuenta("Cuenta Pequeña", "DOP", 50.0);
+    let antes = huella_de_la_base();
+    let v = crate::comandos::abonos::previsualizar_abono(tarjeta, String::new(), "DOP".into(), Some(cuenta), 0.0, "actual".into()).unwrap();
+    assert!(!v.se_puede_confirmar && v.monto.is_none());
+    assert_eq!(v.advertencias[0].gravedad, "bloqueo");
+    let v = crate::comandos::abonos::previsualizar_abono(tarjeta, "100.00".into(), "DOP".into(), Some(cuenta), 0.0, "actual".into()).unwrap();
+    assert!(v.advertencias.iter().any(|a| a.codigo == "cuenta_en_negativo"));
+    assert!(v.se_puede_confirmar, "quedar en negativo es un aviso");
+    let v = crate::comandos::abonos::previsualizar_abono(tarjeta, "10.00".into(), "USD".into(), Some(cuenta), 0.0, "personalizado".into()).unwrap();
+    assert!(v.advertencias.iter().any(|a| a.codigo == "falta_tasa") && !v.se_puede_confirmar);
+    assert!(crate::comandos::abonos::previsualizar_abono(987_654, "1.00".into(), "DOP".into(), None, 0.0, "personalizado".into()).is_err());
+    assert!(crate::comandos::abonos::previsualizar_abono(tarjeta, "1.00".into(), "EUR".into(), None, 0.0, "personalizado".into()).is_err());
+    assert_eq!(huella_de_la_base(), antes);
+}

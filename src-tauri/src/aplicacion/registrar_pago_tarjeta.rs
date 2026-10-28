@@ -31,7 +31,7 @@
 //! no significa nada, y el importe inflado salía de una cuenta real.
 
 use super::ErrorAplicacion;
-use crate::dominio::cargos::TASA_RETENCION;
+use crate::dominio::abono::calcular_abono;
 use crate::dominio::cuenta::nombre_de_caja_de_cobro;
 use crate::dominio::dinero::{Dinero, TasaCambio};
 use crate::dominio::errores::ErrorDominio;
@@ -76,50 +76,34 @@ pub fn registrar_pago_tarjeta(
     // El orden importa: primero se resuelve todo lo que puede fallar por una
     // regla, y solo después se toca un saldo. Así una operación rechazada no
     // deja nada a medias ni siquiera antes de la transacción.
-    let (cuenta_id, con_comision) = match datos.cuenta_ahorro_id {
-        Some(id) => (id, true),
-        None => {
-            let caja = nombre_de_caja_de_cobro(datos.monto.divisa());
-            let id = almacen
-                .cuenta_por_nombre(caja)?
-                .ok_or(ErrorDominio::CajaDeAbonoNoEncontrada { nombre: caja.to_string() })?;
-            (id, false)
-        }
-    };
+    let (cuenta_id, con_comision) = cuenta_de_cobro(datos.monto.divisa(), datos.cuenta_ahorro_id, almacen)?;
     super::cuentas::exigir_activa(almacen, cuenta_id)?;
-    let debitado = resolver_conversion(&datos, almacen.divisa(cuenta_id)?)?;
+    // El mismo cálculo que muestra la vista previa (`previsualizar_abono`).
+    let calculo = calcular_abono(datos.monto, almacen.divisa(cuenta_id)?, datos.tasa_cambio, con_comision)?;
 
     // 1. La deuda de la tarjeta baja. Sin recorte a cero: si el abono excede
     //    la deuda, el balance queda negativo, que es el saldo a favor que el
     //    emisor acredita de verdad (resolución de H5).
     almacen.ajustar_deuda(datos.tarjeta_id, datos.monto.negado())?;
 
-    // 2. La cuenta paga el importe convertido más su comisión.
-    let (debitado, comision, gasto_id) = match con_comision {
-        false => {
-            // En efectivo no hay transferencia ni comisión: sale exactamente el importe del abono.
-            almacen.ajustar_saldo(cuenta_id, debitado.negado())?;
-            (Some(debitado), None, None)
-        }
-        true => {
-            let comision = debitado.porcentaje(TASA_RETENCION)?;
-            let total = debitado.sumar(&comision)?;
-            almacen.ajustar_saldo(cuenta_id, total.negado())?;
-
-            let gasto_id = almacen.insertar(&GastoAPersistir {
-                fecha: datos.fecha.clone(),
-                monto: comision,
-                descripcion: descripcion_comision(datos.tasa_cambio),
-                categoria_id: categoria_comision_id,
-                metodo_pago: "transferencia".to_string(),
-                cargos: Dinero::cero(comision.divisa()),
-                tarjeta_id: None,
-                cuenta_ahorro_id: Some(cuenta_id),
-                estado_conversion: crate::dominio::conversion::EstadoConversion::NoAplica,
-            })?;
-
-            (Some(debitado), Some(comision), Some(gasto_id))
-        }
+    // 2. La cuenta paga el importe convertido más su comisión (en efectivo no hay transferencia ni comisión: sale
+    //    exactamente el importe del abono).
+    almacen.ajustar_saldo(cuenta_id, calculo.total_debitado.negado())?;
+    let debitado = Some(calculo.debitado);
+    let comision = calculo.comision;
+    let gasto_id = match comision {
+        None => None,
+        Some(comision) => Some(almacen.insertar(&GastoAPersistir {
+            fecha: datos.fecha.clone(),
+            monto: comision,
+            descripcion: descripcion_comision(datos.tasa_cambio),
+            categoria_id: categoria_comision_id,
+            metodo_pago: "transferencia".to_string(),
+            cargos: Dinero::cero(comision.divisa()),
+            tarjeta_id: None,
+            cuenta_ahorro_id: Some(cuenta_id),
+            estado_conversion: crate::dominio::conversion::EstadoConversion::NoAplica,
+        })?),
     };
 
     // 3. El abono se guarda ya enlazado a todo lo que movió.
@@ -128,7 +112,7 @@ pub fn registrar_pago_tarjeta(
         fecha: datos.fecha,
         monto: datos.monto,
         cuenta_ahorro_id: Some(cuenta_id),
-        tasa_cambio: if con_comision { datos.tasa_cambio.map(|t| t.valor()) } else { None },
+        tasa_cambio: if comision.is_some() { datos.tasa_cambio.map(|t| t.valor()) } else { None },
         monto_debitado: debitado,
         comision,
         gasto_comision_id: gasto_id,
@@ -137,21 +121,25 @@ pub fn registrar_pago_tarjeta(
     Ok(PagoRegistrado { id, debitado, comision })
 }
 
-/// Qué importe sale realmente de la cuenta, en la divisa de la cuenta.
+/// De qué cuenta sale el abono y si lleva comisión.
 ///
-/// Es aquí donde se exige la tasa. La condición no es «el abono va en USD»
-/// sino «el abono y la cuenta no coinciden»: abonar dólares desde una cuenta
-/// en dólares no necesita conversión ninguna, y pedirla sería un estorbo.
-fn resolver_conversion(
-    datos: &DatosPago,
-    divisa_cuenta: crate::dominio::dinero::Divisa,
-) -> Result<Dinero, ErrorAplicacion> {
-    if datos.monto.divisa() == divisa_cuenta {
-        return Ok(datos.monto);
+/// Con cuenta elegida: esa cuenta, **con** comisión. Sin ella: la caja de efectivo de la divisa del abono («Efectivo
+/// DOP» o «Efectivo USD»), **sin** comisión. Lo usan el registro y la vista previa.
+pub(crate) fn cuenta_de_cobro(
+    divisa_del_abono: crate::dominio::dinero::Divisa,
+    cuenta_ahorro_id: Option<i64>,
+    almacen: &impl BusquedaDeCuentas,
+) -> Result<(i64, bool), ErrorAplicacion> {
+    match cuenta_ahorro_id {
+        Some(id) => Ok((id, true)),
+        None => {
+            let caja = nombre_de_caja_de_cobro(divisa_del_abono);
+            let id = almacen
+                .cuenta_por_nombre(caja)?
+                .ok_or(ErrorDominio::CajaDeAbonoNoEncontrada { nombre: caja.to_string() })?;
+            Ok((id, false))
+        }
     }
-
-    let tasa = datos.tasa_cambio.ok_or(ErrorDominio::TasaDeCambioRequerida)?;
-    Ok(datos.monto.convertir(divisa_cuenta, tasa)?)
 }
 
 /// La descripción conserva la tasa por compatibilidad con lo ya guardado.
@@ -236,6 +224,21 @@ mod tests {
             r,
             Err(ErrorAplicacion::Dominio(ErrorDominio::TasaDeCambioRequerida))
         ));
+    }
+
+    #[test]
+    fn hallazgo_la_tasa_sin_cruce_de_divisas_no_convierte_pero_se_guarda() {
+        // H15 hizo que una tasa sin cruce de divisas no convierta. Pero el abono con cuenta **guarda igualmente** esa
+        // tasa (`tasa_cambio` del abono y «Tasa 60» en la descripción de la comisión), como si hubiera habido
+        // conversión. Es conducta heredada y no daña saldos; se fija aquí y se deja al titular decidir si guardar
+        // solo la tasa que de verdad se usó. La vista previa no muestra la tasa cuando no hubo cruce.
+        let mut a = almacen();
+        a.ajustar_deuda(20, dop(1_000.0)).unwrap();
+
+        let r = registrar_pago_tarjeta(datos(dop(100.0), Some(10), Some(60.0)), 1, &mut a).unwrap();
+
+        assert_eq!(a.saldo_de(10), dop(499_899.8), "100 más 0.20 de comisión: la tasa no convirtió nada");
+        assert_eq!(a.pagos[&r.id].tasa_cambio, Some(60.0), "la tasa se guardó aunque no se usó");
     }
 
     #[test]
