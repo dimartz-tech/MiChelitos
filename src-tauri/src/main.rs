@@ -29,6 +29,8 @@ mod integracion_patrimonio;
 mod gherkin;
 #[cfg(test)]
 mod caso_de_uso_gherkin;
+#[cfg(test)]
+mod integracion_resumen;
 
 // --- PUNTO DE ENTRADA PRINCIPAL ---
 fn main() {
@@ -42,6 +44,7 @@ fn main() {
             comandos::catalogos::crear_categoria,
             comandos::catalogos::eliminar_categoria,
             comandos::gastos::obtener_gastos,
+            comandos::resumen::obtener_resumen_gastos,
             comandos::gastos::crear_gasto,
             comandos::ingresos::obtener_ingresos,
             comandos::ingresos::crear_ingreso,

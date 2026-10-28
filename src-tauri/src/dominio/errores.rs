@@ -114,6 +114,8 @@ pub enum ErrorDominio {
     DiaDeFacturacionInvalido { dia: i32 },
     /// La frecuencia no es ninguna de las que admite el esquema.
     FrecuenciaDesconocida { codigo: String },
+    /// El mes que se pide al resumen no existe o es posterior al mes en curso.
+    PeriodoInvalido { anio: i32, mes: u32 },
 }
 
 impl fmt::Display for ErrorDominio {
@@ -308,6 +310,11 @@ impl fmt::Display for ErrorDominio {
                 f,
                 "Frecuencia «{}» desconocida. Las admitidas son mensual y anual.",
                 codigo
+            ),
+            ErrorDominio::PeriodoInvalido { anio, mes } => write!(
+                f,
+                "El período {:02}/{} no es válido: el mes debe ir de 1 a 12 y no puede ser posterior al mes en curso.",
+                mes, anio
             ),
             ErrorDominio::AvanceEnOtraDivisa { cuenta, avance } => write!(
                 f,
