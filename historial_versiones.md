@@ -32,10 +32,6 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.113.0 - 2026-10-15
-
----
-
 ## Versión 1.114.0 - 2026-10-28
 **Pestaña Gastos: autocompletado de la descripción, «repetir último» y búsqueda/filtros del historial.** Solo interfaz (`src/js/vistas/gastos.ts`): no cambia ninguna regla de dominio ni se añade ningún comando de Rust.
 
