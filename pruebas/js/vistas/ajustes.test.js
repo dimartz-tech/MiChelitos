@@ -352,6 +352,68 @@ test('el panel de casos: si la página no tiene el panel, no hace nada', async (
     await assert.doesNotReject(() => montar().vista.alternarCasosDeCorreccion());
 });
 
+// --- Casos de corrección: detalle de un traspaso borrado  ---
+
+const DETALLE = (extra = {}) => JSON.stringify({
+    version: 1, traspaso_id: 7, fecha: '07/10/2026', descripcion: 'Compra de dólares',
+    origen: { cuenta_id: 5, cuenta_nombre: 'Ahorros DOP', importe: { monto: '5875.37', divisa: 'DOP' } },
+    destino: { cuenta_id: 6, cuenta_nombre: 'Dólares', importe: { monto: '100.00', divisa: 'USD' } },
+    tasa: '0.017021', cargo: { monto: '25.55', divisa: 'DOP' }, ...extra,
+});
+const CASO_TRASPASO = (extra = {}) => ({
+    numero_caso: 'COR-2026-0003', fecha: '03/11/2026', tipo: 'traspaso', referencia_id: 7, descripcion: 'Compra de dólares',
+    importe: 5875.37, divisa: 'DOP', motivo: 'Traspaso registrado en la cuenta equivocada', detalle: DETALLE(), ...extra,
+});
+
+test('el panel de casos muestra el detalle de un traspaso: fecha, las dos cuentas con su importe y divisa, tasa y cargo', async () => {
+    const caja = el({ hidden: true });
+    const t = montar({ campos: { 'casos-correccion': caja }, correcciones: [CASO_TRASPASO()] });
+    await t.vista.alternarCasosDeCorreccion();
+    const html = caja.innerHTML;
+    assert.match(html, /07\/10\/2026: Ahorros DOP \(5875\.37 DOP\) → Dólares \(100\.00 USD\)/);
+    assert.match(html, /tasa 0\.017021/);
+    assert.match(html, /cargo 25\.55 DOP/);
+    assert.match(html, /«Compra de dólares»/);
+    assert.doesNotMatch(html, /Sin detalle/);
+});
+
+test('un traspaso sin tasa ni descripción omite esas partes', async () => {
+    const caja = el({ hidden: true });
+    const t = montar({ campos: { 'casos-correccion': caja }, correcciones: [CASO_TRASPASO({ detalle: DETALLE({ tasa: null, descripcion: null }) })] });
+    await t.vista.alternarCasosDeCorreccion();
+    assert.doesNotMatch(caja.innerHTML, /tasa|«/);
+    assert.match(caja.innerHTML, /cargo 25\.55 DOP/);
+});
+
+test('un caso de traspaso anterior (detalle null) dice «Sin detalle (caso anterior)»; un JSON ilegible, «ilegible»', async () => {
+    const caja = el({ hidden: true });
+    await montar({ campos: { 'casos-correccion': caja }, correcciones: [CASO_TRASPASO({ detalle: null })] }).vista.alternarCasosDeCorreccion();
+    assert.match(caja.innerHTML, /Sin detalle \(caso anterior\)/);
+    const rota = el({ hidden: true });
+    await montar({ campos: { 'casos-correccion': rota }, correcciones: [CASO_TRASPASO({ detalle: '{mal' })] }).vista.alternarCasosDeCorreccion();
+    assert.match(rota.innerHTML, /Sin detalle \(ilegible\)/);
+});
+
+test('los casos que no son traspasos no muestran línea de detalle', async () => {
+    const caja = el({ hidden: true });
+    await montar({ campos: { 'casos-correccion': caja }, correcciones: [CASO_TRASPASO({ tipo: 'gasto', detalle: null })] }).vista.alternarCasosDeCorreccion();
+    assert.doesNotMatch(caja.innerHTML, /caso-detalle|Sin detalle/);
+});
+
+test('el detalle escapa nombres de cuenta, descripción, divisa y tasa: nada se interpreta como marcado', async () => {
+    const caja = el({ hidden: true });
+    const hostil = DETALLE({
+        descripcion: '<img src=x onerror="a">', tasa: '<i>1</i>',
+        origen: { cuenta_id: 5, cuenta_nombre: `<b>O'"&`, importe: { monto: '<1>', divisa: '<D>' } },
+    });
+    await montar({ campos: { 'casos-correccion': caja }, correcciones: [CASO_TRASPASO({ detalle: hostil })] }).vista.alternarCasosDeCorreccion();
+    const html = caja.innerHTML;
+    assert.doesNotMatch(html, /<img|<b>|<i>|<1>|<D>/);
+    assert.match(html, /&lt;b&gt;O&#39;&quot;&amp;/);
+    assert.match(html, /«&lt;img src=x onerror=&quot;a&quot;&gt;»/);
+    assert.doesNotMatch(html, /\bon\w+\s*=\s*"[^&]/, 'sin atributos on* en el detalle');
+});
+
 // --- Correcciones: confirmación y motivo ---
 
 const CORRECCIONES = [

@@ -36,6 +36,7 @@ pub fn eliminar_gasto(
         importe: Some(gasto.monto),
         divisa: Some(gasto.divisa),
         motivo,
+        detalle: None,
     })?;
     revertir_gasto(id, almacen)?;
     Ok(caso)

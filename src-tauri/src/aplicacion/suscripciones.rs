@@ -289,6 +289,7 @@ pub fn confirmar_pendiente(
                 importe: Some(sub.monto),
                 divisa: Some(sub.divisa.clone()),
                 motivo,
+                detalle: None,
             })?;
             avanzar_puntero(almacen, sub.id, &regla, vencimiento, None)?;
             Ok(Confirmado::Descartado { vencimiento, caso })
