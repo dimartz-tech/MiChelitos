@@ -2267,10 +2267,8 @@ fn m3_sin_descripcion_el_caso_dice_traspaso_entre_cuentas() {
 }
 
 #[test]
-fn m3_hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
-    // **Hallazgo, fijado sin corregir** (protocolo de hallazgos): el caso de corrección graba siempre la
-    // divisa «DOP» y el importe de origen, aunque el traspaso sea entre cuentas en dólares. El rastro
-    // miente sobre la divisa. Cambiarlo es una decisión del titular, no de esta refactorización.
+fn m3_el_caso_de_un_traspaso_en_dolares_se_anota_como_usd() {
+    // Resuelto: el caso lleva la divisa de la cuenta de origen (antes decía siempre «DOP»).
     let _g = entorno_aislado();
     let origen = crear_cuenta("Origen USD", "USD", 500.0);
     let destino = crear_cuenta("Destino USD", "USD", 0.0);
@@ -2279,8 +2277,8 @@ fn m3_hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
     crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
 
     let casos = casos_anotados_m3();
-    assert_eq!(casos[0].5.as_deref(), Some("DOP"), "HALLAZGO: debería decir USD");
-    assert_importe(casos[0].4.unwrap(), 200.0, "el importe sí es el del origen");
+    assert_eq!(casos[0].5.as_deref(), Some("USD"));
+    assert_importe(casos[0].4.unwrap(), 200.0, "el importe es el del origen");
 }
 
 #[test]
@@ -6702,4 +6700,90 @@ fn integracion_patrimonio_contrato_de_forma_con_tipos_ipc() {
     assert_eq!(claves_de(&json), claves_declaradas(ts, "Patrimonio"), "el DTO real y tipos-ipc.d.ts declaran claves distintas");
     assert_eq!(claves_de(&json["partidas"][0]), claves_declaradas(ts, "PartidaPatrimonio"));
     assert!(ts.contains("obtener_patrimonio: { args: {  }; ret: Patrimonio }"));
+}
+
+// ---------------------------------------------------------------------------
+//  Integración de la divisa del caso de un traspaso eliminado: comandos reales sobre la base temporal.
+// ---------------------------------------------------------------------------
+
+fn cuenta_por_comando(nombre: &str, divisa: &str, saldo: &str) -> i64 {
+    crate::comandos::cuentas::crear_cuenta(nombre.into(), divisa.into(), importe(saldo), None, None).expect("crear cuenta")
+}
+
+#[test]
+fn integracion_traspaso_usd_a_usd_eliminado_anota_usd_y_devuelve_saldos() {
+    let _g = entorno_aislado();
+    let o = cuenta_por_comando("Ahorro Dólares Ejemplo", "USD", "500.37");
+    let d = cuenta_por_comando("Otra Dólares Ejemplo", "USD", "10.11");
+    crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), o, d, importe("200.07"), importe("200.07"), importe("1.25"), "Mover dólares".into()).unwrap();
+    assert_importe(saldo_cuenta_id(o), 299.05, "tras el traspaso");
+
+    let caso = crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+
+    let casos = crate::comandos::correcciones::obtener_correcciones().unwrap();
+    assert_eq!(casos.len(), 1);
+    assert_eq!(casos[0].numero_caso, caso);
+    assert!(casos[0].numero_caso.starts_with("COR-") && casos[0].numero_caso.ends_with("-0001"), "{}", casos[0].numero_caso);
+    assert_eq!(casos[0].tipo, "traspaso");
+    assert_eq!(casos[0].divisa.as_deref(), Some("USD"));
+    assert_importe(casos[0].importe.unwrap(), 200.07, "importe de origen");
+    assert_importe(saldo_cuenta_id(o), 500.37, "origen como antes");
+    assert_importe(saldo_cuenta_id(d), 10.11, "destino como antes");
+}
+
+#[test]
+fn integracion_traspaso_dop_a_dop_eliminado_sigue_anotando_dop() {
+    let _g = entorno_aislado();
+    let o = cuenta_por_comando("Ahorro Ejemplo", "DOP", "5000.37");
+    let d = cuenta_por_comando("Otra Ejemplo", "DOP", "0.00");
+    crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), o, d, importe("1000.07"), importe("1000.07"), importe("0.00"), "Pesos".into()).unwrap();
+
+    crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+
+    let casos = crate::comandos::correcciones::obtener_correcciones().unwrap();
+    assert_eq!(casos[0].divisa.as_deref(), Some("DOP"));
+    assert_importe(casos[0].importe.unwrap(), 1000.07, "importe");
+    assert_importe(saldo_cuenta_id(o), 5000.37, "origen");
+    assert_importe(saldo_cuenta_id(d), 0.0, "destino");
+}
+
+#[test]
+fn integracion_traspaso_dop_a_usd_eliminado_anota_la_divisa_de_origen() {
+    let _g = entorno_aislado();
+    let o = cuenta_por_comando("Pesos Ejemplo", "DOP", "9000.37");
+    let d = cuenta_por_comando("Dólares Ejemplo", "USD", "0.00");
+    crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), o, d, importe("6003.33"), importe("100.05"), importe("0.00"), "Cambio".into()).unwrap();
+
+    crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+
+    let casos = crate::comandos::correcciones::obtener_correcciones().unwrap();
+    assert_eq!(casos[0].divisa.as_deref(), Some("DOP"));
+    assert_importe(casos[0].importe.unwrap(), 6003.33, "importe de origen");
+    assert!(!casos[0].descripcion.contains("100.05"), "el lado destino no queda en el caso (límite conocido)");
+    assert_importe(saldo_cuenta_id(o), 9000.37, "origen como antes");
+    assert_importe(saldo_cuenta_id(d), 0.0, "destino como antes");
+}
+
+#[test]
+fn integracion_los_casos_antiguos_con_divisa_dop_se_siguen_listando_igual() {
+    let _g = entorno_aislado();
+    conexion()
+        .execute(
+            "INSERT INTO correcciones (numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo) VALUES ('COR-2000-0001', '2000-10-01', 'traspaso', 5, 'Antiguo en dólares', 200.07, 'DOP', 'Motivo antiguo de prueba');",
+            [],
+        )
+        .expect("sembrar caso antiguo");
+    let o = cuenta_por_comando("Ahorro Dólares Ejemplo", "USD", "500.37");
+    let d = cuenta_por_comando("Otra Dólares Ejemplo", "USD", "0.00");
+    crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), o, d, importe("30.03"), importe("30.03"), importe("0.00"), "Nuevo".into()).unwrap();
+    crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+
+    let casos = crate::comandos::correcciones::obtener_correcciones().unwrap();
+    assert_eq!(casos.len(), 2);
+    let antiguo = casos.iter().find(|c| c.descripcion == "Antiguo en dólares").expect("el antiguo sigue");
+    assert_eq!((antiguo.divisa.as_deref(), antiguo.numero_caso.as_str()), (Some("DOP"), "COR-2000-0001"));
+    assert_importe(antiguo.importe.unwrap(), 200.07, "importe antiguo intacto");
+    let nuevo = casos.iter().find(|c| c.descripcion == "Nuevo").unwrap();
+    assert_eq!(nuevo.divisa.as_deref(), Some("USD"));
+    assert!(nuevo.numero_caso.starts_with("COR-") && nuevo.numero_caso.ends_with("-0001"), "otro año, su propia serie");
 }
