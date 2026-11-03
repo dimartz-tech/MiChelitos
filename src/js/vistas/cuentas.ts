@@ -8,6 +8,7 @@
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
 import { ATRIBUTOS_DE_FECHA, alCambiar, alEnviar, escaparHtml } from '../nucleo/html.js';
+import { atributosDeFilaDeTraspaso, insigniaDeTraspaso } from '../nucleo/traspasos.js';
 
 type ApiCuentas = ApiDe<'obtenerCuentas' | 'obtenerTransaccionesCuentas' | 'transferirEntreCuentas'>;
 
@@ -152,9 +153,9 @@ export class VistaCuentas implements Vista {
                                     </thead>
                                     <tbody>
                                         ${transacciones.map(t => `
-                                            <tr>
+                                            <tr${atributosDeFilaDeTraspaso(t)}>
                                                 <td>${escaparHtml(t.fecha)}</td>
-                                                <td><strong>${escaparHtml(t.descripcion || '-')}</strong></td>
+                                                <td><strong>${escaparHtml(t.descripcion || '-')}</strong> ${insigniaDeTraspaso(t)}</td>
                                                 <td>${escaparHtml(t.cuenta_origen_nombre)}</td>
                                                 <td class="amount expense">${t.monto_origen > 0 ? `- ${t.monto_origen.toLocaleString('es-DO', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '-'}</td>
                                                 <td>${escaparHtml(t.cuenta_destino_nombre)}</td>

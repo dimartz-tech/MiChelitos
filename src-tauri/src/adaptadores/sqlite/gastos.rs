@@ -796,8 +796,9 @@ impl RepositorioTransferencias for AlmacenSqlite<'_> {
         self.tx
             .execute(
                 "INSERT INTO transacciones_cuentas
-                 (fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, tasa_cambio, cargo, descripcion)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+                 (fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, tasa_cambio, cargo, descripcion,
+                  estado, compensa_a)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
                 params![
                     datos.fecha,
                     datos.origen_id,
@@ -807,6 +808,8 @@ impl RepositorioTransferencias for AlmacenSqlite<'_> {
                     datos.tasa.unwrap_or(1.0),
                     datos.cargo.unidades(),
                     datos.descripcion,
+                    if datos.compensa_a.is_some() { "compensacion" } else { "vigente" },
+                    datos.compensa_a,
                 ],
             )
             .map_err(fallo)?;
@@ -814,18 +817,20 @@ impl RepositorioTransferencias for AlmacenSqlite<'_> {
     }
 
     fn obtener_transferencia(&self, id: i64) -> Result<TransferenciaGuardada, ErrorAlmacen> {
-        let fila: Option<(String, i64, i64, f64, f64, f64, Option<String>)> = self
+        type Fila = (String, i64, i64, f64, f64, f64, Option<String>, String, Option<i64>);
+        let fila: Option<Fila> = self
             .tx
             .query_row(
-                "SELECT fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, cargo, descripcion
+                "SELECT fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, cargo, descripcion,
+                        estado, compensa_a
                  FROM transacciones_cuentas WHERE id = ?;",
                 [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)),
             )
             .optional()
             .map_err(fallo)?;
 
-        let (fecha, origen_id, destino_id, monto_origen, monto_destino, cargo, descripcion) =
+        let (fecha, origen_id, destino_id, monto_origen, monto_destino, cargo, descripcion, estado, compensa_a) =
             fila.ok_or(ErrorAlmacen::NoEncontrado { entidad: "traspaso", id })?;
 
         // Los importes se reconstruyen en la divisa de su propia cuenta, que
@@ -836,8 +841,13 @@ impl RepositorioTransferencias for AlmacenSqlite<'_> {
             Dinero::nuevo(valor, divisa).map_err(|e| ErrorAlmacen::Fallo(e.to_string()))
         };
 
+        let estado = EstadoTraspaso::desde_texto(&estado)
+            .ok_or_else(|| ErrorAlmacen::Fallo(format!("Estado de traspaso desconocido en el asiento {id}.")))?;
+
         Ok(TransferenciaGuardada {
             id,
+            estado,
+            compensa_a,
             fecha,
             origen_id,
             destino_id,
@@ -848,15 +858,12 @@ impl RepositorioTransferencias for AlmacenSqlite<'_> {
         })
     }
 
-    fn eliminar_transferencia(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+    fn marcar_anulada(&mut self, id: i64) -> Result<bool, ErrorAlmacen> {
         let filas = self
             .tx
-            .execute("DELETE FROM transacciones_cuentas WHERE id = ?;", [id])
+            .execute("UPDATE transacciones_cuentas SET estado = 'anulada' WHERE id = ? AND estado = 'vigente';", [id])
             .map_err(fallo)?;
-        if filas == 0 {
-            return Err(ErrorAlmacen::NoEncontrado { entidad: "traspaso", id });
-        }
-        Ok(())
+        Ok(filas > 0)
     }
 }
 

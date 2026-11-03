@@ -31,6 +31,8 @@ mod gherkin;
 mod caso_de_uso_gherkin;
 #[cfg(test)]
 mod integracion_resumen;
+#[cfg(test)]
+mod integracion_traspasos;
 
 // --- PUNTO DE ENTRADA PRINCIPAL ---
 fn main() {

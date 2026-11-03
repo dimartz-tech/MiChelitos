@@ -36,6 +36,10 @@ pub struct TransaccionCuenta {
     pub tasa_cambio: f64,
     pub cargo: f64,
     pub descripcion: Option<String>,
+    /// `vigente`, `anulada` (el original que se anuló) o `compensacion` (el asiento contrario).
+    pub estado: String,
+    /// En una compensación, el id del traspaso que anula; en los demás, `null`.
+    pub compensa_a: Option<i64>,
 }
 
 fn a_cuenta_ahorro(c: puertos::repositorios::CuentaLeida) -> CuentaAhorro {
@@ -174,12 +178,18 @@ pub fn obtener_transacciones_cuentas() -> Result<Vec<TransaccionCuenta>, String>
                 tasa_cambio: t.tasa_cambio,
                 cargo: t.cargo,
                 descripcion: t.descripcion,
+                estado: t.estado,
+                compensa_a: t.compensa_a,
             })
             .collect())
     })
 }
 
+/// **Anula** un traspaso (ya no lo borra). El nombre y la firma se conservan para no tocar la interfaz ni
+/// `tipos-ipc.d.ts`; el comportamiento es el de `aplicacion::transferir::anular_transferencia`: el original
+/// sobrevive marcado `anulada`, nace su asiento de compensación y se anota el caso de corrección.
 #[tauri::command]
 pub fn eliminar_transaccion_cuenta(id: i64, motivo: String) -> Result<String, String> {
-    con_almacen(|a| Ok(aplicacion::transferir::eliminar_transferencia(id, &motivo, a)?))
+    let hoy = chrono::Local::now().format("%d/%m/%Y").to_string();
+    con_almacen(|a| Ok(aplicacion::transferir::anular_transferencia(id, &motivo, &hoy, a)?))
 }

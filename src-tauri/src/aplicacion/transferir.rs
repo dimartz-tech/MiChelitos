@@ -1,4 +1,6 @@
-//! Casos de uso: transferir entre cuentas y revertir una transferencia.
+//! Casos de uso: transferir entre cuentas y anular un traspaso con un asiento de compensación.
+//!
+//! **MODELO C (prototipo, no fusionar):** anular en vez de borrar. Ver `anular_transferencia`.
 //!
 //! La transferencia es la operación con más efectos simultáneos del sistema:
 //! debita, acredita y asienta. Aquí se orquestan sobre los puertos; la
@@ -16,7 +18,7 @@
 //! contradecir. Quien teclea pensando en pesos y elige una cuenta en dólares
 //! acredita dólares. Esa mitad se mitiga en la interfaz, no aquí.
 //!
-//! **Qué se conserva.** El recorte en cero al revertir el destino (**H10**) y
+//! **Qué se conserva.** La inversa exacta al anular (**H10**) y
 //! la guarda de borrado que ignora las transferencias (**H13**) siguen
 //! exactamente como estaban, a la espera de decisión. El descuadre de importes
 //! dentro de una misma divisa (**H14**) también se admite; el caso de uso lo
@@ -24,7 +26,8 @@
 
 use super::ErrorAplicacion;
 use crate::dominio::cuenta::{ExtremoCuenta, Transferencia};
-use crate::dominio::dinero::Dinero;
+use crate::dominio::dinero::{Dinero, TasaCambio};
+use crate::dominio::errores::ErrorDominio;
 use crate::puertos::repositorios::*;
 
 pub struct DatosTransferencia {
@@ -69,64 +72,83 @@ pub fn transferir(
         tasa: transferencia.tasa()?.map(|t| t.valor()),
         cargo: transferencia.cargo(),
         descripcion: datos.descripcion,
+        compensa_a: None,
     })
     .map_err(Into::into)
 }
 
-/// Deshace una transferencia y elimina su asiento.
+/// **Anula** un traspaso con un asiento de compensación (modelo «C»: anular en vez de borrar).
 ///
-/// **Es la inversa exacta de `transferir`** (resolución de **H10**): las dos
-/// cuentas vuelven al estado que tenían, porque revertir significa *«esta
-/// transferencia nunca ocurrió»*. No es devolver el dinero —eso sería otra
-/// transferencia, un hecho nuevo—, sino retirar un registro mal hecho.
+/// El original **sobrevive** marcado `anulada`; nace un asiento contrario con estado `compensacion` y `compensa_a`
+/// apuntando al original. Los saldos se ajustan con la **inversa exacta** de `transferir` (resolución de **H10**,
+/// intacta): tras anular, las dos cuentas quedan como antes del traspaso, y si el destino ya gastó lo recibido queda en
+/// negativo (informa de movimientos sin registrar; ocultarlo tras un cero borraría esa señal).
 ///
-/// Antes el destino se descontaba con recorte en cero mientras el origen se
-/// restituía entero, de modo que el total repartido entre ambas cuentas
-/// **subía**: el patrimonio quedaba inflado.
+/// El asiento contrario invierte los extremos: su origen es el destino del original (sale `monto_destino`) y su
+/// destino es el origen del original (entra `monto_origen`). **El cargo** conserva su importe y, por la naturaleza
+/// del asiento, se **reembolsa** a la cuenta destino de la compensación (la que pagó el cargo): entra además de
+/// `monto_origen`. Como el cargo vive en la divisa de esa cuenta, no pasa por `Transferencia::nueva`, que lo cobraría
+/// al origen de la compensación.
 ///
-/// Si el destino ya gastó lo recibido, el saldo queda negativo, y eso informa
-/// en lugar de estorbar: dice que hay movimientos sin registrar en esa cuenta.
-/// Ocultarlo tras un cero borraba justamente esa señal.
-pub fn revertir_transferencia(
-    id: i64,
-    almacen: &mut impl AlmacenTransferencias,
-) -> Result<(), ErrorAplicacion> {
-    let t = almacen.obtener_transferencia(id)?;
-
-    let devolucion = t.monto_origen.sumar(&t.cargo)?;
-    almacen.ajustar_saldo(t.origen_id, devolucion)?;
-    almacen.ajustar_saldo(t.destino_id, t.monto_destino.negado())?;
-
-    almacen.eliminar_transferencia(id)?;
-    Ok(())
-}
-
-/// Anota el caso de corrección de un traspaso y lo revierte.
+/// Orden: **primero** que el traspaso exista —un id inexistente se nombra antes que un motivo flojo—, después el motivo,
+/// que esté `vigente` (ni anulado ya, ni una compensación) y que las dos cuentas estén activas (como antes: una cuenta
+/// archivada se reactiva primero). Luego se inserta la compensación, se anota el caso (divisa **de origen**; la
+/// descripción cita «original #a, compensación #b»), se mueven los saldos y se marca el original. Todo en la
+/// transacción de quien llama: si algo falla no queda nada.
 ///
-/// Orden (el de siempre): **primero** que el traspaso exista —un id que no existe se nombra antes que un motivo
-/// flojo—, después el motivo, el caso de corrección y, **al final**, la reversión: si algo falla antes no queda un
-/// caso huérfano.
-///
-/// **Hallazgo, conservado sin corregir** (ver `caracterizacion::m3_hallazgo_…`): el caso graba siempre la divisa
-/// «DOP», aunque el traspaso sea entre cuentas en dólares; el importe es el de origen. Cambiarlo es una decisión
-/// del titular.
-pub fn eliminar_transferencia(
+/// `hoy` (dd/mm/aaaa) es la fecha de la compensación; llega de fuera para que el caso de uso no lea el reloj.
+pub fn anular_transferencia(
     id: i64,
     motivo: &str,
+    hoy: &str,
     almacen: &mut (impl AlmacenTransferencias + RegistroDeCorrecciones),
 ) -> Result<String, ErrorAplicacion> {
     let t = almacen.obtener_transferencia(id)?;
     let motivo = crate::dominio::correccion::motivo_de_correccion(motivo)?;
-    let descripcion = if t.descripcion.is_empty() { "Traspaso entre cuentas".to_string() } else { t.descripcion };
+    match t.estado {
+        EstadoTraspaso::Vigente => {}
+        EstadoTraspaso::Anulada => return Err(ErrorDominio::TraspasoYaAnulado { id }.into()),
+        EstadoTraspaso::Compensacion => return Err(ErrorDominio::CompensacionNoSeAnula { id }.into()),
+    }
+    super::cuentas::exigir_activa(almacen, t.origen_id)?;
+    super::cuentas::exigir_activa(almacen, t.destino_id)?;
+
+    let descripcion = if t.descripcion.is_empty() { "Traspaso entre cuentas".to_string() } else { t.descripcion.clone() };
+
+    // La tasa del contrario es la inversa de la del original; sin cambio de divisa no significa nada (`None`).
+    let tasa = if t.monto_origen.divisa() != t.monto_destino.divisa() {
+        Some(TasaCambio::nueva(t.monto_origen.unidades() / t.monto_destino.unidades())?.valor())
+    } else {
+        None
+    };
+    let compensacion_id = almacen.insertar_transferencia(TransferenciaAPersistir {
+        fecha: hoy.to_string(),
+        origen_id: t.destino_id,
+        destino_id: t.origen_id,
+        monto_origen: t.monto_destino,
+        monto_destino: t.monto_origen,
+        tasa,
+        cargo: t.cargo,
+        descripcion: format!("Compensación de #{id}: {descripcion}"),
+        compensa_a: Some(id),
+    })?;
+
     let caso = almacen.anotar_caso(&CasoAAnotar {
         tipo: "traspaso".to_string(),
         referencia_id: id,
-        descripcion,
+        descripcion: format!("{descripcion} (original #{id}, compensación #{compensacion_id})"),
         importe: Some(t.monto_origen.unidades()),
-        divisa: Some("DOP".to_string()),
+        divisa: Some(t.monto_origen.divisa().codigo().to_string()),
         motivo,
     })?;
-    revertir_transferencia(id, almacen)?;
+
+    // La inversa exacta de `transferir`: el origen recupera el monto y el cargo; el destino devuelve lo recibido.
+    almacen.ajustar_saldo(t.origen_id, t.monto_origen.sumar(&t.cargo)?)?;
+    almacen.ajustar_saldo(t.destino_id, t.monto_destino.negado())?;
+
+    if !almacen.marcar_anulada(id)? {
+        return Err(ErrorDominio::TraspasoYaAnulado { id }.into());
+    }
     Ok(caso)
 }
 
@@ -169,103 +191,6 @@ mod tests {
         let mut d = datos(dop(1_000.0), dop(1_000.0), dop(0.0));
         d.descripcion = descripcion.into();
         transferir(d, a).unwrap()
-    }
-
-    #[test]
-    fn eliminar_un_traspaso_anota_el_caso_y_devuelve_los_saldos() {
-        let mut a = almacen();
-        let id = con_traspaso(&mut a, "Pago del alquiler");
-
-        let caso = eliminar_transferencia(id, MOTIVO, &mut a).unwrap();
-
-        assert_eq!(caso, "CASO-0001");
-        assert_eq!(a.casos.len(), 1);
-        let c = &a.casos[0];
-        assert_eq!((c.tipo.as_str(), c.referencia_id), ("traspaso", id));
-        assert_eq!(c.descripcion, "Pago del alquiler");
-        assert_eq!(c.importe, Some(1_000.0));
-        assert_eq!(c.motivo, MOTIVO);
-        assert_eq!(a.saldo(10).unwrap(), dop(50_000.0));
-        assert_eq!(a.saldo(11).unwrap(), dop(10_000.0));
-        assert!(a.obtener_transferencia(id).is_err(), "el asiento se retiró");
-    }
-
-    #[test]
-    fn el_importe_del_caso_es_el_de_origen_aunque_el_destino_sea_otra_divisa() {
-        let mut a = AlmacenEnMemoria::nuevo().con_cuenta(10, "Pesos", dop(10_000.0)).con_cuenta(12, "Dólares", usd(0.0));
-        let id = transferir(
-            DatosTransferencia {
-                fecha: "13/10/2026".into(),
-                origen_id: 10,
-                destino_id: 12,
-                monto_origen: dop(6_000.0),
-                monto_destino: usd(100.0),
-                cargo: dop(0.0),
-                descripcion: "cambio".into(),
-            },
-            &mut a,
-        )
-        .unwrap();
-
-        eliminar_transferencia(id, MOTIVO, &mut a).unwrap();
-
-        assert_eq!(a.casos[0].importe, Some(6_000.0), "el de origen, no los 100 del destino");
-    }
-
-    #[test]
-    fn un_traspaso_sin_descripcion_se_anota_con_el_texto_generico() {
-        let mut a = almacen();
-        let id = con_traspaso(&mut a, "");
-
-        eliminar_transferencia(id, MOTIVO, &mut a).unwrap();
-
-        assert_eq!(a.casos[0].descripcion, "Traspaso entre cuentas");
-    }
-
-    #[test]
-    fn un_traspaso_inexistente_se_nombra_antes_que_un_motivo_invalido() {
-        let mut a = almacen();
-
-        let e = eliminar_transferencia(99, "corto", &mut a).unwrap_err();
-
-        assert_eq!(e.to_string(), "No se encontró traspaso con identificador 99.");
-        assert!(a.casos.is_empty());
-    }
-
-    #[test]
-    fn un_motivo_invalido_no_anota_caso_ni_toca_los_saldos() {
-        let mut a = almacen();
-        let id = con_traspaso(&mut a, "x");
-
-        assert!(eliminar_transferencia(id, "corto", &mut a).is_err());
-
-        assert!(a.casos.is_empty(), "sin caso huérfano");
-        assert!(a.obtener_transferencia(id).is_ok(), "el asiento sigue");
-        assert_eq!(a.saldo(11).unwrap(), dop(11_000.0));
-    }
-
-    #[test]
-    fn hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
-        // Fijado sin corregir (protocolo de hallazgos): ver el comentario de `eliminar_transferencia`.
-        let mut a2 = AlmacenEnMemoria::nuevo().con_cuenta(12, "A USD", usd(500.0)).con_cuenta(13, "B USD", usd(0.0));
-        let id = transferir(
-            DatosTransferencia {
-                fecha: "13/10/2026".into(),
-                origen_id: 12,
-                destino_id: 13,
-                monto_origen: usd(200.0),
-                monto_destino: usd(200.0),
-                cargo: usd(0.0),
-                descripcion: "usd".into(),
-            },
-            &mut a2,
-        )
-        .unwrap();
-
-        eliminar_transferencia(id, MOTIVO, &mut a2).unwrap();
-
-        assert_eq!(a2.casos[0].divisa.as_deref(), Some("DOP"), "HALLAZGO: debería decir USD");
-        assert_eq!(a2.casos[0].importe, Some(200.0));
     }
 
     #[test]
@@ -314,73 +239,6 @@ mod tests {
     }
 
     #[test]
-    fn revertir_devuelve_el_monto_y_el_cargo_al_origen() {
-        let mut a = almacen();
-        let id = transferir(datos(dop(8_000.0), dop(8_000.0), dop(100.0)), &mut a).unwrap();
-
-        revertir_transferencia(id, &mut a).unwrap();
-
-        assert_eq!(a.saldo_de(10), dop(50_000.0), "restitución exacta");
-        assert_eq!(a.saldo_de(11), dop(10_000.0));
-        assert!(a.obtener_transferencia(id).is_err(), "el asiento se fue");
-    }
-
-    #[test]
-    fn h10_si_el_destino_gasto_lo_recibido_el_saldo_queda_negativo() {
-        // **H10 resuelto.** Antes el destino se recortaba en cero mientras el
-        // origen se restituía entero, y el total repartido entre las dos
-        // cuentas subía: el patrimonio quedaba inflado.
-        //
-        // Ahora el negativo se muestra, y dice algo cierto: si la
-        // transferencia nunca ocurrió, el destino nunca tuvo ese dinero, así
-        // que gastarlo significa que faltan movimientos por registrar en esa
-        // cuenta. Ocultarlo tras un cero borraba justamente esa señal.
-        let mut a = almacen();
-        let id = transferir(datos(dop(8_000.0), dop(8_000.0), dop(0.0)), &mut a).unwrap();
-        a.ajustar_saldo(11, dop(-15_000.0)).unwrap(); // el destino queda en 3 000
-        assert_eq!(a.saldo_de(11), dop(3_000.0));
-        let total_antes = a.saldo_de(10).sumar(&a.saldo_de(11)).unwrap();
-
-        revertir_transferencia(id, &mut a).unwrap();
-
-        assert_eq!(a.saldo_de(10), dop(50_000.0), "el origen recupera todo");
-        assert_eq!(a.saldo_de(11), dop(-5_000.0), "y el destino devuelve todo");
-
-        let total_despues = a.saldo_de(10).sumar(&a.saldo_de(11)).unwrap();
-        assert_eq!(
-            total_despues, total_antes,
-            "el total no cambia: revertir no crea ni destruye dinero"
-        );
-    }
-
-    #[test]
-    fn transferir_y_revertir_es_inverso_cuando_el_recorte_no_interviene() {
-        let mut a = almacen();
-        let antes = (a.saldo_de(10), a.saldo_de(11));
-
-        let id = transferir(datos(dop(8_000.0), dop(8_000.0), dop(100.0)), &mut a).unwrap();
-        revertir_transferencia(id, &mut a).unwrap();
-
-        assert_eq!((a.saldo_de(10), a.saldo_de(11)), antes);
-    }
-
-    #[test]
-    fn revertir_dos_veces_falla_la_segunda() {
-        let mut a = almacen();
-        let id = transferir(datos(dop(8_000.0), dop(8_000.0), dop(0.0)), &mut a).unwrap();
-        revertir_transferencia(id, &mut a).unwrap();
-
-        assert!(revertir_transferencia(id, &mut a).is_err());
-        assert_eq!(a.saldo_de(10), dop(50_000.0), "sin doble restitución");
-    }
-
-    #[test]
-    fn revertir_una_transferencia_inexistente_es_error() {
-        let mut a = almacen();
-        assert!(revertir_transferencia(404, &mut a).is_err());
-    }
-
-    #[test]
     fn h14_un_descuadre_dentro_de_la_misma_divisa_se_rechaza() {
         // **H14 resuelto.** Antes salían 8 000 y entraban 7 500, y los 500 de
         // diferencia desaparecían entre las dos cuentas sin que nada lo
@@ -395,5 +253,229 @@ mod tests {
         assert!(error.contains("comisión"), "orienta hacia el cargo: {error}");
         assert_eq!(a.saldo_de(10), dop(50_000.0), "ningún saldo se movió");
         assert_eq!(a.saldo_de(11), dop(10_000.0));
+    }
+
+    // --- Anulación con asiento de compensación (modelo C) ---
+
+    const HOY: &str = "03/11/2026";
+
+    fn anular(id: i64, a: &mut AlmacenEnMemoria) -> Result<String, ErrorAplicacion> {
+        anular_transferencia(id, MOTIVO, HOY, a)
+    }
+
+    fn compensacion_de(a: &AlmacenEnMemoria, id: i64) -> TransferenciaGuardada {
+        a.transferencias.values().find(|t| t.compensa_a == Some(id)).cloned().expect("hay compensación")
+    }
+
+    #[test]
+    fn anular_un_traspaso_anota_el_caso_deja_el_original_y_crea_la_compensacion() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "Pago del alquiler");
+
+        let caso = anular(id, &mut a).unwrap();
+
+        assert_eq!(caso, "CASO-0001");
+        assert_eq!(a.casos.len(), 1);
+        let c = &a.casos[0];
+        let comp = compensacion_de(&a, id);
+        assert_eq!((c.tipo.as_str(), c.referencia_id), ("traspaso", id));
+        assert_eq!(c.descripcion, format!("Pago del alquiler (original #{id}, compensación #{})", comp.id));
+        assert_eq!(c.importe, Some(1_000.0));
+        assert_eq!(c.divisa.as_deref(), Some("DOP"));
+        assert_eq!(c.motivo, MOTIVO);
+        assert_eq!(a.saldo(10).unwrap(), dop(50_000.0));
+        assert_eq!(a.saldo(11).unwrap(), dop(10_000.0));
+        let original = a.obtener_transferencia(id).unwrap();
+        assert_eq!((original.estado, original.compensa_a), (EstadoTraspaso::Anulada, None), "el original sobrevive");
+        assert_eq!(comp.estado, EstadoTraspaso::Compensacion);
+        assert_eq!((comp.origen_id, comp.destino_id), (11, 10), "extremos invertidos");
+        assert_eq!((comp.monto_origen, comp.monto_destino), (dop(1_000.0), dop(1_000.0)));
+        assert_eq!(comp.fecha, HOY);
+        assert_eq!(comp.descripcion, format!("Compensación de #{id}: Pago del alquiler"));
+    }
+
+    #[test]
+    fn anular_usd_a_usd_anota_el_caso_en_dolares() {
+        // Invierte el antiguo hallazgo: el caso decía siempre «DOP».
+        let mut a = AlmacenEnMemoria::nuevo().con_cuenta(12, "A USD", usd(500.0)).con_cuenta(13, "B USD", usd(0.0));
+        let id = transferir(
+            DatosTransferencia {
+                fecha: "13/10/2026".into(),
+                origen_id: 12,
+                destino_id: 13,
+                monto_origen: usd(200.0),
+                monto_destino: usd(200.0),
+                cargo: usd(0.0),
+                descripcion: "usd".into(),
+            },
+            &mut a,
+        )
+        .unwrap();
+
+        anular(id, &mut a).unwrap();
+
+        assert_eq!(a.casos[0].divisa.as_deref(), Some("USD"));
+        assert_eq!(a.casos[0].importe, Some(200.0));
+        assert_eq!((a.saldo_de(12), a.saldo_de(13)), (usd(500.0), usd(0.0)));
+    }
+
+    #[test]
+    fn anular_dop_a_dop_con_cargo_devuelve_monto_y_cargo_al_origen() {
+        let mut a = almacen();
+        let id = transferir(datos(dop(8_000.0), dop(8_000.0), dop(100.0)), &mut a).unwrap();
+        assert_eq!(a.saldo_de(10), dop(41_900.0));
+
+        anular(id, &mut a).unwrap();
+
+        assert_eq!(a.saldo_de(10), dop(50_000.0), "restitución exacta con cargo");
+        assert_eq!(a.saldo_de(11), dop(10_000.0));
+        assert_eq!(compensacion_de(&a, id).cargo, dop(100.0), "el cargo reembolsado queda a la vista");
+    }
+
+    #[test]
+    fn anular_un_cruce_dop_a_usd_usa_la_divisa_de_origen_y_los_importes_invertidos() {
+        let mut a = almacen();
+        let mut d = datos(dop(6_000.0), usd(100.0), dop(50.0));
+        d.destino_id = 12;
+        let id = transferir(d, &mut a).unwrap();
+        assert_eq!((a.saldo_de(10), a.saldo_de(12)), (dop(43_950.0), usd(100.0)));
+
+        anular(id, &mut a).unwrap();
+
+        assert_eq!((a.saldo_de(10), a.saldo_de(12)), (dop(50_000.0), usd(0.0)));
+        assert_eq!(a.casos[0].divisa.as_deref(), Some("DOP"), "la divisa del ORIGEN, no la del destino");
+        assert_eq!(a.casos[0].importe, Some(6_000.0));
+        let comp = compensacion_de(&a, id);
+        assert_eq!((comp.origen_id, comp.destino_id), (12, 10));
+        assert_eq!((comp.monto_origen, comp.monto_destino, comp.cargo), (usd(100.0), dop(6_000.0), dop(50.0)));
+    }
+
+    #[test]
+    fn anular_una_vez_no_deja_anular_otra() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "x");
+        anular(id, &mut a).unwrap();
+        let antes = (a.saldo_de(10), a.saldo_de(11), a.transferencias.len(), a.casos.len());
+
+        let e = anular(id, &mut a).unwrap_err();
+
+        assert_eq!(e.to_string(), format!("El traspaso {id} ya está anulado: su asiento de compensación ya existe."));
+        assert_eq!((a.saldo_de(10), a.saldo_de(11), a.transferencias.len(), a.casos.len()), antes, "sin efectos");
+    }
+
+    #[test]
+    fn una_compensacion_no_se_anula() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "x");
+        anular(id, &mut a).unwrap();
+        let comp = compensacion_de(&a, id).id;
+        let antes = (a.saldo_de(10), a.saldo_de(11), a.transferencias.len(), a.casos.len());
+
+        let e = anular(comp, &mut a).unwrap_err();
+
+        assert!(e.to_string().contains("es la compensación de un traspaso anulado"), "{e}");
+        assert_eq!((a.saldo_de(10), a.saldo_de(11), a.transferencias.len(), a.casos.len()), antes);
+    }
+
+    #[test]
+    fn un_traspaso_inexistente_se_nombra_antes_que_un_motivo_invalido() {
+        let mut a = almacen();
+
+        let e = anular_transferencia(99, "corto", HOY, &mut a).unwrap_err();
+
+        assert_eq!(e.to_string(), "No se encontró traspaso con identificador 99.");
+        assert!(a.casos.is_empty());
+    }
+
+    #[test]
+    fn un_motivo_invalido_no_anota_caso_ni_crea_compensacion_ni_toca_los_saldos() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "x");
+
+        assert!(anular_transferencia(id, "corto", HOY, &mut a).is_err());
+
+        assert!(a.casos.is_empty(), "sin caso huérfano");
+        assert_eq!(a.transferencias.len(), 1, "ninguna compensación");
+        assert_eq!(a.obtener_transferencia(id).unwrap().estado, EstadoTraspaso::Vigente);
+        assert_eq!(a.saldo(11).unwrap(), dop(11_000.0));
+    }
+
+    #[test]
+    fn un_traspaso_sin_descripcion_se_anota_con_el_texto_generico() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "");
+
+        anular(id, &mut a).unwrap();
+
+        assert!(a.casos[0].descripcion.starts_with("Traspaso entre cuentas (original #"), "{}", a.casos[0].descripcion);
+        assert!(compensacion_de(&a, id).descripcion.ends_with(": Traspaso entre cuentas"));
+    }
+
+    #[test]
+    fn una_cuenta_archivada_rechaza_la_anulacion_con_el_mismo_mensaje_de_siempre() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "ida");
+        a.ajustar_saldo(11, dop(-11_000.0)).unwrap(); // el destino lo gastó todo: saldo cero
+        assert!(a.archivar_cuenta(11).unwrap());
+        let antes = (a.saldo_de(10), a.transferencias.len(), a.casos.len());
+
+        let e = anular(id, &mut a).unwrap_err();
+
+        assert_eq!(e.to_string(), "La cuenta «Cuenta Corriente DOP» está archivada: reactívala antes de usarla en una operación.");
+        assert_eq!((a.saldo_de(10), a.transferencias.len(), a.casos.len()), antes, "sin efectos");
+        assert_eq!(a.obtener_transferencia(id).unwrap().estado, EstadoTraspaso::Vigente);
+    }
+
+    #[test]
+    fn un_fallo_al_insertar_la_compensacion_no_marca_el_original_ni_mueve_saldos() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "x");
+        a.falla_al_insertar = true;
+
+        assert!(anular(id, &mut a).is_err());
+
+        assert_eq!(a.obtener_transferencia(id).unwrap().estado, EstadoTraspaso::Vigente);
+        assert_eq!((a.saldo_de(10), a.saldo_de(11)), (dop(49_000.0), dop(11_000.0)), "los de después del traspaso");
+        assert!(a.casos.is_empty());
+    }
+
+    #[test]
+    fn h10_si_el_destino_gasto_lo_recibido_el_saldo_queda_negativo() {
+        // **H10 resuelto**, conservado: la inversa exacta, sin recorte en cero. El total repartido no cambia.
+        let mut a = almacen();
+        let id = transferir(datos(dop(8_000.0), dop(8_000.0), dop(0.0)), &mut a).unwrap();
+        a.ajustar_saldo(11, dop(-15_000.0)).unwrap(); // el destino queda en 3 000
+        assert_eq!(a.saldo_de(11), dop(3_000.0));
+        let total_antes = a.saldo_de(10).sumar(&a.saldo_de(11)).unwrap();
+
+        anular(id, &mut a).unwrap();
+
+        assert_eq!(a.saldo_de(10), dop(50_000.0), "el origen recupera todo");
+        assert_eq!(a.saldo_de(11), dop(-5_000.0), "y el destino devuelve todo");
+        let total_despues = a.saldo_de(10).sumar(&a.saldo_de(11)).unwrap();
+        assert_eq!(total_despues, total_antes, "anular no crea ni destruye dinero");
+    }
+
+    #[test]
+    fn invariante_los_saldos_tras_anular_son_los_de_antes_del_traspaso() {
+        // Recorre combinaciones de divisa y cargo: tras transferir y anular, todo vuelve a su punto de partida.
+        let casos = [
+            (11, dop(1_234.56), dop(1_234.56), dop(0.0)),
+            (11, dop(1_234.56), dop(1_234.56), dop(7.77)),
+            (12, dop(6_000.0), usd(100.0), dop(0.0)),
+            (12, dop(6_000.0), usd(97.31), dop(35.0)),
+        ];
+        for (destino, mo, md, cargo) in casos {
+            let mut a = almacen();
+            let antes: Vec<_> = [10, 11, 12].iter().map(|c| a.saldo_de(*c)).collect();
+            let mut d = datos(mo, md, cargo);
+            d.destino_id = destino;
+            let id = transferir(d, &mut a).unwrap();
+
+            anular(id, &mut a).unwrap();
+
+            let despues: Vec<_> = [10, 11, 12].iter().map(|c| a.saldo_de(*c)).collect();
+            assert_eq!(despues, antes, "destino {destino}, cargo {cargo:?}");
+        }
     }
 }

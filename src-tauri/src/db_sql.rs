@@ -1947,6 +1947,98 @@ pub fn migracion_18_historial_del_patrimonio(tx: &Transaction) -> Result<(), Err
     Ok(())
 }
 
+const MIG19: &str = "traspasos: anular con asiento de compensación (PROTOTIPO)";
+
+/// **MIGRACIÓN DE PROTOTIPO (modelo C, rama `modelo/traspasos-c-…`; no fusionar).** Se numera 19 en esta rama; la 19
+/// real está reservada a presupuestos, así que si el abordaje se adopta se renumerará.
+///
+/// Anular un traspaso deja de borrarlo: el original sobrevive marcado y nace su asiento contrario.
+///
+/// * **`estado`** (`vigente` | `anulada` | `compensacion`, por defecto `vigente`): los traspasos existentes quedan
+///   `vigente`.
+/// * **`compensa_a`**: solo las filas `compensacion` la llevan, y apunta al traspaso que anulan. El `CHECK` exige la
+///   coherencia en los dos sentidos; un índice único impide dos compensaciones del mismo original.
+/// * **Disparadores** (la base lo impone aunque se salte la aplicación): un asiento `anulada` o `compensacion` no se
+///   modifica ni se borra; un traspaso solo pasa de `vigente` a `anulada` y solo si ya existe su compensación; una
+///   compensación solo nace sobre un traspaso `vigente`; ninguna fila nace ya `anulada`.
+pub fn migracion_19_traspasos_anulables(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::anadir_columna(
+        tx,
+        MIG19,
+        "transacciones_cuentas",
+        "estado",
+        "TEXT NOT NULL DEFAULT 'vigente' CHECK(estado IN ('vigente', 'anulada', 'compensacion'))",
+    )?;
+    migraciones::anadir_columna(
+        tx,
+        MIG19,
+        "transacciones_cuentas",
+        "compensa_a",
+        "INTEGER REFERENCES transacciones_cuentas(id) ON DELETE RESTRICT
+             CHECK((estado = 'compensacion') = (compensa_a IS NOT NULL))",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG19,
+        "una sola compensación por traspaso",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_traspaso_una_compensacion
+             ON transacciones_cuentas(compensa_a) WHERE compensa_a IS NOT NULL;",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG19,
+        "disparador: ningún traspaso nace anulado",
+        "CREATE TRIGGER IF NOT EXISTS traspasos_no_nacen_anulados BEFORE INSERT ON transacciones_cuentas
+         WHEN NEW.estado = 'anulada'
+         BEGIN
+             SELECT RAISE(ABORT, 'Un traspaso no nace anulado: se anula después, con su compensación.');
+         END;",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG19,
+        "disparador: solo se compensa un traspaso vigente",
+        "CREATE TRIGGER IF NOT EXISTS traspasos_solo_se_compensa_un_vigente BEFORE INSERT ON transacciones_cuentas
+         WHEN NEW.compensa_a IS NOT NULL
+              AND IFNULL((SELECT estado FROM transacciones_cuentas WHERE id = NEW.compensa_a), '') <> 'vigente'
+         BEGIN
+             SELECT RAISE(ABORT, 'Solo se compensa un traspaso vigente.');
+         END;",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG19,
+        "disparador: un asiento anulado o de compensación no se modifica",
+        "CREATE TRIGGER IF NOT EXISTS traspasos_anulados_no_se_modifican BEFORE UPDATE ON transacciones_cuentas
+         WHEN OLD.estado <> 'vigente'
+         BEGIN
+             SELECT RAISE(ABORT, 'Un asiento anulado o de compensación no se modifica.');
+         END;",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG19,
+        "disparador: de vigente solo se pasa a anulada, con su compensación hecha",
+        "CREATE TRIGGER IF NOT EXISTS traspasos_vigente_solo_se_anula BEFORE UPDATE OF estado ON transacciones_cuentas
+         WHEN OLD.estado = 'vigente' AND NEW.estado <> 'vigente'
+              AND (NEW.estado <> 'anulada'
+                   OR NOT EXISTS (SELECT 1 FROM transacciones_cuentas WHERE compensa_a = OLD.id))
+         BEGIN
+             SELECT RAISE(ABORT, 'Un traspaso solo se anula con su asiento de compensación ya creado.');
+         END;",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG19,
+        "disparador: un asiento anulado o de compensación no se borra",
+        "CREATE TRIGGER IF NOT EXISTS traspasos_anulados_no_se_borran BEFORE DELETE ON transacciones_cuentas
+         WHEN OLD.estado <> 'vigente'
+         BEGIN
+             SELECT RAISE(ABORT, 'Un asiento anulado o de compensación no se borra.');
+         END;",
+    )
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;

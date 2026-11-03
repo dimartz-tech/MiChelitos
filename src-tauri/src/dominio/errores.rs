@@ -78,6 +78,10 @@ pub enum ErrorDominio {
     /// Una factura cobrada en una cuenta que ya no existe no se puede corregir: el ajuste no tendría adónde ir.
     CuentaDeDepositoInexistente { cuenta: String },
     MotivoInsuficiente { motivo: String },
+    /// Un traspaso que ya se anuló no se vuelve a anular: su asiento contrario ya existe.
+    TraspasoYaAnulado { id: i64 },
+    /// Una compensación es el contrario de un traspaso anulado: no se anula (se haría otro traspaso nuevo).
+    CompensacionNoSeAnula { id: i64 },
     FacturaNoPendiente { id: i64 },
     CuentaSinNombre,
     /// Una tarjeta se desactiva con sus dos balances exactamente en cero. `importe` ya lleva dos decimales.
@@ -175,6 +179,14 @@ impl fmt::Display for ErrorDominio {
                 "Explica la corrección en al menos {} caracteres. Dentro de seis meses, «{}» no dirá qué pasó.",
                 super::correccion::MINIMO_DEL_MOTIVO,
                 motivo
+            ),
+            ErrorDominio::TraspasoYaAnulado { id } => {
+                write!(f, "El traspaso {} ya está anulado: su asiento de compensación ya existe.", id)
+            }
+            ErrorDominio::CompensacionNoSeAnula { id } => write!(
+                f,
+                "El asiento {} es la compensación de un traspaso anulado y no se anula: si fue un error, registra un traspaso nuevo.",
+                id
             ),
             ErrorDominio::CuotasTotalesRequeridas => write!(f, "Las cuotas totales son requeridas."),
             ErrorDominio::CuotasPendientesRequeridas => write!(f, "Las cuotas pendientes son requeridas."),

@@ -2120,6 +2120,13 @@ fn total_transferencias() -> i64 {
         .expect("contar transferencias")
 }
 
+/// Filas que cuentan (vigentes): las anuladas y sus compensaciones sobreviven pero no son «traspasos en pie».
+fn total_vigentes() -> i64 {
+    conexion()
+        .query_row("SELECT COUNT(*) FROM transacciones_cuentas WHERE estado = 'vigente';", [], |r| r.get(0))
+        .expect("contar vigentes")
+}
+
 fn ultima_transferencia() -> i64 {
     conexion()
         .query_row("SELECT MAX(id) FROM transacciones_cuentas;", [], |r| r.get(0))
@@ -2189,7 +2196,8 @@ fn c47_revertir_una_transferencia_devuelve_el_monto_y_el_cargo_al_origen() {
 
     assert_importe(saldo_cuenta_id(origen), 50_000.0, "restitución exacta con cargo");
     assert_importe(saldo_cuenta_id(destino), 10_000.0, "restitución exacta");
-    assert_eq!(total_transferencias(), 0);
+    assert_eq!(total_transferencias(), 2, "modelo C: el original y su compensación sobreviven");
+    assert_eq!(total_vigentes(), 0);
 }
 
 #[test]
@@ -2242,13 +2250,15 @@ fn m3_eliminar_un_traspaso_anota_el_caso_con_su_descripcion_e_importe() {
     let destino = crear_cuenta("Destino", "DOP", 0.0);
     crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(1_000.0), monto(1_000.0), monto(0.0), "Pago del alquiler".into()).unwrap();
 
-    let caso = crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+    let id = ultima_transferencia();
+    let caso = crate::comandos::cuentas::eliminar_transaccion_cuenta(id, motivo_de_prueba()).unwrap();
 
     let casos = casos_anotados_m3();
     assert_eq!(casos.len(), 1);
     assert_eq!(casos[0].0, caso, "devuelve el número de caso");
     assert_eq!(casos[0].1, "traspaso");
-    assert_eq!(casos[0].3, "Pago del alquiler");
+    assert_eq!(casos[0].2, id, "referencia al original");
+    assert_eq!(casos[0].3, format!("Pago del alquiler (original #{id}, compensación #{})", ultima_transferencia()));
     assert_importe(casos[0].4.unwrap(), 1_000.0, "importe del traspaso");
     assert_eq!(casos[0].5.as_deref(), Some("DOP"));
 }
@@ -2261,16 +2271,15 @@ fn m3_sin_descripcion_el_caso_dice_traspaso_entre_cuentas() {
     crate::comandos::cuentas::transferir_entre_cuentas("13/10/2026".into(), origen, destino, monto(100.0), monto(100.0), monto(0.0), "x".into()).unwrap();
     conexion().execute("UPDATE transacciones_cuentas SET descripcion = NULL;", []).unwrap();
 
-    crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
+    let id = ultima_transferencia();
+    crate::comandos::cuentas::eliminar_transaccion_cuenta(id, motivo_de_prueba()).unwrap();
 
-    assert_eq!(casos_anotados_m3()[0].3, "Traspaso entre cuentas");
+    assert_eq!(casos_anotados_m3()[0].3, format!("Traspaso entre cuentas (original #{id}, compensación #{})", ultima_transferencia()));
 }
 
 #[test]
-fn m3_hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
-    // **Hallazgo, fijado sin corregir** (protocolo de hallazgos): el caso de corrección graba siempre la
-    // divisa «DOP» y el importe de origen, aunque el traspaso sea entre cuentas en dólares. El rastro
-    // miente sobre la divisa. Cambiarlo es una decisión del titular, no de esta refactorización.
+fn m3_el_caso_de_un_traspaso_en_dolares_se_anota_en_usd() {
+    // Antes era un hallazgo fijado (el caso grababa siempre «DOP»); el modelo C anota la divisa de la cuenta de origen.
     let _g = entorno_aislado();
     let origen = crear_cuenta("Origen USD", "USD", 500.0);
     let destino = crear_cuenta("Destino USD", "USD", 0.0);
@@ -2279,8 +2288,8 @@ fn m3_hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
     crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
 
     let casos = casos_anotados_m3();
-    assert_eq!(casos[0].5.as_deref(), Some("DOP"), "HALLAZGO: debería decir USD");
-    assert_importe(casos[0].4.unwrap(), 200.0, "el importe sí es el del origen");
+    assert_eq!(casos[0].5.as_deref(), Some("USD"), "la divisa de la cuenta de origen");
+    assert_importe(casos[0].4.unwrap(), 200.0, "el importe es el del origen");
 }
 
 #[test]
@@ -2320,8 +2329,8 @@ fn m3_las_correcciones_se_listan_de_la_mas_reciente_a_la_mas_antigua() {
     let lista = crate::comandos::correcciones::obtener_correcciones().unwrap();
 
     assert_eq!(lista.len(), 2);
-    assert_eq!(lista[0].descripcion, "segundo", "la más reciente primero");
-    assert_eq!(lista[1].descripcion, "primero");
+    assert!(lista[0].descripcion.starts_with("segundo (original #"), "la más reciente primero: {}", lista[0].descripcion);
+    assert!(lista[1].descripcion.starts_with("primero (original #"));
     assert_eq!(lista[0].tipo, "traspaso");
     assert_eq!(lista[0].divisa.as_deref(), Some("DOP"));
     assert_eq!(lista[0].motivo, motivo_de_prueba());
@@ -6150,7 +6159,8 @@ fn ar5_revertir_un_movimiento_historico_de_una_cuenta_archivada_exige_reactivarl
 
     crate::comandos::cuentas::reactivar_cuenta(b).unwrap();
     crate::comandos::cuentas::eliminar_transaccion_cuenta(ida, motivo_de_prueba()).unwrap();
-    assert_eq!(total_transferencias(), 1);
+    assert_eq!(total_transferencias(), 3, "el original sobrevive y se le suma su compensación");
+    assert_eq!(total_vigentes(), 1);
 }
 
 #[test]

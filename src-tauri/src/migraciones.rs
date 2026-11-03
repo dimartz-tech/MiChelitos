@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 18;
+pub const VERSION_OBJETIVO: u32 = 19;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -183,6 +183,12 @@ fn catalogo() -> Vec<Migracion> {
             version: 18,
             nombre: "historial del patrimonio",
             aplicar: crate::db_sql::migracion_18_historial_del_patrimonio,
+        },
+        Migracion {
+            // PROTOTIPO (modelo C): en la rama principal la 19 está reservada a presupuestos.
+            version: 19,
+            nombre: "traspasos anulables con asiento de compensación (prototipo)",
+            aplicar: crate::db_sql::migracion_19_traspasos_anulables,
         },
     ]
 }
@@ -1278,7 +1284,7 @@ mod tests_patrimonio {
     #[test]
     fn de_cero_a_18_crea_las_dos_tablas_y_deja_la_version() {
         let c = migrada();
-        assert_eq!(version_de(&c).unwrap(), 18);
+        assert_eq!(version_de(&c).unwrap(), VERSION_OBJETIVO, "(18 + la 19 de prototipo de los traspasos)");
         for t in ["patrimonio_fotos", "patrimonio_partidas"] {
             let n: i64 = c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", [t], |r| r.get(0)).unwrap();
             assert_eq!(n, 1, "{t}");
@@ -1400,7 +1406,7 @@ mod tests_patrimonio {
             .collect()
     }
 
-    /// Una base en la versión 17 con datos del esquema real (inventados), migrada a la 18: todo lo anterior se conserva.
+    /// Una base en la versión 17 con datos del esquema real (inventados), migrada a la 18 (y a la 19 de prototipo): todo lo anterior se conserva.
     #[test]
     fn integracion_migrar_de_17_a_18_conserva_todo_lo_sembrado() {
         let mut c = Connection::open_in_memory().unwrap();
@@ -1425,10 +1431,216 @@ mod tests_patrimonio {
         assert!(antes.iter().any(|(t, cuerpo)| t == "cuentas_ahorro" && cuerpo.contains("12345.67")), "la siembra llegó");
 
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (17, 18));
-        assert_eq!(informe.aplicadas, vec!["historial del patrimonio"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (17, 19));
+        assert_eq!(
+            informe.aplicadas,
+            vec!["historial del patrimonio", "traspasos anulables con asiento de compensación (prototipo)"]
+        );
         assert_eq!(volcado(&c), antes, "ninguna fila de las tablas anteriores cambió");
         let n: i64 = c.query_row("SELECT COUNT(*) FROM patrimonio_fotos", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0, "las tablas nuevas nacen vacías: no se reconstruye el pasado");
+    }
+}
+
+/// Migración 19 de PROTOTIPO (modelo C): traspasos anulables con asiento de compensación.
+#[cfg(test)]
+mod tests_traspasos {
+    use super::*;
+
+    fn hasta(version: u32) -> Connection {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        for m in catalogo() {
+            if m.version > version {
+                break;
+            }
+            let tx = c.transaction().unwrap();
+            (m.aplicar)(&tx).unwrap();
+            tx.execute_batch(&format!("PRAGMA user_version = {};", m.version)).unwrap();
+            tx.commit().unwrap();
+        }
+        c
+    }
+
+    fn migrada() -> Connection {
+        let mut c = Connection::open_in_memory().unwrap();
+        ejecutar(&mut c).unwrap();
+        c.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        c.execute_batch(
+            "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES ('Alfa inventada', 'DOP', 1234.57);
+             INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES ('Beta inventada', 'USD', 98.77);",
+        )
+        .unwrap();
+        c
+    }
+
+    fn traspaso(c: &Connection, estado: &str, compensa_a: Option<i64>) -> rusqlite::Result<i64> {
+        c.execute(
+            "INSERT INTO transacciones_cuentas
+             (fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, tasa_cambio, cargo, descripcion, estado, compensa_a)
+             VALUES ('01/11/2026', 1, 2, 600.13, 10.07, 0.0168, 1.01, 'inventado', ?, ?);",
+            rusqlite::params![estado, compensa_a],
+        )?;
+        Ok(c.last_insert_rowid())
+    }
+
+    fn con_su_compensacion(c: &Connection) -> (i64, i64) {
+        let a = traspaso(c, "vigente", None).unwrap();
+        let b = traspaso(c, "compensacion", Some(a)).unwrap();
+        c.execute("UPDATE transacciones_cuentas SET estado = 'anulada' WHERE id = ?", [a]).unwrap();
+        (a, b)
+    }
+
+    #[test]
+    fn de_cero_a_19_deja_las_dos_columnas_y_la_version() {
+        let c = migrada();
+        assert_eq!(version_de(&c).unwrap(), 19);
+        for col in ["estado", "compensa_a"] {
+            let n: i64 = c.query_row("SELECT COUNT(*) FROM pragma_table_info('transacciones_cuentas') WHERE name = ?", [col], |r| r.get(0)).unwrap();
+            assert_eq!(n, 1, "{col}");
+        }
+    }
+
+    #[test]
+    fn la_migracion_19_es_idempotente_aplicada_dos_veces() {
+        let mut c = migrada();
+        let (a, b) = con_su_compensacion(&c);
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_19_traspasos_anulables(&tx).unwrap();
+        tx.commit().unwrap();
+        let filas: Vec<(i64, String, Option<i64>)> = c
+            .prepare("SELECT id, estado, compensa_a FROM transacciones_cuentas ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect();
+        assert_eq!(filas, vec![(a, "anulada".into(), None), (b, "compensacion".into(), Some(a))]);
+        assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0);
+    }
+
+    #[test]
+    fn de_18_a_19_los_traspasos_existentes_quedan_vigentes_y_nada_mas_cambia() {
+        let mut c = hasta(18);
+        c.execute_batch(
+            "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES ('Alfa inventada', 'DOP', 1234.57);
+             INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES ('Beta inventada', 'USD', 98.77);
+             INSERT INTO transacciones_cuentas (fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, tasa_cambio, cargo, descripcion)
+                 VALUES ('01/10/2026', 1, 2, 600.13, 10.07, 0.0168, 1.01, 'uno'), ('02/10/2026', 2, 1, 5.03, 299.97, 59.63, 0.0, NULL);",
+        )
+        .unwrap();
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!((informe.version_inicial, informe.version_final), (18, 19));
+        let filas: Vec<(String, Option<i64>, f64, f64)> = c
+            .prepare("SELECT estado, compensa_a, monto_origen, cargo FROM transacciones_cuentas ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect();
+        assert_eq!(filas, vec![("vigente".into(), None, 600.13, 1.01), ("vigente".into(), None, 5.03, 0.0)]);
+    }
+
+    #[test]
+    fn de_17_a_18_a_19_por_etapas_conserva_el_traspaso() {
+        let mut c = hasta(17);
+        c.execute_batch(
+            "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES ('Alfa inventada', 'DOP', 1234.57), ('Beta inventada', 'DOP', 7.07);
+             INSERT INTO transacciones_cuentas (fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, tasa_cambio, cargo)
+                 VALUES ('01/10/2026', 1, 2, 600.13, 600.13, 1.0, 0.0);",
+        )
+        .unwrap();
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_18_historial_del_patrimonio(&tx).unwrap();
+        tx.execute_batch("PRAGMA user_version = 18;").unwrap();
+        tx.commit().unwrap();
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!((informe.version_inicial, informe.version_final), (18, 19));
+        let (e, m): (String, f64) = c.query_row("SELECT estado, monto_origen FROM transacciones_cuentas", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((e.as_str(), m), ("vigente", 600.13));
+    }
+
+    #[test]
+    fn el_esquema_rechaza_estados_y_vinculos_incoherentes() {
+        let c = migrada();
+        let a = traspaso(&c, "vigente", None).unwrap();
+        assert!(traspaso(&c, "inventado", None).is_err(), "estado fuera de la lista");
+        assert!(traspaso(&c, "vigente", Some(a)).is_err(), "vínculo en una fila que no es compensación");
+        assert!(traspaso(&c, "compensacion", None).is_err(), "compensación sin vínculo");
+        assert!(traspaso(&c, "compensacion", Some(9999)).is_err(), "vínculo a un asiento que no existe");
+        assert!(traspaso(&c, "anulada", None).is_err(), "nada nace anulado");
+        assert!(traspaso(&c, "compensacion", Some(a)).is_ok());
+        assert!(traspaso(&c, "compensacion", Some(a)).is_err(), "una sola compensación por traspaso");
+    }
+
+    #[test]
+    fn una_anulada_no_se_vuelve_a_compensar_ni_una_compensacion_se_compensa() {
+        let c = migrada();
+        let (a, b) = con_su_compensacion(&c);
+        assert!(traspaso(&c, "compensacion", Some(a)).is_err(), "el original ya está anulado");
+        assert!(traspaso(&c, "compensacion", Some(b)).is_err(), "una compensación no se compensa");
+    }
+
+    #[test]
+    fn solo_se_anula_un_vigente_y_con_su_compensacion_hecha() {
+        let c = migrada();
+        let a = traspaso(&c, "vigente", None).unwrap();
+        let e = c.execute("UPDATE transacciones_cuentas SET estado = 'anulada' WHERE id = ?", [a]).unwrap_err().to_string();
+        assert!(e.contains("solo se anula con su asiento de compensación"), "{e}");
+        let (a2, b2) = con_su_compensacion(&c);
+        for id in [a2, b2] {
+            assert!(c.execute("UPDATE transacciones_cuentas SET estado = 'vigente' WHERE id = ?", [id]).is_err());
+            assert!(c.execute("UPDATE transacciones_cuentas SET monto_origen = 1.01 WHERE id = ?", [id]).is_err());
+            assert!(c.execute("DELETE FROM transacciones_cuentas WHERE id = ?", [id]).is_err());
+        }
+        assert!(c.execute("UPDATE transacciones_cuentas SET descripcion = 'editada' WHERE id = ?", [a]).is_ok(), "un vigente se edita como siempre");
+    }
+
+    #[test]
+    fn integracion_base_v18_en_disco_con_traspasos_existentes_se_migra_y_se_anula_con_los_comandos() {
+        let _g = crate::caracterizacion::entorno_para_pruebas_externas();
+        let ruta = crate::db_sql::obtener_ruta_db();
+        assert!(ruta.starts_with(std::env::temp_dir().to_str().unwrap()), "ABORTADO: base real");
+        let _ = std::fs::remove_file(&ruta);
+        {
+            let mut c = Connection::open(&ruta).unwrap();
+            c.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+            for m in catalogo() {
+                if m.version > 18 {
+                    break;
+                }
+                let tx = c.transaction().unwrap();
+                (m.aplicar)(&tx).unwrap();
+                tx.execute_batch(&format!("PRAGMA user_version = {};", m.version)).unwrap();
+                tx.commit().unwrap();
+            }
+            c.execute_batch(
+                "INSERT INTO cuentas_ahorro (nombre, divisa, balance_actual) VALUES ('Alfa inventada', 'DOP', 4321.09), ('Beta inventada', 'USD', 98.77);
+                 INSERT INTO transacciones_cuentas (fecha, cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, tasa_cambio, cargo, descripcion)
+                     VALUES ('01/10/2026', 1, 2, 600.13, 10.07, 0.0168, 1.01, 'previo uno'), ('02/10/2026', 1, 2, 30.03, 0.51, 0.017, 0.0, 'previo dos');",
+            )
+            .unwrap();
+        }
+
+        crate::db_sql::inicializar_db().unwrap();
+
+        let antes = crate::comandos::cuentas::obtener_transacciones_cuentas().unwrap();
+        assert_eq!(antes.len(), 2);
+        assert!(antes.iter().all(|t| t.estado == "vigente" && t.compensa_a.is_none()));
+        crate::comandos::cuentas::eliminar_transaccion_cuenta(1, "Anulación de un traspaso previo a la 19".into()).unwrap();
+        let c = Connection::open(&ruta).unwrap();
+        let (a, b): (f64, f64) = c
+            .query_row("SELECT (SELECT balance_actual FROM cuentas_ahorro WHERE id = 1), (SELECT balance_actual FROM cuentas_ahorro WHERE id = 2)", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!(((a * 100.0).round() as i64, (b * 100.0).round() as i64), (432_109 + 60_013 + 101, 9_877 - 1_007));
+        let estados: Vec<String> = c.prepare("SELECT estado FROM transacciones_cuentas ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(estados, vec!["anulada", "vigente", "compensacion"]);
+    }
+
+    #[test]
+    fn un_vigente_sin_compensacion_se_puede_borrar_como_siempre() {
+        let c = migrada();
+        let a = traspaso(&c, "vigente", None).unwrap();
+        assert_eq!(c.execute("DELETE FROM transacciones_cuentas WHERE id = ?", [a]).unwrap(), 1);
     }
 }
