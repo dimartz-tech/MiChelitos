@@ -1,15 +1,21 @@
 // Pestaña «Resumen» (diseño «B»: clase con dependencias inyectadas).
 //
-// Solo lectura: siete consultas a la API y una pantalla; no tiene manejadores. No
+// Solo lectura: consultas a la API y una pantalla. Lo único interactivo es el bloque
+// «Gasto por categoría» (mes, promedio y conmutador; ver `resumen_gastos.ts`). No
 // usa `this` de ningún objeto mezclado ni `AppAPI` global: todo entra por el
 // constructor, así que se puede probar en Node con dobles
 // (`pruebas/js/vistas/resumen.test.js`). El cuerpo es el de `ui.ts`; solo cambian
 // los accesos a lo compartido (ver `docs/historico/division_de_ui_limpia.md`).
 
-import type { ApiDe, Formato, Pantalla, Referencias, Reloj, Vista } from '../ui/servicios';
+import type { Categoria, MesDisponible } from '../tipos-ipc';
+import type { ApiDe, Dom, Formato, Pantalla, Referencias, Reloj, Vista } from '../ui/servicios';
 
 import { escaparHtml } from '../nucleo/html.js';
 import { consultarPatrimonio, htmlCifrasDePatrimonio } from './patrimonio_cifras.js';
+import {
+    ID_ANTERIOR, ID_BLOQUE_GASTO, ID_CONMUTADOR, ID_MES, ID_PROMEDIO, ID_SIGUIENTE, PROMEDIO_POR_DEFECTO, PROMEDIOS_OFRECIDOS,
+    type EstadoDeGasto, htmlDeGastoPorCategoria, idsDeInversionYObligaciones, mesDeValor, mesesDelSelector,
+} from './resumen_gastos.js';
 
 type ApiResumen = ApiDe<
     | 'obtenerCapital'
@@ -20,17 +26,43 @@ type ApiResumen = ApiDe<
     | 'obtenerPrestamos'
     | 'obtenerSuscripciones'
     | 'obtenerTarjetas'
+    | 'obtenerCategorias'
+    | 'obtenerResumenGastos'
 >;
 
 export interface DependenciasResumen {
     api: ApiResumen;
     formato: Formato;
     pantalla: Pantalla;
+    dom: Dom;
     ahora: Reloj;
     referencias: Referencias;
 }
 
+/** Lo que el titular tiene elegido en el bloque «Gasto por categoría» y lo último que se supo de él. */
+interface EstadoDelBloque {
+    anio: number;
+    mes: number;
+    nPromedio: number;
+    incluirTodo: boolean;
+    meses: MesDisponible[];
+    estado: EstadoDeGasto;
+    /** Contador de peticiones: una respuesta con otro número llegó tarde y se descarta. */
+    secuencia: number;
+    /** El catálogo de categorías (se pide una vez, solo si se apaga «Incluir inversión y obligaciones»). */
+    categorias: Categoria[] | null;
+    /** Los nombres que dejó fuera la última petición con el conmutador apagado. */
+    excluidas: string[];
+    /** El control que se tocó, para devolverle el foco al repintar. */
+    enfoque: string | null;
+}
+
 export class VistaResumen implements Vista {
+    private gasto: EstadoDelBloque = {
+        anio: 0, mes: 0, nPromedio: PROMEDIO_POR_DEFECTO, incluirTodo: true, meses: [],
+        estado: { tipo: 'cargando' }, secuencia: 0, categorias: null, excluidas: [], enfoque: null,
+    };
+
     constructor(private readonly dep: DependenciasResumen) {}
 
     // --- RENDER: RESUMEN ---
@@ -136,6 +168,14 @@ export class VistaResumen implements Vista {
 
         const gastosTotales = gastos.filter(g => g.fecha.endsWith(mesAnioActual)).reduce((sum, g) => sum + g.monto + g.costo_adicional, 0);
         const balanceNeto = ingresosCobradosTotales - gastosTotales;
+
+        // El bloque «Gasto por categoría» arranca en el mes en curso; lo demás que se eligió se conserva.
+        this.gasto.anio = hoy.getFullYear();
+        this.gasto.mes = hoy.getMonth() + 1;
+        this.gasto.estado = { tipo: 'cargando' };
+        this.gasto.excluidas = [];
+        this.gasto.enfoque = null;
+        const peticion = ++this.gasto.secuencia;
 
         pantalla.contenido.innerHTML = `
             <div class="section-title">
@@ -248,11 +288,113 @@ export class VistaResumen implements Vista {
                     </div>
                 </div>
             </div>
+
+            <!-- Gasto por categoría y mes (lo calcula Rust: obtener_resumen_gastos) -->
+            <div class="card" id="${ID_BLOQUE_GASTO}">${this.htmlDelBloque()}</div>
         `;
+        // Un fallo del bloque se queda en el bloque: el resto del Resumen ya está dibujado.
+        await this.cargarGasto(peticion);
+    }
+
+    // --- GASTO POR CATEGORÍA ---
+
+    private htmlDelBloque(): string {
+        const g = this.gasto;
+        return htmlDeGastoPorCategoria(g.estado, {
+            anio: g.anio, mes: g.mes, nPromedio: g.nPromedio, incluirTodo: g.incluirTodo, mesesDisponibles: g.meses, excluidas: g.excluidas,
+        });
+    }
+
+    private pintarGasto(): void {
+        const caja = this.dep.dom.buscar(ID_BLOQUE_GASTO);
+        if (!caja) return; // la pestaña ya no está en pantalla
+        caja.innerHTML = this.htmlDelBloque();
+        // Repintar destruye el control que el titular tocó: el foco vuelve a él (teclado y lectores de pantalla).
+        if (this.gasto.enfoque) this.dep.dom.buscar(this.gasto.enfoque)?.focus?.();
+    }
+
+    /** Pide el resumen del mes elegido. Solo la última petición pinta: una respuesta vieja (o su error) se descarta. */
+    private async cargarGasto(mia: number): Promise<void> {
+        const { api, referencias } = this.dep;
+        const g = this.gasto;
+        const vigente = (): boolean => g.secuencia === mia;
+        try {
+            let excluir: number[] = [];
+            g.excluidas = [];
+            if (!g.incluirTodo) {
+                g.categorias ??= await api.obtenerCategorias();
+                if (!vigente()) return;
+                excluir = idsDeInversionYObligaciones(g.categorias);
+                g.excluidas = g.categorias.filter(c => excluir.includes(c.id)).map(c => c.nombre);
+            }
+            const resumen = await api.obtenerResumenGastos(g.anio, g.mes, g.nPromedio, referencias.tasaUsdADop, excluir);
+            if (!vigente()) return;
+            g.meses = resumen.meses_disponibles;
+            g.estado = { tipo: 'ok', resumen };
+        } catch (err) {
+            if (!vigente()) return;
+            g.estado = { tipo: 'error', mensaje: String(err) };
+        }
+        this.pintarGasto();
+    }
+
+    /** Cambia lo elegido y vuelve a pedir; muestra «cargando» mientras llega. */
+    private async recargarGasto(control: string): Promise<void> {
+        const g = this.gasto;
+        g.estado = { tipo: 'cargando' };
+        g.enfoque = control;
+        const mia = ++g.secuencia;
+        this.pintarGasto();
+        await this.cargarGasto(mia);
+    }
+
+    /** El selector de mes: valor «aaaa-mm». */
+    async elegirMesDeGasto(valor: string): Promise<void> {
+        const m = mesDeValor(valor);
+        if (!m) return;
+        this.gasto.anio = m.anio;
+        this.gasto.mes = m.mes;
+        await this.recargarGasto(ID_MES);
+    }
+
+    /** Anterior / siguiente: se mueve entre los meses del selector (con datos, más el elegido). */
+    async moverMesDeGasto(delta: number): Promise<void> {
+        const g = this.gasto;
+        const meses = mesesDelSelector(g.meses, { anio: g.anio, mes: g.mes });
+        const i = meses.findIndex(m => m.anio === g.anio && m.mes === g.mes);
+        const destino = meses[i + Math.sign(delta)];
+        if (!destino) return;
+        g.anio = destino.anio;
+        g.mes = destino.mes;
+        await this.recargarGasto(delta < 0 ? ID_ANTERIOR : ID_SIGUIENTE);
+    }
+
+    /** «Promedio de N meses». */
+    async elegirPromedioDeGasto(valor: string): Promise<void> {
+        const n = Number(valor);
+        if (!PROMEDIOS_OFRECIDOS.includes(n)) return;
+        this.gasto.nPromedio = n;
+        await this.recargarGasto(ID_PROMEDIO);
+    }
+
+    /** «Incluir inversión y obligaciones». */
+    async conmutarInversionYObligaciones(control: { checked: boolean }): Promise<void> {
+        this.gasto.incluirTodo = control.checked;
+        await this.recargarGasto(ID_CONMUTADOR);
     }
 }
 
-/** Esta vista no tiene acciones delegadas: no cuelga nada de `appUI`. */
-export function puenteResumen(_vista: VistaResumen): Record<string, never> {
-    return {};
+/** Lo que `window.appUI` expone de esta vista: los controles del bloque «Gasto por categoría». */
+export function puenteResumen(vista: VistaResumen): {
+    resumenGastoMes: (valor: string) => Promise<void>;
+    resumenGastoMover: (delta: number) => Promise<void>;
+    resumenGastoPromedio: (valor: string) => Promise<void>;
+    resumenGastoConmutar: (control: { checked: boolean }) => Promise<void>;
+} {
+    return {
+        resumenGastoMes: valor => vista.elegirMesDeGasto(valor),
+        resumenGastoMover: delta => vista.moverMesDeGasto(delta),
+        resumenGastoPromedio: valor => vista.elegirPromedioDeGasto(valor),
+        resumenGastoConmutar: control => vista.conmutarInversionYObligaciones(control),
+    };
 }
