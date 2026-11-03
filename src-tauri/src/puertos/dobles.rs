@@ -1146,6 +1146,7 @@ impl ConsultaDeCorrecciones for AlmacenEnMemoria {
                 importe: c.importe,
                 divisa: c.divisa.clone(),
                 motivo: c.motivo.clone(),
+                detalle: c.detalle.clone(),
             })
             .collect())
     }

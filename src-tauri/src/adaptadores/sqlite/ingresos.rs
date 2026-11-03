@@ -153,6 +153,7 @@ impl RegistroDeCorrecciones for AlmacenSqlite<'_> {
                 importe: caso.importe,
                 divisa: caso.divisa.clone(),
                 motivo: &caso.motivo,
+                detalle: caso.detalle.as_deref(),
             },
         )
         .map_err(ErrorAlmacen::Fallo)
@@ -164,7 +165,7 @@ impl ConsultaDeCorrecciones for AlmacenSqlite<'_> {
         let mut stmt = self
             .tx
             .prepare(
-                "SELECT numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo
+                "SELECT numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo, detalle
                  FROM correcciones ORDER BY id DESC;",
             )
             .map_err(fallo)?;
@@ -179,6 +180,7 @@ impl ConsultaDeCorrecciones for AlmacenSqlite<'_> {
                     importe: r.get(5)?,
                     divisa: r.get(6)?,
                     motivo: r.get(7)?,
+                    detalle: r.get(8)?,
                 })
             })
             .map_err(fallo)?;

@@ -9,7 +9,7 @@
 // `confirm` ni `prompt` globales: todo entra por el constructor
 // (`pruebas/js/vistas/ajustes.test.js`). Los cuerpos son los de `ui.ts`.
 
-import type { CuentaAhorro } from '../tipos-ipc';
+import type { CasoCorreccion, CuentaAhorro } from '../tipos-ipc';
 import { accion, alEnviar, escaparHtml, manejador } from '../nucleo/html.js';
 import { describirRespaldo } from '../nucleo/respaldos.js';
 
@@ -79,6 +79,48 @@ interface EventoDeFormulario {
 interface BotonDeAccion {
     disabled: boolean;
     textContent: string | null;
+}
+
+/** La forma del JSON que guarda `dominio::detalle_traspaso::DetalleDeTraspaso` (versión 1). Importes y tasa, en texto exacto. */
+interface DetalleDeTraspaso {
+    version: number;
+    traspaso_id: number;
+    fecha: string;
+    descripcion: string | null;
+    origen: { cuenta_id: number; cuenta_nombre: string; importe: { monto: string; divisa: string } };
+    destino: { cuenta_id: number; cuenta_nombre: string; importe: { monto: string; divisa: string } };
+    tasa: string | null;
+    cargo: { monto: string; divisa: string };
+}
+
+/**
+ * El detalle de un caso de traspaso (la foto completa que se guardó al borrarlo), o «sin detalle» si el caso es
+ * anterior a que se guardara. Los demás tipos de caso no llevan detalle y no muestran nada. Todo texto va por
+ * `escaparHtml`: los nombres de cuenta y la descripción los escribió el titular. Los importes ya llegan como texto
+ * exacto en el JSON, así que se muestran tal cual, sin pasar por coma flotante.
+ */
+export function detalleDeTraspasoHtml(c: CasoCorreccion): string {
+    if (c.tipo !== 'traspaso') return '';
+    const estilo = 'margin-top:0.2rem; color:var(--text-secondary);';
+    if (c.detalle == null) {
+        return `<div class="caso-detalle caso-sin-detalle" style="${estilo}">Sin detalle (caso anterior)</div>`;
+    }
+    let d: DetalleDeTraspaso;
+    try {
+        d = JSON.parse(c.detalle) as DetalleDeTraspaso;
+        if (!d || !d.origen || !d.destino || !d.cargo) throw new Error('forma inesperada');
+    } catch {
+        return `<div class="caso-detalle caso-sin-detalle" style="${estilo}">Sin detalle (ilegible)</div>`;
+    }
+    const lado = (e: DetalleDeTraspaso['origen']) =>
+        `${escaparHtml(e.cuenta_nombre)} (${escaparHtml(e.importe.monto)} ${escaparHtml(e.importe.divisa)})`;
+    const partes = [
+        `${escaparHtml(d.fecha)}: ${lado(d.origen)} → ${lado(d.destino)}`,
+        d.tasa != null ? `tasa ${escaparHtml(d.tasa)}` : '',
+        `cargo ${escaparHtml(d.cargo.monto)} ${escaparHtml(d.cargo.divisa)}`,
+        d.descripcion != null ? `«${escaparHtml(d.descripcion)}»` : '',
+    ].filter(x => x !== '');
+    return `<div class="caso-detalle" style="${estilo}">${partes.join(' · ')}</div>`;
 }
 
 export class VistaAjustes implements Vista {
@@ -674,6 +716,7 @@ export class VistaAjustes implements Vista {
                             <div style="margin-top:0.2rem;">
                                 ${escaparHtml(c.descripcion)}${c.importe != null ? ` — ${escaparHtml(c.divisa || '')} ${formato.importe(c.importe)}` : ''}
                             </div>
+                            ${detalleDeTraspasoHtml(c)}
                             <div style="margin-top:0.2rem; color:var(--text-secondary); font-style:italic;">${escaparHtml(c.motivo)}</div>
                         </div>
                     `).join('')}
