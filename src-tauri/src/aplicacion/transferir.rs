@@ -24,6 +24,7 @@
 
 use super::ErrorAplicacion;
 use crate::dominio::cuenta::{ExtremoCuenta, Transferencia};
+use crate::dominio::detalle_traspaso::{DatosDelTraspasoBorrado, DetalleDeTraspaso};
 use crate::dominio::dinero::Dinero;
 use crate::puertos::repositorios::*;
 
@@ -107,24 +108,39 @@ pub fn revertir_transferencia(
 /// flojo—, después el motivo, el caso de corrección y, **al final**, la reversión: si algo falla antes no queda un
 /// caso huérfano.
 ///
-/// **Hallazgo, conservado sin corregir** (ver `caracterizacion::m3_hallazgo_…`): el caso graba siempre la divisa
-/// «DOP», aunque el traspaso sea entre cuentas en dólares; el importe es el de origen. Cambiarlo es una decisión
-/// del titular.
+/// **Hallazgo corregido (prototipo del abordaje B).** El caso grababa siempre la divisa «DOP» y solo el importe de origen.
+/// Ahora toma la divisa del propio importe de origen y guarda además la foto completa del traspaso (`DetalleDeTraspaso`:
+/// fecha original, las dos cuentas con su nombre, los dos montos con su divisa, tasa, cargo y descripción) en `detalle`.
 pub fn eliminar_transferencia(
     id: i64,
     motivo: &str,
-    almacen: &mut (impl AlmacenTransferencias + RegistroDeCorrecciones),
+    almacen: &mut (impl AlmacenTransferencias + RegistroDeCorrecciones + BusquedaDeCuentas),
 ) -> Result<String, ErrorAplicacion> {
     let t = almacen.obtener_transferencia(id)?;
     let motivo = crate::dominio::correccion::motivo_de_correccion(motivo)?;
+    let origen_nombre = almacen.nombre_de_cuenta(t.origen_id)?;
+    let destino_nombre = almacen.nombre_de_cuenta(t.destino_id)?;
+    let detalle = DetalleDeTraspaso::construir(&DatosDelTraspasoBorrado {
+        id,
+        fecha: &t.fecha,
+        descripcion: &t.descripcion,
+        origen_id: t.origen_id,
+        origen_nombre: &origen_nombre,
+        destino_id: t.destino_id,
+        destino_nombre: &destino_nombre,
+        monto_origen: t.monto_origen,
+        monto_destino: t.monto_destino,
+        cargo: t.cargo,
+    });
     let descripcion = if t.descripcion.is_empty() { "Traspaso entre cuentas".to_string() } else { t.descripcion };
     let caso = almacen.anotar_caso(&CasoAAnotar {
         tipo: "traspaso".to_string(),
         referencia_id: id,
         descripcion,
         importe: Some(t.monto_origen.unidades()),
-        divisa: Some("DOP".to_string()),
+        divisa: Some(t.monto_origen.divisa().codigo().to_string()),
         motivo,
+        detalle: Some(detalle.a_json()),
     })?;
     revertir_transferencia(id, almacen)?;
     Ok(caso)
@@ -245,8 +261,8 @@ mod tests {
     }
 
     #[test]
-    fn hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
-        // Fijado sin corregir (protocolo de hallazgos): ver el comentario de `eliminar_transferencia`.
+    fn el_caso_de_un_traspaso_en_dolares_se_anota_como_usd() {
+        // Antes era un hallazgo fijado (decía «DOP»); el abordaje B lo corrige: la divisa es la del importe de origen.
         let mut a2 = AlmacenEnMemoria::nuevo().con_cuenta(12, "A USD", usd(500.0)).con_cuenta(13, "B USD", usd(0.0));
         let id = transferir(
             DatosTransferencia {
@@ -264,8 +280,72 @@ mod tests {
 
         eliminar_transferencia(id, MOTIVO, &mut a2).unwrap();
 
-        assert_eq!(a2.casos[0].divisa.as_deref(), Some("DOP"), "HALLAZGO: debería decir USD");
+        assert_eq!(a2.casos[0].divisa.as_deref(), Some("USD"));
         assert_eq!(a2.casos[0].importe, Some(200.0));
+    }
+
+    fn detalle_de(a: &AlmacenEnMemoria) -> DetalleDeTraspaso {
+        DetalleDeTraspaso::desde_json(a.casos[0].detalle.as_deref().expect("el caso lleva detalle")).unwrap()
+    }
+
+    #[test]
+    fn el_caso_guarda_la_foto_completa_de_un_traspaso_dop_a_usd_con_cargo() {
+        let mut a = AlmacenEnMemoria::nuevo().con_cuenta(10, "Pesos", dop(10_000.0)).con_cuenta(12, "Dólares", usd(0.0));
+        let id = transferir(
+            DatosTransferencia {
+                fecha: "13/10/2026".into(),
+                origen_id: 10,
+                destino_id: 12,
+                monto_origen: dop(5_875.0),
+                monto_destino: usd(100.0),
+                cargo: dop(25.5),
+                descripcion: "cambio".into(),
+            },
+            &mut a,
+        )
+        .unwrap();
+
+        eliminar_transferencia(id, MOTIVO, &mut a).unwrap();
+
+        let d = detalle_de(&a);
+        assert_eq!((d.traspaso_id, d.fecha.as_str(), d.descripcion.as_deref()), (id, "13/10/2026", Some("cambio")));
+        assert_eq!((d.origen.cuenta_id, d.origen.cuenta_nombre.as_str()), (10, "Pesos"));
+        assert_eq!((d.origen.importe.monto.as_str(), d.origen.importe.divisa.as_str()), ("5875.00", "DOP"));
+        assert_eq!((d.destino.cuenta_id, d.destino.cuenta_nombre.as_str()), (12, "Dólares"));
+        assert_eq!((d.destino.importe.monto.as_str(), d.destino.importe.divisa.as_str()), ("100.00", "USD"));
+        assert!(d.tasa.is_some());
+        assert_eq!((d.cargo.monto.as_str(), d.cargo.divisa.as_str()), ("25.50", "DOP"));
+        assert_eq!(a.casos[0].divisa.as_deref(), Some("DOP"), "la divisa del caso es la de origen");
+    }
+
+    #[test]
+    fn el_detalle_de_un_traspaso_sin_descripcion_la_deja_nula_y_el_caso_usa_el_texto_generico() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "");
+
+        eliminar_transferencia(id, MOTIVO, &mut a).unwrap();
+
+        assert_eq!(detalle_de(&a).descripcion, None);
+        assert_eq!(a.casos[0].descripcion, "Traspaso entre cuentas");
+    }
+
+    #[test]
+    fn el_detalle_conserva_nombres_hostiles_de_cuenta() {
+        let hostil = "<img src=x onerror='a'>\"&";
+        let mut a = AlmacenEnMemoria::nuevo().con_cuenta(10, hostil, dop(5_000.0)).con_cuenta(11, "Destino", dop(0.0));
+        let id = transferir(datos(dop(100.0), dop(100.0), dop(0.0)), &mut a).unwrap();
+
+        eliminar_transferencia(id, MOTIVO, &mut a).unwrap();
+
+        assert_eq!(detalle_de(&a).origen.cuenta_nombre, hostil);
+    }
+
+    #[test]
+    fn un_motivo_invalido_no_deja_detalle_ni_caso() {
+        let mut a = almacen();
+        let id = con_traspaso(&mut a, "x");
+        assert!(eliminar_transferencia(id, "corto", &mut a).is_err());
+        assert!(a.casos.is_empty());
     }
 
     #[test]
