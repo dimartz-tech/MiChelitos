@@ -144,7 +144,7 @@ test('borrar transferencia: confirma, pide motivo y envía id + motivo', async (
     const ui = cargarInterfaz({ confirm: true, prompt: MOTIVO });
     await ui.appUI.handleEliminarTransaccionCuentaCorr(61);
     llamoUnaVez(ui, 'eliminarTransaccionCuenta', [61, MOTIVO]);
-    avisoExito(ui, /Transferencia revertida/);
+    avisoExito(ui, /Transferencia anulada/);
     redibujo(ui, 'ajustes');
 });
 

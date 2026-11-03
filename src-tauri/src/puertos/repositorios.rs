@@ -713,6 +713,10 @@ pub struct TransaccionLeida {
     pub tasa_cambio: f64,
     pub cargo: f64,
     pub descripcion: Option<String>,
+    /// `vigente`, `anulada` o `compensacion` (ver `EstadoTraspaso`).
+    pub estado: String,
+    /// El traspaso que este asiento compensa; solo las compensaciones lo llevan.
+    pub compensa_a: Option<i64>,
 }
 
 /// Alta, corrección y consulta de cuentas y de su historial de transferencias. (Mover dinero entre ellas
@@ -1072,10 +1076,34 @@ pub trait RepositorioCuentas {
     fn reactivar_cuenta(&mut self, cuenta_id: i64) -> Result<bool, ErrorAlmacen>;
 }
 
+/// En qué punto de su vida está un asiento de traspaso (modelo de asientos de compensación).
+///
+/// * `Vigente`: cuenta. * `Anulada`: el original que se anuló; sobrevive, y su contrario es una `Compensacion`.
+/// * `Compensacion`: el asiento contrario que anula a otro (`compensa_a`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstadoTraspaso {
+    Vigente,
+    Anulada,
+    Compensacion,
+}
+
+impl EstadoTraspaso {
+    pub fn desde_texto(texto: &str) -> Option<Self> {
+        match texto {
+            "vigente" => Some(EstadoTraspaso::Vigente),
+            "anulada" => Some(EstadoTraspaso::Anulada),
+            "compensacion" => Some(EstadoTraspaso::Compensacion),
+            _ => None,
+        }
+    }
+}
+
 /// Datos de una transferencia tal como se guardan.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransferenciaGuardada {
     pub id: i64,
+    pub estado: EstadoTraspaso,
+    pub compensa_a: Option<i64>,
     pub fecha: String,
     pub origen_id: i64,
     pub destino_id: i64,
@@ -1096,6 +1124,8 @@ pub struct TransferenciaAPersistir {
     pub tasa: Option<f64>,
     pub cargo: Dinero,
     pub descripcion: String,
+    /// `Some(id)` solo para el asiento de compensación del traspaso `id`; entonces nace con estado `compensacion`.
+    pub compensa_a: Option<i64>,
 }
 
 pub trait RepositorioTransferencias {
@@ -1106,7 +1136,9 @@ pub trait RepositorioTransferencias {
 
     fn obtener_transferencia(&self, id: i64) -> Result<TransferenciaGuardada, ErrorAlmacen>;
 
-    fn eliminar_transferencia(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+    /// Marca como `anulada` un traspaso **vigente**. `false` si no existía o ya no estaba vigente (la decisión
+    /// autoritativa es esta sentencia, no la lectura previa del caso de uso).
+    fn marcar_anulada(&mut self, id: i64) -> Result<bool, ErrorAlmacen>;
 
 }
 

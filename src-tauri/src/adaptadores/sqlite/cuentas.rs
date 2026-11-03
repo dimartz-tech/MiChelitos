@@ -81,7 +81,8 @@ impl CatalogoDeCuentas for CuentasSqlite<'_> {
             .tx
             .prepare(
                 "SELECT t.id, t.fecha, t.cuenta_origen_id, co.nombre, t.cuenta_destino_id, cd.nombre,
-                        t.monto_origen, t.monto_destino, t.tasa_cambio, t.cargo, t.descripcion
+                        t.monto_origen, t.monto_destino, t.tasa_cambio, t.cargo, t.descripcion,
+                        t.estado, t.compensa_a
                  FROM transacciones_cuentas t
                  JOIN cuentas_ahorro co ON t.cuenta_origen_id = co.id
                  JOIN cuentas_ahorro cd ON t.cuenta_destino_id = cd.id
@@ -102,6 +103,8 @@ impl CatalogoDeCuentas for CuentasSqlite<'_> {
                     tasa_cambio: r.get(8)?,
                     cargo: r.get(9)?,
                     descripcion: r.get(10)?,
+                    estado: r.get(11)?,
+                    compensa_a: r.get(12)?,
                 })
             })
             .map_err(fallo)?;

@@ -22,7 +22,7 @@ const CUENTAS = [
 const gasto = id => ({ id, fecha: '10/03/2027', descripcion: `Gasto ${id}`, monto: 100, costo_adicional: 5, divisa: 'DOP', categoria_nombre: 'Comida', metodo_pago: 'efectivo' });
 const informal = id => ({ id, fecha: '11/03/2027', descripcion: `Informal ${id}`, monto: 80, estatus: 'pagado', institucion_deposito: 'Banco Alfa' });
 const ingreso = id => ({ id, fecha_emision: '12/03/2027', numero_factura: `FAC-${id}`, cliente_nombre: 'Cliente Uno', monto_total: 300, estatus: 'emitida' });
-const transaccion = id => ({ id, fecha: '13/03/2027', cuenta_origen_nombre: 'Cuenta Alfa', cuenta_destino_nombre: 'Cuenta Beta', monto_origen: 40, cargo: 2, descripcion: null });
+const transaccion = id => ({ id, fecha: '13/03/2027', cuenta_origen_nombre: 'Cuenta Alfa', cuenta_destino_nombre: 'Cuenta Beta', monto_origen: 40, cargo: 2, descripcion: null, estado: 'vigente', compensa_a: null });
 
 const el = (spec = {}) => ({ value: '', hidden: false, disabled: false, textContent: '', innerHTML: '', ...spec });
 
@@ -370,10 +370,27 @@ test('cada corrección pide confirmación y luego el motivo, y solo entonces env
         await espera;
         assert.deepEqual(t.llamadas, [[api, id, MOTIVO]], metodo);
         assert.match(t.motivos[0].titulo, titulo, metodo);
-        assert.match(t.motivos[0].texto, /destruye el movimiento/, metodo);
+        assert.match(t.motivos[0].texto, metodo === 'handleEliminarTransaccionCuentaCorr' ? /no se borra/ : /destruye el movimiento/, metodo);
         assert.deepEqual(t.rutas, ['ajustes'], metodo);
         assert.equal(t.avisos.at(-1).tipo, undefined, metodo);
     }
+});
+
+test('un traspaso anulado y su compensación llevan insignia, sin botón, y el vigente ofrece «Anular»', async () => {
+    const t = montar({ datos: { ...DATOS(), transacciones: [
+        { ...transaccion(3), estado: 'compensacion', compensa_a: 1, descripcion: '<b>Compensación</b>' },
+        { ...transaccion(2) },
+        { ...transaccion(1), estado: 'anulada' },
+    ] } });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.match(html, /data-estado-traspaso="anulada">Anulado</);
+    assert.match(html, /data-estado-traspaso="compensacion">Compensación de #1</);
+    assert.deepEqual(llamadasDelManejador(html, 'handleEliminarTransaccionCuentaCorr').map(a => a[0]), [2], 'solo el vigente se puede anular');
+    assert.match(html, /Anular<\/button>/);
+    assert.doesNotMatch(html, /<b>Compensación<\/b>/, 'el texto libre se escapa');
+    assert.match(html, /&lt;b&gt;Compensación&lt;\/b&gt;/);
+    assert.doesNotMatch(html, /onclick=|onchange=|onsubmit=/);
 });
 
 test('el aviso de borrar un gasto trae el número de caso', async () => {

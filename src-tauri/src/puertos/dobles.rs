@@ -847,6 +847,8 @@ impl RepositorioTransferencias for AlmacenEnMemoria {
             id,
             TransferenciaGuardada {
                 id,
+                estado: if datos.compensa_a.is_some() { EstadoTraspaso::Compensacion } else { EstadoTraspaso::Vigente },
+                compensa_a: datos.compensa_a,
                 fecha: datos.fecha,
                 origen_id: datos.origen_id,
                 destino_id: datos.destino_id,
@@ -866,11 +868,14 @@ impl RepositorioTransferencias for AlmacenEnMemoria {
             .ok_or(ErrorAlmacen::NoEncontrado { entidad: "traspaso", id })
     }
 
-    fn eliminar_transferencia(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
-        self.transferencias
-            .remove(&id)
-            .map(|_| ())
-            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "traspaso", id })
+    fn marcar_anulada(&mut self, id: i64) -> Result<bool, ErrorAlmacen> {
+        match self.transferencias.get_mut(&id) {
+            Some(t) if t.estado == EstadoTraspaso::Vigente => {
+                t.estado = EstadoTraspaso::Anulada;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 }
 

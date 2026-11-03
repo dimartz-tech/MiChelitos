@@ -12,6 +12,7 @@
 import type { CuentaAhorro } from '../tipos-ipc';
 import { accion, alEnviar, escaparHtml, manejador } from '../nucleo/html.js';
 import { describirRespaldo } from '../nucleo/respaldos.js';
+import { atributosDeFilaDeTraspaso, insigniaDeTraspaso, sePuedeAnular } from '../nucleo/traspasos.js';
 
 /** Las pestañas del panel de correcciones: sus paneles y los botones que los alternan (acción `activarPestana`). */
 const PANELES_CORRECCION = ['corr-gastos', 'corr-ingresos', 'corr-trans'];
@@ -459,15 +460,15 @@ export class VistaAjustes implements Vista {
                                 </thead>
                                 <tbody>
                                     ${transacciones.slice(0, 15).map(t => `
-                                        <tr>
+                                        <tr${atributosDeFilaDeTraspaso(t)}>
                                             <td>${escaparHtml(t.fecha)}</td>
-                                            <td><strong>${escaparHtml(t.descripcion || '-')}</strong></td>
+                                            <td><strong>${escaparHtml(t.descripcion || '-')}</strong> ${insigniaDeTraspaso(t)}</td>
                                             <td>${escaparHtml(t.cuenta_origen_nombre)}</td>
                                             <td class="amount expense">- ${formato.importe(t.monto_origen)}</td>
                                             <td>${escaparHtml(t.cuenta_destino_nombre)}</td>
                                             <td class="amount expense">${t.cargo > 0 ? formato.importe(t.cargo) : '-'}</td>
                                             <td>
-                                                <button type="button" ${accion('handleEliminarTransaccionCuentaCorr', t.id)} class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">🗑️ Revertir</button>
+                                                ${sePuedeAnular(t) ? `<button type="button" ${accion('handleEliminarTransaccionCuentaCorr', t.id)} class="btn btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">↩️ Anular</button>` : ''}
                                             </td>
                                         </tr>
                                     `).join('')}
@@ -739,15 +740,15 @@ export class VistaAjustes implements Vista {
 
     async handleEliminarTransaccionCuentaCorr(id: number): Promise<void> {
         const { api, avisos, enrutador, dialogos, motivo: pedidorDeMotivo } = this.dep;
-        if (await dialogos.confirmar("¿Estás seguro de que deseas revertir y eliminar esta transferencia? Los saldos de las cuentas origen y destino serán restaurados.")) {
+        if (await dialogos.confirmar("¿Estás seguro de que deseas anular esta transferencia? Los saldos de las cuentas origen y destino serán restaurados y el traspaso quedará en el historial como anulado.")) {
             try {
                 const motivo = await pedidorDeMotivo.pedir(
-                    `Vas a borrar este traspaso entre cuentas`,
-                    'Esto **destruye el movimiento**: no queda un asiento que lo anule, solo el caso de auditoría que estás a punto de abrir.'
+                    `Vas a anular este traspaso entre cuentas`,
+                    'El traspaso **no se borra**: queda marcado como anulado y se crea un asiento de compensación que lo contrarresta, además del caso de auditoría que estás a punto de abrir.'
                 );
                 if (motivo === null) return;
                 const caso = await api.eliminarTransaccionCuenta(id, motivo);
-                avisos.mostrar("Transferencia revertida y eliminada.");
+                avisos.mostrar(`Transferencia anulada con su asiento de compensación.${caso ? ` Caso ${caso}.` : ''}`);
                 await enrutador.mostrar('ajustes');
             } catch (err) {
                 avisos.mostrar(String(err), 'error');

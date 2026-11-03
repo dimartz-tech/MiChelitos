@@ -17,7 +17,7 @@ const CUENTAS = [
 ];
 const TRANSACCION = {
     id: 9, fecha: '05/03/2027', descripcion: 'Cambio de prueba', cuenta_origen_nombre: 'Cuenta Alfa',
-    cuenta_destino_nombre: 'Cuenta Beta', monto_origen: 600, monto_destino: 10, cargo: 1.5, tasa_cambio: 60,
+    cuenta_destino_nombre: 'Cuenta Beta', monto_origen: 600, monto_destino: 10, cargo: 1.5, tasa_cambio: 60, estado: 'vigente', compensa_a: null,
 };
 
 /** Un elemento mínimo del DOM: lo que la vista lee y escribe. */
@@ -79,6 +79,21 @@ test('dibuja el título, las cuentas con el formato inyectado y la fecha de hoy 
     assert.match(html, /DOP #1000#/, 'el importe pasa por el servicio de formato');
     assert.match(html, /value="05\/03\/2027"/, 'la fecha por defecto sale del reloj inyectado');
     assert.match(html, /Cambio de prueba/, 'el historial lista la transferencia');
+});
+
+test('el historial marca el anulado y la compensación, y escapa el texto libre', async () => {
+    const t = montar({ transacciones: [
+        { ...TRANSACCION, id: 11, estado: 'compensacion', compensa_a: 9, descripcion: '<img src=x onerror=1>' },
+        { ...TRANSACCION, id: 9, estado: 'anulada' },
+        { ...TRANSACCION, id: 8 },
+    ] });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.match(html, /data-estado-traspaso="anulada">Anulado</);
+    assert.match(html, /data-estado-traspaso="compensacion">Compensación de #9</);
+    assert.equal((html.match(/data-estado-traspaso=/g) || []).length, 2, 'el vigente no lleva insignia');
+    assert.doesNotMatch(html, /<img src=x/);
+    assert.match(html, /&lt;img src=x onerror=1&gt;/);
 });
 
 test('sin transferencias dibuja el mensaje vacío', async () => {
