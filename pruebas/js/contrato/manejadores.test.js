@@ -82,7 +82,7 @@ test('las acciones generales no pisan ningún método de una vista (la composici
 
 test('el index.html: el menú navega por la acción general «navegar» y no lleva script en línea', () => {
     const acciones = accionesDe(HTML);
-    assert.equal(acciones.length, 11);
+    assert.equal(acciones.length, 12);
     assert.ok(acciones.every(a => a.evento === 'click' && a.nombre === 'navegar' && a.args.length === 1), 'cada botón del menú navega a una ruta');
     assert.doesNotMatch(HTML, /<script(?![^>]*\bsrc=)/, 'un <script> sin src es código en línea');
 });
