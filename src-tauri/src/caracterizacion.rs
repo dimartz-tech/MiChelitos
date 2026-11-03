@@ -2267,10 +2267,9 @@ fn m3_sin_descripcion_el_caso_dice_traspaso_entre_cuentas() {
 }
 
 #[test]
-fn m3_hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
-    // **Hallazgo, fijado sin corregir** (protocolo de hallazgos): el caso de corrección graba siempre la
-    // divisa «DOP» y el importe de origen, aunque el traspaso sea entre cuentas en dólares. El rastro
-    // miente sobre la divisa. Cambiarlo es una decisión del titular, no de esta refactorización.
+fn m3_el_caso_de_un_traspaso_en_dolares_se_anota_como_usd() {
+    // Antes fijaba un hallazgo (el caso decía «DOP» aunque el traspaso fuera en dólares). El abordaje B lo corrige:
+    // la divisa del caso es la del importe de origen.
     let _g = entorno_aislado();
     let origen = crear_cuenta("Origen USD", "USD", 500.0);
     let destino = crear_cuenta("Destino USD", "USD", 0.0);
@@ -2279,8 +2278,8 @@ fn m3_hallazgo_el_caso_de_un_traspaso_en_dolares_se_anota_como_dop() {
     crate::comandos::cuentas::eliminar_transaccion_cuenta(ultima_transferencia(), motivo_de_prueba()).unwrap();
 
     let casos = casos_anotados_m3();
-    assert_eq!(casos[0].5.as_deref(), Some("DOP"), "HALLAZGO: debería decir USD");
-    assert_importe(casos[0].4.unwrap(), 200.0, "el importe sí es el del origen");
+    assert_eq!(casos[0].5.as_deref(), Some("USD"));
+    assert_importe(casos[0].4.unwrap(), 200.0, "el importe es el del origen");
 }
 
 #[test]

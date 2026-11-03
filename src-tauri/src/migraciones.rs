@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 18;
+pub const VERSION_OBJETIVO: u32 = 19;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -184,7 +184,27 @@ fn catalogo() -> Vec<Migracion> {
             nombre: "historial del patrimonio",
             aplicar: crate::db_sql::migracion_18_historial_del_patrimonio,
         },
+        Migracion {
+            version: 19,
+            nombre: "detalle de los casos de corrección",
+            aplicar: crate::db_sql::migracion_19_detalle_de_correcciones,
+        },
     ]
+}
+
+/// Solo para pruebas: lleva una base nueva hasta `version` (para sembrar el estado de una versión anterior).
+#[cfg(test)]
+pub(crate) fn migrar_hasta(conn: &mut Connection, version: u32) {
+    conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("desactivar claves ajenas");
+    for m in catalogo() {
+        if m.version > version {
+            break;
+        }
+        let tx = conn.transaction().expect("abrir transacción de migración");
+        (m.aplicar)(&tx).expect("aplicar migración");
+        tx.execute_batch(&format!("PRAGMA user_version = {};", m.version)).expect("fijar versión");
+        tx.commit().expect("confirmar migración");
+    }
 }
 
 pub fn version_de(conn: &Connection) -> Result<u32, ErrorMigracion> {
@@ -1276,9 +1296,9 @@ mod tests_patrimonio {
     }
 
     #[test]
-    fn de_cero_a_18_crea_las_dos_tablas_y_deja_la_version() {
+    fn de_cero_a_la_version_objetivo_crea_las_dos_tablas_del_patrimonio() {
         let c = migrada();
-        assert_eq!(version_de(&c).unwrap(), 18);
+        assert_eq!(version_de(&c).unwrap(), VERSION_OBJETIVO);
         for t in ["patrimonio_fotos", "patrimonio_partidas"] {
             let n: i64 = c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", [t], |r| r.get(0)).unwrap();
             assert_eq!(n, 1, "{t}");
@@ -1425,10 +1445,138 @@ mod tests_patrimonio {
         assert!(antes.iter().any(|(t, cuerpo)| t == "cuentas_ahorro" && cuerpo.contains("12345.67")), "la siembra llegó");
 
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (17, 18));
-        assert_eq!(informe.aplicadas, vec!["historial del patrimonio"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (17, 19));
+        assert_eq!(informe.aplicadas, vec!["historial del patrimonio", "detalle de los casos de corrección"]);
         assert_eq!(volcado(&c), antes, "ninguna fila de las tablas anteriores cambió");
         let n: i64 = c.query_row("SELECT COUNT(*) FROM patrimonio_fotos", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0, "las tablas nuevas nacen vacías: no se reconstruye el pasado");
+    }
+}
+
+/// Migración 19 (PROTOTIPO): `correcciones.detalle`.
+#[cfg(test)]
+mod tests_detalle_de_correcciones {
+    use super::*;
+
+    fn base_hasta(version: u32) -> Connection {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        for m in catalogo() {
+            if m.version > version {
+                break;
+            }
+            let tx = c.transaction().unwrap();
+            (m.aplicar)(&tx).unwrap();
+            tx.execute_batch(&format!("PRAGMA user_version = {};", m.version)).unwrap();
+            tx.commit().unwrap();
+        }
+        c
+    }
+
+    fn sembrar_casos_viejos(c: &Connection) {
+        c.execute_batch(
+            "INSERT INTO correcciones (numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo)
+                 VALUES ('COR-2026-0001', '01/10/2026', 'traspaso', 4, 'Traspaso inventado', 1187.53, 'DOP', 'Motivo viejo de prueba'),
+                        ('COR-2026-0002', '02/10/2026', 'gasto', 9, 'Gasto inventado', 33.37, 'DOP', 'Otro motivo viejo de prueba');",
+        )
+        .unwrap();
+    }
+
+    fn filas(c: &Connection) -> Vec<(String, String, i64, Option<f64>, Option<String>)> {
+        c.prepare("SELECT numero_caso, descripcion, referencia_id, importe, detalle FROM correcciones ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn de_18_a_19_conserva_los_casos_existentes_con_detalle_nulo() {
+        let mut c = base_hasta(18);
+        sembrar_casos_viejos(&c);
+        let columnas_antes: i64 = c.query_row("SELECT COUNT(*) FROM pragma_table_info('correcciones')", [], |r| r.get(0)).unwrap();
+
+        let informe = ejecutar(&mut c).unwrap();
+
+        assert_eq!((informe.version_inicial, informe.version_final), (18, 19));
+        assert_eq!(informe.aplicadas, vec!["detalle de los casos de corrección"]);
+        let v = filas(&c);
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0], ("COR-2026-0001".into(), "Traspaso inventado".into(), 4, Some(1187.53), None));
+        assert_eq!(v[1].0, "COR-2026-0002");
+        assert!(v.iter().all(|f| f.4.is_none()), "los casos viejos no inventan un detalle");
+        let columnas_despues: i64 = c.query_row("SELECT COUNT(*) FROM pragma_table_info('correcciones')", [], |r| r.get(0)).unwrap();
+        assert_eq!(columnas_despues, columnas_antes + 1);
+    }
+
+    #[test]
+    fn de_17_a_18_a_19_encadena_las_dos_migraciones_sin_tocar_los_casos() {
+        let mut c = base_hasta(17);
+        sembrar_casos_viejos(&c);
+        let antes = c
+            .prepare("SELECT numero_caso, descripcion, referencia_id, importe FROM correcciones ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, f64>(3)?)))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect::<Vec<_>>();
+
+        let informe = ejecutar(&mut c).unwrap();
+
+        assert_eq!((informe.version_inicial, informe.version_final), (17, 19));
+        let despues: Vec<_> = filas(&c).into_iter().map(|f| (f.0, f.1, f.2, f.3.unwrap())).collect();
+        assert_eq!(despues, antes);
+    }
+
+    #[test]
+    fn migrar_una_base_ya_migrada_no_repite_nada_ni_pierde_detalles() {
+        let mut c = base_hasta(19);
+        c.execute(
+            "INSERT INTO correcciones (numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo, detalle)
+             VALUES ('COR-2026-0001', '01/10/2026', 'traspaso', 4, 'x', 1.5, 'USD', 'Motivo de prueba largo', '{\"version\":1}')",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0);
+        assert_eq!(filas(&c)[0].4.as_deref(), Some("{\"version\":1}"));
+    }
+
+    #[test]
+    fn aplicar_la_19_dos_veces_es_idempotente() {
+        let mut c = base_hasta(19);
+        sembrar_casos_viejos(&c);
+        let antes = filas(&c);
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_19_detalle_de_correcciones(&tx).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(filas(&c), antes);
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM pragma_table_info('correcciones') WHERE name = 'detalle'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "una sola columna detalle");
+    }
+
+    #[test]
+    fn el_esquema_rechaza_un_detalle_que_no_es_json_y_acepta_nulo_y_json() {
+        let c = base_hasta(19);
+        let insertar = |numero: &str, detalle: Option<&str>| {
+            c.execute(
+                "INSERT INTO correcciones (numero_caso, fecha, tipo, referencia_id, descripcion, motivo, detalle)
+                 VALUES (?, '01/10/2026', 'traspaso', 1, 'x', 'Motivo de prueba largo', ?)",
+                rusqlite::params![numero, detalle],
+            )
+        };
+        assert!(insertar("A", None).is_ok());
+        assert!(insertar("B", Some("{\"a\":1}")).is_ok());
+        assert!(insertar("C", Some("{mal formado")).is_err(), "JSON inválido rechazado");
+        assert!(insertar("D", Some("")).is_err(), "la cadena vacía tampoco es JSON");
+        assert!(insertar("E", Some("texto suelto")).is_err());
+    }
+
+    #[test]
+    fn el_check_tambien_protege_las_filas_viejas_al_actualizar() {
+        let c = base_hasta(19);
+        sembrar_casos_viejos(&c);
+        assert!(c.execute("UPDATE correcciones SET detalle = 'no json' WHERE numero_caso = 'COR-2026-0001'", []).is_err());
     }
 }

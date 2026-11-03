@@ -15,6 +15,8 @@ pub struct CasoCorreccion {
     pub importe: Option<f64>,
     pub divisa: Option<String>,
     pub motivo: String,
+    /// JSON con la foto completa del movimiento (traspasos); `null` en los casos anteriores.
+    pub detalle: Option<String>,
 }
 
 /// Los casos de corrección, del más reciente al más antiguo.
@@ -35,6 +37,7 @@ pub fn obtener_correcciones() -> Result<Vec<CasoCorreccion>, String> {
                 importe: c.importe,
                 divisa: c.divisa,
                 motivo: c.motivo,
+                detalle: c.detalle,
             })
             .collect())
     })
