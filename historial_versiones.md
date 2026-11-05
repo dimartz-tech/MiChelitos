@@ -4,7 +4,18 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.125.0 (Versión Actual) - 2026-11-05
+## 🚀 Versión 1.126.0 (Versión Actual) - 2026-11-05
+**Un abono con cuenta guarda la tasa de cambio solo cuando hubo cruce de divisas.** Decisión del titular sobre el hallazgo `hallazgo_la_tasa_sin_cruce_de_divisas_no_convierte_pero_se_guarda`.
+
+### 🔧 Qué se hace
+* **Cambio:** si la divisa del abono coincide con la de la cuenta de origen, la tasa recibida no se usó y ya no se guarda: `pagos_tarjeta.tasa_cambio` queda NULL y la descripción del gasto de comisión es «Comisión 0.20% Pago Tarjeta» (sin «Tasa N»). Con cruce de divisas todo queda igual (tasa guardada y mostrada).
+* **Sin cambio de dinero:** saldos, comisión y deuda son idénticos a antes; solo cambia el dato informativo guardado.
+* **Sin migración ni cambio de esquema:** los 11 abonos antiguos con tasa 1.0 no se tocan; se siguen listando (con su 1.0 oculto por la vista) y revirtiendo. El listado, la reversión y la vista previa ya toleraban NULL.
+* **Pruebas:** el hallazgo se invierte y pierde el prefijo; unitarias nuevas (sin cruce DOP/USD, con cruce en ambos sentidos, efectivo, tasa ausente con cruce, reversión) y 6 de integración (`integracion_abono_tasa.rs`) con los comandos reales, incluido un abono antiguo con tasa 1.0.
+
+---
+
+## Versión 1.125.0 - 2026-11-05
 **«Gasto por categoría» gana la columna «Tendencia 6m».** PR 3 de 5 del resumen por categoría y mes. Sin migración (esquema 19) y sin presupuesto.
 
 ### 🔧 Qué se hace
