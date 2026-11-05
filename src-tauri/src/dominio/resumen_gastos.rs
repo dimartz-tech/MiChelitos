@@ -19,6 +19,24 @@
 //!   meses anteriores al pedido) y la variación se ofrece también contra el mismo tramo del mes anterior.
 //! * **Exclusiones** por identificador de categoría (la fila sintética se excluye con `ID_CARGOS_DERIVADOS`).
 //!
+//! ## Tendencia de 6 meses y regla de dirección
+//!
+//! Cada fila (y el total) lleva una serie de **6 meses** que terminan en el mes pedido (el pedido incluido y los 5
+//! anteriores). Un mes sin gasto es **cero** (`Some(0)`); un mes anterior al primer dato del historial es **ausente**
+//! (`None`: no se inventan ceros). El mes en curso va marcado como parcial. La serie del total es la **suma de las
+//! series de las filas** mes a mes (las filas visibles, igual que el total del mes).
+//!
+//! **Regla de dirección** (`direccion_de_tendencia`, nueva y sujeta a revisión del titular):
+//!
+//! 1. El mes parcial **nunca** entra al cálculo. Tampoco los meses ausentes.
+//! 2. Se necesitan al menos **4 meses completos** con dato; si no, `DatosInsuficientes`.
+//! 3. «Reciente» = promedio de los 3 últimos meses completos; «previo» = promedio de los hasta 3 meses completos
+//!    anteriores a esos (mínimo 1, por la regla 2). Los promedios no se redondean: se comparan por producto cruzado
+//!    en enteros.
+//! 4. Si el promedio previo no es positivo → `DatosInsuficientes` (no hay contra qué medir).
+//! 5. Reciente **estrictamente mayor** que previo +10 % → `Sube`; **estrictamente menor** que previo −10 % → `Baja`;
+//!    en otro caso (el umbral exacto incluido) → `Estable`.
+//!
 //! ## Cómo se redondea
 //!
 //! La conversión redondea una vez por cubo, así que el importe de una fila es exacto respecto de sus datos y el total
@@ -85,12 +103,54 @@ pub struct Medidas {
     pub n: i64,
 }
 
+/// Cuántos meses abarca la tendencia (el pedido y los 5 anteriores).
+pub const MESES_TENDENCIA: u32 = 6;
+
+/// Un mes de la serie de tendencia.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PuntoTendencia {
+    pub anio: i32,
+    pub mes: u32,
+    /// En pesos. `None`: el mes es anterior al primer dato del historial (ausente, no cero).
+    pub importe: Option<Dinero>,
+    /// Es el mes en curso: su cierre aún no ha llegado. Solo puede serlo el último punto.
+    pub parcial: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DireccionTendencia {
+    Sube,
+    Baja,
+    Estable,
+    DatosInsuficientes,
+}
+
+impl DireccionTendencia {
+    /// El texto controlado con el que viaja al frontend.
+    pub fn como_texto(self) -> &'static str {
+        match self {
+            DireccionTendencia::Sube => "sube",
+            DireccionTendencia::Baja => "baja",
+            DireccionTendencia::Estable => "estable",
+            DireccionTendencia::DatosInsuficientes => "datos_insuficientes",
+        }
+    }
+}
+
+/// La serie de 6 meses (del más antiguo al pedido) y su dirección.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tendencia {
+    pub meses: Vec<PuntoTendencia>,
+    pub direccion: DireccionTendencia,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilaResumen {
     pub categoria_id: i64,
     pub categoria_nombre: String,
     pub derivado: bool,
     pub medidas: Medidas,
+    pub tendencia: Tendencia,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -107,6 +167,8 @@ pub struct ResumenMensual {
     pub filas: Vec<FilaResumen>,
     /// La suma de las filas.
     pub totales: Medidas,
+    /// La tendencia del total: la suma, mes a mes, de la de las filas.
+    pub tendencia_total: Tendencia,
     /// Los meses con algún gasto (del más reciente al más antiguo), para el selector.
     pub meses_disponibles: Vec<(i32, u32)>,
 }
@@ -219,6 +281,43 @@ fn medidas(
     }
 }
 
+/// La dirección de una serie de tendencia según la regla del módulo (ver «Tendencia de 6 meses»).
+///
+/// Los meses con dato y completos son los que tienen `importe` y no son parciales; el parcial nunca cuenta.
+pub fn direccion_de_tendencia(puntos: &[PuntoTendencia]) -> DireccionTendencia {
+    let completos: Vec<i128> = puntos
+        .iter()
+        .filter(|p| !p.parcial)
+        .filter_map(|p| p.importe.map(|d| d.centavos() as i128))
+        .collect();
+    if completos.len() < 4 {
+        return DireccionTendencia::DatosInsuficientes;
+    }
+    let (previos, recientes) = completos.split_at(completos.len() - 3);
+    let previos = &previos[previos.len().saturating_sub(3)..];
+    let suma_reciente: i128 = recientes.iter().sum();
+    let suma_previa: i128 = previos.iter().sum();
+    if suma_previa <= 0 {
+        return DireccionTendencia::DatosInsuficientes;
+    }
+    // reciente = suma_reciente / 3; previo = suma_previa / k. «reciente > previo * 1.10» sin dividir:
+    // suma_reciente * k * 10 > suma_previa * 3 * 11.
+    let k = previos.len() as i128;
+    let izquierda = suma_reciente * k * 10;
+    if izquierda > suma_previa * 3 * 11 {
+        DireccionTendencia::Sube
+    } else if izquierda < suma_previa * 3 * 9 {
+        DireccionTendencia::Baja
+    } else {
+        DireccionTendencia::Estable
+    }
+}
+
+fn tendencia_de(meses: Vec<PuntoTendencia>) -> Tendencia {
+    let direccion = direccion_de_tendencia(&meses);
+    Tendencia { meses, direccion }
+}
+
 /// El resumen del mes `mes` (año, mes) tal como está a fecha `hoy`.
 ///
 /// `n_promedio` es cuántos meses previos completos promediar (0 = sin promedio). Falla si el mes no existe o es
@@ -263,12 +362,19 @@ pub fn resumen_por_mes(
         BTreeMap::new()
     };
 
+    // La ventana de la tendencia: del más antiguo al pedido. Un mes anterior al primer dato es ausente.
+    let ventana_tendencia: Vec<(i32, u32)> = (0..MESES_TENDENCIA).rev().map(|k| mes_atras(anio, m, k)).collect();
+    let por_mes: Vec<BTreeMap<i64, Acumulado>> =
+        ventana_tendencia.iter().map(|ym| acumular(filas, opciones, |f| (f.anio, f.mes) == *ym)).collect();
+    let existe = |ym: &(i32, u32)| primero.map_or(false, |p| *ym >= p);
+
     let mut ids: Vec<i64> = actual.keys().chain(anterior.keys()).chain(promedios.keys()).copied().collect();
     ids.sort_unstable();
     ids.dedup();
 
     let cero = Acumulado::default();
     let mut brutas: Vec<(i64, String, bool, Dinero, Dinero, Option<Dinero>, Option<Dinero>, i64, i64)> = Vec::new();
+    let mut series: BTreeMap<i64, Vec<PuntoTendencia>> = BTreeMap::new();
     for id in ids {
         let a = actual.get(&id).unwrap_or(&cero);
         let p = anterior.get(&id).unwrap_or(&cero);
@@ -289,6 +395,12 @@ pub fn resumen_por_mes(
         } else {
             None
         };
+        let mut serie = Vec::with_capacity(ventana_tendencia.len());
+        for (ym, mapa) in ventana_tendencia.iter().zip(&por_mes) {
+            let importe = if existe(ym) { Some(mapa.get(&id).unwrap_or(&cero).en_pesos(tasa_usd)?) } else { None };
+            serie.push(PuntoTendencia { anio: ym.0, mes: ym.1, importe, parcial: parcial && *ym == (anio, m) });
+        }
+        series.insert(id, serie);
         brutas.push((id, nombre, derivado, a.en_pesos(tasa_usd)?, p.en_pesos(tasa_usd)?, md, prom, a.usd, a.n));
     }
 
@@ -302,6 +414,22 @@ pub fn resumen_por_mes(
     let total_usd = suma(&|b| b.7);
     let total_n = suma(&|b| b.8);
 
+    // El total de cada mes es la suma de las series de las filas (ausente si el mes no existía en el historial).
+    let serie_total: Vec<PuntoTendencia> = ventana_tendencia
+        .iter()
+        .enumerate()
+        .map(|(i, ym)| PuntoTendencia {
+            anio: ym.0,
+            mes: ym.1,
+            importe: if existe(ym) {
+                Some(dop(series.values().map(|s| s[i].importe.map_or(0, |d| d.centavos())).sum()))
+            } else {
+                None
+            },
+            parcial: parcial && *ym == (anio, m),
+        })
+        .collect();
+
     let mut filas_resumen: Vec<FilaResumen> = brutas
         .into_iter()
         .map(|(id, nombre, derivado, imp, ant, md, prom, usd, n)| FilaResumen {
@@ -309,6 +437,7 @@ pub fn resumen_por_mes(
             categoria_nombre: nombre,
             derivado,
             medidas: medidas(imp, total_importe, ant, md, prom, usd, n),
+            tendencia: tendencia_de(series.remove(&id).unwrap_or_default()),
         })
         .collect();
     filas_resumen.sort_by(|a, b| {
@@ -328,6 +457,7 @@ pub fn resumen_por_mes(
         meses_promedio,
         filas: filas_resumen,
         totales: medidas(total_importe, total_importe, total_anterior, total_mismo_dia, total_promedio, total_usd, total_n),
+        tendencia_total: tendencia_de(serie_total),
         meses_disponibles,
     })
 }
@@ -603,5 +733,198 @@ mod tests {
         let r = resumir(&filas, (2026, 9), fecha(2026, 10, 28), 0);
         let nombres: Vec<&str> = r.filas.iter().map(|f| f.categoria_nombre.as_str()).collect();
         assert_eq!(nombres, vec!["Mayor", "Alfa", "Zeta"]);
+    }
+
+    // --- Tendencia de 6 meses y regla de dirección ---
+
+    /// Los importes de la serie en centavos (`None` = mes ausente).
+    fn serie(t: &Tendencia) -> Vec<Option<i64>> {
+        t.meses.iter().map(|p| p.importe.map(|d| d.centavos())).collect()
+    }
+
+    fn meses_de(t: &Tendencia) -> Vec<(i32, u32)> {
+        t.meses.iter().map(|p| (p.anio, p.mes)).collect()
+    }
+
+    /// Una serie para la regla de dirección: `completos` (None = ausente) y, si se da, un mes parcial al final.
+    fn puntos(completos: &[Option<i64>], parcial: Option<i64>) -> Vec<PuntoTendencia> {
+        let mut v: Vec<PuntoTendencia> = completos
+            .iter()
+            .enumerate()
+            .map(|(i, c)| PuntoTendencia { anio: 2026, mes: 1 + i as u32, importe: c.map(dop), parcial: false })
+            .collect();
+        if let Some(p) = parcial {
+            v.push(PuntoTendencia { anio: 2026, mes: 1 + completos.len() as u32, importe: Some(dop(p)), parcial: true });
+        }
+        v
+    }
+
+    fn todos(c: &[i64]) -> Vec<Option<i64>> {
+        c.iter().map(|x| Some(*x)).collect()
+    }
+
+    #[test]
+    fn la_tendencia_son_los_6_meses_que_terminan_en_el_pedido_con_ceros_en_los_huecos() {
+        // Historial desde abril; categoría con gasto en abril, junio y septiembre. Se pide septiembre.
+        let filas = vec![pesos(2026, 4, 3, 1, "Comida", 10_001), pesos(2026, 6, 3, 1, "Comida", 20_002), pesos(2026, 9, 3, 1, "Comida", 30_003)];
+        let r = resumir(&filas, (2026, 9), fecha(2026, 10, 28), 0);
+        let t = &de(&r, 1).tendencia;
+        assert_eq!(meses_de(t), vec![(2026, 4), (2026, 5), (2026, 6), (2026, 7), (2026, 8), (2026, 9)]);
+        assert_eq!(serie(t), vec![Some(10_001), Some(0), Some(20_002), Some(0), Some(0), Some(30_003)]);
+        assert!(t.meses.iter().all(|p| !p.parcial), "septiembre ya está cerrado");
+        assert_eq!(t.meses.last().unwrap().importe.unwrap(), de(&r, 1).medidas.importe, "el último punto es el importe del mes");
+    }
+
+    #[test]
+    fn los_meses_anteriores_al_primer_dato_del_historial_son_ausentes_no_ceros() {
+        let filas = vec![pesos(2026, 7, 3, 1, "Comida", 10_001), pesos(2026, 9, 3, 1, "Comida", 30_003)];
+        let r = resumir(&filas, (2026, 9), fecha(2026, 10, 28), 0);
+        assert_eq!(serie(&de(&r, 1).tendencia), vec![None, None, None, Some(10_001), Some(0), Some(30_003)]);
+        assert_eq!(serie(&r.tendencia_total), vec![None, None, None, Some(10_001), Some(0), Some(30_003)]);
+        // Pedir un mes sin historial detrás: todo ausente salvo el propio.
+        let r2 = resumir(&filas, (2026, 7), fecha(2026, 10, 28), 0);
+        assert_eq!(serie(&de(&r2, 1).tendencia), vec![None, None, None, None, None, Some(10_001)]);
+    }
+
+    #[test]
+    fn el_mes_en_curso_va_marcado_como_parcial_y_solo_el() {
+        let filas = vec![pesos(2026, 7, 3, 1, "Comida", 100), pesos(2026, 9, 3, 1, "Comida", 200), pesos(2026, 10, 4, 1, "Comida", 50)];
+        let r = resumir(&filas, (2026, 10), fecha(2026, 10, 12), 0);
+        let t = &de(&r, 1).tendencia;
+        assert_eq!(meses_de(t).last(), Some(&(2026, 10)));
+        assert_eq!(t.meses.iter().map(|p| p.parcial).collect::<Vec<_>>(), vec![false, false, false, false, false, true]);
+        assert!(r.tendencia_total.meses.last().unwrap().parcial);
+        // Mirando septiembre desde el 12/10 el mismo gasto de octubre no entra ni se marca nada.
+        let cerrado = resumir(&filas, (2026, 9), fecha(2026, 10, 12), 0);
+        assert!(de(&cerrado, 1).tendencia.meses.iter().all(|p| !p.parcial));
+    }
+
+    #[test]
+    fn la_ventana_cruza_el_cambio_de_anio() {
+        let filas = vec![pesos(2026, 9, 3, 1, "Comida", 111), pesos(2026, 12, 3, 1, "Comida", 222), pesos(2027, 2, 3, 1, "Comida", 333)];
+        let r = resumir(&filas, (2027, 2), fecha(2027, 3, 10), 0);
+        let t = &de(&r, 1).tendencia;
+        assert_eq!(meses_de(t), vec![(2026, 9), (2026, 10), (2026, 11), (2026, 12), (2027, 1), (2027, 2)]);
+        assert_eq!(serie(t), vec![Some(111), Some(0), Some(0), Some(222), Some(0), Some(333)]);
+    }
+
+    #[test]
+    fn una_categoria_que_aparece_a_mitad_tiene_ceros_antes_y_no_ausentes() {
+        // El historial empieza en abril (por «Comida»); «Nueva» solo aparece en agosto y septiembre.
+        let filas = vec![
+            pesos(2026, 4, 3, 1, "Comida", 5_000),
+            pesos(2026, 8, 3, 2, "Nueva", 7_007),
+            pesos(2026, 9, 3, 2, "Nueva", 9_009),
+        ];
+        let r = resumir(&filas, (2026, 9), fecha(2026, 10, 28), 0);
+        assert_eq!(serie(&de(&r, 2).tendencia), vec![Some(0), Some(0), Some(0), Some(0), Some(7_007), Some(9_009)]);
+    }
+
+    #[test]
+    fn el_total_de_la_tendencia_es_la_suma_de_las_filas_mes_a_mes_y_respeta_exclusiones_y_dolares() {
+        let filas = vec![
+            pesos(2026, 5, 3, 1, "A", 1_001),
+            pesos(2026, 6, 3, 2, "B", 2_002),
+            pesos(2026, 8, 3, 1, "A", 3_003),
+            fila(2026, 8, 5, 3, "C", "USD", 333),
+            pesos(2026, 9, 3, 2, "B", 4_004),
+            pesos(2026, 9, 3, 4, "Excluida", 999_999),
+        ];
+        let opciones = OpcionesResumen { excluir_categorias: vec![4] };
+        let tasa_fea = TasaCambio::nueva(58.7351).unwrap();
+        let r = resumen_por_mes(&filas, (2026, 9), fecha(2026, 10, 28), 0, tasa_fea, &opciones).unwrap();
+        assert_eq!(r.tendencia_total.meses[0].importe, None, "abril es anterior al primer dato (mayo)");
+        for i in 1..6 {
+            let esperado: i64 = r.filas.iter().map(|f| f.tendencia.meses[i].importe.unwrap().centavos()).sum();
+            assert_eq!(r.tendencia_total.meses[i].importe.unwrap().centavos(), esperado, "mes {i} del total");
+        }
+        // El último punto de cada fila y del total coincide con el importe del mes.
+        for f in &r.filas {
+            assert_eq!(f.tendencia.meses[5].importe.unwrap(), f.medidas.importe);
+        }
+        assert_eq!(r.tendencia_total.meses[5].importe.unwrap(), r.totales.importe);
+        assert_eq!(r.tendencia_total.meses[5].importe.unwrap().centavos(), 4_004, "la excluida no entra");
+        // El dólar sin liquidar se convierte una vez en agosto (3.33 USD * 58.7351 = 195.5889 -> 195.59).
+        assert_eq!(de(&r, 3).tendencia.meses[4].importe.unwrap().centavos(), 19_559);
+    }
+
+    #[test]
+    fn la_regla_pide_al_menos_cuatro_meses_completos() {
+        for completos in [todos(&[]), todos(&[100]), todos(&[100, 100, 100]), vec![None, None, Some(100), Some(100), Some(100)]] {
+            assert_eq!(direccion_de_tendencia(&puntos(&completos, None)), DireccionTendencia::DatosInsuficientes, "{completos:?}");
+        }
+        // Con cuatro: 3 recientes contra 1 previo.
+        assert_eq!(direccion_de_tendencia(&puntos(&todos(&[100, 300, 300, 300]), None)), DireccionTendencia::Sube);
+        // El parcial no cuenta como cuarto mes.
+        assert_eq!(direccion_de_tendencia(&puntos(&todos(&[100, 100, 100]), Some(999))), DireccionTendencia::DatosInsuficientes);
+    }
+
+    #[test]
+    fn el_umbral_exacto_del_diez_por_ciento_es_estable_y_un_centavo_mas_ya_sube_o_baja() {
+        // Previo: 3 meses de 100000 centavos (suma 300000). Reciente: promedio exacto +10 % = suma 330000.
+        let con = |a: i64, b: i64, c: i64| direccion_de_tendencia(&puntos(&todos(&[100_000, 100_000, 100_000, a, b, c]), None));
+        assert_eq!(con(110_000, 110_000, 110_000), DireccionTendencia::Estable, "+10.00 % exacto");
+        assert_eq!(con(110_000, 110_000, 110_001), DireccionTendencia::Sube, "un centavo sobre el umbral (la suma, no el promedio)");
+        assert_eq!(con(110_000, 110_000, 109_999), DireccionTendencia::Estable, "justo debajo");
+        assert_eq!(con(90_000, 90_000, 90_000), DireccionTendencia::Estable, "-10.00 % exacto");
+        assert_eq!(con(90_000, 90_000, 89_999), DireccionTendencia::Baja, "justo debajo del umbral de baja");
+        assert_eq!(con(90_000, 90_000, 90_001), DireccionTendencia::Estable, "justo encima");
+        assert_eq!(con(100_000, 100_000, 100_000), DireccionTendencia::Estable);
+        // Con un solo previo (4 meses) el umbral es el mismo: previo 100000 centavos, reciente suma 330000.
+        let uno = |suma_c: i64| direccion_de_tendencia(&puntos(&todos(&[100_000, 110_000, 110_000, suma_c - 220_000]), None));
+        assert_eq!(uno(330_000), DireccionTendencia::Estable);
+        assert_eq!(uno(330_001), DireccionTendencia::Sube);
+        // Con dos previos: previo promedia 100000 centavos; mismo umbral.
+        let dos = |ultimo: i64| direccion_de_tendencia(&puntos(&todos(&[90_000, 110_000, 110_000, 110_000, ultimo]), None));
+        assert_eq!(dos(110_000), DireccionTendencia::Estable);
+        assert_eq!(dos(110_001), DireccionTendencia::Sube);
+    }
+
+    #[test]
+    fn una_referencia_en_cero_o_negativa_son_datos_insuficientes() {
+        assert_eq!(direccion_de_tendencia(&puntos(&todos(&[0, 0, 0, 500, 500, 500]), None)), DireccionTendencia::DatosInsuficientes);
+        assert_eq!(direccion_de_tendencia(&puntos(&todos(&[0, 100, 100, 100]), None)), DireccionTendencia::DatosInsuficientes);
+        assert_eq!(direccion_de_tendencia(&puntos(&todos(&[-500, 100, 100, 100]), None)), DireccionTendencia::DatosInsuficientes);
+        // Recientes en cero contra un previo positivo: baja del todo.
+        assert_eq!(direccion_de_tendencia(&puntos(&todos(&[500, 500, 500, 0, 0, 0]), None)), DireccionTendencia::Baja);
+    }
+
+    #[test]
+    fn el_mes_parcial_nunca_entra_en_la_direccion() {
+        let base = todos(&[1_000, 1_000, 1_000, 1_000, 1_000, 1_000]);
+        assert_eq!(direccion_de_tendencia(&puntos(&base, None)), DireccionTendencia::Estable);
+        for parcial in [0, 1, 999_999_999] {
+            assert_eq!(direccion_de_tendencia(&puntos(&base, Some(parcial))), DireccionTendencia::Estable, "parcial = {parcial}");
+        }
+        // Con 5 completos (el pedido es el mes en curso) la ventana de 3+2 sigue valiendo.
+        let cinco = todos(&[1_000, 1_000, 2_000, 2_000, 2_000]);
+        assert_eq!(direccion_de_tendencia(&puntos(&cinco, Some(0))), DireccionTendencia::Sube);
+    }
+
+    #[test]
+    fn la_direccion_usa_los_3_ultimos_completos_contra_hasta_3_anteriores() {
+        let sube = direccion_de_tendencia(&puntos(&todos(&[1_000, 1_000, 1_000, 2_000, 2_000, 2_000]), None));
+        assert_eq!(sube, DireccionTendencia::Sube);
+        // Con ausentes al inicio, los previos son los que haya (dos: 1000 y 1000) contra 500 de promedio.
+        let con_ausentes = vec![None, None, Some(1_000), Some(1_000), Some(500), Some(500), Some(500)];
+        assert_eq!(direccion_de_tendencia(&puntos(&con_ausentes, None)), DireccionTendencia::Baja);
+    }
+
+    #[test]
+    fn la_direccion_llega_a_la_fila_y_al_total_y_el_parcial_no_la_cambia() {
+        // Hoy 12/10, se pide octubre (parcial): completos mayo a septiembre.
+        let mut filas = Vec::new();
+        for (mes, c) in [(5u32, 10_000i64), (6, 10_000), (7, 20_000), (8, 20_000), (9, 20_000)] {
+            filas.push(pesos(2026, mes, 3, 1, "Comida", c));
+        }
+        filas.push(pesos(2026, 10, 2, 1, "Comida", 1));
+        let r = resumir(&filas, (2026, 10), fecha(2026, 10, 12), 0);
+        assert_eq!(de(&r, 1).tendencia.direccion, DireccionTendencia::Sube);
+        assert_eq!(r.tendencia_total.direccion, DireccionTendencia::Sube);
+        assert_eq!(DireccionTendencia::Sube.como_texto(), "sube");
+        assert_eq!(DireccionTendencia::DatosInsuficientes.como_texto(), "datos_insuficientes");
+        // Con historial corto, insuficientes.
+        let corto = resumir(&[pesos(2026, 9, 3, 1, "Comida", 100)], (2026, 9), fecha(2026, 10, 12), 0);
+        assert_eq!(de(&corto, 1).tendencia.direccion, DireccionTendencia::DatosInsuficientes);
     }
 }

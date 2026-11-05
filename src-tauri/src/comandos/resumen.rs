@@ -7,7 +7,7 @@ use super::ayudantes::lee_almacen;
 use crate::aplicacion;
 use crate::aplicacion::resumen_gastos::DatosDeResumen;
 use crate::dominio::dinero::{Dinero, TasaCambio};
-use crate::dominio::resumen_gastos::{Medidas, ResumenMensual, ID_CARGOS_DERIVADOS};
+use crate::dominio::resumen_gastos::{Medidas, ResumenMensual, Tendencia, ID_CARGOS_DERIVADOS};
 use crate::ipc;
 
 /// Las cifras de una fila o del total. Los importes viajan como texto exacto (`1234.56`), nunca como número.
@@ -31,6 +31,25 @@ pub struct MedidasResumen {
     pub n: i64,
 }
 
+/// Un mes de la serie de tendencia.
+#[derive(Serialize, Debug)]
+pub struct PuntoTendenciaResumen {
+    pub anio: i32,
+    pub mes: u32,
+    /// En pesos, texto exacto. `null`: el mes es anterior al primer dato del historial (ausente, no cero).
+    pub importe: Option<String>,
+    /// El mes en curso (su cierre aún no ha llegado). Nunca entra en la dirección.
+    pub parcial: bool,
+}
+
+/// Los 6 meses que terminan en el mes pedido (del más antiguo al pedido) y su dirección.
+#[derive(Serialize, Debug)]
+pub struct TendenciaResumen {
+    pub meses: Vec<PuntoTendenciaResumen>,
+    /// `sube`, `baja`, `estable` o `datos_insuficientes` (regla en `dominio::resumen_gastos`).
+    pub direccion: String,
+}
+
 #[derive(Serialize, Debug)]
 pub struct FilaResumenGasto {
     /// `id_cargos_derivados` para la fila sintética; en otro caso, el de la categoría.
@@ -38,6 +57,7 @@ pub struct FilaResumenGasto {
     pub categoria_nombre: String,
     pub derivado: bool,
     pub medidas: MedidasResumen,
+    pub tendencia: TendenciaResumen,
 }
 
 #[derive(Serialize, Debug)]
@@ -61,6 +81,8 @@ pub struct ResumenGastos {
     pub filas: Vec<FilaResumenGasto>,
     /// La suma de las filas.
     pub totales: MedidasResumen,
+    /// La tendencia del total: la suma, mes a mes, de la de las filas.
+    pub tendencia_total: TendenciaResumen,
     /// Los meses con algún gasto, del más reciente al más antiguo.
     pub meses_disponibles: Vec<MesDisponible>,
 }
@@ -110,6 +132,22 @@ fn a_medidas(m: &Medidas) -> MedidasResumen {
     }
 }
 
+fn a_tendencia(t: &Tendencia) -> TendenciaResumen {
+    TendenciaResumen {
+        meses: t
+            .meses
+            .iter()
+            .map(|p| PuntoTendenciaResumen {
+                anio: p.anio,
+                mes: p.mes,
+                importe: p.importe.map(ipc::importe_a_texto),
+                parcial: p.parcial,
+            })
+            .collect(),
+        direccion: t.direccion.como_texto().to_string(),
+    }
+}
+
 fn a_dto(r: ResumenMensual) -> ResumenGastos {
     ResumenGastos {
         anio: r.anio,
@@ -127,9 +165,11 @@ fn a_dto(r: ResumenMensual) -> ResumenGastos {
                 categoria_nombre: f.categoria_nombre.clone(),
                 derivado: f.derivado,
                 medidas: a_medidas(&f.medidas),
+                tendencia: a_tendencia(&f.tendencia),
             })
             .collect(),
         totales: a_medidas(&r.totales),
+        tendencia_total: a_tendencia(&r.tendencia_total),
         meses_disponibles: r.meses_disponibles.iter().map(|(a, m)| MesDisponible { anio: *a, mes: *m }).collect(),
     }
 }

@@ -8,8 +8,9 @@ import { importeDeTexto as desdeTarjetas } from '../../../src/js/vistas/tarjetas
 import {
     etiquetaDeMes, filasOrdenadas, htmlDeGastoPorCategoria, idsDeInversionYObligaciones, mesDeValor, mesesDelSelector,
     notaDeDolares, porcentajeDeMilesimas, valorDeMes, variacionDePb,
+    alturasDeBarras, descripcionDeTendencia, etiquetaDeDireccion, htmlDeTendencia,
 } from '../../../src/js/vistas/resumen_gastos.js';
-import { eleccion, fila, medidas, resumen } from '../ayudas/resumen_gastos_datos.js';
+import { eleccion, fila, medidas, resumen, tendencia } from '../ayudas/resumen_gastos_datos.js';
 
 const dibujar = (r = resumen(), e = eleccion()) => htmlDeGastoPorCategoria({ tipo: 'ok', resumen: r }, e);
 
@@ -162,4 +163,86 @@ test('un nombre de categoría hostil se escapa en la celda, en el aria-label y n
     assert.doesNotMatch(html, /<img/);
     assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt; &quot;&#39;&amp;/);
     assert.doesNotMatch(html, /aria-label="[^"]*"[^>]*onerror/);
+});
+
+// --- Tendencia de 6 meses ---
+
+const pts = importes => importes.map(importe => ({ importe }));
+
+test('alturasDeBarras: escala al máximo de la fila; cero mide 0; con gasto, al menos el piso; ausente es null', () => {
+    assert.deepEqual(alturasDeBarras(pts(['100.00', '50.00', '0.00', null, '0.01', '100.00'])), [100, 50, 0, null, 6, 100]);
+    assert.deepEqual(alturasDeBarras(pts(['333.33', '1000.01'])), [33, 100], 'división entera sobre centavos');
+    assert.deepEqual(alturasDeBarras(pts(['0.00', '0.00', null])), [0, 0, null], 'sin máximo positivo no hay barras');
+    assert.deepEqual(alturasDeBarras(pts(['-5.00', '10.00'])), [0, 100], 'un negativo no dibuja barra');
+    assert.deepEqual(alturasDeBarras(pts(['900719925474099.99', '450359962737049.99'])), [100, 49], 'enteros grandes sin Number (división entera)');
+    assert.deepEqual(alturasDeBarras(pts(['basura', '10.00'])), [0, 100], 'un texto ilegible no rompe');
+    assert.deepEqual(alturasDeBarras([]), []);
+});
+
+test('etiquetaDeDireccion: flecha Y texto; lo desconocido es «datos insuficientes»', () => {
+    assert.deepEqual(etiquetaDeDireccion('sube'), { direccion: 'sube', flecha: '▲', texto: 'sube' });
+    assert.deepEqual(etiquetaDeDireccion('baja'), { direccion: 'baja', flecha: '▼', texto: 'baja' });
+    assert.deepEqual(etiquetaDeDireccion('estable'), { direccion: 'estable', flecha: '=', texto: 'estable' });
+    assert.deepEqual(etiquetaDeDireccion('datos_insuficientes'), { direccion: 'datos_insuficientes', flecha: '', texto: 'datos insuficientes' });
+    assert.equal(etiquetaDeDireccion('<b>x</b>').texto, 'datos insuficientes');
+});
+
+test('descripcionDeTendencia: nombre, dirección y cada mes con su importe en texto; ausente y parcial dicen lo suyo', () => {
+    const t = tendencia([null, '1234.57', '0.00', '80.01'], 'sube', true);
+    const d = descripcionDeTendencia('Supermercado', t);
+    assert.match(d, /^Supermercado: sube; últimos meses: /);
+    assert.match(d, /noviembre 2026 sin datos/);
+    assert.match(d, /diciembre 2026 DOP 1,234\.57/);
+    assert.match(d, /enero 2027 DOP 0\.00/);
+    assert.match(d, /febrero 2027 \(parcial, no cuenta en la dirección\) DOP 80\.01/);
+});
+
+test('htmlDeTendencia: una barra por mes con su altura, el parcial rayado, el ausente como hueco, texto y aria-label', () => {
+    const html = htmlDeTendencia('Comida', tendencia([null, '100.00', '50.00', '0.00', '25.00', '75.00'], 'baja', true));
+    assert.equal((html.match(/class="rg-t-barra[ "]/g) ?? []).length, 5, 'cinco barras (la ausente no dibuja)');
+    assert.equal((html.match(/rg-t-hueco/g) ?? []).length, 1);
+    assert.equal((html.match(/rg-t-parcial/g) ?? []).length, 1);
+    assert.match(html, /height:100%/);
+    assert.match(html, /height:50%/);
+    assert.match(html, /height:0%/);
+    assert.match(html, /repeating-linear-gradient/, 'el parcial lleva trama, no color distinto');
+    assert.match(html, /role="img" aria-label="Comida: baja; últimos meses: /);
+    assert.match(html, /▼<\/span> baja/);
+    assert.match(html, /var\(--color-success/);
+    assert.doesNotMatch(html, /\bon[a-z]+=/, 'sin manejadores en línea');
+});
+
+test('la dirección «sube» usa el color de alerta y «datos insuficientes» no lleva flecha', () => {
+    assert.match(htmlDeTendencia('X', tendencia(undefined, 'sube')), /var\(--color-danger/);
+    const sin = htmlDeTendencia('X', tendencia(['1.00', '2.00'], 'datos_insuficientes'));
+    assert.match(sin, /datos insuficientes/);
+    assert.doesNotMatch(sin, /▲|▼/);
+});
+
+test('la tabla trae la columna «Tendencia 6m», una celda por fila y la del total; desplazable y con ancho mínimo', () => {
+    const html = dibujar();
+    assert.match(html, /<th scope="col">Tendencia 6m<\/th>/);
+    assert.equal((html.match(/class="rg-tendencia"/g) ?? []).length, 4, 'tres filas y el total');
+    assert.match(html, /aria-label="Total: estable; últimos meses: /);
+    assert.match(html, /aria-label="Cargos derivados: sube; /);
+    assert.match(html, /class="rg-desplazable" role="region" tabindex="0"/);
+    assert.match(html, /min-width:46rem/);
+});
+
+test('un nombre hostil no sale sin escapar del aria-label ni del título de la tendencia', () => {
+    const hostil = `"><script>alert(1)</script> '&`;
+    const html = dibujar(resumen({ filas: [fila(1, hostil)] }));
+    assert.doesNotMatch(html, /<script/);
+    assert.match(html, /aria-label="&lt;|aria-label="&quot;&gt;&lt;script&gt;/);
+    const suelto = htmlDeTendencia(hostil, tendencia());
+    assert.doesNotMatch(suelto, /<script/);
+    assert.doesNotMatch(suelto, /aria-label="[^"]*"[^>]*<script/);
+});
+
+test('los estados cargando y error no dibujan tendencia', () => {
+    for (const estado of [{ tipo: 'cargando' }, { tipo: 'error', mensaje: 'x' }]) {
+        assert.doesNotMatch(htmlDeGastoPorCategoria(estado, eleccion()), /rg-tendencia/);
+    }
+    const vacio = dibujar(resumen({ filas: [] }));
+    assert.doesNotMatch(vacio, /rg-tendencia/);
 });
