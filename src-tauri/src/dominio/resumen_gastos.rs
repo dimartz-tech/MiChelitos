@@ -34,8 +34,13 @@
 //!    anteriores a esos (mínimo 1, por la regla 2). Los promedios no se redondean: se comparan por producto cruzado
 //!    en enteros.
 //! 4. Si el promedio previo no es positivo → `DatosInsuficientes` (no hay contra qué medir).
-//! 5. Reciente **estrictamente mayor** que previo +10 % → `Sube`; **estrictamente menor** que previo −10 % → `Baja`;
-//!    en otro caso (el umbral exacto incluido) → `Estable`.
+//! 5. Reciente **estrictamente mayor** que previo +10 % **y** con una diferencia de al menos
+//!    `MINIMO_ABSOLUTO_TENDENCIA_CENTAVOS` (500.00 pesos) → `Sube`; **estrictamente menor** que previo −10 % **y** con
+//!    esa misma diferencia mínima → `Baja`; en otro caso (el umbral exacto incluido) → `Estable`. El mínimo absoluto
+//!    evita que una categoría pequeña «suba» un 50 % por unos pocos pesos. La diferencia es entre los **promedios**
+//!    (sin redondear) y en pesos, porque los importes de la serie ya vienen convertidos a DOP.
+//! 6. Un `Estable` lleva su motivo (`MotivoEstable`): `DentroDelUmbral` si el cambio no pasa del 10 %, y `PocoCambio`
+//!    si pasa del 10 % pero la diferencia es menor que el mínimo absoluto.
 //!
 //! ## Cómo se redondea
 //!
@@ -103,6 +108,11 @@ pub struct Medidas {
     pub n: i64,
 }
 
+/// Diferencia absoluta mínima, en centavos de peso (500.00 DOP), entre el promedio reciente y el previo para que la
+/// tendencia sea «sube» o «baja». Decisión del titular («opción A+D con mínimo de 500 pesos»): además del umbral
+/// relativo del 10 %, el cambio debe ser de al menos esta cantidad; la comparación es inclusiva (500.00 exactos cuenta).
+pub const MINIMO_ABSOLUTO_TENDENCIA_CENTAVOS: i128 = 50_000;
+
 /// Cuántos meses abarca la tendencia (el pedido y los 5 anteriores).
 pub const MESES_TENDENCIA: u32 = 6;
 
@@ -125,6 +135,25 @@ pub enum DireccionTendencia {
     DatosInsuficientes,
 }
 
+/// Por qué una tendencia es `Estable`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotivoEstable {
+    /// El cambio relativo no pasa del 10 % (el umbral exacto incluido).
+    DentroDelUmbral,
+    /// El cambio relativo pasa del 10 % pero la diferencia es menor que `MINIMO_ABSOLUTO_TENDENCIA_CENTAVOS`.
+    PocoCambio,
+}
+
+impl MotivoEstable {
+    /// El texto controlado con el que viaja al frontend.
+    pub fn como_texto(self) -> &'static str {
+        match self {
+            MotivoEstable::DentroDelUmbral => "dentro_del_umbral",
+            MotivoEstable::PocoCambio => "poco_cambio",
+        }
+    }
+}
+
 impl DireccionTendencia {
     /// El texto controlado con el que viaja al frontend.
     pub fn como_texto(self) -> &'static str {
@@ -142,6 +171,8 @@ impl DireccionTendencia {
 pub struct Tendencia {
     pub meses: Vec<PuntoTendencia>,
     pub direccion: DireccionTendencia,
+    /// Solo con `direccion == Estable`.
+    pub motivo_estable: Option<MotivoEstable>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -285,37 +316,53 @@ fn medidas(
 ///
 /// Los meses con dato y completos son los que tienen `importe` y no son parciales; el parcial nunca cuenta.
 pub fn direccion_de_tendencia(puntos: &[PuntoTendencia]) -> DireccionTendencia {
+    evaluar_tendencia(puntos).0
+}
+
+/// Como `direccion_de_tendencia`, y si es `Estable` también por qué.
+pub fn evaluar_tendencia(puntos: &[PuntoTendencia]) -> (DireccionTendencia, Option<MotivoEstable>) {
     let completos: Vec<i128> = puntos
         .iter()
         .filter(|p| !p.parcial)
         .filter_map(|p| p.importe.map(|d| d.centavos() as i128))
         .collect();
     if completos.len() < 4 {
-        return DireccionTendencia::DatosInsuficientes;
+        return (DireccionTendencia::DatosInsuficientes, None);
     }
     let (previos, recientes) = completos.split_at(completos.len() - 3);
     let previos = &previos[previos.len().saturating_sub(3)..];
     let suma_reciente: i128 = recientes.iter().sum();
     let suma_previa: i128 = previos.iter().sum();
     if suma_previa <= 0 {
-        return DireccionTendencia::DatosInsuficientes;
+        return (DireccionTendencia::DatosInsuficientes, None);
     }
-    // reciente = suma_reciente / 3; previo = suma_previa / k. «reciente > previo * 1.10» sin dividir:
-    // suma_reciente * k * 10 > suma_previa * 3 * 11.
-    let k = previos.len() as i128;
-    let izquierda = suma_reciente * k * 10;
-    if izquierda > suma_previa * 3 * 11 {
-        DireccionTendencia::Sube
-    } else if izquierda < suma_previa * 3 * 9 {
-        DireccionTendencia::Baja
+    // reciente = suma_reciente / n_r; previo = suma_previa / n_p. Todo por producto cruzado, sin dividir ni
+    // redondear. i128 sobra: las sumas son de a lo sumo 3 enteros de 64 bits y se multiplican por constantes pequeñas.
+    let n_r = recientes.len() as i128;
+    let n_p = previos.len() as i128;
+    let reciente_escalado = suma_reciente * n_p; // reciente * n_r * n_p
+    let previo_escalado = suma_previa * n_r; // previo * n_r * n_p
+    // Relativo: reciente > previo * 1.10  <=>  reciente_escalado * 10 > previo_escalado * 11.
+    let sobre = reciente_escalado * 10 > previo_escalado * 11;
+    let bajo = reciente_escalado * 10 < previo_escalado * 9;
+    if !sobre && !bajo {
+        return (DireccionTendencia::Estable, Some(MotivoEstable::DentroDelUmbral));
+    }
+    // Absoluto: |reciente - previo| >= minimo  <=>  |reciente_escalado - previo_escalado| >= minimo * n_r * n_p.
+    let diferencia = (reciente_escalado - previo_escalado).abs();
+    if diferencia < MINIMO_ABSOLUTO_TENDENCIA_CENTAVOS * n_r * n_p {
+        return (DireccionTendencia::Estable, Some(MotivoEstable::PocoCambio));
+    }
+    if sobre {
+        (DireccionTendencia::Sube, None)
     } else {
-        DireccionTendencia::Estable
+        (DireccionTendencia::Baja, None)
     }
 }
 
 fn tendencia_de(meses: Vec<PuntoTendencia>) -> Tendencia {
-    let direccion = direccion_de_tendencia(&meses);
-    Tendencia { meses, direccion }
+    let (direccion, motivo_estable) = evaluar_tendencia(&meses);
+    Tendencia { meses, direccion, motivo_estable }
 }
 
 /// El resumen del mes `mes` (año, mes) tal como está a fecha `hoy`.
@@ -848,36 +895,131 @@ mod tests {
         assert_eq!(de(&r, 3).tendencia.meses[4].importe.unwrap().centavos(), 19_559);
     }
 
+    fn ev(c: &[i64]) -> (DireccionTendencia, Option<MotivoEstable>) {
+        evaluar_tendencia(&puntos(&todos(c), None))
+    }
+
     #[test]
     fn la_regla_pide_al_menos_cuatro_meses_completos() {
         for completos in [todos(&[]), todos(&[100]), todos(&[100, 100, 100]), vec![None, None, Some(100), Some(100), Some(100)]] {
             assert_eq!(direccion_de_tendencia(&puntos(&completos, None)), DireccionTendencia::DatosInsuficientes, "{completos:?}");
         }
-        // Con cuatro: 3 recientes contra 1 previo.
-        assert_eq!(direccion_de_tendencia(&puntos(&todos(&[100, 300, 300, 300]), None)), DireccionTendencia::Sube);
+        // Con cuatro: 3 recientes (3000 pesos) contra 1 previo (1000 pesos): +200 % y 2000 pesos de diferencia.
+        // (En #163 esta prueba usaba 100/300 centavos; con el mínimo absoluto de 500.00 se escalan a pesos reales.)
+        assert_eq!(direccion_de_tendencia(&puntos(&todos(&[100_000, 300_000, 300_000, 300_000]), None)), DireccionTendencia::Sube);
         // El parcial no cuenta como cuarto mes.
         assert_eq!(direccion_de_tendencia(&puntos(&todos(&[100, 100, 100]), Some(999))), DireccionTendencia::DatosInsuficientes);
     }
 
     #[test]
     fn el_umbral_exacto_del_diez_por_ciento_es_estable_y_un_centavo_mas_ya_sube_o_baja() {
-        // Previo: 3 meses de 100000 centavos (suma 300000). Reciente: promedio exacto +10 % = suma 330000.
-        let con = |a: i64, b: i64, c: i64| direccion_de_tendencia(&puntos(&todos(&[100_000, 100_000, 100_000, a, b, c]), None));
-        assert_eq!(con(110_000, 110_000, 110_000), DireccionTendencia::Estable, "+10.00 % exacto");
-        assert_eq!(con(110_000, 110_000, 110_001), DireccionTendencia::Sube, "un centavo sobre el umbral (la suma, no el promedio)");
-        assert_eq!(con(110_000, 110_000, 109_999), DireccionTendencia::Estable, "justo debajo");
-        assert_eq!(con(90_000, 90_000, 90_000), DireccionTendencia::Estable, "-10.00 % exacto");
-        assert_eq!(con(90_000, 90_000, 89_999), DireccionTendencia::Baja, "justo debajo del umbral de baja");
-        assert_eq!(con(90_000, 90_000, 90_001), DireccionTendencia::Estable, "justo encima");
-        assert_eq!(con(100_000, 100_000, 100_000), DireccionTendencia::Estable);
-        // Con un solo previo (4 meses) el umbral es el mismo: previo 100000 centavos, reciente suma 330000.
-        let uno = |suma_c: i64| direccion_de_tendencia(&puntos(&todos(&[100_000, 110_000, 110_000, suma_c - 220_000]), None));
-        assert_eq!(uno(330_000), DireccionTendencia::Estable);
-        assert_eq!(uno(330_001), DireccionTendencia::Sube);
-        // Con dos previos: previo promedia 100000 centavos; mismo umbral.
-        let dos = |ultimo: i64| direccion_de_tendencia(&puntos(&todos(&[90_000, 110_000, 110_000, 110_000, ultimo]), None));
-        assert_eq!(dos(110_000), DireccionTendencia::Estable);
-        assert_eq!(dos(110_001), DireccionTendencia::Sube);
+        // Previo: 3 meses de 1 000 000 centavos (10 000.00; suma 3 000 000). Reciente: +10 % exacto = suma 3 300 000
+        // (la diferencia, 1000 pesos, supera el mínimo absoluto: aquí solo manda el relativo). Escala x10 respecto de #163.
+        let con = |a: i64, b: i64, c: i64| ev(&[1_000_000, 1_000_000, 1_000_000, a, b, c]);
+        assert_eq!(con(1_100_000, 1_100_000, 1_100_000), (DireccionTendencia::Estable, Some(MotivoEstable::DentroDelUmbral)), "+10.00 % exacto");
+        assert_eq!(con(1_100_000, 1_100_000, 1_100_001).0, DireccionTendencia::Sube, "un centavo sobre el umbral (la suma, no el promedio)");
+        assert_eq!(con(1_100_000, 1_100_000, 1_099_999).0, DireccionTendencia::Estable, "justo debajo");
+        assert_eq!(con(900_000, 900_000, 900_000), (DireccionTendencia::Estable, Some(MotivoEstable::DentroDelUmbral)), "-10.00 % exacto");
+        assert_eq!(con(900_000, 900_000, 899_999).0, DireccionTendencia::Baja, "justo debajo del umbral de baja");
+        assert_eq!(con(900_000, 900_000, 900_001).0, DireccionTendencia::Estable, "justo encima");
+        assert_eq!(con(1_000_000, 1_000_000, 1_000_000).0, DireccionTendencia::Estable);
+        // Con un solo previo (4 meses) el umbral es el mismo: previo 1 000 000 centavos, reciente suma 3 300 000.
+        let uno = |suma_c: i64| ev(&[1_000_000, 1_100_000, 1_100_000, suma_c - 2_200_000]);
+        assert_eq!(uno(3_300_000).0, DireccionTendencia::Estable);
+        assert_eq!(uno(3_300_001).0, DireccionTendencia::Sube);
+        // Con dos previos: previo promedia 1 000 000 centavos; mismo umbral.
+        let dos = |ultimo: i64| ev(&[900_000, 1_100_000, 1_100_000, 1_100_000, ultimo]);
+        assert_eq!(dos(1_100_000).0, DireccionTendencia::Estable);
+        assert_eq!(dos(1_100_001).0, DireccionTendencia::Sube);
+    }
+
+    #[test]
+    fn el_minimo_absoluto_de_500_pesos_exactos_cuenta_y_un_centavo_menos_es_estable() {
+        // Previo 3 x 1000 pesos (promedio 1000 pesos); reciente promedio 1500.00 (+50 %): diferencia exacta 500.00.
+        // El último mes aporta un tercio de su variación al promedio: ±3 centavos en la suma son ±1 centavo de promedio.
+        let sube = |ultimo: i64| ev(&[100_000, 100_000, 100_000, 150_000, 150_000, ultimo]);
+        assert_eq!(sube(150_000).0, DireccionTendencia::Sube, "500.00 exactos: el mínimo es inclusivo");
+        assert_eq!(sube(149_997), (DireccionTendencia::Estable, Some(MotivoEstable::PocoCambio)), "499.99 de diferencia");
+        // Misma frontera con la baja: previo 1500.00, reciente 1000 pesos.
+        let baja = |ultimo: i64| ev(&[150_000, 150_000, 150_000, 100_000, 100_000, ultimo]);
+        assert_eq!(baja(100_000).0, DireccionTendencia::Baja, "500.00 exactos hacia abajo");
+        assert_eq!(baja(100_003), (DireccionTendencia::Estable, Some(MotivoEstable::PocoCambio)), "499.99 hacia abajo");
+        // Un centavo de suma por encima de la frontera sigue contando.
+        assert_eq!(ev(&[100_000, 100_000, 100_000, 150_000, 150_000, 150_001]).0, DireccionTendencia::Sube);
+        assert_eq!(baja(99_999).0, DireccionTendencia::Baja);
+    }
+
+    #[test]
+    fn mas_de_diez_por_ciento_con_diferencia_pequena_es_estable_por_poco_cambio() {
+        // Categoría pequeña: de 20.00 a 30.00 (+50 %) son solo 10 pesos.
+        assert_eq!(ev(&[2_000, 2_000, 2_000, 3_000, 3_000, 3_000]), (DireccionTendencia::Estable, Some(MotivoEstable::PocoCambio)));
+        // Y a la baja: de 30.00 a 20.00 (-33 %).
+        assert_eq!(ev(&[3_000, 3_000, 3_000, 2_000, 2_000, 2_000]), (DireccionTendencia::Estable, Some(MotivoEstable::PocoCambio)));
+        // Cae a cero: -100 % pero solo 20 pesos.
+        assert_eq!(ev(&[2_000, 2_000, 2_000, 0, 0, 0]), (DireccionTendencia::Estable, Some(MotivoEstable::PocoCambio)));
+        // Gran diferencia absoluta pero relativo bajo (+5 % de 20 000.00 = 1000 pesos): dentro del umbral, no «poco cambio».
+        assert_eq!(
+            ev(&[2_000_000, 2_000_000, 2_000_000, 2_100_000, 2_100_000, 2_100_000]),
+            (DireccionTendencia::Estable, Some(MotivoEstable::DentroDelUmbral))
+        );
+        // Los veredictos «sube» y «baja» no llevan motivo; los datos insuficientes tampoco.
+        assert_eq!(ev(&[100_000, 100_000, 100_000, 300_000, 300_000, 300_000]), (DireccionTendencia::Sube, None));
+        assert_eq!(ev(&[300_000, 300_000, 300_000, 100_000, 100_000, 100_000]), (DireccionTendencia::Baja, None));
+        assert_eq!(ev(&[100, 100]), (DireccionTendencia::DatosInsuficientes, None));
+    }
+
+    #[test]
+    fn diez_por_ciento_exacto_con_diferencia_grande_es_estable_y_diez_con_cero_uno_ya_sube() {
+        // 50 000.00 -> 55 000.00: +10 % exacto, 5000 pesos de diferencia: estable por el umbral estricto.
+        assert_eq!(
+            ev(&[5_000_000, 5_000_000, 5_000_000, 5_500_000, 5_500_000, 5_500_000]),
+            (DireccionTendencia::Estable, Some(MotivoEstable::DentroDelUmbral))
+        );
+        // +10.01 % (55 005.00) con diferencia >= 500: sube.
+        assert_eq!(ev(&[5_000_000, 5_000_000, 5_000_000, 5_500_500, 5_500_500, 5_500_500]).0, DireccionTendencia::Sube);
+        // -10.01 %: baja.
+        assert_eq!(ev(&[5_000_000, 5_000_000, 5_000_000, 4_499_500, 4_499_500, 4_499_500]).0, DireccionTendencia::Baja);
+        // +10.01 % pero de 1000 pesos a 1100.10: son 100 pesos, estable por poco cambio.
+        assert_eq!(ev(&[100_000, 100_000, 100_000, 110_010, 110_010, 110_010]), (DireccionTendencia::Estable, Some(MotivoEstable::PocoCambio)));
+    }
+
+    #[test]
+    fn el_minimo_absoluto_se_mide_entre_promedios_sin_redondear() {
+        // Previos 1000 pesos y 1000.01 (promedio 1000.005, dos meses); recientes 1500.00 x3 (promedio 1500.00).
+        // Diferencia real: 499.995 (< 500.00). Con promedios redondeados al centavo (1000.01 y 1500.00) sería 499.99 y
+        // con el previo truncado (1000 pesos) sería 500.00 exactos: solo el cálculo exacto da «estable» por la razón buena.
+        let c = [100_000, 100_001, 150_000, 150_000, 150_000];
+        assert_eq!(ev(&c), (DireccionTendencia::Estable, Some(MotivoEstable::PocoCambio)), "499.995 < 500.00");
+        // Recientes con 0.01 más en total (suma 450_001; promedio 1500.00333): diferencia 499.99833 -> aún estable.
+        assert_eq!(ev(&[100_000, 100_001, 150_000, 150_000, 150_001]).0, DireccionTendencia::Estable);
+        // Con 0.02 más en total la diferencia (500.00167 - 0.005 = 500.0000 aprox.) cruza: 450_002/3 - 100_000.5.
+        // 450_002/3 = 150_000.6667; menos 100_000.5 = 50_000.1667 centavos >= 50_000: sube.
+        assert_eq!(ev(&[100_000, 100_001, 150_000, 150_000, 150_002]).0, DireccionTendencia::Sube);
+        // Tres previos con resto: (100_000 + 100_000 + 100_001) / 3 = 100_000.333; reciente 150_000: diferencia
+        // 49_999.667 centavos < 50 000: estable (con el previo truncado a 100_000 sería exactamente 50 000: sube).
+        assert_eq!(
+            ev(&[100_000, 100_000, 100_001, 150_000, 150_000, 150_000]),
+            (DireccionTendencia::Estable, Some(MotivoEstable::PocoCambio))
+        );
+        // Un solo previo y tres recientes (4 meses): previo 1000 pesos, reciente 1500.00 exactos.
+        assert_eq!(ev(&[100_000, 150_000, 150_000, 150_000]).0, DireccionTendencia::Sube);
+        assert_eq!(ev(&[100_000, 150_000, 150_000, 149_999]).0, DireccionTendencia::Estable);
+    }
+
+    #[test]
+    fn los_importes_muy_grandes_no_desbordan() {
+        let g = i64::MAX / 4; // ~2.3e18 centavos por mes
+        assert_eq!(ev(&[g, g, g, g, g, g]), (DireccionTendencia::Estable, Some(MotivoEstable::DentroDelUmbral)));
+        assert_eq!(ev(&[g, g, g, g * 2, g * 2, g * 2]).0, DireccionTendencia::Sube);
+        assert_eq!(ev(&[g * 2, g * 2, g * 2, g, g, g]).0, DireccionTendencia::Baja);
+        // Un centavo sobre el umbral relativo con importes enormes sigue distinguiéndose.
+        let diez = g / 10;
+        assert_eq!(ev(&[g, g, g, g + diez + 100, g + diez + 100, g + diez + 100]).0, DireccionTendencia::Sube);
+        assert_eq!(ev(&[g, g, g, g + diez - 100, g + diez - 100, g + diez - 100]).0, DireccionTendencia::Estable);
+        let maximo = i64::MAX;
+        assert_eq!(ev(&[maximo, maximo, maximo, maximo, maximo, maximo]).0, DireccionTendencia::Estable);
+        assert_eq!(ev(&[1, 1, 1, maximo, maximo, maximo]).0, DireccionTendencia::Sube);
+        assert_eq!(ev(&[maximo, maximo, maximo, 1, 1, 1]).0, DireccionTendencia::Baja);
     }
 
     #[test]
@@ -885,8 +1027,11 @@ mod tests {
         assert_eq!(direccion_de_tendencia(&puntos(&todos(&[0, 0, 0, 500, 500, 500]), None)), DireccionTendencia::DatosInsuficientes);
         assert_eq!(direccion_de_tendencia(&puntos(&todos(&[0, 100, 100, 100]), None)), DireccionTendencia::DatosInsuficientes);
         assert_eq!(direccion_de_tendencia(&puntos(&todos(&[-500, 100, 100, 100]), None)), DireccionTendencia::DatosInsuficientes);
-        // Recientes en cero contra un previo positivo: baja del todo.
-        assert_eq!(direccion_de_tendencia(&puntos(&todos(&[500, 500, 500, 0, 0, 0]), None)), DireccionTendencia::Baja);
+        assert_eq!(ev(&[0, 0, 0, 900_000, 900_000, 900_000]), (DireccionTendencia::DatosInsuficientes, None));
+        // Recientes en cero contra un previo positivo y grande: baja del todo. En #163, con 500 centavos, bastaba;
+        // con el mínimo absoluto esa misma serie pequeña es «estable por poco cambio».
+        assert_eq!(ev(&[500_000, 500_000, 500_000, 0, 0, 0]).0, DireccionTendencia::Baja);
+        assert_eq!(ev(&[500, 500, 500, 0, 0, 0]), (DireccionTendencia::Estable, Some(MotivoEstable::PocoCambio)));
     }
 
     #[test]
@@ -896,17 +1041,22 @@ mod tests {
         for parcial in [0, 1, 999_999_999] {
             assert_eq!(direccion_de_tendencia(&puntos(&base, Some(parcial))), DireccionTendencia::Estable, "parcial = {parcial}");
         }
-        // Con 5 completos (el pedido es el mes en curso) la ventana de 3+2 sigue valiendo.
-        let cinco = todos(&[1_000, 1_000, 2_000, 2_000, 2_000]);
+        // Con 5 completos (el pedido es el mes en curso) la ventana de 3+2 sigue valiendo. Escala x1000 respecto de
+        // #163 para superar el mínimo absoluto (promedios 1000 pesos -> 2000 pesos).
+        let cinco = todos(&[100_000, 100_000, 200_000, 200_000, 200_000]);
         assert_eq!(direccion_de_tendencia(&puntos(&cinco, Some(0))), DireccionTendencia::Sube);
+        // Un parcial enorme no convierte una serie estable en «sube», ni uno nulo en «baja».
+        let estable = todos(&[5_000_000, 5_000_000, 5_000_000, 5_000_000, 5_000_000]);
+        assert_eq!(direccion_de_tendencia(&puntos(&estable, Some(99_999_999_999))), DireccionTendencia::Estable);
+        assert_eq!(direccion_de_tendencia(&puntos(&estable, Some(0))), DireccionTendencia::Estable);
     }
 
     #[test]
     fn la_direccion_usa_los_3_ultimos_completos_contra_hasta_3_anteriores() {
-        let sube = direccion_de_tendencia(&puntos(&todos(&[1_000, 1_000, 1_000, 2_000, 2_000, 2_000]), None));
+        let sube = direccion_de_tendencia(&puntos(&todos(&[100_000, 100_000, 100_000, 200_000, 200_000, 200_000]), None));
         assert_eq!(sube, DireccionTendencia::Sube);
-        // Con ausentes al inicio, los previos son los que haya (dos: 1000 y 1000) contra 500 de promedio.
-        let con_ausentes = vec![None, None, Some(1_000), Some(1_000), Some(500), Some(500), Some(500)];
+        // Con ausentes al inicio, los previos son los que haya (dos: 2000 pesos y 2000 pesos) contra 1000 pesos de promedio.
+        let con_ausentes = vec![None, None, Some(200_000), Some(200_000), Some(100_000), Some(100_000), Some(100_000)];
         assert_eq!(direccion_de_tendencia(&puntos(&con_ausentes, None)), DireccionTendencia::Baja);
     }
 
@@ -914,17 +1064,30 @@ mod tests {
     fn la_direccion_llega_a_la_fila_y_al_total_y_el_parcial_no_la_cambia() {
         // Hoy 12/10, se pide octubre (parcial): completos mayo a septiembre.
         let mut filas = Vec::new();
-        for (mes, c) in [(5u32, 10_000i64), (6, 10_000), (7, 20_000), (8, 20_000), (9, 20_000)] {
+        for (mes, c) in [(5u32, 1_000_000i64), (6, 1_000_000), (7, 2_000_000), (8, 2_000_000), (9, 2_000_000)] {
             filas.push(pesos(2026, mes, 3, 1, "Comida", c));
         }
         filas.push(pesos(2026, 10, 2, 1, "Comida", 1));
         let r = resumir(&filas, (2026, 10), fecha(2026, 10, 12), 0);
         assert_eq!(de(&r, 1).tendencia.direccion, DireccionTendencia::Sube);
+        assert_eq!(de(&r, 1).tendencia.motivo_estable, None);
         assert_eq!(r.tendencia_total.direccion, DireccionTendencia::Sube);
         assert_eq!(DireccionTendencia::Sube.como_texto(), "sube");
         assert_eq!(DireccionTendencia::DatosInsuficientes.como_texto(), "datos_insuficientes");
+        assert_eq!(MotivoEstable::PocoCambio.como_texto(), "poco_cambio");
+        assert_eq!(MotivoEstable::DentroDelUmbral.como_texto(), "dentro_del_umbral");
         // Con historial corto, insuficientes.
         let corto = resumir(&[pesos(2026, 9, 3, 1, "Comida", 100)], (2026, 9), fecha(2026, 10, 12), 0);
         assert_eq!(de(&corto, 1).tendencia.direccion, DireccionTendencia::DatosInsuficientes);
+        // La fila de totales usa la misma regla: una categoría pequeña que sube 50 % no mueve al total grande.
+        let mut mixto = Vec::new();
+        for (mes, grande, chica) in [(5u32, 5_000_000i64, 2_000i64), (6, 5_000_000, 2_000), (7, 5_000_000, 2_000), (8, 5_000_000, 3_000), (9, 5_000_000, 3_000)] {
+            mixto.push(pesos(2026, mes, 3, 1, "Grande", grande));
+            mixto.push(pesos(2026, mes, 4, 2, "Chica", chica));
+        }
+        let m = resumir(&mixto, (2026, 9), fecha(2026, 10, 12), 0);
+        assert_eq!(de(&m, 2).tendencia.direccion, DireccionTendencia::Estable);
+        assert_eq!(de(&m, 2).tendencia.motivo_estable, Some(MotivoEstable::PocoCambio));
+        assert_eq!(m.tendencia_total.motivo_estable, Some(MotivoEstable::DentroDelUmbral));
     }
 }

@@ -6,12 +6,13 @@ export const medidas = (extra = {}) => ({
 });
 
 /** Una serie de 6 meses que termina en febrero de 2027; `importes` de más antiguo a más reciente (`null` = ausente). */
-export const tendencia = (importes = ['100.01', '200.02', '150.03', '300.04', '250.05', '120.06'], direccion = 'sube', parcial = false) => ({
+export const tendencia = (importes = ['100.01', '200.02', '150.03', '300.04', '250.05', '120.06'], direccion = 'sube', parcial = false, motivo_estable = null) => ({
     meses: importes.map((importe, i) => {
         const indice = 2027 * 12 + 1 - (importes.length - 1 - i);
         return { anio: Math.floor(indice / 12), mes: (indice % 12) + 1, importe, parcial: parcial && i === importes.length - 1 };
     }),
     direccion,
+    motivo_estable,
 });
 
 export const fila = (id, nombre, m = {}, derivado = false, t = tendencia()) => ({ categoria_id: id, categoria_nombre: nombre, derivado, medidas: medidas(m), tendencia: t });

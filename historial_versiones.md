@@ -4,7 +4,19 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.126.0 (Versión Actual) - 2026-11-05
+## 🚀 Versión 1.127.0 (Versión Actual) - 2026-11-05
+**La tendencia del resumen de gastos exige un cambio mínimo de DOP 500.00 para decir «sube» o «baja».** Decisión del titular («opción A+D con mínimo de 500 pesos») sobre la regla de dirección de la 1.125.0. Sin migración (esquema 19).
+
+### 🔧 Qué se hace
+* **Regla nueva:** además de superar el 10 % (estricto), la diferencia entre el promedio reciente (3 últimos meses completos) y el previo (hasta 3 anteriores) debe ser de al menos 500.00 pesos (`MINIMO_ABSOLUTO_TENDENCIA_CENTAVOS = 50 000`, inclusivo). Si no, «estable». Una categoría pequeña ya no «sube» un 50 % por unos pesos.
+* **Cálculo exacto:** los promedios no se redondean; la diferencia se compara por producto cruzado en enteros de 128 bits (`|suma_reciente·n_previo − suma_previa·n_reciente|` contra `50 000·n_reciente·n_previo`). Todo lo demás (4 meses completos, parcial y ausentes fuera, previo no positivo = datos insuficientes, fila de totales con la misma regla) queda igual.
+* **Motivo de «estable»:** el DTO de la tendencia gana `motivo_estable` (`poco_cambio` | `dentro_del_umbral` | `null`; solo con «estable»). Tipos regenerados.
+* **Interfaz:** la etiqueta dice «estable (cambio menor de DOP 500)» cuando el relativo se cumple pero el absoluto no (también en el `aria-label`); la cabecera «Tendencia 6m» lleva un `title` con la regla y el pie de la tabla la resume.
+* **Pruebas:** unitarias nuevas (500.00 exactos, 499.99, +10 % exacto con diferencia grande, +10.01 %, categoría pequeña +50 %, la baja con las mismas variantes, promedios fraccionarios, importes enormes sin desbordar) y 2 de integración. Las de la 1.125.0 que cambiaban de veredicto con importes pequeños se escalaron a pesos reales. 7 mutaciones, todas detectadas.
+
+---
+
+## Versión 1.126.0 - 2026-11-05
 **Un abono con cuenta guarda la tasa de cambio solo cuando hubo cruce de divisas.** Decisión del titular sobre el hallazgo `hallazgo_la_tasa_sin_cruce_de_divisas_no_convierte_pero_se_guarda`.
 
 ### 🔧 Qué se hace
