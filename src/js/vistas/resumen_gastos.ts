@@ -5,9 +5,10 @@
 // formatean sobre el texto (`importeDeTexto`), sin `Number`. Las variaciones llegan en puntos básicos (100 = 1 %) y
 // las partes del total en milésimas (1000 = 100 %): enteros, así que el texto sale por división entera.
 
-import type { Categoria, FilaResumenGasto, MedidasResumen, MesDisponible, ResumenGastos } from '../tipos-ipc';
+import type { Categoria, FilaResumenGasto, MedidasResumen, MesDisponible, ResumenGastos, TendenciaResumen } from '../tipos-ipc';
 
 import { accion, escaparHtml, manejador } from '../nucleo/html.js';
+import { enCentavos } from '../nucleo/evolucion.js';
 import { importeDeTexto, porTasaEnTexto } from '../nucleo/importe_texto.js';
 
 /** Los promedios que ofrece el selector («Promedio de N meses») y el que se usa por defecto. */
@@ -129,6 +130,97 @@ export function notaDeDolares(usd: string, tasa: string): string {
         : `incluye USD ${importeDeTexto(usd)} ≈ DOP ${importeDeTexto(en)} a tasa ${tasaTexto} · estimado`;
 }
 
+// --- Tendencia de 6 meses ------------------------------------------------------------------------------------
+// Rust entrega la serie (importes en texto, `null` = mes anterior al historial, marca del mes parcial) y la
+// dirección ya decidida (regla en `dominio/resumen_gastos.rs`). Aquí solo se dibuja: barras HTML/CSS propias, sin
+// librerías. Los importes se leen con `enCentavos` (BigInt sobre el texto): nada de `Number` para dinero.
+
+export type DireccionDeTendencia = 'sube' | 'baja' | 'estable' | 'datos_insuficientes';
+
+export interface EtiquetaDeDireccion {
+    direccion: DireccionDeTendencia;
+    /** ▲ ▼ = (decorativa: el texto dice lo mismo). Vacía si faltan datos. */
+    flecha: string;
+    texto: string;
+}
+
+/** La dirección con flecha Y texto. Cualquier valor desconocido se trata como «datos insuficientes». */
+export function etiquetaDeDireccion(direccion: string): EtiquetaDeDireccion {
+    switch (direccion) {
+        case 'sube': return { direccion, flecha: '▲', texto: 'sube' };
+        case 'baja': return { direccion, flecha: '▼', texto: 'baja' };
+        case 'estable': return { direccion, flecha: '=', texto: 'estable' };
+        default: return { direccion: 'datos_insuficientes', flecha: '', texto: 'datos insuficientes' };
+    }
+}
+
+/** El piso visual de una barra con gasto: que un mes pequeño no desaparezca. */
+const ALTURA_MINIMA_PCT = 6;
+
+/** Centavos de un importe en texto; un texto ilegible (no debería llegar) cuenta como cero en vez de romper la tabla. */
+function centavosSeguros(texto: string): bigint {
+    try { return enCentavos(texto); } catch { return 0n; }
+}
+
+/**
+ * La altura (0 a 100, entera) de la barra de cada mes, escalada al máximo de LA FILA. `null` = mes ausente (sin
+ * barra). Un mes sin gasto mide 0; uno con gasto, al menos `ALTURA_MINIMA_PCT`. Si el máximo no es positivo, todo 0.
+ */
+export function alturasDeBarras(meses: readonly { importe: string | null }[]): (number | null)[] {
+    const centavos = meses.map(m => (m.importe === null ? null : centavosSeguros(m.importe)));
+    const maximo = centavos.reduce<bigint>((a, c) => (c !== null && c > a ? c : a), 0n);
+    return centavos.map(c => {
+        if (c === null) return null;
+        if (c <= 0n || maximo <= 0n) return 0;
+        return Math.max(ALTURA_MINIMA_PCT, Number((c * 100n) / maximo));
+    });
+}
+
+/** «Supermercado: sube; últimos meses: enero 2027 DOP 1,234.57, febrero 2027 (parcial) DOP 80.01, …». Sin escapar. */
+export function descripcionDeTendencia(nombre: string, t: TendenciaResumen): string {
+    const e = etiquetaDeDireccion(t.direccion);
+    const meses = t.meses.map(m => {
+        const mes = etiquetaDeMes(m.anio, m.mes);
+        const parcial = m.parcial ? ' (parcial, no cuenta en la dirección)' : '';
+        return m.importe === null ? `${mes} sin datos` : `${mes}${parcial} DOP ${importeDeTexto(m.importe)}`;
+    });
+    return `${nombre}: ${e.texto}; últimos meses: ${meses.join(', ')}`;
+}
+
+const COLOR_DE_DIRECCION: Record<DireccionDeTendencia, string> = {
+    'sube': 'var(--color-danger, #ef4444)',
+    'baja': 'var(--color-success, #22c55e)',
+    'estable': 'var(--text-secondary)',
+    'datos_insuficientes': 'var(--text-secondary)',
+};
+
+/** El estilo de una barra: sólida si el mes está completo; rayada (y con borde punteado) si es el parcial. */
+function estiloDeBarra(pct: number, parcial: boolean): string {
+    const base = `flex:1 1 0; min-width:6px; max-width:14px; height:${pct}%;`;
+    return parcial
+        ? `${base} background:repeating-linear-gradient(45deg, var(--accent-primary) 0 2px, transparent 2px 4px); border:1px dashed var(--accent-primary); box-sizing:border-box;`
+        : `${base} background:var(--accent-primary);`;
+}
+
+/** La celda «Tendencia 6m»: mini barras, la dirección con flecha y texto, y la descripción accesible entera. */
+export function htmlDeTendencia(nombre: string, t: TendenciaResumen): string {
+    const e = etiquetaDeDireccion(t.direccion);
+    const alturas = alturasDeBarras(t.meses);
+    const barras = t.meses.map((m, i) => {
+        const pct = alturas[i];
+        const titulo = m.importe === null
+            ? `${etiquetaDeMes(m.anio, m.mes)}: sin datos`
+            : `${etiquetaDeMes(m.anio, m.mes)}${m.parcial ? ' (parcial)' : ''}: DOP ${importeDeTexto(m.importe)}`;
+        if (pct === null) return `<span class="rg-t-hueco" title="${escaparHtml(titulo)}" style="flex:1 1 0; min-width:6px; max-width:14px;"></span>`;
+        return `<span class="rg-t-barra${m.parcial ? ' rg-t-parcial' : ''}" title="${escaparHtml(titulo)}" style="${estiloDeBarra(pct, m.parcial)}"></span>`;
+    }).join('');
+    const flecha = e.flecha ? `<span aria-hidden="true">${escaparHtml(e.flecha)}</span> ` : '';
+    return `<div class="rg-tendencia" style="display:flex; align-items:flex-end; gap:0.5rem; min-width:9.5rem;">
+                            <span class="rg-t-barras" role="img" aria-label="${escaparHtml(descripcionDeTendencia(nombre, t))}" style="display:flex; align-items:flex-end; gap:2px; height:28px; width:5.5rem; border-bottom:1px solid var(--border-color);">${barras}</span>
+                            <span class="rg-t-direccion rg-${e.direccion}" aria-hidden="true" style="color:${escaparHtml(COLOR_DE_DIRECCION[e.direccion])}; white-space:nowrap; font-size:0.8rem;">${flecha}${escaparHtml(e.texto)}</span>
+                        </div>`;
+}
+
 function htmlDeFila(f: FilaResumenGasto, r: ResumenGastos): string {
     const m = f.medidas;
     const usd = usdAparte(m);
@@ -150,6 +242,7 @@ function htmlDeFila(f: FilaResumenGasto, r: ResumenGastos): string {
                             <div style="width:${barra}%; height:100%; background:var(--accent-primary);"></div>
                         </div>
                     </td>
+                    <td>${htmlDeTendencia(f.categoria_nombre, f.tendencia)}</td>
                     <td>${htmlDeVariacion(m.variacion_anterior_pb)}<small style="display:block; color:var(--text-muted);">mes anterior: DOP ${escaparHtml(importeDeTexto(m.anterior))}</small>${tramo}</td>
                     <td>${htmlDeVariacion(m.variacion_promedio_pb)}<small style="display:block; color:var(--text-muted);">${m.promedio === null ? 'sin promedio' : `promedio: DOP ${escaparHtml(importeDeTexto(m.promedio))}`}</small></td>
                 </tr>`;
@@ -231,14 +324,15 @@ function htmlDeCuerpo(estado: EstadoDeGasto, e: EleccionDeGasto): string {
                 ${usd ? `<small style="display:block; color:var(--text-muted);">${escaparHtml(notaDeDolares(usd, r.tasa_usd))}</small>` : ''}
             </p>
             ${exclusion}
-            <div style="overflow-x:auto;">
-            <table class="rg-tabla" style="width:100%; border-collapse:collapse; font-size:0.85rem;">
-                <caption style="text-align:left; padding:0.4rem 0; color:var(--text-secondary);">Gasto por categoría de ${escaparHtml(mes + parcial)} (DOP). Comparado con el mes anterior y con el promedio de ${r.meses_promedio} meses completos.</caption>
+            <div class="rg-desplazable" role="region" tabindex="0" aria-label="Tabla de gasto por categoría (se desplaza en horizontal si no cabe)" style="overflow-x:auto;">
+            <table class="rg-tabla" style="width:100%; min-width:46rem; border-collapse:collapse; font-size:0.85rem;">
+                <caption style="text-align:left; padding:0.4rem 0; color:var(--text-secondary);">Gasto por categoría de ${escaparHtml(mes + parcial)} (DOP). Tendencia de los últimos 6 meses${r.parcial ? ' (el mes en curso, rayado, no cuenta en la dirección)' : ''}. Comparado con el mes anterior y con el promedio de ${r.meses_promedio} meses completos.</caption>
                 <thead>
                     <tr>
                         <th scope="col" style="text-align:left;">Categoría</th>
                         <th scope="col" style="text-align:right;">Importe</th>
                         <th scope="col">% del total</th>
+                        <th scope="col">Tendencia 6m</th>
                         <th scope="col">Contra el mes anterior</th>
                         <th scope="col">Contra el promedio de ${r.meses_promedio} meses</th>
                     </tr>
@@ -250,6 +344,7 @@ function htmlDeCuerpo(estado: EstadoDeGasto, e: EleccionDeGasto): string {
                         <th scope="row" style="text-align:left;">Total</th>
                         <td style="text-align:right;"><strong>${escaparHtml(importeDeTexto(r.totales.importe))}</strong></td>
                         <td>100 %</td>
+                        <td>${htmlDeTendencia('Total', r.tendencia_total)}</td>
                         <td>${htmlDeVariacion(r.totales.variacion_anterior_pb)}</td>
                         <td>${htmlDeVariacion(r.totales.variacion_promedio_pb)}</td>
                     </tr>
