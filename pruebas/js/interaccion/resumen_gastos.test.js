@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cargarInterfaz } from '../ayudas/cargar_interfaz.js';
-import { fila, resumen } from '../ayudas/resumen_gastos_datos.js';
+import { fila, resumen, tendencia } from '../ayudas/resumen_gastos_datos.js';
 
 const IDS = ['resumen-gasto-categoria', 'rg-mes', 'rg-mes-anterior', 'rg-mes-siguiente', 'rg-promedio', 'rg-incluir-todo'];
 const CATEGORIAS = [{ id: 41, nombre: 'Comida' }, { id: 7, nombre: 'Impuestos' }, { id: 12, nombre: 'Maquinaria/Equipos' }, { id: 13, nombre: 'Prestamo' }, { id: 99, nombre: 'Renta' }];
@@ -174,4 +174,29 @@ test('tras repintar, el foco vuelve al control que se tocó', async () => {
     await vista.render();
     await ui.appUI.resumenGastoPromedio('6');
     assert.equal(ui.elemento('rg-promedio').enfocado, true);
+});
+
+test('cambiar el mes mueve la ventana de 6 meses: la tendencia que se dibuja es la de la respuesta del mes elegido', async () => {
+    // Cada mes responde con una serie que termina en él (como hace Rust).
+    const serie = (anio, mes) => {
+        const fin = anio * 12 + (mes - 1);
+        return {
+            meses: [5, 4, 3, 2, 1, 0].map(k => ({ anio: Math.floor((fin - k) / 12), mes: ((fin - k) % 12) + 1, importe: `${100 + k}.07`, parcial: false })),
+            direccion: 'estable',
+        };
+    };
+    const { ui, vista, bloque } = interfaz({
+        obtenerResumenGastos: (anio, mes) => resumen({
+            anio, mes, meses_disponibles: [{ anio: 2026, mes: 5 }, { anio: 2026, mes: 6 }, { anio: 2026, mes: 7 }],
+            filas: [fila(1, 'Comida', {}, false, serie(anio, mes))], tendencia_total: serie(anio, mes),
+        }),
+    });
+    await vista.render();
+    await ui.appUI.resumenGastoMes('2026-06');
+    assert.match(bloque(), /enero 2026 DOP 105\.07/, 'junio de 2026 abre en enero de 2026');
+    assert.match(bloque(), /junio 2026 DOP 100\.07/);
+    await ui.appUI.resumenGastoMover(1);
+    assert.match(bloque(), /febrero 2026 DOP 105\.07/, 'julio de 2026 abre en febrero');
+    assert.doesNotMatch(bloque(), /enero 2026 DOP/);
+    assert.match(bloque(), /julio 2026 DOP 100\.07/);
 });

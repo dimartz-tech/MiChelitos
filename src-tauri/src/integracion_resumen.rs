@@ -437,3 +437,158 @@ fn integracion_ningun_importe_viaja_como_numero() {
         }
     }
 }
+
+// --- Tendencia de 6 meses ---
+
+/// Siembra seis meses de historial (abril a septiembre de 2026, más un gasto pequeño en octubre) con los comandos
+/// reales. Alimentación sube (≈100 → ≈200); Transporte se mantiene (≈150) de mayo a septiembre.
+fn sembrar_historial() {
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000_000.0);
+    for (fecha, monto) in [
+        ("05/04/2026", "100.17"), ("05/05/2026", "99.91"), ("05/06/2026", "100.33"),
+        ("05/07/2026", "200.07"), ("05/08/2026", "210.19"), ("05/09/2026", "190.43"),
+    ] {
+        transferencia(fecha, monto, "Alimentación", cuenta);
+    }
+    for (fecha, monto) in [
+        ("09/05/2026", "150.41"), ("09/06/2026", "149.77"), ("09/07/2026", "150.11"),
+        ("09/08/2026", "149.87"), ("09/09/2026", "150.23"), ("09/10/2026", "0.77"),
+    ] {
+        transferencia(fecha, monto, "Transporte", cuenta);
+    }
+}
+
+/// Lo gastado en pesos (monto + costo adicional) por una categoría en un mes, leído directamente de la tabla.
+fn gastado_directo(anio: i32, mes: u32, categoria: Option<&str>) -> i64 {
+    let c = conexion();
+    let patron = format!("%/{mes:02}/{anio}");
+    let (sql, filtro) = match categoria {
+        Some(n) => ("SELECT monto, costo_adicional FROM gastos WHERE fecha LIKE ?1 AND categoria_id = ?2;", categoria_por_nombre(n)),
+        None => ("SELECT monto, costo_adicional FROM gastos WHERE fecha LIKE ?1 AND ?2 = ?2;", 0),
+    };
+    let mut stmt = c.prepare(sql).unwrap();
+    let filas = stmt.query_map(params![patron, filtro], |r| Ok((r.get::<_, f64>(0)?, r.get::<_, f64>(1)?))).unwrap();
+    filas.map(|f| { let (m, k) = f.unwrap(); (m * 100.0).round() as i64 + (k * 100.0).round() as i64 }).sum()
+}
+
+fn serie_en_centavos(t: &crate::comandos::resumen::TendenciaResumen) -> Vec<Option<i64>> {
+    t.meses.iter().map(|p| p.importe.as_deref().map(centavos)).collect()
+}
+
+#[test]
+fn integracion_la_tendencia_de_septiembre_coincide_con_los_gastos_de_cada_mes_de_la_base() {
+    let _g = entorno_para_pruebas_externas();
+    sembrar_historial();
+    let r = resumen_en(hoy(2026, 10, 28), 2026, 9, 3, 60.0, vec![]).unwrap();
+
+    let ali = fila(&r, "Alimentación");
+    let meses: Vec<(i32, u32)> = ali.tendencia.meses.iter().map(|p| (p.anio, p.mes)).collect();
+    assert_eq!(meses, vec![(2026, 4), (2026, 5), (2026, 6), (2026, 7), (2026, 8), (2026, 9)]);
+    let esperado: Vec<Option<i64>> = (4..=9).map(|m| Some(gastado_directo(2026, m, Some("Alimentación")))).collect();
+    assert_eq!(serie_en_centavos(&ali.tendencia), esperado);
+    assert!(ali.tendencia.meses.iter().all(|p| !p.parcial));
+    assert_eq!(ali.tendencia.direccion, "sube");
+    // El último punto es el importe del mes que muestra la tabla.
+    assert_eq!(ali.tendencia.meses[5].importe.as_deref(), Some(ali.medidas.importe.as_str()));
+
+    // Transporte no tuvo nada en abril: cero (existía historial), no ausente.
+    let tr = fila(&r, "Transporte");
+    assert_eq!(serie_en_centavos(&tr.tendencia)[0], Some(0));
+    // El total de cada mes es la suma de las filas y coincide con lo gastado en la base.
+    let total = serie_en_centavos(&r.tendencia_total);
+    for (i, m) in (4..=9u32).enumerate() {
+        let suma: i64 = r.filas.iter().map(|f| serie_en_centavos(&f.tendencia)[i].unwrap()).sum();
+        assert_eq!(total[i], Some(suma), "mes {m}");
+        assert_eq!(total[i], Some(gastado_directo(2026, m, None)), "mes {m} contra la base");
+    }
+    assert_eq!(r.tendencia_total.meses[5].importe.as_deref(), Some(r.totales.importe.as_str()));
+}
+
+#[test]
+fn integracion_los_meses_antes_del_historial_son_ausentes_y_la_direccion_dice_datos_insuficientes() {
+    let _g = entorno_para_pruebas_externas();
+    sembrar_historial();
+    // Junio de 2026: la ventana arranca en enero, pero el primer dato es abril.
+    let r = resumen_en(hoy(2026, 10, 28), 2026, 6, 3, 60.0, vec![]).unwrap();
+    let ali = fila(&r, "Alimentación");
+    let serie = serie_en_centavos(&ali.tendencia);
+    assert_eq!(&serie[..3], &[None, None, None], "enero a marzo: antes del primer dato");
+    assert_eq!(serie[3], Some(gastado_directo(2026, 4, Some("Alimentación"))));
+    assert!(ali.tendencia.meses[..3].iter().all(|p| p.importe.is_none()));
+    assert_eq!(ali.tendencia.direccion, "datos_insuficientes", "solo 3 meses completos con dato");
+    assert_eq!(serie_en_centavos(&r.tendencia_total)[..3], [None, None, None]);
+}
+
+#[test]
+fn integracion_el_mes_en_curso_va_marcado_y_no_entra_en_la_direccion() {
+    let _g = entorno_para_pruebas_externas();
+    sembrar_historial();
+    // Hoy es el 15/10: octubre es parcial. Transporte lleva ≈150 al mes y solo 0.77 en octubre.
+    let r = resumen_en(hoy(2026, 10, 15), 2026, 10, 3, 60.0, vec![]).unwrap();
+    let tr = fila(&r, "Transporte");
+    let marcas: Vec<bool> = tr.tendencia.meses.iter().map(|p| p.parcial).collect();
+    assert_eq!(marcas, vec![false, false, false, false, false, true]);
+    assert_eq!(tr.tendencia.meses[5].importe.as_deref(), Some(tr.medidas.importe.as_str()));
+    assert_eq!(tr.tendencia.direccion, "estable", "si el parcial contara, parecería una caída");
+    assert!(r.tendencia_total.meses[5].parcial);
+    // El mismo gasto, visto desde noviembre (octubre ya cerrado), sí cuenta como un mes más y no está marcado.
+    let cerrado = resumen_en(hoy(2026, 11, 20), 2026, 10, 3, 60.0, vec![]).unwrap();
+    assert!(fila(&cerrado, "Transporte").tendencia.meses.iter().all(|p| !p.parcial));
+}
+
+#[test]
+fn integracion_las_exclusiones_tambien_quitan_la_serie_del_total() {
+    let _g = entorno_para_pruebas_externas();
+    sembrar_historial();
+    let completo = resumen_en(hoy(2026, 10, 28), 2026, 9, 3, 60.0, vec![]).unwrap();
+    let sin = resumen_en(hoy(2026, 10, 28), 2026, 9, 3, 60.0, vec![categoria_por_nombre("Alimentación")]).unwrap();
+    assert!(sin.filas.iter().all(|f| f.categoria_nombre != "Alimentación"));
+    let a = serie_en_centavos(&completo.tendencia_total);
+    let b = serie_en_centavos(&sin.tendencia_total);
+    let ali = serie_en_centavos(&fila(&completo, "Alimentación").tendencia);
+    for i in 0..6 {
+        assert_eq!(b[i].unwrap(), a[i].unwrap() - ali[i].unwrap(), "mes {i}");
+    }
+}
+
+#[test]
+fn integracion_la_tendencia_no_escribe_nada() {
+    let _g = entorno_para_pruebas_externas();
+    sembrar_historial();
+    let antes = huella_de_la_base();
+    for (hoy_, mes) in [(hoy(2026, 10, 28), 9), (hoy(2026, 10, 15), 10), (hoy(2026, 10, 28), 6), (hoy(2026, 10, 28), 4)] {
+        resumen_en(hoy_, 2026, mes, 3, 60.0, vec![-1]).unwrap();
+        assert_eq!(huella_de_la_base(), antes, "el mes {mes} alteró la base");
+    }
+    obtener_resumen_gastos(2026, 9, 6, 60.0, vec![]).unwrap();
+    assert_eq!(huella_de_la_base(), antes);
+}
+
+#[test]
+fn integracion_el_dto_de_la_tendencia_tiene_la_forma_de_tipos_ipc_y_un_vocabulario_controlado() {
+    let _g = entorno_para_pruebas_externas();
+    sembrar_historial();
+    let dts = include_str!("../../src/js/tipos-ipc.d.ts");
+    assert!(dts.contains("export type TendenciaResumen = {") && dts.contains("export type PuntoTendenciaResumen = {"));
+    assert!(dts.contains("tendencia_total: TendenciaResumen"), "el total declara su tendencia");
+    for (hoy_, mes) in [(hoy(2026, 10, 28), 9), (hoy(2026, 10, 15), 10), (hoy(2026, 10, 28), 5)] {
+        let dto = resumen_en(hoy_, 2026, mes, 3, 60.0, vec![]).unwrap();
+        let json = serde_json::to_value(&dto).unwrap();
+        verificar_forma(dts, "ResumenGastos", &json, "ResumenGastos");
+        let tendencias = json["filas"].as_array().unwrap().iter().map(|f| &f["tendencia"]).chain(std::iter::once(&json["tendencia_total"]));
+        for t in tendencias {
+            let meses = t["meses"].as_array().unwrap();
+            assert_eq!(meses.len(), 6);
+            assert!(matches!(t["direccion"].as_str().unwrap(), "sube" | "baja" | "estable" | "datos_insuficientes"));
+            for p in meses {
+                // Los importes viajan como texto exacto con dos decimales, o null si el mes es anterior al historial.
+                match &p["importe"] {
+                    Value::Null => {}
+                    Value::String(t) => assert!(t.split('.').nth(1).map_or(false, |d| d.len() == 2), "{t}"),
+                    otro => panic!("importe de tendencia no es texto: {otro}"),
+                }
+            }
+        }
+    }
+}
+

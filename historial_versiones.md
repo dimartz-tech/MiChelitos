@@ -4,7 +4,24 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.124.0 (Versión Actual) - 2026-11-05
+## 🚀 Versión 1.125.0 (Versión Actual) - 2026-11-05
+**«Gasto por categoría» gana la columna «Tendencia 6m».** PR 3 de 5 del resumen por categoría y mes. Sin migración (esquema 19) y sin presupuesto.
+
+### 🔧 Qué se hace
+* **Dominio** (`dominio/resumen_gastos.rs`): cada fila y el total llevan una serie de 6 meses que terminan en el mes elegido (el elegido y los 5 anteriores). Un mes sin gasto vale cero; un mes anterior al primer dato del historial es ausente (`None`, no se inventan ceros); el mes en curso va marcado como parcial. La serie del total es la suma, mes a mes, de las series de las filas visibles.
+* **Regla de dirección (nueva, a revisar por el titular):** con al menos 4 meses completos con dato, se compara el promedio de los 3 últimos meses completos contra el de los hasta 3 anteriores (mínimo 1). Más de +10 % → «sube»; menos de −10 % → «baja»; en otro caso, el umbral exacto incluido, «estable». Con menos de 4 meses completos o con referencia no positiva → «datos insuficientes». El mes parcial nunca entra. La comparación es en enteros por producto cruzado, sin redondear promedios.
+* **DTO y tipos:** `tendencia` por fila y `tendencia_total` (meses con importe en texto exacto o `null`, bandera `parcial`, y `direccion` como texto controlado: `sube`, `baja`, `estable`, `datos_insuficientes`). Tipos regenerados.
+* **Interfaz** (`vistas/resumen_gastos.ts`): columna «Tendencia 6m» con mini barras HTML/CSS propias escaladas al máximo de cada fila, el mes parcial rayado, los meses ausentes como hueco, la dirección con flecha y texto (el color nunca es la única señal) y `aria-label` descriptivo por fila con los importes en texto. La tabla tiene ancho mínimo y se desplaza en horizontal (región enfocable con teclado) en pantallas estrechas.
+* **Pruebas:** unitarias de dominio (serie con huecos, ausentes, parcial, cambio de año, categoría a mitad, umbral exacto y a un centavo de él, datos insuficientes, referencia cero, parcial excluido, total = suma de filas) y de JS (barras, escalas, etiquetas accesibles, escape, estados, mover el mes mueve la ventana); 6 de integración (`integracion_`) con los comandos reales sobre una base temporal con datos inventados, incluida la de solo lectura y el contrato de forma del DTO. Mutaciones comprobadas: ventana de meses, parcial en la dirección, umbral (tres variantes), ausente como cero, escala de barras, escape y trama del parcial.
+
+### 🧪 Qué probar a mano
+* Pestaña Resumen › Gasto por categoría: la columna de tendencia, mes cerrado y mes en curso (barra rayada).
+* Pantalla estrecha (la tabla se desplaza, no desborda) y modo claro/oscuro.
+* Revisar la regla de dirección y su umbral del 10 %.
+
+---
+
+## Versión 1.124.0 - 2026-11-05
 **El caso de corrección de un traspaso eliminado guarda la foto completa del traspaso.** Etapa 2 de 2 de la corrección de traspasos (la etapa 1 fue la 1.123.0).
 
 > **ADVERTENCIA DE ESQUEMA: este PR sube el esquema a 19. La app instalada (v18) no abre una base v19. No instalar sin respaldo y ensayo.**
