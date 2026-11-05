@@ -291,6 +291,7 @@ impl RepositorioGastos for AlmacenEnMemoria {
         }
         let id = self.siguiente_id;
         self.siguiente_id += 1;
+        self.descripciones_de_gasto.insert(id, gasto.descripcion.clone());
         self.gastos.insert(
             id,
             GastoGuardado {

@@ -91,12 +91,14 @@ pub fn registrar_pago_tarjeta(
     almacen.ajustar_saldo(cuenta_id, calculo.total_debitado.negado())?;
     let debitado = Some(calculo.debitado);
     let comision = calculo.comision;
+    // La tasa se guarda solo si de verdad se usó: hubo cruce de divisas. Sin cruce, una tasa recibida es sobrante.
+    let tasa_usada = if calculo.convirtio { datos.tasa_cambio } else { None };
     let gasto_id = match comision {
         None => None,
         Some(comision) => Some(almacen.insertar(&GastoAPersistir {
             fecha: datos.fecha.clone(),
             monto: comision,
-            descripcion: descripcion_comision(datos.tasa_cambio),
+            descripcion: descripcion_comision(tasa_usada),
             categoria_id: categoria_comision_id,
             metodo_pago: "transferencia".to_string(),
             cargos: Dinero::cero(comision.divisa()),
@@ -112,7 +114,7 @@ pub fn registrar_pago_tarjeta(
         fecha: datos.fecha,
         monto: datos.monto,
         cuenta_ahorro_id: Some(cuenta_id),
-        tasa_cambio: if comision.is_some() { datos.tasa_cambio.map(|t| t.valor()) } else { None },
+        tasa_cambio: if comision.is_some() { tasa_usada.map(|t| t.valor()) } else { None },
         monto_debitado: debitado,
         comision,
         gasto_comision_id: gasto_id,
@@ -226,19 +228,86 @@ mod tests {
         ));
     }
 
+    /// Registra un abono con cuenta y devuelve (tasa guardada, descripción del gasto de comisión).
+    fn tasa_y_descripcion(deuda: Dinero, monto: Dinero, cuenta: i64, tasa: Option<f64>) -> (Option<f64>, String) {
+        let mut a = almacen();
+        a.ajustar_deuda(20, deuda).unwrap();
+        let r = registrar_pago_tarjeta(datos(monto, Some(cuenta), tasa), 1, &mut a).unwrap();
+        let gasto_id = a.pagos[&r.id].gasto_comision_id.expect("hay comisión");
+        let descripcion = String::from(a.descripciones_de_gasto[&gasto_id].as_str());
+        (a.pagos[&r.id].tasa_cambio, descripcion)
+    }
+
     #[test]
-    fn hallazgo_la_tasa_sin_cruce_de_divisas_no_convierte_pero_se_guarda() {
-        // H15 hizo que una tasa sin cruce de divisas no convierta. Pero el abono con cuenta **guarda igualmente** esa
-        // tasa (`tasa_cambio` del abono y «Tasa 60» en la descripción de la comisión), como si hubiera habido
-        // conversión. Es conducta heredada y no daña saldos; se fija aquí y se deja al titular decidir si guardar
-        // solo la tasa que de verdad se usó. La vista previa no muestra la tasa cuando no hubo cruce.
+    fn sin_cruce_de_divisas_la_tasa_recibida_no_se_guarda_ni_se_nombra_en_la_comision() {
         let mut a = almacen();
         a.ajustar_deuda(20, dop(1_000.0)).unwrap();
 
         let r = registrar_pago_tarjeta(datos(dop(100.0), Some(10), Some(60.0)), 1, &mut a).unwrap();
 
         assert_eq!(a.saldo_de(10), dop(499_899.8), "100 más 0.20 de comisión: la tasa no convirtió nada");
-        assert_eq!(a.pagos[&r.id].tasa_cambio, Some(60.0), "la tasa se guardó aunque no se usó");
+        assert_eq!(a.pagos[&r.id].tasa_cambio, None, "la tasa no se usó, no se guarda");
+        assert_eq!(a.descripciones_de_gasto.values().next().unwrap(), "Comisión 0.20% Pago Tarjeta");
+    }
+
+    #[test]
+    fn dop_a_dop_y_usd_a_usd_con_tasa_sobrante_no_guardan_tasa() {
+        let (t, d) = tasa_y_descripcion(dop(1_000.0), dop(100.0), 10, Some(58.75));
+        assert_eq!((t, d.as_str()), (None, "Comisión 0.20% Pago Tarjeta"));
+        let (t, d) = tasa_y_descripcion(usd(1_000.0), usd(100.0), 11, Some(58.75));
+        assert_eq!((t, d.as_str()), (None, "Comisión 0.20% Pago Tarjeta"));
+    }
+
+    #[test]
+    fn usd_desde_cuenta_en_pesos_guarda_la_tasa_y_la_nombra() {
+        let (t, d) = tasa_y_descripcion(usd(1_000.0), usd(100.0), 10, Some(58.75));
+        assert_eq!(t, Some(58.75));
+        assert_eq!(d, "Comisión 0.20% Pago Tarjeta (Tasa 58.75)");
+    }
+
+    #[test]
+    fn dop_desde_cuenta_en_dolares_cruzado_guarda_la_tasa_y_la_nombra() {
+        let mut a = almacen();
+        a.ajustar_deuda(20, dop(9_000.0)).unwrap();
+        let r = registrar_pago_tarjeta(datos(dop(5_875.0), Some(11), Some(58.75)), 1, &mut a).unwrap();
+        assert_eq!(r.debitado, Some(usd(100.0)));
+        assert_eq!(a.saldo_de(11), usd(1_899.8), "100 más 0.20 de comisión");
+        assert_eq!(a.pagos[&r.id].tasa_cambio, Some(58.75));
+        assert_eq!(a.descripciones_de_gasto.values().next().unwrap(), "Comisión 0.20% Pago Tarjeta (Tasa 58.75)");
+    }
+
+    #[test]
+    fn el_cruce_sin_tasa_sigue_siendo_el_mismo_error_y_no_guarda_nada() {
+        let mut a = almacen();
+        a.ajustar_deuda(20, dop(9_000.0)).unwrap();
+        let e = registrar_pago_tarjeta(datos(dop(5_875.0), Some(11), None), 1, &mut a).unwrap_err();
+        assert!(matches!(e, ErrorAplicacion::Dominio(ErrorDominio::TasaDeCambioRequerida)));
+        assert!(a.pagos.is_empty());
+        assert_eq!(a.total_gastos(), 0);
+    }
+
+    #[test]
+    fn sin_cuenta_no_hay_tasa_ni_comision_aunque_se_reciba() {
+        let mut a = almacen();
+        a.ajustar_deuda(20, dop(5_000.0)).unwrap();
+        registrar_pago_tarjeta(datos(dop(100.0), None, Some(60.0)), 1, &mut a).unwrap();
+        assert_eq!(a.pagos.values().next().unwrap().tasa_cambio, None);
+        assert_eq!(a.total_gastos(), 0);
+    }
+
+    #[test]
+    fn revertir_un_abono_nuevo_sin_tasa_devuelve_el_saldo_exacto() {
+        use super::super::revertir_pago_tarjeta::revertir_pago_tarjeta;
+        let mut a = almacen();
+        a.ajustar_deuda(20, dop(1_000.0)).unwrap();
+        let r = registrar_pago_tarjeta(datos(dop(333.33), Some(10), Some(60.0)), 1, &mut a).unwrap();
+        assert_eq!(a.pagos[&r.id].tasa_cambio, None);
+
+        revertir_pago_tarjeta(r.id, &mut a).unwrap();
+
+        assert_eq!(a.saldo_de(10), dop(500_000.0));
+        assert_eq!(a.deuda_de(20), dop(1_000.0));
+        assert_eq!(a.total_gastos(), 0);
     }
 
     #[test]
