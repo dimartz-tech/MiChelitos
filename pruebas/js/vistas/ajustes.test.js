@@ -352,7 +352,7 @@ test('el panel de casos: si la página no tiene el panel, no hace nada', async (
     await assert.doesNotReject(() => montar().vista.alternarCasosDeCorreccion());
 });
 
-// --- Casos de corrección: detalle de un traspaso borrado  ---
+// --- Casos de corrección: detalle de un traspaso borrado ---
 
 const DETALLE = (extra = {}) => JSON.stringify({
     version: 1, traspaso_id: 7, fecha: '07/10/2026', descripcion: 'Compra de dólares',
