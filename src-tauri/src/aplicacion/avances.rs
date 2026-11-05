@@ -49,6 +49,7 @@ pub fn revertir_avance(
         importe: Some(avance.monto),
         divisa: Some(avance.divisa),
         motivo,
+        detalle: None,
     })?;
     let revertido = revertir_avance_de_efectivo(id, almacen)?;
     Ok(ReversionDeAvance { revertido, caso })

@@ -4,7 +4,26 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.123.0 (Versión Actual) - 2026-11-05
+## 🚀 Versión 1.124.0 (Versión Actual) - 2026-11-05
+**El caso de corrección de un traspaso eliminado guarda la foto completa del traspaso.** Etapa 2 de 2 de la corrección de traspasos (la etapa 1 fue la 1.123.0).
+
+> **ADVERTENCIA DE ESQUEMA: este PR sube el esquema a 19. La app instalada (v18) no abre una base v19. No instalar sin respaldo y ensayo.**
+
+### 🔧 Qué se hace
+* **Migración 19:** columna `correcciones.detalle TEXT` con `CHECK(detalle IS NULL OR json_valid(detalle))`. Idempotente; los casos existentes quedan con `detalle = NULL` (no se reconstruye el pasado).
+* **Dominio:** `DetalleDeTraspaso` (`dominio/detalle_traspaso.rs`): fecha original, las dos cuentas con su nombre, los dos montos con su divisa, tasa, cargo y descripción, serializado como JSON.
+* **Aplicación y DTO:** `CasoAAnotar`, `CasoLeido` y el DTO de correcciones llevan `detalle: Option<String>`; `eliminar_transferencia` lo rellena. Con esto el lado destino de un traspaso entre divisas ya no se pierde (era el límite conocido de la 1.123.0).
+* **Interfaz:** en la pestaña de casos de corrección (`vistas/ajustes.ts`) un caso con detalle muestra la foto completa (con escape de HTML en los nombres); uno antiguo muestra «Sin detalle (caso anterior)».
+* **Pruebas:** unitarias del dominio y de la aplicación, 7 de integración (`integracion_`) con los comandos reales sobre una base temporal, y una de migración desde una base v18 sembrada.
+
+### 🧪 Qué probar antes de instalar
+* Respaldar la base y ensayar la migración con una copia.
+* Pestaña de casos de corrección con un caso antiguo: debe decir «Sin detalle (caso anterior)».
+* Eliminar un traspaso nuevo: el caso debe mostrar el detalle completo.
+
+---
+
+## Versión 1.123.0 - 2026-11-05
 **El caso de corrección de un traspaso eliminado ya anota la divisa de la cuenta de origen.** Etapa 1 de 2 de la corrección de traspasos (la etapa 2 será guardar una foto completa del traspaso). Decidido por el titular entre tres abordajes modelados.
 
 ### 🔧 Qué se hace
