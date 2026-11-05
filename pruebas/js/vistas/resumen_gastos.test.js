@@ -187,6 +187,21 @@ test('etiquetaDeDireccion: flecha Y texto; lo desconocido es «datos insuficient
     assert.equal(etiquetaDeDireccion('<b>x</b>').texto, 'datos insuficientes');
 });
 
+test('«estable» dice por qué: poco cambio (menos de DOP 500) o dentro del umbral; el motivo no afecta a otras direcciones', () => {
+    assert.equal(etiquetaDeDireccion('estable', 'poco_cambio').texto, 'estable (cambio menor de DOP 500)');
+    assert.equal(etiquetaDeDireccion('estable', 'dentro_del_umbral').texto, 'estable');
+    assert.equal(etiquetaDeDireccion('estable', null).texto, 'estable');
+    assert.equal(etiquetaDeDireccion('estable', '<b>x</b>').texto, 'estable', 'un motivo desconocido no se vuelca');
+    assert.equal(etiquetaDeDireccion('sube', 'poco_cambio').texto, 'sube');
+    assert.equal(etiquetaDeDireccion('datos_insuficientes', 'poco_cambio').texto, 'datos insuficientes');
+    const t = tendencia(['20.00', '20.00', '20.00', '30.00', '30.00', '30.00'], 'estable', false, 'poco_cambio');
+    assert.match(descripcionDeTendencia('Café', t), /^Café: estable \(cambio menor de DOP 500\); últimos meses: /);
+    const html = htmlDeTendencia('Café', t);
+    assert.match(html, /aria-label="Café: estable \(cambio menor de DOP 500\);/);
+    assert.match(html, /rg-estable[^>]*><span aria-hidden="true">=<\/span> estable \(cambio menor de DOP 500\)/);
+    assert.doesNotMatch(htmlDeTendencia('Café', tendencia(undefined, 'estable', false, 'dentro_del_umbral')), /cambio menor/);
+});
+
 test('descripcionDeTendencia: nombre, dirección y cada mes con su importe en texto; ausente y parcial dicen lo suyo', () => {
     const t = tendencia([null, '1234.57', '0.00', '80.01'], 'sube', true);
     const d = descripcionDeTendencia('Supermercado', t);
@@ -221,7 +236,8 @@ test('la dirección «sube» usa el color de alerta y «datos insuficientes» no
 
 test('la tabla trae la columna «Tendencia 6m», una celda por fila y la del total; desplazable y con ancho mínimo', () => {
     const html = dibujar();
-    assert.match(html, /<th scope="col">Tendencia 6m<\/th>/);
+    assert.match(html, /<th scope="col" title="[^"]*10 %[^"]*DOP 500[^"]*">Tendencia 6m /);
+    assert.match(html, /al menos DOP 500 al mes\)/, 'el pie de la tabla resume la regla');
     assert.equal((html.match(/class="rg-tendencia"/g) ?? []).length, 4, 'tres filas y el total');
     assert.match(html, /aria-label="Total: estable; últimos meses: /);
     assert.match(html, /aria-label="Cargos derivados: sube; /);

@@ -144,12 +144,24 @@ export interface EtiquetaDeDireccion {
     texto: string;
 }
 
-/** La dirección con flecha Y texto. Cualquier valor desconocido se trata como «datos insuficientes». */
-export function etiquetaDeDireccion(direccion: string): EtiquetaDeDireccion {
+/** El piso absoluto de la regla, solo para el texto (la decisión la toma Rust: `MINIMO_ABSOLUTO_TENDENCIA_CENTAVOS`). */
+export const MINIMO_TENDENCIA_TEXTO = 'DOP 500';
+
+/** La regla completa, para el `title` de la columna «Tendencia 6m». */
+export const AYUDA_DE_TENDENCIA =
+    `Compara el promedio de los 3 últimos meses completos con el de hasta 3 anteriores. Sube o baja solo si el cambio supera el 10 % `
+    + `y además es de al menos ${MINIMO_TENDENCIA_TEXTO} al mes; si no, estable. Hacen falta 4 meses completos con gasto; el mes en curso no cuenta.`;
+
+/**
+ * La dirección con flecha Y texto. Cualquier valor desconocido se trata como «datos insuficientes». `motivoEstable`
+ * (`poco_cambio` | `dentro_del_umbral`) solo afecta a «estable»: con `poco_cambio` el texto dice por qué.
+ */
+export function etiquetaDeDireccion(direccion: string, motivoEstable: string | null = null): EtiquetaDeDireccion {
     switch (direccion) {
         case 'sube': return { direccion, flecha: '▲', texto: 'sube' };
         case 'baja': return { direccion, flecha: '▼', texto: 'baja' };
-        case 'estable': return { direccion, flecha: '=', texto: 'estable' };
+        case 'estable':
+            return { direccion, flecha: '=', texto: motivoEstable === 'poco_cambio' ? `estable (cambio menor de ${MINIMO_TENDENCIA_TEXTO})` : 'estable' };
         default: return { direccion: 'datos_insuficientes', flecha: '', texto: 'datos insuficientes' };
     }
 }
@@ -178,7 +190,7 @@ export function alturasDeBarras(meses: readonly { importe: string | null }[]): (
 
 /** «Supermercado: sube; últimos meses: enero 2027 DOP 1,234.57, febrero 2027 (parcial) DOP 80.01, …». Sin escapar. */
 export function descripcionDeTendencia(nombre: string, t: TendenciaResumen): string {
-    const e = etiquetaDeDireccion(t.direccion);
+    const e = etiquetaDeDireccion(t.direccion, t.motivo_estable);
     const meses = t.meses.map(m => {
         const mes = etiquetaDeMes(m.anio, m.mes);
         const parcial = m.parcial ? ' (parcial, no cuenta en la dirección)' : '';
@@ -204,7 +216,7 @@ function estiloDeBarra(pct: number, parcial: boolean): string {
 
 /** La celda «Tendencia 6m»: mini barras, la dirección con flecha y texto, y la descripción accesible entera. */
 export function htmlDeTendencia(nombre: string, t: TendenciaResumen): string {
-    const e = etiquetaDeDireccion(t.direccion);
+    const e = etiquetaDeDireccion(t.direccion, t.motivo_estable);
     const alturas = alturasDeBarras(t.meses);
     const barras = t.meses.map((m, i) => {
         const pct = alturas[i];
@@ -217,7 +229,7 @@ export function htmlDeTendencia(nombre: string, t: TendenciaResumen): string {
     const flecha = e.flecha ? `<span aria-hidden="true">${escaparHtml(e.flecha)}</span> ` : '';
     return `<div class="rg-tendencia" style="display:flex; align-items:flex-end; gap:0.5rem; min-width:9.5rem;">
                             <span class="rg-t-barras" role="img" aria-label="${escaparHtml(descripcionDeTendencia(nombre, t))}" style="display:flex; align-items:flex-end; gap:2px; height:28px; width:5.5rem; border-bottom:1px solid var(--border-color);">${barras}</span>
-                            <span class="rg-t-direccion rg-${e.direccion}" aria-hidden="true" style="color:${escaparHtml(COLOR_DE_DIRECCION[e.direccion])}; white-space:nowrap; font-size:0.8rem;">${flecha}${escaparHtml(e.texto)}</span>
+                            <span class="rg-t-direccion rg-${e.direccion}" aria-hidden="true" style="color:${escaparHtml(COLOR_DE_DIRECCION[e.direccion])}; max-width:8rem; font-size:0.8rem;">${flecha}${escaparHtml(e.texto)}</span>
                         </div>`;
 }
 
@@ -326,13 +338,13 @@ function htmlDeCuerpo(estado: EstadoDeGasto, e: EleccionDeGasto): string {
             ${exclusion}
             <div class="rg-desplazable" role="region" tabindex="0" aria-label="Tabla de gasto por categoría (se desplaza en horizontal si no cabe)" style="overflow-x:auto;">
             <table class="rg-tabla" style="width:100%; min-width:46rem; border-collapse:collapse; font-size:0.85rem;">
-                <caption style="text-align:left; padding:0.4rem 0; color:var(--text-secondary);">Gasto por categoría de ${escaparHtml(mes + parcial)} (DOP). Tendencia de los últimos 6 meses${r.parcial ? ' (el mes en curso, rayado, no cuenta en la dirección)' : ''}. Comparado con el mes anterior y con el promedio de ${r.meses_promedio} meses completos.</caption>
+                <caption style="text-align:left; padding:0.4rem 0; color:var(--text-secondary);">Gasto por categoría de ${escaparHtml(mes + parcial)} (DOP). Tendencia de los últimos 6 meses (sube o baja solo con más de 10 % de cambio y al menos ${MINIMO_TENDENCIA_TEXTO} al mes)${r.parcial ? ' (el mes en curso, rayado, no cuenta en la dirección)' : ''}. Comparado con el mes anterior y con el promedio de ${r.meses_promedio} meses completos.</caption>
                 <thead>
                     <tr>
                         <th scope="col" style="text-align:left;">Categoría</th>
                         <th scope="col" style="text-align:right;">Importe</th>
                         <th scope="col">% del total</th>
-                        <th scope="col">Tendencia 6m</th>
+                        <th scope="col" title="${escaparHtml(AYUDA_DE_TENDENCIA)}">Tendencia 6m <span aria-hidden="true">ⓘ</span></th>
                         <th scope="col">Contra el mes anterior</th>
                         <th scope="col">Contra el promedio de ${r.meses_promedio} meses</th>
                     </tr>
