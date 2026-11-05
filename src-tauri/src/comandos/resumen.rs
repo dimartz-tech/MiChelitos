@@ -48,6 +48,9 @@ pub struct TendenciaResumen {
     pub meses: Vec<PuntoTendenciaResumen>,
     /// `sube`, `baja`, `estable` o `datos_insuficientes` (regla en `dominio::resumen_gastos`).
     pub direccion: String,
+    /// Solo con `direccion == "estable"`: `dentro_del_umbral` (el cambio no pasa del 10 %) o `poco_cambio` (pasa del
+    /// 10 % pero la diferencia es menor de DOP 500.00). `null` en cualquier otra dirección.
+    pub motivo_estable: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -145,6 +148,7 @@ fn a_tendencia(t: &Tendencia) -> TendenciaResumen {
             })
             .collect(),
         direccion: t.direccion.como_texto().to_string(),
+        motivo_estable: t.motivo_estable.map(|m| m.como_texto().to_string()),
     }
 }
 

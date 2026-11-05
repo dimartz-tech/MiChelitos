@@ -441,12 +441,12 @@ fn integracion_ningun_importe_viaja_como_numero() {
 // --- Tendencia de 6 meses ---
 
 /// Siembra seis meses de historial (abril a septiembre de 2026, más un gasto pequeño en octubre) con los comandos
-/// reales. Alimentación sube (≈100 → ≈200); Transporte se mantiene (≈150) de mayo a septiembre.
+/// reales. Alimentación sube (≈1000 → ≈2000: más del 10 % y más de DOP 500); Transporte se mantiene (≈150) de mayo a septiembre.
 fn sembrar_historial() {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000_000.0);
     for (fecha, monto) in [
-        ("05/04/2026", "100.17"), ("05/05/2026", "99.91"), ("05/06/2026", "100.33"),
-        ("05/07/2026", "200.07"), ("05/08/2026", "210.19"), ("05/09/2026", "190.43"),
+        ("05/04/2026", "1000.17"), ("05/05/2026", "999.91"), ("05/06/2026", "1000.33"),
+        ("05/07/2026", "2000.07"), ("05/08/2026", "2100.19"), ("05/09/2026", "1900.43"),
     ] {
         transferencia(fecha, monto, "Alimentación", cuenta);
     }
@@ -580,6 +580,12 @@ fn integracion_el_dto_de_la_tendencia_tiene_la_forma_de_tipos_ipc_y_un_vocabular
             let meses = t["meses"].as_array().unwrap();
             assert_eq!(meses.len(), 6);
             assert!(matches!(t["direccion"].as_str().unwrap(), "sube" | "baja" | "estable" | "datos_insuficientes"));
+            // El motivo solo existe con «estable» y su vocabulario es controlado.
+            match (t["direccion"].as_str().unwrap(), &t["motivo_estable"]) {
+                ("estable", Value::String(m)) => assert!(matches!(m.as_str(), "poco_cambio" | "dentro_del_umbral"), "{m}"),
+                (otra, Value::Null) => assert_ne!(otra, "estable", "un «estable» sin motivo"),
+                (d, m) => panic!("dirección {d} con motivo {m}"),
+            }
             for p in meses {
                 // Los importes viajan como texto exacto con dos decimales, o null si el mes es anterior al historial.
                 match &p["importe"] {
@@ -592,3 +598,74 @@ fn integracion_el_dto_de_la_tendencia_tiene_la_forma_de_tipos_ipc_y_un_vocabular
     }
 }
 
+
+// --- Mínimo absoluto de la tendencia (DOP 500.00) ---
+
+/// Seis meses (abril a septiembre de 2026) en tres categorías, con céntimos poco redondos:
+/// * Alimentación: ≈1000 → ≈2000 (+100 %, ≈1000 pesos): sube.
+/// * Transporte: ≈200 → ≈300 (+50 %, ≈100 pesos): más del 10 % pero menos de DOP 500: estable por poco cambio.
+/// * Otros: ≈3000 → ≈3100 (+3 %): estable, dentro del umbral.
+fn sembrar_minimo_absoluto() {
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000_000.0);
+    let series: [(&str, [&str; 6]); 3] = [
+        ("Alimentación", ["1000.17", "999.91", "1000.33", "2000.07", "2100.19", "1900.43"]),
+        ("Transporte", ["200.13", "199.87", "200.29", "300.11", "299.83", "300.47"]),
+        ("Otros", ["3000.19", "2999.83", "3000.37", "3100.21", "3099.79", "3100.41"]),
+    ];
+    for (categoria, importes) in series {
+        for (i, monto) in importes.iter().enumerate() {
+            transferencia(&format!("07/{:02}/2026", 4 + i), monto, categoria, cuenta);
+        }
+    }
+}
+
+#[test]
+fn integracion_el_minimo_absoluto_separa_el_cambio_grande_en_pesos_del_grande_solo_en_porcentaje() {
+    let _g = entorno_para_pruebas_externas();
+    sembrar_minimo_absoluto();
+    let antes = huella_de_la_base();
+    let r = resumen_en(hoy(2026, 10, 28), 2026, 9, 3, 60.0, vec![]).unwrap();
+    let json = serde_json::to_value(&r).unwrap();
+
+    let ali = fila(&r, "Alimentación");
+    assert_eq!((ali.tendencia.direccion.as_str(), ali.tendencia.motivo_estable.as_deref()), ("sube", None));
+    let tr = fila(&r, "Transporte");
+    assert_eq!((tr.tendencia.direccion.as_str(), tr.tendencia.motivo_estable.as_deref()), ("estable", Some("poco_cambio")));
+    let otros = fila(&r, "Otros");
+    assert_eq!((otros.tendencia.direccion.as_str(), otros.tendencia.motivo_estable.as_deref()), ("estable", Some("dentro_del_umbral")));
+    // El total (≈6200 → ≈7400: +19 %, ≈1200 pesos) también sube, con la misma regla.
+    assert_eq!((r.tendencia_total.direccion.as_str(), r.tendencia_total.motivo_estable.as_deref()), ("sube", None));
+
+    // El DTO tal como viaja: el campo existe en cada tendencia, como texto o null.
+    for f in json["filas"].as_array().unwrap() {
+        assert!(f["tendencia"].get("motivo_estable").is_some(), "falta motivo_estable en {}", f["categoria_nombre"]);
+    }
+    assert_eq!(json["filas"].as_array().unwrap().iter().find(|f| f["categoria_nombre"] == "Transporte").unwrap()["tendencia"]["motivo_estable"], "poco_cambio");
+    assert!(json["tendencia_total"]["motivo_estable"].is_null());
+    let dts = include_str!("../../src/js/tipos-ipc.d.ts");
+    assert!(dts.contains("motivo_estable: string | null"), "tipos-ipc.d.ts declara el motivo");
+    verificar_forma(dts, "ResumenGastos", &json, "ResumenGastos");
+
+    // Pedir el resumen no escribe nada.
+    assert_eq!(huella_de_la_base(), antes);
+}
+
+#[test]
+fn integracion_la_baja_con_cambio_pequeno_en_pesos_es_estable_y_con_cambio_grande_baja() {
+    let _g = entorno_para_pruebas_externas();
+    let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 50_000_000.0);
+    // Transporte cae de ≈300 a ≈200 (−33 %, ≈100 pesos); Alimentación de ≈2000 a ≈1000 (−50 %, ≈1000 pesos).
+    for (categoria, importes) in [
+        ("Transporte", ["300.13", "299.87", "300.29", "200.11", "199.83", "200.47"]),
+        ("Alimentación", ["2000.17", "1999.91", "2000.33", "1000.07", "1100.19", "900.43"]),
+    ] {
+        for (i, monto) in importes.iter().enumerate() {
+            transferencia(&format!("07/{:02}/2026", 4 + i), monto, categoria, cuenta);
+        }
+    }
+    let r = resumen_en(hoy(2026, 10, 28), 2026, 9, 3, 60.0, vec![]).unwrap();
+    assert_eq!(fila(&r, "Transporte").tendencia.direccion, "estable");
+    assert_eq!(fila(&r, "Transporte").tendencia.motivo_estable.as_deref(), Some("poco_cambio"));
+    assert_eq!(fila(&r, "Alimentación").tendencia.direccion, "baja");
+    assert_eq!(fila(&r, "Alimentación").tendencia.motivo_estable, None);
+}
