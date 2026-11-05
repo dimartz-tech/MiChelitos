@@ -140,6 +140,20 @@ test('baja de categoría: con confirmación envía el id; sin ella no hace nada;
     await rechazoSeMuestra(ui, () => ui.appUI.handleEliminarCategoria(14));
 });
 
+test('marcar una categoría como fija / recurrente: envía (id, marca) y avisa; si Rust rechaza, deshace el casillero y avisa', async () => {
+    let ui = cargarInterfaz({ api: { marcarCategoriaFija: { id: 14, nombre: 'Seguros', fija: true } } });
+    await ui.appUI.handleMarcarCategoriaFija({ checked: true }, 14);
+    llamoUnaVez(ui, 'marcarCategoriaFija', [14, true]);
+    avisoExito(ui, /«Seguros» ahora es fija \/ recurrente/);
+    noRedibujo(ui);
+
+    ui = cargarInterfaz({});
+    ui.rechazar('marcarCategoriaFija', 'Error simulado de Rust');
+    const control = { checked: true };
+    await rechazoSeMuestra(ui, () => ui.appUI.handleMarcarCategoriaFija(control, 14));
+    assert.equal(control.checked, false);
+});
+
 // --- clientes ---
 
 test('alta de cliente: AppAPI.crearCliente recibe (RNC, nombre), no (nombre, RNC)', async () => {

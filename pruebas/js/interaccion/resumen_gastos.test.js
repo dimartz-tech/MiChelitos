@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { cargarInterfaz } from '../ayudas/cargar_interfaz.js';
 import { fila, resumen, tendencia } from '../ayudas/resumen_gastos_datos.js';
 
-const IDS = ['resumen-gasto-categoria', 'rg-mes', 'rg-mes-anterior', 'rg-mes-siguiente', 'rg-promedio', 'rg-incluir-todo'];
+const IDS = ['resumen-gasto-categoria', 'rg-mes', 'rg-mes-anterior', 'rg-mes-siguiente', 'rg-promedio', 'rg-incluir-todo', 'rg-filtro'];
 const CATEGORIAS = [{ id: 41, nombre: 'Comida' }, { id: 7, nombre: 'Impuestos' }, { id: 12, nombre: 'Maquinaria/Equipos' }, { id: 13, nombre: 'Prestamo' }, { id: 99, nombre: 'Renta' }];
 
 /** Todo lo que `render()` consulta, con respuestas mínimas, más lo que la prueba pise. */
@@ -199,4 +199,29 @@ test('cambiar el mes mueve la ventana de 6 meses: la tendencia que se dibuja es 
     assert.match(bloque(), /febrero 2026 DOP 105\.07/, 'julio de 2026 abre en febrero');
     assert.doesNotMatch(bloque(), /enero 2026 DOP/);
     assert.match(bloque(), /julio 2026 DOP 100\.07/);
+});
+
+test('el filtro «solo fijas o recurrentes» no vuelve a pedir nada a Rust, no cambia los totales y se conserva', async () => {
+    const r = resumen({ filas: [fila(1, 'Comida'), fila(3, 'Seguros', {}, false, tendencia(), true)] });
+    const { ui, vista, bloque } = interfaz({ obtenerResumenGastos: r });
+    await vista.render();
+    const totalAntes = /Total DOP [\d,.]+/.exec(bloque())[0];
+    const pedidas = llamadas(ui).length;
+    await ui.appUI.resumenGastoFiltro('fijas');
+    assert.equal(llamadas(ui).length, pedidas, 'el filtro es de filas: no hay otra petición');
+    assert.doesNotMatch(bloque(), /<th scope="row" style="text-align:left;">Comida/);
+    assert.match(bloque(), /<th scope="row" style="text-align:left;">Seguros/);
+    assert.equal(/Total DOP [\d,.]+/.exec(bloque())[0], totalAntes);
+    assert.match(bloque(), /<option value="fijas" selected>/);
+    await ui.appUI.resumenGastoFiltro('basura');
+    assert.match(bloque(), /<option value="todas" selected>/, 'un valor desconocido es «todas»');
+    assert.match(bloque(), /<th scope="row" style="text-align:left;">Comida/);
+});
+
+test('el filtro se conserva al cambiar de mes', async () => {
+    const { ui, vista, bloque } = interfaz({ obtenerResumenGastos: () => resumen({ meses_disponibles: [{ anio: 2026, mes: 5 }, { anio: 2026, mes: 6 }] }) });
+    await vista.render();
+    await ui.appUI.resumenGastoFiltro('variables');
+    await ui.appUI.resumenGastoMes('2026-06');
+    assert.match(bloque(), /<option value="variables" selected>/);
 });

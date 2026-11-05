@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 19;
+pub const VERSION_OBJETIVO: u32 = 20;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -188,6 +188,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 19,
             nombre: "detalle de los casos de corrección",
             aplicar: crate::db_sql::migracion_19_detalle_de_correcciones,
+        },
+        Migracion {
+            version: 20,
+            nombre: "categorías fijas",
+            aplicar: crate::db_sql::migracion_20_categorias_fijas,
         },
     ]
 }
@@ -1445,8 +1450,8 @@ mod tests_patrimonio {
         assert!(antes.iter().any(|(t, cuerpo)| t == "cuentas_ahorro" && cuerpo.contains("12345.67")), "la siembra llegó");
 
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (17, 19));
-        assert_eq!(informe.aplicadas, vec!["historial del patrimonio", "detalle de los casos de corrección"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (17, 20));
+        assert_eq!(informe.aplicadas, vec!["historial del patrimonio", "detalle de los casos de corrección", "categorías fijas"]);
         assert_eq!(volcado(&c), antes, "ninguna fila de las tablas anteriores cambió");
         let n: i64 = c.query_row("SELECT COUNT(*) FROM patrimonio_fotos", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0, "las tablas nuevas nacen vacías: no se reconstruye el pasado");
@@ -1499,8 +1504,8 @@ mod tests_detalle_de_correcciones {
 
         let informe = ejecutar(&mut c).unwrap();
 
-        assert_eq!((informe.version_inicial, informe.version_final), (18, 19));
-        assert_eq!(informe.aplicadas, vec!["detalle de los casos de corrección"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (18, 20));
+        assert_eq!(informe.aplicadas, vec!["detalle de los casos de corrección", "categorías fijas"]);
         let v = filas(&c);
         assert_eq!(v.len(), 2);
         assert_eq!(v[0], ("COR-2026-0001".into(), "Traspaso inventado".into(), 4, Some(1187.53), None));
@@ -1524,14 +1529,14 @@ mod tests_detalle_de_correcciones {
 
         let informe = ejecutar(&mut c).unwrap();
 
-        assert_eq!((informe.version_inicial, informe.version_final), (17, 19));
+        assert_eq!((informe.version_inicial, informe.version_final), (17, 20));
         let despues: Vec<_> = filas(&c).into_iter().map(|f| (f.0, f.1, f.2, f.3.unwrap())).collect();
         assert_eq!(despues, antes);
     }
 
     #[test]
     fn migrar_una_base_ya_migrada_no_repite_nada_ni_pierde_detalles() {
-        let mut c = base_hasta(19);
+        let mut c = base_hasta(20);
         c.execute(
             "INSERT INTO correcciones (numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo, detalle)
              VALUES ('COR-2026-0001', '01/10/2026', 'traspaso', 4, 'x', 1.5, 'USD', 'Motivo de prueba largo', '{\"version\":1}')",
@@ -1578,5 +1583,109 @@ mod tests_detalle_de_correcciones {
         let c = base_hasta(19);
         sembrar_casos_viejos(&c);
         assert!(c.execute("UPDATE correcciones SET detalle = 'no json' WHERE numero_caso = 'COR-2026-0001'", []).is_err());
+    }
+}
+
+/// Migración 20: `categorias.fija`.
+#[cfg(test)]
+mod tests_categorias_fijas {
+    use super::*;
+
+    fn base_hasta(version: u32) -> Connection {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        for m in catalogo() {
+            if m.version > version {
+                break;
+            }
+            let tx = c.transaction().unwrap();
+            (m.aplicar)(&tx).unwrap();
+            tx.execute_batch(&format!("PRAGMA user_version = {};", m.version)).unwrap();
+            tx.commit().unwrap();
+        }
+        c
+    }
+
+    fn marcas(c: &Connection) -> Vec<(String, i64)> {
+        c.prepare("SELECT nombre, fija FROM categorias ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect()
+    }
+
+    fn sembrar(c: &Connection) {
+        c.execute_batch("INSERT INTO categorias (nombre) VALUES ('Alquiler'), ('Suscripciones'), ('Comida inventada');").unwrap();
+    }
+
+    #[test]
+    fn de_cero_a_la_version_objetivo_llega_a_20_con_la_columna() {
+        let mut c = Connection::open_in_memory().unwrap();
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!(informe.version_final, 20);
+        assert_eq!(VERSION_OBJETIVO, 20);
+        assert_eq!(informe.aplicadas.last().copied(), Some("categorías fijas"));
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM pragma_table_info('categorias') WHERE name = 'fija'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn de_19_a_20_deja_toda_categoria_existente_como_variable() {
+        let mut c = base_hasta(19);
+        sembrar(&c);
+        let nombres: Vec<String> = c.prepare("SELECT nombre FROM categorias ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(nombres.len(), 3);
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!((informe.version_inicial, informe.version_final), (19, 20));
+        assert_eq!(informe.aplicadas, vec!["categorías fijas"]);
+        let v = marcas(&c);
+        assert_eq!(v.len(), nombres.len(), "no se perdió ni se creó ninguna");
+        assert!(v.iter().all(|(_, f)| *f == 0), "la migración no marca nada, ni «Alquiler» ni «Suscripciones»: {v:?}");
+    }
+
+    #[test]
+    fn de_18_a_19_a_20_encadena_las_dos_y_conserva_las_categorias() {
+        let mut c = base_hasta(18);
+        sembrar(&c);
+        let antes: Vec<String> = c.prepare("SELECT nombre FROM categorias ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!((informe.version_inicial, informe.version_final), (18, 20));
+        let despues: Vec<String> = marcas(&c).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(despues, antes);
+    }
+
+    #[test]
+    fn una_base_ya_en_20_no_repite_nada_ni_pierde_las_marcas() {
+        let mut c = base_hasta(20);
+        c.execute("INSERT INTO categorias (nombre, fija) VALUES ('Renta inventada', 1), ('Comida inventada', 0)", []).unwrap();
+        assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0);
+        assert_eq!(marcas(&c), vec![("Renta inventada".to_string(), 1), ("Comida inventada".to_string(), 0)]);
+    }
+
+    #[test]
+    fn aplicar_la_20_dos_veces_es_idempotente() {
+        let mut c = base_hasta(20);
+        c.execute("INSERT INTO categorias (nombre, fija) VALUES ('Renta inventada', 1)", []).unwrap();
+        let antes = marcas(&c);
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_20_categorias_fijas(&tx).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(marcas(&c), antes);
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM pragma_table_info('categorias') WHERE name = 'fija'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "una sola columna fija");
+    }
+
+    #[test]
+    fn el_check_rechaza_cualquier_valor_que_no_sea_0_o_1_y_el_defecto_es_variable() {
+        let c = base_hasta(20);
+        c.execute("INSERT INTO categorias (nombre) VALUES ('Nueva inventada')", []).unwrap();
+        let f: i64 = c.query_row("SELECT fija FROM categorias WHERE nombre = 'Nueva inventada'", [], |r| r.get(0)).unwrap();
+        assert_eq!(f, 0, "una categoría nueva nace variable");
+        assert!(c.execute("INSERT INTO categorias (nombre, fija) VALUES ('Dos', 2)", []).is_err());
+        assert!(c.execute("INSERT INTO categorias (nombre, fija) VALUES ('Menos', -1)", []).is_err());
+        assert!(c.execute("UPDATE categorias SET fija = 2 WHERE nombre = 'Nueva inventada'", []).is_err());
+        assert!(c.execute("UPDATE categorias SET fija = NULL WHERE nombre = 'Nueva inventada'", []).is_err(), "NOT NULL");
+        assert!(c.execute("UPDATE categorias SET fija = 1 WHERE nombre = 'Nueva inventada'", []).is_ok());
     }
 }

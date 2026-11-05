@@ -17,12 +17,14 @@ pub struct Cliente {
 pub struct Categoria {
     pub id: i64,
     pub nombre: String,
+    /// Marca de gasto fijo/recurrente que elige el titular (una categoría nueva es variable).
+    pub fija: bool,
 }
 
 #[tauri::command]
 pub fn obtener_categorias() -> Result<Vec<Categoria>, String> {
     lee_catalogos(|a| {
-        Ok(a.categorias()?.into_iter().map(|c| Categoria { id: c.id, nombre: c.nombre }).collect())
+        Ok(a.categorias()?.into_iter().map(|c| Categoria { id: c.id, nombre: c.nombre, fija: c.fija }).collect())
     })
 }
 
@@ -30,7 +32,17 @@ pub fn obtener_categorias() -> Result<Vec<Categoria>, String> {
 pub fn crear_categoria(nombre: String) -> Result<Categoria, String> {
     con_catalogos(|a| {
         let c = aplicacion::catalogos::crear_categoria(&nombre, a)?;
-        Ok(Categoria { id: c.id, nombre: c.nombre })
+        Ok(Categoria { id: c.id, nombre: c.nombre, fija: c.fija })
+    })
+}
+
+/// Marca (`fija = true`) o desmarca una categoría como gasto fijo/recurrente. **Escritura**: solo cambia esa marca, no toca
+/// ningún gasto ni saldo. Una categoría que no existe es un error legible.
+#[tauri::command]
+pub fn marcar_categoria_fija(id: i64, fija: bool) -> Result<Categoria, String> {
+    con_catalogos(|a| {
+        let c = aplicacion::catalogos::marcar_categoria_fija(id, fija, a)?;
+        Ok(Categoria { id: c.id, nombre: c.nombre, fija: c.fija })
     })
 }
 

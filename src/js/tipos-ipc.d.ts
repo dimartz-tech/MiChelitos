@@ -11,7 +11,7 @@ export type SimulacionAvance = { monto: number; cargo: number; a_la_tarjeta: num
 export type AvanceEfectivo = { id: number; fecha: string; monto: number; divisa: string; tipo_cargo: string; tasa: number | null; cargo: number; cuenta_ahorro_id: number; cuenta_nombre: string; nota: string | null };
 export type BonificacionDto = { id: number; fecha: string; tarjeta_id: number; entidad: string; nombre_tarjeta: string; monto: number; divisa: string; concepto: string; gasto_id: number | null };
 export type Cliente = { id: number; rnc: string; nombre: string };
-export type Categoria = { id: number; nombre: string };
+export type Categoria = { id: number; nombre: string; fija: boolean };
 export type LineaDeTraslado = { suscripcion_id: number; plataforma: string; monto: number; divisa: string; frecuencia: string; fecha_proximo_cobro: string | null; destino_sugerido: number | null; elegibles: number[]; motivo: string };
 export type DestinoDeCierre = { id: number; nombre: string; conserva_dolares: boolean; disponible_pesos: number; disponible_dolares: number };
 export type VistaPreviaDeCierre = { tarjeta_id: number; nombre: string; activa: boolean; balance_pesos: number; balance_dolares: number; bloqueos: string[]; lineas: LineaDeTraslado[]; destinos: DestinoDeCierre[] };
@@ -32,9 +32,10 @@ export type MovimientoPrestamo = { id: number; fecha: string; tipo: string; mont
 export type MedidasResumen = { importe: string; porcentaje_milesimas: number; anterior: string; variacion_anterior_pb: number | null; anterior_mismo_dia: string | null; variacion_mismo_dia_pb: number | null; promedio: string | null; variacion_promedio_pb: number | null; usd_aparte: string; n: number };
 export type PuntoTendenciaResumen = { anio: number; mes: number; importe: string | null; parcial: boolean };
 export type TendenciaResumen = { meses: PuntoTendenciaResumen[]; direccion: string; motivo_estable: string | null };
-export type FilaResumenGasto = { categoria_id: number; categoria_nombre: string; derivado: boolean; medidas: MedidasResumen; tendencia: TendenciaResumen };
+export type FilaResumenGasto = { categoria_id: number; categoria_nombre: string; derivado: boolean; fija: boolean; medidas: MedidasResumen; tendencia: TendenciaResumen };
+export type SegmentoResumen = { importe: string; porcentaje_milesimas: number; anterior: string; variacion_anterior_pb: number | null };
 export type MesDisponible = { anio: number; mes: number };
-export type ResumenGastos = { anio: number; mes: number; parcial: boolean; hasta_dia: number | null; tasa_usd: string; meses_promedio: number; id_cargos_derivados: number; filas: FilaResumenGasto[]; totales: MedidasResumen; tendencia_total: TendenciaResumen; meses_disponibles: MesDisponible[] };
+export type ResumenGastos = { anio: number; mes: number; parcial: boolean; hasta_dia: number | null; tasa_usd: string; meses_promedio: number; id_cargos_derivados: number; filas: FilaResumenGasto[]; totales: MedidasResumen; totales_fijo: SegmentoResumen; totales_variable: SegmentoResumen; tendencia_total: TendenciaResumen; meses_disponibles: MesDisponible[] };
 export type Suscripcion = { id: number; plataforma: string; monto: number; tarjeta_id: number; frecuencia: string; dia_facturacion: number; fecha_ultimo_pago: string | null; divisa: string; entidad: string; nombre_tarjeta: string; fecha_proximo_cobro: string | null; pendientes: string[]; avisa: boolean; impedimento: string | null };
 export type CobrosAutomaticos = { cargos: string[]; fallos: string[] };
 export type Tarjeta = { id: number; entidad: string; nombre_tarjeta: string; limite_pesos: number; limite_dolares: number; limite_ajustado_pesos: number | null; limite_ajustado_dolares: number | null; limite_sobregiro_pesos: number; limite_sobregiro_dolares: number; balance_pesos: number; balance_dolares: number; balance_corte_pesos: number; balance_corte_dolares: number; fecha_corte: number; fecha_limite_pago: number; politica_liquidacion: string; limite_efectivo_pesos: number; limite_efectivo_dolares: number; disponible_pesos: number; disponible_dolares: number; alerta_corte: boolean; alerta_pago: boolean; dias_corte_msg: string; dias_pago_msg: string };
@@ -63,6 +64,7 @@ export type Comandos = {
     guardar_capital: { args: { data: any }; ret: string | null };
     obtener_categorias: { args: {  }; ret: Categoria[] };
     crear_categoria: { args: { nombre: string }; ret: Categoria };
+    marcar_categoria_fija: { args: { id: number; fija: boolean }; ret: Categoria };
     eliminar_categoria: { args: { id: number }; ret: null };
     obtener_clientes: { args: {  }; ret: Cliente[] };
     crear_cliente: { args: { rnc: string; nombre: string }; ret: Cliente };

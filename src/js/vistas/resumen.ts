@@ -13,8 +13,8 @@ import type { ApiDe, Dom, Formato, Pantalla, Referencias, Reloj, Vista } from '.
 import { escaparHtml } from '../nucleo/html.js';
 import { consultarPatrimonio, htmlCifrasDePatrimonio } from './patrimonio_cifras.js';
 import {
-    ID_ANTERIOR, ID_BLOQUE_GASTO, ID_CONMUTADOR, ID_MES, ID_PROMEDIO, ID_SIGUIENTE, PROMEDIO_POR_DEFECTO, PROMEDIOS_OFRECIDOS,
-    type EstadoDeGasto, htmlDeGastoPorCategoria, idsDeInversionYObligaciones, mesDeValor, mesesDelSelector,
+    ID_ANTERIOR, ID_BLOQUE_GASTO, ID_CONMUTADOR, ID_FILTRO, ID_MES, ID_PROMEDIO, ID_SIGUIENTE, PROMEDIO_POR_DEFECTO, PROMEDIOS_OFRECIDOS,
+    type EstadoDeGasto, type FiltroDeFijas, filtroDeValor, htmlDeGastoPorCategoria, idsDeInversionYObligaciones, mesDeValor, mesesDelSelector,
 } from './resumen_gastos.js';
 
 type ApiResumen = ApiDe<
@@ -45,6 +45,8 @@ interface EstadoDelBloque {
     mes: number;
     nPromedio: number;
     incluirTodo: boolean;
+    /** Qué filas muestra la tabla; no se vuelve a pedir nada a Rust: los totales no cambian. */
+    filtro: FiltroDeFijas;
     meses: MesDisponible[];
     estado: EstadoDeGasto;
     /** Contador de peticiones: una respuesta con otro número llegó tarde y se descarta. */
@@ -59,7 +61,7 @@ interface EstadoDelBloque {
 
 export class VistaResumen implements Vista {
     private gasto: EstadoDelBloque = {
-        anio: 0, mes: 0, nPromedio: PROMEDIO_POR_DEFECTO, incluirTodo: true, meses: [],
+        anio: 0, mes: 0, nPromedio: PROMEDIO_POR_DEFECTO, incluirTodo: true, filtro: 'todas', meses: [],
         estado: { tipo: 'cargando' }, secuencia: 0, categorias: null, excluidas: [], enfoque: null,
     };
 
@@ -301,7 +303,7 @@ export class VistaResumen implements Vista {
     private htmlDelBloque(): string {
         const g = this.gasto;
         return htmlDeGastoPorCategoria(g.estado, {
-            anio: g.anio, mes: g.mes, nPromedio: g.nPromedio, incluirTodo: g.incluirTodo, mesesDisponibles: g.meses, excluidas: g.excluidas,
+            anio: g.anio, mes: g.mes, nPromedio: g.nPromedio, incluirTodo: g.incluirTodo, mesesDisponibles: g.meses, excluidas: g.excluidas, filtro: g.filtro,
         });
     }
 
@@ -377,6 +379,13 @@ export class VistaResumen implements Vista {
         await this.recargarGasto(ID_PROMEDIO);
     }
 
+    /** «Mostrar categorías»: solo filtra filas, no pide nada y no cambia ningún total. */
+    async filtrarFijas(valor: string): Promise<void> {
+        this.gasto.filtro = filtroDeValor(valor);
+        this.gasto.enfoque = ID_FILTRO;
+        this.pintarGasto();
+    }
+
     /** «Incluir inversión y obligaciones». */
     async conmutarInversionYObligaciones(control: { checked: boolean }): Promise<void> {
         this.gasto.incluirTodo = control.checked;
@@ -390,11 +399,13 @@ export function puenteResumen(vista: VistaResumen): {
     resumenGastoMover: (delta: number) => Promise<void>;
     resumenGastoPromedio: (valor: string) => Promise<void>;
     resumenGastoConmutar: (control: { checked: boolean }) => Promise<void>;
+    resumenGastoFiltro: (valor: string) => Promise<void>;
 } {
     return {
         resumenGastoMes: valor => vista.elegirMesDeGasto(valor),
         resumenGastoMover: delta => vista.moverMesDeGasto(delta),
         resumenGastoPromedio: valor => vista.elegirPromedioDeGasto(valor),
         resumenGastoConmutar: control => vista.conmutarInversionYObligaciones(control),
+        resumenGastoFiltro: valor => vista.filtrarFijas(valor),
     };
 }
