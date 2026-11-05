@@ -4,7 +4,18 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.122.0 (Versión Actual) - 2026-10-28
+## 🚀 Versión 1.123.0 (Versión Actual) - 2026-11-05
+**El caso de corrección de un traspaso eliminado ya anota la divisa de la cuenta de origen.** Etapa 1 de 2 de la corrección de traspasos (la etapa 2 será guardar una foto completa del traspaso). Decidido por el titular entre tres abordajes modelados.
+
+### 🔧 Qué se hace
+* **Defecto corregido:** `eliminar_transferencia` anotaba siempre la divisa `DOP` escrita a mano, aunque el traspaso fuera entre cuentas en dólares (hallazgo fijado antes con pruebas `hallazgo_…`). Ahora toma la divisa de la cuenta de origen; el importe sigue siendo el de origen y el cargo no entra en él.
+* **Sin migración ni cambios de esquema o de DTO:** la app instalada sigue abriendo la base. Los casos ya guardados no se tocan (en la base real ninguno es incorrecto: no hay traspasos entre divisas ni con cuentas en dólares).
+* **Pruebas:** las dos pruebas del hallazgo se invierten y pierden el prefijo (`el_caso_de_un_traspaso_en_dolares_se_anota_como_usd` y su gemela de caracterización); 8 unitarias nuevas (USD→USD, DOP→DOP, DOP→USD, con cargo, sin descripción, motivo inválido, inexistente) y 4 de integración (`integracion_`) con los comandos reales sobre una base temporal: divisa, importe, número de caso, saldos de vuelta, y convivencia con un caso antiguo en DOP. 4 mutaciones, todas detectadas.
+* **Límite conocido (se resuelve en la etapa 2):** en un traspaso entre divisas distintas el caso solo conoce el lado de origen; lo que recibió el destino no queda registrado. Una prueba unitaria y otra de integración lo documentan.
+
+---
+
+## Versión 1.122.0 - 2026-10-28
 **Historial del patrimonio, parte 3: pestaña «Evolución».** Solo interfaz sobre los comandos que ya existían (`obtener_fotos_patrimonio`, `tomar_foto_patrimonio`). **Sin Rust nuevo, sin migración (el esquema sigue en 18), sin reconstrucción del pasado y sin recomendaciones.**
 
 ### ✨ Qué hay
