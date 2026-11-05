@@ -4,7 +4,34 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.127.0 (Versión Actual) - 2026-11-05
+## 🚀 Versión 1.128.0 (Versión Actual) - 2026-11-05
+**Marca «fija / recurrente» por categoría en el resumen de gastos.** PR 4 de 5 del resumen por categoría y mes (decisión D6 del titular: la marca la elige él por categoría; no se detecta por el texto). Una categoría fija/recurrente es un gasto que se repite cada período **aunque el monto varíe** (por ejemplo Suscripciones, Telefónicas, Seguros, Impuestos).
+
+> ⚠️ **ESTE PR SUBE EL ESQUEMA A 20: la app instalada (v19) no abre una base v20. No instalar sin respaldo y ensayo.** Volver atrás es restituir un `.app` guardado y el respaldo previo.
+
+### 🗄️ Migración 20 («categorías fijas»)
+* `ALTER TABLE categorias ADD COLUMN fija INTEGER NOT NULL DEFAULT 0 CHECK(fija IN (0,1))`, con `anadir_columna` idempotente. **Ninguna categoría queda marcada** por la migración: el titular las marca él. El `CHECK` rechaza cualquier valor distinto de 0 y 1.
+* `VERSION_OBJETIVO = 20`; ajustadas las pruebas que daban por fijo el 19 (encadenados 17→20 y 18→20, base ya migrada).
+
+### 🔧 Qué se hace
+* **Catálogo:** `Categoria` (Rust y `tipos-ipc.d.ts`) gana `fija: boolean`; la categoría nueva nace variable. Caso de uso `marcar_categoria_fija(id, fija)` y comando de escritura `marcar_categoria_fija(id, fija)` (transacción IMMEDIATE); una categoría inexistente es el error legible «No se encontró la categoría con identificador N.». Solo cambia esa marca: no toca ningún gasto ni saldo.
+* **Resumen:** `FilaResumenGasto.fija` y dos segmentos nuevos, `totales_fijo` y `totales_variable` (`importe`, `porcentaje_milesimas`, `anterior`, `variacion_anterior_pb`), todo en DOP, con la misma conversión USD y las mismas exclusiones que el resto. **Fijo + variable = total del mes, exacto** (cada fila cae en uno solo; no es una resta). También para el mes anterior. Los porcentajes salen de `dividir_redondeando` (mitad lejos de cero); dinero siempre en `Dinero`/enteros y texto exacto al frontend.
+* **Decisión: «Cargos derivados» (comisiones de abono, cargos de avance) cuenta siempre como VARIABLE**, aunque la categoría real de esos gastos esté marcada fija. La marca es **actual, no histórica**: al marcar o desmarcar cambia la lectura de todos los meses.
+* **Interfaz (Resumen › Gasto por categoría):** marca «↻ fija / recurrente» (símbolo y texto) en cada categoría fija; línea «Fijo/recurrente: DOP x (a %) · Variable: DOP y (b %)» con la variación contra el mes anterior en flecha y texto; selector «Mostrar categorías: Todas / Solo fijas o recurrentes / Solo variables» que **solo filtra filas** (no pide nada a Rust, no cambia ningún total, y lo avisa en pantalla).
+* **Interfaz (Ajustes › Categorías):** casillero «Fija / recurrente» por categoría («Marca las categorías cuyo gasto se repite cada período, aunque el monto cambie un poco»), acción delegada `handleMarcarCategoriaFija`; el cambio visible es la confirmación y, si Rust falla, el casillero vuelve atrás y se avisa. Sin atributos `on*=`; nombres por `escaparHtml`; funciona en modo claro y oscuro.
+* No se toca la regla de tendencia ni los presupuestos (PR 5).
+
+### 🧪 Pruebas y mutaciones
+* Unitarias de dominio (fijo+variable=total con USD, exclusiones y derivados; mes anterior; % con redondeo; fija sin gasto; ninguna fija), de adaptadores SQLite, de migración (0→20, 18→19→20, 19→20, idempotencia, CHECK, categorías existentes en 0), del caso de uso con el doble y de JS (marca, línea de resumen, filtro sin alterar totales, control de Ajustes, escape, estados).
+* 10 de integración (`integracion_categorias_fijas.rs`) con los comandos reales y datos inventados: reparto y suma exacta, marcar no altera ningún gasto ni saldo, inexistente, forma del DTO contra `tipos-ipc.d.ts`, respaldo→restauración conserva las marcas y migración integrada desde una base v19 sembrada vía `inicializar_db`.
+* Mutaciones (derivados como fijo en adaptador y en dominio, % truncado, marcar la categoría equivocada, sin CHECK, fijo mal sumado, filtro que altera el pie): todas detectadas.
+
+### 🧭 Qué probar a mano (en una copia, nunca en la base real sin respaldo)
+* Abrir una base v19 copiada: debe migrar a 20 sin marcar nada. En Ajustes marcar Suscripciones, Seguros, etc.; en Resumen comprobar que Fijo + Variable = Total y que el filtro no mueve el total.
+
+---
+
+## Versión 1.127.0 - 2026-11-05
 **La tendencia del resumen de gastos exige un cambio mínimo de DOP 500.00 para decir «sube» o «baja».** Decisión del titular («opción A+D con mínimo de 500 pesos») sobre la regla de dirección de la 1.125.0. Sin migración (esquema 19).
 
 ### 🔧 Qué se hace

@@ -155,3 +155,25 @@ fn la_fecha_sin_cero_inicial_se_entiende() {
     let filas = leer(&mut conn);
     assert_eq!((filas[0].anio, filas[0].mes, filas[0].dia), (2026, 9, 3));
 }
+
+#[test]
+fn la_fila_lleva_la_marca_fija_de_su_categoria_y_un_derivado_nunca_es_fijo() {
+    let mut conn = base();
+    let comida = categoria(&conn, "Comida");
+    let transporte = categoria(&conn, "Transporte");
+    conn.execute("UPDATE categorias SET fija = 1 WHERE id = ?;", [comida]).unwrap();
+    gasto(&conn, "06/09/2026", 17.11, "DOP", comida, 0.0);
+    gasto(&conn, "06/09/2026", 23.57, "DOP", transporte, 0.0);
+    let comision = gasto(&conn, "07/09/2026", 24.69, "DOP", comida, 0.0);
+    conn.execute(
+        "INSERT INTO pagos_tarjeta (tarjeta_id, fecha_pago, monto_pagado, divisa, gasto_comision_id)
+         VALUES (1, '07/09/2026', 3177.29, 'DOP', ?);",
+        [comision],
+    )
+    .unwrap();
+    let filas = leer(&mut conn);
+    assert_eq!(filas.len(), 3);
+    assert!(filas.iter().find(|f| f.categoria_id == comida && !f.derivado).unwrap().fija);
+    assert!(!filas.iter().find(|f| f.categoria_id == transporte).unwrap().fija);
+    assert!(!filas.iter().find(|f| f.derivado).unwrap().fija, "un derivado cuenta como variable aunque su categoría sea fija");
+}

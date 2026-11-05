@@ -15,17 +15,21 @@ export const tendencia = (importes = ['100.01', '200.02', '150.03', '300.04', '2
     motivo_estable,
 });
 
-export const fila = (id, nombre, m = {}, derivado = false, t = tendencia()) => ({ categoria_id: id, categoria_nombre: nombre, derivado, medidas: medidas(m), tendencia: t });
+export const fila = (id, nombre, m = {}, derivado = false, t = tendencia(), fija = false) => ({ categoria_id: id, categoria_nombre: nombre, derivado, fija, medidas: medidas(m), tendencia: t });
+
+export const segmento = (extra = {}) => ({ importe: '0.00', porcentaje_milesimas: 0, anterior: '0.00', variacion_anterior_pb: null, ...extra });
 
 export const resumen = (extra = {}) => ({
     anio: 2027, mes: 2, parcial: false, hasta_dia: null, tasa_usd: '60.00', meses_promedio: 3, id_cargos_derivados: -1,
     filas: [fila(1, 'Comida'), fila(-1, 'Cargos derivados', { importe: '12.34', porcentaje_milesimas: 9 }, true), fila(2, 'Transporte', { importe: '777.77', porcentaje_milesimas: 667 })],
     totales: medidas({ importe: '2024.68', porcentaje_milesimas: 1000 }),
+    totales_fijo: segmento(),
+    totales_variable: segmento({ importe: '2024.68', porcentaje_milesimas: 1000, anterior: '1900.11', variacion_anterior_pb: 653 }),
     tendencia_total: tendencia(['300.01', '400.02', '350.03', '600.04', '550.05', '420.06'], 'estable'),
     meses_disponibles: [{ anio: 2027, mes: 1 }, { anio: 2027, mes: 2 }],
     ...extra,
 });
 
 export const eleccion = (extra = {}) => ({
-    anio: 2027, mes: 2, nPromedio: 3, incluirTodo: true, mesesDisponibles: [{ anio: 2027, mes: 1 }, { anio: 2027, mes: 2 }], excluidas: [], ...extra,
+    anio: 2027, mes: 2, nPromedio: 3, incluirTodo: true, mesesDisponibles: [{ anio: 2027, mes: 1 }, { anio: 2027, mes: 2 }], excluidas: [], filtro: 'todas', ...extra,
 });

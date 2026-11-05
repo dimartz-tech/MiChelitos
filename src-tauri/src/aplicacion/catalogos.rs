@@ -19,7 +19,7 @@ pub fn crear_categoria(
         return Err(ErrorDominio::CategoriaExistente.into());
     }
     let id = almacen.insertar_categoria(&nombre)?;
-    Ok(CategoriaGuardada { id, nombre })
+    Ok(CategoriaGuardada { id, nombre, fija: false })
 }
 
 pub fn eliminar_categoria(id: i64, almacen: &mut impl AlmacenCatalogos) -> Result<(), ErrorAplicacion> {
@@ -27,6 +27,18 @@ pub fn eliminar_categoria(id: i64, almacen: &mut impl AlmacenCatalogos) -> Resul
     catalogo::puede_eliminarse_categoria(&nombre, almacen.gastos_de_categoria(id)?)?;
     almacen.eliminar_categoria(id)?;
     Ok(())
+}
+
+/// Marca o desmarca una categoría como gasto fijo/recurrente. Solo cambia esa marca: no toca ningún gasto, saldo ni
+/// importe. Una categoría inexistente es un error de almacén (`NoEncontrado`), no un cambio silencioso.
+pub fn marcar_categoria_fija(
+    id: i64,
+    fija: bool,
+    almacen: &mut impl AlmacenCatalogos,
+) -> Result<CategoriaGuardada, ErrorAplicacion> {
+    let nombre = almacen.nombre_de_categoria(id)?;
+    almacen.marcar_categoria_fija(id, fija)?;
+    Ok(CategoriaGuardada { id, nombre, fija })
 }
 
 pub fn crear_cliente(
@@ -109,6 +121,46 @@ mod tests {
         let e = eliminar_categoria(999, &mut a).unwrap_err();
         assert!(matches!(e, ErrorAplicacion::Almacen(ErrorAlmacen::NoEncontrado { id: 999, .. })), "{e:?}");
         assert_eq!(a.categorias.len(), 2);
+    }
+
+    #[test]
+    fn una_categoria_nueva_nace_variable() {
+        let mut a = almacen();
+        let c = crear_categoria("Mascotas", &mut a).unwrap();
+        assert!(!c.fija);
+        assert!(a.categorias.iter().all(|c| !c.fija));
+    }
+
+    #[test]
+    fn marcar_y_desmarcar_una_categoria_solo_cambia_esa() {
+        let mut a = almacen();
+        let comida = a.id_de_categoria("Comida");
+        let otros = a.id_de_categoria("Otros");
+
+        let c = marcar_categoria_fija(comida, true, &mut a).unwrap();
+        assert_eq!((c.id, c.nombre.as_str(), c.fija), (comida, "Comida", true));
+        let marcas: Vec<(String, bool)> = a.categorias.iter().map(|c| (c.nombre.clone(), c.fija)).collect();
+        assert_eq!(marcas, vec![("Otros".to_string(), false), ("Comida".to_string(), true)]);
+
+        // Marcar dos veces es lo mismo que una.
+        marcar_categoria_fija(comida, true, &mut a).unwrap();
+        assert!(a.categorias.iter().find(|c| c.id == comida).unwrap().fija);
+
+        let c = marcar_categoria_fija(comida, false, &mut a).unwrap();
+        assert!(!c.fija);
+        assert!(a.categorias.iter().all(|c| !c.fija));
+        // La de sistema también puede marcarse: la marca es del titular.
+        marcar_categoria_fija(otros, true, &mut a).unwrap();
+        assert!(a.categorias.iter().find(|c| c.id == otros).unwrap().fija);
+    }
+
+    #[test]
+    fn marcar_una_categoria_inexistente_es_un_error_legible_y_no_cambia_nada() {
+        let mut a = almacen();
+        let e = marcar_categoria_fija(999, true, &mut a).unwrap_err();
+        assert!(matches!(e, ErrorAplicacion::Almacen(ErrorAlmacen::NoEncontrado { id: 999, .. })), "{e:?}");
+        assert!(!e.to_string().is_empty());
+        assert!(a.categorias.iter().all(|c| !c.fija));
     }
 
     #[test]

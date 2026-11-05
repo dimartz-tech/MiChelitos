@@ -5,7 +5,7 @@
 // formatean sobre el texto (`importeDeTexto`), sin `Number`. Las variaciones llegan en puntos básicos (100 = 1 %) y
 // las partes del total en milésimas (1000 = 100 %): enteros, así que el texto sale por división entera.
 
-import type { Categoria, FilaResumenGasto, MedidasResumen, MesDisponible, ResumenGastos, TendenciaResumen } from '../tipos-ipc';
+import type { Categoria, FilaResumenGasto, MedidasResumen, MesDisponible, ResumenGastos, SegmentoResumen, TendenciaResumen } from '../tipos-ipc';
 
 import { accion, escaparHtml, manejador } from '../nucleo/html.js';
 import { enCentavos } from '../nucleo/evolucion.js';
@@ -111,6 +111,46 @@ function htmlDeVariacion(pb: number | null): string {
 /** La parte en dólares de un importe, o `''` si no hay (`0.00`). */
 function usdAparte(m: MedidasResumen): string {
     return /^-?0+(\.0+)?$/.test(m.usd_aparte) ? '' : m.usd_aparte;
+}
+
+// --- Fijo/recurrente y variable ---------------------------------------------------------------------------------
+// Rust reparte el total del mes en dos segmentos que suman EXACTAMENTE el total (`totales_fijo` y `totales_variable`);
+// aquí solo se rotulan. La marca la elige el titular en Ajustes; los cargos derivados cuentan siempre como variables.
+
+/** La ayuda de la marca (la misma en la tabla y en Ajustes). */
+export const AYUDA_DE_FIJAS = 'Marca las categorías cuyo gasto se repite cada período, aunque el monto cambie un poco';
+
+/** Lo que muestra la tabla: todas las filas, solo las fijas o recurrentes, o solo las variables. Nunca altera los totales. */
+export type FiltroDeFijas = 'todas' | 'fijas' | 'variables';
+
+export const FILTROS_DE_FIJAS: readonly { valor: FiltroDeFijas; texto: string }[] = [
+    { valor: 'todas', texto: 'Todas' },
+    { valor: 'fijas', texto: 'Solo fijas o recurrentes' },
+    { valor: 'variables', texto: 'Solo variables' },
+];
+
+/** Un valor desconocido (no debería llegar) es «todas». */
+export function filtroDeValor(valor: string): FiltroDeFijas {
+    return valor === 'fijas' || valor === 'variables' ? valor : 'todas';
+}
+
+/** Solo filtra FILAS: los totales del mes los da Rust y no cambian. «Cargos derivados» es variable. */
+export function filasFiltradas(filas: readonly FilaResumenGasto[], filtro: FiltroDeFijas): FilaResumenGasto[] {
+    if (filtro === 'fijas') return filas.filter(f => f.fija);
+    if (filtro === 'variables') return filas.filter(f => !f.fija);
+    return [...filas];
+}
+
+/** «Fijo/recurrente: DOP 1,234.57 (33.3 %)». Sin escapar. */
+export function textoDeSegmento(nombre: string, s: SegmentoResumen): string {
+    return `${nombre}: DOP ${importeDeTexto(s.importe)} (${porcentajeDeMilesimas(s.porcentaje_milesimas)})`;
+}
+
+/** La línea de resumen «Fijo/recurrente: DOP x (a %) · Variable: DOP y (b %)», cada parte con su variación contra el mes anterior. */
+export function htmlDeFijoYVariable(r: ResumenGastos): string {
+    const parte = (nombre: string, s: SegmentoResumen): string =>
+        `<span class="rg-segmento"><strong>${escaparHtml(textoDeSegmento(nombre, s))}</strong> ${htmlDeVariacion(s.variacion_anterior_pb)} <small style="color:var(--text-muted);">frente al mes anterior (DOP ${escaparHtml(importeDeTexto(s.anterior))})</small></span>`;
+    return `<p class="rg-fijo-variable" style="margin:0.25rem 0; display:flex; flex-wrap:wrap; gap:0.25rem 1rem;" title="${escaparHtml(AYUDA_DE_FIJAS)}">${parte('Fijo/recurrente', r.totales_fijo)}<span aria-hidden="true">·</span>${parte('Variable', r.totales_variable)}</p>`;
 }
 
 /** Orden de la tabla: las categorías como llegan y la fila sintética «Cargos derivados» siempre al final. */
@@ -233,6 +273,11 @@ export function htmlDeTendencia(nombre: string, t: TendenciaResumen): string {
                         </div>`;
 }
 
+/** La marca «fija / recurrente»: símbolo Y texto (el color nunca es la única señal). */
+function htmlDeMarcaFija(): string {
+    return ` <span class="rg-marca-fija" title="${escaparHtml(AYUDA_DE_FIJAS)}" style="display:inline-block; font-size:0.7rem; font-weight:600; padding:0 0.35rem; border:1px solid var(--accent-primary); border-radius:999px; white-space:nowrap;"><span aria-hidden="true">↻</span> fija / recurrente</span>`;
+}
+
 function htmlDeFila(f: FilaResumenGasto, r: ResumenGastos): string {
     const m = f.medidas;
     const usd = usdAparte(m);
@@ -246,7 +291,7 @@ function htmlDeFila(f: FilaResumenGasto, r: ResumenGastos): string {
         : '';
     return `
                 <tr${f.derivado ? ' class="rg-derivado"' : ''}>
-                    <th scope="row" style="text-align:left;">${escaparHtml(f.categoria_nombre)}${nota}</th>
+                    <th scope="row" style="text-align:left;">${escaparHtml(f.categoria_nombre)}${f.fija ? htmlDeMarcaFija() : ''}${nota}</th>
                     <td style="text-align:right;">${escaparHtml(importeDeTexto(m.importe))}${usd ? `<small style="display:block; color:var(--text-muted);">USD ${escaparHtml(importeDeTexto(usd))}</small>` : ''}</td>
                     <td>
                         ${escaparHtml(porcentajeDeMilesimas(m.porcentaje_milesimas))}
@@ -271,6 +316,8 @@ export interface EleccionDeGasto {
     mesesDisponibles: readonly MesDisponible[];
     /** Los nombres de las categorías que el conmutador deja fuera, cuando está apagado. */
     excluidas: readonly string[];
+    /** Qué filas muestra la tabla (los totales no cambian). Por defecto, todas. */
+    filtro?: FiltroDeFijas;
 }
 
 export type EstadoDeGasto =
@@ -285,6 +332,7 @@ export const ID_PROMEDIO = 'rg-promedio';
 export const ID_CONMUTADOR = 'rg-incluir-todo';
 export const ID_ANTERIOR = 'rg-mes-anterior';
 export const ID_SIGUIENTE = 'rg-mes-siguiente';
+export const ID_FILTRO = 'rg-filtro';
 
 function htmlDeControles(e: EleccionDeGasto): string {
     const meses = mesesDelSelector(e.mesesDisponibles, { anio: e.anio, mes: e.mes });
@@ -294,6 +342,9 @@ function htmlDeControles(e: EleccionDeGasto): string {
         .map(m => `<option value="${valorDeMes(m)}"${valorDeMes(m) === actual ? ' selected' : ''}>${escaparHtml(etiquetaDeMes(m.anio, m.mes))}</option>`).join('');
     const opcionesN = PROMEDIOS_OFRECIDOS
         .map(n => `<option value="${n}"${n === e.nPromedio ? ' selected' : ''}>${n} meses</option>`).join('');
+    const filtro = e.filtro ?? 'todas';
+    const opcionesFiltro = FILTROS_DE_FIJAS
+        .map(o => `<option value="${o.valor}"${o.valor === filtro ? ' selected' : ''}>${escaparHtml(o.texto)}</option>`).join('');
     return `
             <div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end; margin-bottom:0.75rem;">
                 <button type="button" class="btn btn-secondary" id="${ID_ANTERIOR}" ${accion('resumenGastoMover', -1)}${indice <= 0 ? ' disabled' : ''} aria-label="Mes anterior">‹ Anterior</button>
@@ -307,6 +358,9 @@ function htmlDeControles(e: EleccionDeGasto): string {
                 <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.85rem;">
                     <input type="checkbox" id="${ID_CONMUTADOR}" ${manejador('change', 'resumenGastoConmutar', [], 'elemento')}${e.incluirTodo ? ' checked' : ''}>
                     Incluir inversión y obligaciones
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:0.75rem; gap:0.2rem;" title="${escaparHtml(AYUDA_DE_FIJAS)}">Mostrar categorías
+                    <select id="${ID_FILTRO}" ${manejador('change', 'resumenGastoFiltro', [], 'valor')}>${opcionesFiltro}</select>
                 </label>
             </div>`;
 }
@@ -327,6 +381,13 @@ function htmlDeCuerpo(estado: EstadoDeGasto, e: EleccionDeGasto): string {
     const usd = usdAparte(r.totales);
     const exclusion = e.incluirTodo || e.excluidas.length === 0 ? ''
         : `<p style="margin:0.25rem 0; font-size:0.75rem; color:var(--text-muted);">Fuera de la tabla: ${escaparHtml(e.excluidas.join(', '))}.</p>`;
+    const filtro = e.filtro ?? 'todas';
+    const visibles = filasFiltradas(filasOrdenadas(r.filas), filtro);
+    const avisoDeFiltro = filtro === 'todas' ? ''
+        : `<p class="rg-aviso-filtro" role="status" style="margin:0.25rem 0; font-size:0.75rem; color:var(--text-muted);">Filtro activo: la tabla muestra solo las categorías ${filtro === 'fijas' ? 'fijas o recurrentes' : 'variables'}. Es solo un filtro de filas: el total y la línea de arriba son los del mes completo y no cambian.</p>`;
+    const cuerpoDeTabla = visibles.length === 0
+        ? `<tr><td colspan="6" role="status" style="color:var(--text-muted);">Ninguna categoría ${filtro === 'fijas' ? 'fija o recurrente' : 'variable'} tuvo gasto en ${escaparHtml(mes)}.</td></tr>`
+        : visibles.map(f => htmlDeFila(f, r)).join('');
     const etiquetaParcial = r.parcial
         ? `<span class="badge emitida" style="font-size:0.7rem;">parcial, hasta el día ${r.hasta_dia ?? '?'}</span>` : '';
     return `
@@ -335,7 +396,9 @@ function htmlDeCuerpo(estado: EstadoDeGasto, e: EleccionDeGasto): string {
                 ${etiquetaParcial}
                 ${usd ? `<small style="display:block; color:var(--text-muted);">${escaparHtml(notaDeDolares(usd, r.tasa_usd))}</small>` : ''}
             </p>
+            ${htmlDeFijoYVariable(r)}
             ${exclusion}
+            ${avisoDeFiltro}
             <div class="rg-desplazable" role="region" tabindex="0" aria-label="Tabla de gasto por categoría (se desplaza en horizontal si no cabe)" style="overflow-x:auto;">
             <table class="rg-tabla" style="width:100%; min-width:46rem; border-collapse:collapse; font-size:0.85rem;">
                 <caption style="text-align:left; padding:0.4rem 0; color:var(--text-secondary);">Gasto por categoría de ${escaparHtml(mes + parcial)} (DOP). Tendencia de los últimos 6 meses (sube o baja solo con más de 10 % de cambio y al menos ${MINIMO_TENDENCIA_TEXTO} al mes)${r.parcial ? ' (el mes en curso, rayado, no cuenta en la dirección)' : ''}. Comparado con el mes anterior y con el promedio de ${r.meses_promedio} meses completos.</caption>
@@ -349,11 +412,11 @@ function htmlDeCuerpo(estado: EstadoDeGasto, e: EleccionDeGasto): string {
                         <th scope="col">Contra el promedio de ${r.meses_promedio} meses</th>
                     </tr>
                 </thead>
-                <tbody>${filasOrdenadas(r.filas).map(f => htmlDeFila(f, r)).join('')}
+                <tbody>${cuerpoDeTabla}
                 </tbody>
                 <tfoot>
                     <tr>
-                        <th scope="row" style="text-align:left;">Total</th>
+                        <th scope="row" style="text-align:left;">Total del mes${filtro === 'todas' ? '' : ' (todas las categorías)'}</th>
                         <td style="text-align:right;"><strong>${escaparHtml(importeDeTexto(r.totales.importe))}</strong></td>
                         <td>100 %</td>
                         <td>${htmlDeTendencia('Total', r.tendencia_total)}</td>

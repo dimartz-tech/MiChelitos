@@ -1963,6 +1963,22 @@ pub fn migracion_19_detalle_de_correcciones(tx: &Transaction) -> Result<(), Erro
     Ok(())
 }
 
+const MIG20: &str = "categorías fijas";
+
+/// Migración 20. Añade `categorias.fija`: la marca de **gasto fijo/recurrente** que el titular elige para cada categoría
+/// (0 = variable, 1 = fija). Ninguna categoría existente queda marcada: el titular decide, no se adivina por el nombre.
+/// `CHECK(fija IN (0,1))` impide cualquier otro valor. Idempotente: si la columna ya existe no hace nada.
+pub fn migracion_20_categorias_fijas(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::anadir_columna(
+        tx,
+        MIG20,
+        "categorias",
+        "fija",
+        "INTEGER NOT NULL DEFAULT 0 CHECK(fija IN (0,1))",
+    )?;
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;

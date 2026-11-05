@@ -23,6 +23,7 @@ struct GastoCrudo {
     fecha: String,
     categoria_id: i64,
     categoria_nombre: String,
+    fija: bool,
     divisa: String,
     centavos: i64,
     cargo: i64,
@@ -39,7 +40,7 @@ impl ConsultaDeGastosPorCategoria for AlmacenSqlite<'_> {
             .collect::<Vec<_>>()
             .join(" OR ");
         let sql = format!(
-            "SELECT g.id, g.fecha, g.categoria_id, c.nombre, g.divisa,
+            "SELECT g.id, g.fecha, g.categoria_id, c.nombre, c.fija, g.divisa,
                     CAST(ROUND(g.monto * 100) AS INTEGER),
                     CAST(ROUND(g.costo_adicional * 100) AS INTEGER),
                     CASE WHEN g.estado_conversion = 'liquidado' AND g.monto_liquidado IS NOT NULL
@@ -57,11 +58,12 @@ impl ConsultaDeGastosPorCategoria for AlmacenSqlite<'_> {
                     fecha: r.get(1)?,
                     categoria_id: r.get(2)?,
                     categoria_nombre: r.get(3)?,
-                    divisa: r.get(4)?,
-                    centavos: r.get(5)?,
-                    cargo: r.get(6)?,
-                    liquidado_dop: r.get(7)?,
-                    derivado: r.get(8)?,
+                    fija: r.get::<_, i64>(4)? == 1,
+                    divisa: r.get(5)?,
+                    centavos: r.get(6)?,
+                    cargo: r.get(7)?,
+                    liquidado_dop: r.get(8)?,
+                    derivado: r.get(9)?,
                 })
             })
             .map_err(fallo)?
@@ -88,6 +90,8 @@ impl ConsultaDeGastosPorCategoria for AlmacenSqlite<'_> {
                 categoria_nombre: g.categoria_nombre.clone(),
                 divisa,
                 derivado: g.derivado,
+                // Un gasto derivado nunca cuenta como fijo, aunque su categoría lo sea.
+                fija: g.fija && !g.derivado,
                 centavos: 0,
                 liquidado_origen_centavos: 0,
                 liquidado_dop_centavos: None,
