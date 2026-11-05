@@ -23,6 +23,8 @@ pub struct Correccion<'a> {
     pub importe: Option<f64>,
     pub divisa: Option<String>,
     pub motivo: &'a str,
+    /// JSON de la foto completa del movimiento (traspasos); `None` si no la lleva.
+    pub detalle: Option<&'a str>,
 }
 
 /// Anota la corrección y devuelve su número de caso.
@@ -45,8 +47,8 @@ pub fn insertar(tx: &Transaction, c: &Correccion<'_>) -> Result<String, String> 
 
     tx.execute(
         "INSERT INTO correcciones
-             (numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+             (numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo, detalle)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
         (
             &numero,
             &hoy,
@@ -56,6 +58,7 @@ pub fn insertar(tx: &Transaction, c: &Correccion<'_>) -> Result<String, String> 
             c.importe,
             &c.divisa,
             c.motivo,
+            c.detalle,
         ),
     )
     .map_err(|e| e.to_string())?;
@@ -112,7 +115,8 @@ mod tests {
                  descripcion TEXT NOT NULL,
                  importe REAL,
                  divisa TEXT,
-                 motivo TEXT NOT NULL
+                 motivo TEXT NOT NULL,
+                 detalle TEXT CHECK(detalle IS NULL OR json_valid(detalle))
              );",
         )
         .unwrap();
@@ -127,6 +131,7 @@ mod tests {
             importe: Some(1_000.0),
             divisa: Some("DOP".into()),
             motivo,
+            detalle: None,
         }
     }
 

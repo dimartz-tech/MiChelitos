@@ -188,6 +188,7 @@ pub fn actualizar_ingreso(
         importe: Some(correccion.ajuste.unidades()),
         divisa: Some(MONEDA_LOCAL.codigo().to_string()),
         motivo,
+        detalle: None,
     })?;
     almacen.fijar_recibido(datos.id, correccion.recibido.unidades())?;
 
@@ -221,6 +222,7 @@ pub fn eliminar_ingreso(
         importe: Some(factura.monto_total),
         divisa: Some("DOP".to_string()),
         motivo,
+        detalle: None,
     })?;
 
     if factura.estatus == "pagada" {

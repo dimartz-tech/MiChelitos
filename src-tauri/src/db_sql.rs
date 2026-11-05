@@ -1947,6 +1947,22 @@ pub fn migracion_18_historial_del_patrimonio(tx: &Transaction) -> Result<(), Err
     Ok(())
 }
 
+const MIG19: &str = "detalle de los casos de corrección";
+
+/// Migración 19. Añade `correcciones.detalle`: la foto completa del movimiento borrado, en JSON, hoy solo para los traspasos. Los casos
+/// existentes quedan con `detalle = NULL` (no se reconstruye el pasado). `CHECK(detalle IS NULL OR json_valid(detalle))`
+/// impide guardar un texto que no sea JSON. Idempotente: si la columna ya existe no hace nada.
+pub fn migracion_19_detalle_de_correcciones(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::anadir_columna(
+        tx,
+        MIG19,
+        "correcciones",
+        "detalle",
+        "TEXT CHECK(detalle IS NULL OR json_valid(detalle))",
+    )?;
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;

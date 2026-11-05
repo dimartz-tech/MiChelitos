@@ -50,6 +50,7 @@ pub fn revertir_abono(
         importe: Some(abono.monto_pagado),
         divisa: Some(abono.divisa),
         motivo,
+        detalle: None,
     })?;
     let revertido = revertir_pago_tarjeta(id, almacen)?;
     Ok(ReversionConCaso { revertido, caso })

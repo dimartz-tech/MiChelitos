@@ -563,6 +563,8 @@ pub struct CasoAAnotar {
     pub importe: Option<f64>,
     pub divisa: Option<String>,
     pub motivo: String,
+    /// JSON con la foto completa del movimiento borrado (hoy solo los traspasos); `None` si el tipo no la lleva.
+    pub detalle: Option<String>,
 }
 
 /// El rastro de las correcciones: cada una deja un caso con número propio.
@@ -583,6 +585,8 @@ pub struct CasoLeido {
     pub importe: Option<f64>,
     pub divisa: Option<String>,
     pub motivo: String,
+    /// El JSON del detalle; `None` en los casos anteriores a la migración 19 y en los tipos que no lo guardan.
+    pub detalle: Option<String>,
 }
 
 /// Lectura del rastro de correcciones. No hay forma de borrarlo: es deliberado.

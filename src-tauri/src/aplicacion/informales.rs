@@ -98,6 +98,7 @@ pub fn eliminar_ingreso_informal(
         importe: Some(ingreso.monto),
         divisa: Some("DOP".to_string()),
         motivo,
+        detalle: None,
     })?;
 
     if ingreso.estatus == "pagado" {

@@ -25,6 +25,7 @@ mod tests {
             importe: Some(10.0),
             divisa: Some("DOP".into()),
             motivo: "motivo de prueba suficiente".into(),
+            detalle: None,
         }
     }
 
