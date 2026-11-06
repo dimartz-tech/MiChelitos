@@ -13,7 +13,14 @@ import assert from 'node:assert/strict';
 import { VistaAjustes, MANEJADORES_AJUSTES, puenteAjustes } from '../../../src/js/vistas/ajustes.js';
 import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
 
-const CATEGORIAS = [{ id: 1, nombre: 'Otros', fija: false }, { id: 2, nombre: 'Suscripciones', fija: true }, { id: 3, nombre: 'Comida', fija: false }];
+const MOTIVO_OTROS = 'asentar las comisiones de los abonos a tarjeta y el cargo de los avances de efectivo';
+const CATEGORIAS = [
+    { id: 1, nombre: 'Otros', fija: false, motivo_sistema: MOTIVO_OTROS },
+    { id: 2, nombre: 'Suscripciones', fija: true, motivo_sistema: 'asentar los cargos recurrentes automáticos de las suscripciones' },
+    { id: 3, nombre: 'Comida', fija: false, motivo_sistema: null },
+    { id: 4, nombre: 'Renta', fija: false, motivo_sistema: null },
+    { id: 5, nombre: 'Impuestos', fija: false, motivo_sistema: 'reconocer los pagos de impuestos' },
+];
 const CLIENTES = [{ id: 4, nombre: 'Cliente Uno', rnc: '101000001' }];
 const CUENTAS = [
     { id: 5, nombre: 'Cuenta Alfa', divisa: 'DOP', balance_actual: 750, entidad: 'Banco Alfa', comision_pago_impuestos: 12.5 },
@@ -36,8 +43,13 @@ const DATOS = () => ({
 /** Respuesta que llega después, como en el WebView real. */
 const tarde = valor => new Promise(resolver => setTimeout(() => resolver(valor), 2));
 
-function montar({ datos = DATOS(), campos = {}, falla = {}, confirmar = true, respuestas = [], motivo = 'Registrado por error en la cuenta equivocada', correcciones = [] } = {}) {
-    const llamadas = [], avisos = [], rutas = [], confirmaciones = [], preguntas = [], motivos = [];
+const previaDe = (origenId, destinoId, extra = {}) => {
+    const nombre = id => CATEGORIAS.find(c => c.id === id)?.nombre ?? `Categoría ${id}`;
+    return { origen_id: origenId, origen_nombre: nombre(origenId), destino_id: destinoId, destino_nombre: nombre(destinoId), gastos: 3, desde: '21/07/2026', hasta: '03/09/2026', advertencias: [], origen_fija: false, destino_fija: false, ...extra };
+};
+
+function montar({ datos = DATOS(), campos = {}, falla = {}, confirmar = true, respuestas = [], motivo = 'Registrado por error en la cuenta equivocada', correcciones = [], previa = previaDe, movidos = 3 } = {}) {
+    const llamadas = [], avisos = [], rutas = [], confirmaciones = [], preguntas = [], motivos = [], modales = [];
     const registrar = (nombre, valor) => async (...a) => {
         llamadas.push([nombre, ...a]);
         if (falla[nombre]) throw new Error(falla[nombre]);
@@ -54,6 +66,21 @@ function montar({ datos = DATOS(), campos = {}, falla = {}, confirmar = true, re
         listarRespaldos: async () => { if (falla.listarRespaldos) throw new Error('sin carpeta'); return datos.respaldos; },
         obtenerCorrecciones: async () => { if (falla.obtenerCorrecciones) throw new Error(falla.obtenerCorrecciones); return correcciones; },
         crearCategoria: registrar('crearCategoria'), eliminarCategoria: registrar('eliminarCategoria'),
+        renombrarCategoria: async (id, nombre) => {
+            llamadas.push(['renombrarCategoria', id, nombre]);
+            if (falla.renombrarCategoria) throw new Error(falla.renombrarCategoria);
+            return { id, nombre: nombre.trim(), motivo_sistema: null };
+        },
+        previsualizarFusionCategorias: async (o, d) => {
+            llamadas.push(['previsualizarFusionCategorias', o, d]);
+            if (falla.previsualizarFusionCategorias) throw new Error(falla.previsualizarFusionCategorias);
+            return typeof previa === 'function' ? previa(o, d) : previa;
+        },
+        fusionarCategorias: async (o, d) => {
+            llamadas.push(['fusionarCategorias', o, d]);
+            if (falla.fusionarCategorias) throw new Error(falla.fusionarCategorias);
+            return movidos;
+        },
         marcarCategoriaFija: async (id, fija) => {
             llamadas.push(['marcarCategoriaFija', id, fija]);
             if (falla.marcarCategoriaFija) throw new Error(falla.marcarCategoriaFija);
@@ -83,8 +110,9 @@ function montar({ datos = DATOS(), campos = {}, falla = {}, confirmar = true, re
         },
         dialogos: { confirmar: m => { confirmaciones.push(m); return tarde(confirmar); }, preguntar: (m, d) => { preguntas.push({ m, d }); return tarde(cola.shift() ?? null); } },
         motivo: { pedir: (titulo, texto) => { motivos.push({ titulo, texto }); return tarde(motivo); } },
+        modales: { abrir: (id, html) => { modales.push({ id, html }); } },
     });
-    return { vista, llamadas, avisos, rutas, confirmaciones, preguntas, motivos, pantalla, registro, evento: { preventDefault() { this.evitado = (this.evitado || 0) + 1; } } };
+    return { vista, llamadas, avisos, rutas, confirmaciones, preguntas, motivos, modales, pantalla, registro, evento: { preventDefault() { this.evitado = (this.evitado || 0) + 1; } } };
 }
 
 // --- Lo que se dibuja ---
@@ -101,12 +129,34 @@ test('dibuja los catálogos, los respaldos y el panel de correcciones', async ()
     assert.doesNotMatch(html, /undefined|NaN/);
 });
 
-test('las categorías del sistema no se pueden borrar; las demás sí', async () => {
+test('«Otros» y «Suscripciones» no se pueden borrar; las demás sí (como siempre)', async () => {
     const t = montar();
     await t.vista.render();
     const html = t.pantalla.contenido.innerHTML;
-    assert.equal(llamadasDelManejador(html, 'handleEliminarCategoria').map(a => a[0]).join(), '3');
-    assert.equal([...html.matchAll(/>Sistema</g)].length, 2);
+    assert.equal(llamadasDelManejador(html, 'handleEliminarCategoria').map(a => a[0]).join(), '3,4,5');
+});
+
+test('las del sistema se marcan con icono y texto, explican por qué, y no ofrecen renombrar ni fusionar', async () => {
+    const t = montar();
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.equal([...html.matchAll(/🔒 Sistema</g)].length, 3, 'Otros, Suscripciones e Impuestos');
+    assert.match(html, new RegExp(`El sistema la usa para ${MOTIVO_OTROS}\\. Por eso no se renombra ni se fusiona en otra`));
+    // Solo las corrientes (3 «Comida» y 4 «Renta») llevan los botones.
+    assert.deepEqual(llamadasDelManejador(html, 'handleRenombrarCategoria'), [[3, 'Comida'], [4, 'Renta']]);
+    assert.deepEqual(llamadasDelManejador(html, 'handleFusionarCategoria'), [[3], [4]]);
+    assert.match(html, /✏️ Renombrar/);
+    assert.match(html, /🔀 Fusionar…/);
+});
+
+test('un nombre de categoría hostil se escapa en la lista y llega íntegro a los manejadores', async () => {
+    const hostil = `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`;
+    const t = montar({ datos: { ...DATOS(), categorias: [...CATEGORIAS, { id: 9, nombre: hostil, motivo_sistema: null }] } });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.deepEqual(llamadasDelManejador(html, 'handleRenombrarCategoria').at(-1), [9, hostil]);
+    assert.doesNotMatch(html, /<img/);
+    assert.match(html, /&lt;img src=x onerror=&quot;alert\(2\)&quot;&gt; &amp;amp;/);
 });
 
 test('el respaldo se describe legible, y un nombre con HTML se escapa', async () => {
@@ -552,9 +602,222 @@ test('el puente expone todos los manejadores y delega en la vista', async () => 
 test('todo appUI.x( que escribe la plantilla está en el puente, y todo el puente está en la plantilla', async () => {
     const t = montar();
     await t.vista.render();
-    const llamados = nombresDelPuente(t.pantalla.contenido.innerHTML);
+    await t.vista.handleFusionarCategoria(4);   // la ventana de fusión también escribe manejadores
+    const llamados = nombresDelPuente(t.pantalla.contenido.innerHTML + t.modales[0].html);
     for (const nombre of llamados) assert.ok(MANEJADORES_AJUSTES.includes(nombre), `falta ${nombre} en el puente`);
     for (const nombre of MANEJADORES_AJUSTES) assert.ok(llamados.has(nombre), `${nombre} está en el puente pero la plantilla no lo usa`);
+});
+
+// --- Renombrar una categoría ---
+
+test('renombrar: pregunta con el nombre actual, envía lo escrito, avisa y redibuja', async () => {
+    const t = montar({ respuestas: ['  Alimentos  '] });
+    await t.vista.handleRenombrarCategoria(3, 'Comida');
+    assert.equal(t.preguntas.length, 1);
+    assert.match(t.preguntas[0].m, /Nuevo nombre para «Comida»/);
+    assert.equal(t.preguntas[0].d, 'Comida', 'el nombre actual es la respuesta por defecto');
+    assert.deepEqual(t.llamadas, [['renombrarCategoria', 3, '  Alimentos  ']], 'el recorte lo hace Rust: la vista no toca el texto');
+    assert.deepEqual(t.avisos, [{ mensaje: 'Categoría renombrada.', tipo: undefined }]);
+    assert.deepEqual(t.rutas, ['ajustes']);
+});
+
+test('renombrar: cancelar el diálogo no envía nada', async () => {
+    const t = montar({ respuestas: [null] });
+    await t.vista.handleRenombrarCategoria(4, 'Renta');
+    assert.deepEqual(t.llamadas, []);
+    assert.deepEqual(t.avisos, []);
+    assert.deepEqual(t.rutas, []);
+});
+
+test('renombrar: si Rust rechaza (duplicada, reservada, del sistema…) muestra el motivo y no redibuja', async () => {
+    const t = montar({ respuestas: ['alimentacion'], falla: { renombrarCategoria: 'La categoría ya existe.' } });
+    await t.vista.handleRenombrarCategoria(4, 'Renta');
+    assert.equal(t.avisos.length, 1);
+    assert.equal(t.avisos[0].tipo, 'error');
+    assert.match(t.avisos[0].mensaje, /La categoría ya existe\./);
+    assert.deepEqual(t.rutas, []);
+});
+
+test('renombrar: advierte si el cambio mueve la categoría dentro o fuera del conmutador «Incluir inversión y obligaciones»', async () => {
+    const entra = montar({ respuestas: ['Prestamo'] });
+    await entra.vista.handleRenombrarCategoria(3, 'Comida');
+    assert.match(entra.avisos[0].mensaje, /Atención: en el Resumen, «Prestamo» ahora se excluye cuando «Incluir inversión y obligaciones» está apagado/);
+
+    const sale = montar({ respuestas: ['Vivienda'] });
+    await sale.vista.handleRenombrarCategoria(4, 'Renta');
+    assert.match(sale.avisos[0].mensaje, /«Vivienda» ahora se cuenta/);
+
+    const igual = montar({ respuestas: ['alquiler'] });
+    await igual.vista.handleRenombrarCategoria(4, 'Renta');   // Renta y Alquiler están las dos en la regla: nada cambia
+    assert.equal(igual.avisos[0].mensaje, 'Categoría renombrada.');
+});
+
+// --- Fusionar: la ventana ---
+
+test('fusionar abre una ventana accesible con selector de destino, vista previa vacía y «Confirmar» deshabilitado', async () => {
+    const t = montar();
+    await t.vista.handleFusionarCategoria(4);
+    assert.equal(t.modales.length, 1);
+    const { id, html } = t.modales[0];
+    assert.equal(id, 'modal-fusion-categoria');
+    assert.match(html, /role="dialog" aria-modal="true" aria-labelledby="fusion_titulo"/);
+    assert.match(html, /id="fusion_titulo" tabindex="-1"[^>]*>🔀 Fusionar «Renta» en otra categoría/);
+    assert.match(html, /<label for="fusion_destino">/);
+    assert.match(html, /id="fusion_vista_previa" role="status" aria-live="polite"/);
+    assert.match(html, /id="fusion_confirmar"[^>]* disabled>Confirmar fusión/);
+    const destinos = [...html.matchAll(/<option value="(\d*)">([^<]*)</g)].map(m => [m[1], m[2]]);
+    assert.deepEqual(destinos, [['', 'Elige la categoría de destino…'], ['1', 'Otros (sistema)'], ['2', 'Suscripciones (sistema)'], ['3', 'Comida'], ['5', 'Impuestos (sistema)']], 'no se ofrece a sí misma; las del sistema sí, rotuladas');
+    assert.deepEqual(llamadasDelManejador(html, 'cambiarDestinoFusion'), [['VALOR', 4]]);
+    assert.deepEqual(llamadasDelManejador(html, 'handleConfirmarFusion'), [[4]]);
+    assert.deepEqual(llamadasDelManejador(html, 'quitar'), [['modal-fusion-categoria']]);
+});
+
+test('fusionar: nombres hostiles de origen y destino se escapan en la ventana', async () => {
+    const hostil = `<img src=x onerror="alert(1)"> '&`;
+    const t = montar({ datos: { ...DATOS(), categorias: [...CATEGORIAS, { id: 9, nombre: hostil, motivo_sistema: null }] } });
+    await t.vista.handleFusionarCategoria(9);
+    assert.doesNotMatch(t.modales[0].html, /<img/);
+    assert.match(t.modales[0].html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt; &#39;&amp;/);
+    const u = montar({ datos: { ...DATOS(), categorias: [...CATEGORIAS, { id: 9, nombre: hostil, motivo_sistema: null }] } });
+    await u.vista.handleFusionarCategoria(4);
+    assert.doesNotMatch(u.modales[0].html, /<img/);
+});
+
+test('fusionar: sin otra categoría, o si no se puede leer el catálogo, avisa y no abre nada', async () => {
+    const sola = montar({ datos: { ...DATOS(), categorias: [CATEGORIAS[2]] } });
+    await sola.vista.handleFusionarCategoria(3);
+    assert.equal(sola.modales.length, 0);
+    assert.equal(sola.avisos[0].tipo, 'error');
+    const rota = montar();
+    rota.vista.dep.api.obtenerCategorias = async () => { throw new Error('sin base'); };
+    await rota.vista.handleFusionarCategoria(3);
+    assert.equal(rota.modales.length, 0);
+    assert.match(rota.avisos[0].mensaje, /sin base/);
+});
+
+// --- Fusionar: la vista previa ---
+
+const camposDeFusion = (valor = '3') => ({ fusion_destino: el({ value: valor }), fusion_vista_previa: el(), fusion_confirmar: el({ disabled: true }) });
+
+test('vista previa: cuántos gastos, el rango de fechas y «Confirmar» habilitado', async () => {
+    const t = montar({ campos: camposDeFusion('3') });
+    await t.vista.cambiarDestinoFusion('3', 4);
+    assert.deepEqual(t.llamadas, [['previsualizarFusionCategorias', 4, 3]]);
+    const html = t.registro.fusion_vista_previa.innerHTML;
+    assert.match(html, /<strong>3 gastos<\/strong> de «Renta» pasarán a «Comida»\. Del 21\/07\/2026 al 03\/09\/2026\./);
+    assert.match(html, /«Renta» se eliminará\. Queda un caso en el registro de correcciones\./);
+    assert.equal(t.registro.fusion_confirmar.disabled, false);
+});
+
+test('vista previa: un gasto, una sola fecha, y las advertencias de Rust', async () => {
+    const t = montar({ campos: camposDeFusion('3'), previa: (o, d) => previaDe(o, d, { gastos: 1, desde: '05/09/2026', hasta: '05/09/2026', advertencias: ['Algo que conviene saber.'] }) });
+    await t.vista.cambiarDestinoFusion('3', 4);
+    const html = t.registro.fusion_vista_previa.innerHTML;
+    assert.match(html, /<strong>1 gasto<\/strong>/);
+    assert.match(html, /Fecha: 05\/09\/2026\./);
+    assert.match(html, /⚠️ Algo que conviene saber\./);
+});
+
+test('vista previa: sin gastos no inventa un rango', async () => {
+    const t = montar({ campos: camposDeFusion('3'), previa: (o, d) => previaDe(o, d, { gastos: 0, desde: null, hasta: null, advertencias: ['«Renta» no tiene gastos: solo se eliminará la categoría.'] }) });
+    await t.vista.cambiarDestinoFusion('3', 4);
+    const html = t.registro.fusion_vista_previa.innerHTML;
+    assert.match(html, /<strong>0 gastos<\/strong>/);
+    assert.doesNotMatch(html, /Del |Fecha:/);
+    assert.match(html, /no tiene gastos/);
+    assert.equal(t.registro.fusion_confirmar.disabled, false, 'fusionar una vacía es válido');
+});
+
+test('vista previa: advierte, con texto, si la fusión cambia cómo cuenta el conmutador «Incluir inversión y obligaciones»', async () => {
+    // Renta (en la regla) → Comida (fuera de ella): sus gastos pasarán a contarse siempre.
+    const t = montar({ campos: camposDeFusion('3') });
+    await t.vista.cambiarDestinoFusion('3', 4);
+    assert.match(t.registro.fusion_vista_previa.innerHTML, /⚠️ En el Resumen, el conmutador «Incluir inversión y obligaciones» deja fuera «Renta» y cuenta «Comida»: tras la fusión, sus gastos se contarán con ese conmutador\./);
+    // Dentro de la regla las dos (Renta → Impuestos): sin advertencia.
+    const u = montar({ campos: camposDeFusion('5') });
+    await u.vista.cambiarDestinoFusion('5', 4);
+    assert.doesNotMatch(u.registro.fusion_vista_previa.innerHTML, /conmutador/);
+    // Comida (fuera) → Renta (dentro): se excluirán.
+    const v = montar({ campos: camposDeFusion('4') });
+    await v.vista.cambiarDestinoFusion('4', 3);
+    assert.match(v.registro.fusion_vista_previa.innerHTML, /se excluirán con ese conmutador/);
+});
+
+test('vista previa: los nombres hostiles de la respuesta se escapan', async () => {
+    const hostil = `<script>alert(1)</script> "'`;
+    const t = montar({ campos: camposDeFusion('3'), previa: (o, d) => previaDe(o, d, { origen_nombre: hostil, destino_nombre: hostil, advertencias: [hostil], desde: hostil, hasta: hostil }) });
+    await t.vista.cambiarDestinoFusion('3', 4);
+    const html = t.registro.fusion_vista_previa.innerHTML;
+    assert.doesNotMatch(html, /<script>/);
+    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt; &quot;&#39;/);
+});
+
+test('vista previa: sin destino elegido, «Confirmar» se deshabilita y no se consulta nada', async () => {
+    const t = montar({ campos: camposDeFusion('') });
+    t.registro.fusion_confirmar.disabled = false;
+    await t.vista.cambiarDestinoFusion('', 4);
+    assert.deepEqual(t.llamadas, []);
+    assert.equal(t.registro.fusion_confirmar.disabled, true);
+    assert.match(t.registro.fusion_vista_previa.innerHTML, /Elige un destino/);
+});
+
+test('vista previa: si Rust la rechaza, se muestra el motivo y «Confirmar» sigue deshabilitado', async () => {
+    const t = montar({ campos: camposDeFusion('3'), falla: { previsualizarFusionCategorias: 'No se puede fusionar en otra la categoría «Otros»' } });
+    await t.vista.cambiarDestinoFusion('3', 1);
+    assert.match(t.registro.fusion_vista_previa.innerHTML, /No se puede fusionar en otra la categoría «Otros»/);
+    assert.equal(t.registro.fusion_confirmar.disabled, true);
+});
+
+test('vista previa: una respuesta tardía de un destino que ya no es el elegido se descarta', async () => {
+    const t = montar({ campos: camposDeFusion('5') });   // el selector ya está en otro destino
+    await t.vista.cambiarDestinoFusion('3', 4);
+    assert.doesNotMatch(t.registro.fusion_vista_previa.innerHTML, /pasarán a/);
+    assert.equal(t.registro.fusion_confirmar.disabled, true);
+});
+
+// --- Fusionar: confirmar ---
+
+test('confirmar: fusiona con la vista previa vigente, cierra la ventana, avisa cuántos gastos y redibuja', async () => {
+    const campos = { ...camposDeFusion('3'), 'modal-fusion-categoria': { remove() { this.quitado = true; } } };
+    const t = montar({ campos, movidos: 3 });
+    await t.vista.cambiarDestinoFusion('3', 4);
+    await t.vista.handleConfirmarFusion(4);
+    assert.deepEqual(t.llamadas.at(-1), ['fusionarCategorias', 4, 3]);
+    assert.equal(t.registro['modal-fusion-categoria'].quitado, true);
+    assert.equal(t.avisos.at(-1).mensaje, 'Fusión hecha: 3 gastos pasaron a «Comida».');
+    assert.deepEqual(t.rutas, ['ajustes']);
+});
+
+test('confirmar: con un solo gasto el aviso va en singular', async () => {
+    const campos = { ...camposDeFusion('3'), 'modal-fusion-categoria': { remove() {} } };
+    const t = montar({ campos, movidos: 1 });
+    await t.vista.cambiarDestinoFusion('3', 4);
+    await t.vista.handleConfirmarFusion(4);
+    assert.equal(t.avisos.at(-1).mensaje, 'Fusión hecha: 1 gasto pasó a «Comida».');
+});
+
+test('confirmar: sin vista previa vigente, o con otro destino en el selector, no hace nada', async () => {
+    const sin = montar({ campos: camposDeFusion('3') });
+    await sin.vista.handleConfirmarFusion(4);
+    assert.deepEqual(sin.llamadas, []);
+
+    const t = montar({ campos: camposDeFusion('3') });
+    await t.vista.cambiarDestinoFusion('3', 4);
+    t.registro.fusion_destino.value = '5';   // el titular cambió el selector y la vista previa aún no llegó
+    await t.vista.handleConfirmarFusion(4);
+    assert.equal(t.llamadas.filter(l => l[0] === 'fusionarCategorias').length, 0);
+});
+
+test('confirmar: si Rust rechaza, muestra el error, deja la ventana abierta y rehabilita «Confirmar»', async () => {
+    const campos = { ...camposDeFusion('3'), 'modal-fusion-categoria': { remove() { this.quitado = true; } } };
+    const t = montar({ campos, falla: { fusionarCategorias: 'fallo de prueba' } });
+    await t.vista.cambiarDestinoFusion('3', 4);
+    await t.vista.handleConfirmarFusion(4);
+    assert.equal(t.avisos.at(-1).tipo, 'error');
+    assert.match(t.avisos.at(-1).mensaje, /fallo de prueba/);
+    assert.equal(t.registro['modal-fusion-categoria'].quitado, undefined);
+    assert.equal(t.registro.fusion_confirmar.disabled, false);
+    assert.deepEqual(t.rutas, []);
 });
 
 // --- Cuentas archivadas ---
@@ -585,11 +848,11 @@ test('cada categoría trae su casillero «Fija / recurrente», con la marca actu
     await t.vista.render();
     const html = t.pantalla.contenido.innerHTML;
     const casilleros = [...html.matchAll(/<input type="checkbox" class="cat-fija"[^>]*>/g)].map(m => m[0]);
-    assert.equal(casilleros.length, 3);
-    assert.deepEqual(casilleros.map(c => /\schecked/.test(c)), [false, true, false], 'la marca viene del catálogo');
+    assert.equal(casilleros.length, 5);
+    assert.deepEqual(casilleros.map(c => /\schecked/.test(c)), [false, true, false, false, false], 'la marca viene del catálogo');
     assert.match(casilleros[1], /aria-label="Fija \/ recurrente: Suscripciones"/);
     const llamadas = llamadasDelManejador(html, 'handleMarcarCategoriaFija');
-    assert.deepEqual(llamadas.map(a => a.slice(1)), [[1], [2], [3]]);
+    assert.deepEqual(llamadas.map(a => a.slice(1)), [[1], [2], [3], [4], [5]]);
     assert.equal(llamadas[0][0], 'ELEMENTO');
     assert.match(html, /Marca las categorías cuyo gasto se repite cada período, aunque el monto cambie un poco/);
     assert.doesNotMatch(html, /\son(click|change)=/);
@@ -626,4 +889,19 @@ test('si Rust rechaza el cambio el casillero vuelve a como estaba y se avisa del
     assert.equal(control.checked, false, 'se deshace el cambio visible');
     assert.equal(t.avisos.at(-1).tipo, 'error');
     assert.match(t.avisos.at(-1).mensaje, /No se encontró la categoría/);
+});
+
+test('vista previa: la advertencia sobre la marca «fija / recurrente» que manda Rust se muestra con su icono y en texto', async () => {
+    const aviso = '«Renta» es fija / recurrente y «Comida» es variable: tras la fusión, los gastos tomarán la marca de «Comida» (variable).';
+    const t = montar({ campos: camposDeFusion('3'), previa: (o, d) => previaDe(o, d, { origen_fija: true, advertencias: [aviso] }) });
+    await t.vista.cambiarDestinoFusion('3', 4);
+    assert.match(t.registro.fusion_vista_previa.innerHTML, /⚠️ «Renta» es fija \/ recurrente y «Comida» es variable: tras la fusión, los gastos tomarán la marca de «Comida» \(variable\)\./);
+});
+
+test('la lista conserva el casillero «Fija / recurrente» de las categorías que se pueden renombrar y fusionar, y de las del sistema', async () => {
+    const t = montar();
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.equal([...html.matchAll(/class="cat-fija"/g)].length, 5);
+    assert.deepEqual(llamadasDelManejador(html, 'handleRenombrarCategoria').length, 2);
 });

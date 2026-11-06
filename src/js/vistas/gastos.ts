@@ -253,6 +253,10 @@ export class VistaGastos implements Vista {
         const tarjetas = await api.obtenerTarjetas();
         const cuentas = await api.obtenerCuentas();
         this.gastos = gastos; this.categorias = categorias; this.tarjetas = tarjetas; this.cuentas = cuentas;
+        // Una categoría fusionada o eliminada desde Ajustes ya no está en el selector: el filtro no puede seguir apuntando a ella.
+        if (this.filtros.categoria !== '' && !categorias.some(c => String(c.id) === this.filtros.categoria)) {
+            this.filtros = { ...this.filtros, categoria: '' };
+        }
         this.ofrecido = null;
         const sugerencias = sugerenciasDeDescripcion(gastos);
 

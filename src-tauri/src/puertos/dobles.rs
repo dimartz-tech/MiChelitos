@@ -879,12 +879,18 @@ impl RepositorioTransferencias for AlmacenEnMemoria {
 ///
 /// Guarda lo mismo que las tablas: categorías con su nombre, clientes con RNC y nombre, y, para ejercitar
 /// las guardas de borrado, cuántos gastos usan cada categoría y cuántas facturas tiene cada cliente.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct CatalogosEnMemoria {
     pub categorias: Vec<CategoriaGuardada>,
     pub clientes: Vec<ClienteGuardado>,
     pub gastos_por_categoria: HashMap<i64, i64>,
+    /// Las fechas de los gastos de cada categoría (para la vista previa de una fusión).
+    pub fechas_por_categoria: HashMap<i64, Vec<String>>,
     pub facturas_por_cliente: HashMap<i64, i64>,
+    /// Los casos de auditoría anotados (lo que la tabla `correcciones` guardaría).
+    pub casos: Vec<CasoAAnotar>,
+    /// Fallo inyectado: la operación nombrada devuelve `ErrorAlmacen::Fallo` cuando le toca.
+    pub fallar_en: Option<&'static str>,
     siguiente_id: i64,
 }
 
@@ -901,7 +907,39 @@ impl CatalogosEnMemoria {
     pub fn id_de_categoria(&self, nombre: &str) -> i64 {
         self.categorias.iter().find(|c| c.nombre == nombre).expect("categoría sembrada").id
     }
+    /// Siembra gastos de una categoría con esas fechas.
+    pub fn con_gastos(mut self, categoria: &str, fechas: &[&str]) -> Self {
+        let id = self.id_de_categoria(categoria);
+        self.gastos_por_categoria.insert(id, fechas.len() as i64);
+        self.fechas_por_categoria.insert(id, fechas.iter().map(|f| f.to_string()).collect());
+        self
+    }
+    /// Corre `f` como una transacción: si falla, el almacén vuelve a como estaba (lo que SQLite hace con un
+    /// `ROLLBACK`). Así el doble puede probar que una operación que se cae a medias no deja nada.
+    pub fn en_transaccion<T, E>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, E>) -> Result<T, E> {
+        let antes = self.clone();
+        let r = f(self);
+        if r.is_err() {
+            *self = antes;
+        }
+        r
+    }
+    fn fallo_inyectado(&self, operacion: &'static str) -> Result<(), ErrorAlmacen> {
+        if self.fallar_en == Some(operacion) {
+            return Err(ErrorAlmacen::Fallo(format!("fallo inyectado en {operacion}")));
+        }
+        Ok(())
+    }
 }
+
+impl RegistroDeCorrecciones for CatalogosEnMemoria {
+    fn anotar_caso(&mut self, caso: &CasoAAnotar) -> Result<String, ErrorAlmacen> {
+        self.fallo_inyectado("anotar_caso")?;
+        self.casos.push(caso.clone());
+        Ok(format!("CASO-{:04}", self.casos.len()))
+    }
+}
+
 
 impl AlmacenCatalogos for CatalogosEnMemoria {
     fn categorias(&self) -> Result<Vec<CategoriaGuardada>, ErrorAlmacen> {
@@ -929,8 +967,30 @@ impl AlmacenCatalogos for CatalogosEnMemoria {
         Ok(*self.gastos_por_categoria.get(&id).unwrap_or(&0))
     }
     fn eliminar_categoria(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.fallo_inyectado("eliminar_categoria")?;
         self.categorias.retain(|c| c.id != id);
         Ok(())
+    }
+    fn renombrar_categoria(&mut self, id: i64, nombre: &str) -> Result<(), ErrorAlmacen> {
+        self.fallo_inyectado("renombrar_categoria")?;
+        let c = self
+            .categorias
+            .iter_mut()
+            .find(|c| c.id == id)
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "la categoría", id })?;
+        c.nombre = nombre.to_string();
+        Ok(())
+    }
+    fn fechas_de_gastos_de_categoria(&self, id: i64) -> Result<Vec<String>, ErrorAlmacen> {
+        Ok(self.fechas_por_categoria.get(&id).cloned().unwrap_or_default())
+    }
+    fn mover_gastos_de_categoria(&mut self, origen: i64, destino: i64) -> Result<i64, ErrorAlmacen> {
+        self.fallo_inyectado("mover_gastos_de_categoria")?;
+        let n = self.gastos_por_categoria.remove(&origen).unwrap_or(0);
+        *self.gastos_por_categoria.entry(destino).or_insert(0) += n;
+        let fechas = self.fechas_por_categoria.remove(&origen).unwrap_or_default();
+        self.fechas_por_categoria.entry(destino).or_default().extend(fechas);
+        Ok(n)
     }
     fn marcar_categoria_fija(&mut self, id: i64, fija: bool) -> Result<(), ErrorAlmacen> {
         let c = self

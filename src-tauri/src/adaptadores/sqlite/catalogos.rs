@@ -71,6 +71,28 @@ impl AlmacenCatalogos for CatalogosSqlite<'_> {
         Ok(())
     }
 
+    fn renombrar_categoria(&mut self, id: i64, nombre: &str) -> Result<(), ErrorAlmacen> {
+        let filas = self.tx.execute("UPDATE categorias SET nombre = ? WHERE id = ?;", (nombre, id)).map_err(fallo)?;
+        if filas == 0 {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "la categoría", id });
+        }
+        Ok(())
+    }
+
+    fn fechas_de_gastos_de_categoria(&self, id: i64) -> Result<Vec<String>, ErrorAlmacen> {
+        let mut stmt = self.tx.prepare("SELECT fecha FROM gastos WHERE categoria_id = ?;").map_err(fallo)?;
+        let filas = stmt.query_map([id], |r| r.get::<_, String>(0)).map_err(fallo)?;
+        filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
+    }
+
+    fn mover_gastos_de_categoria(&mut self, origen: i64, destino: i64) -> Result<i64, ErrorAlmacen> {
+        let filas = self
+            .tx
+            .execute("UPDATE gastos SET categoria_id = ? WHERE categoria_id = ?;", (destino, origen))
+            .map_err(fallo)?;
+        Ok(filas as i64)
+    }
+
     fn clientes(&self) -> Result<Vec<ClienteGuardado>, ErrorAlmacen> {
         let mut stmt = self.tx.prepare("SELECT id, rnc, nombre FROM clientes ORDER BY nombre ASC;").map_err(fallo)?;
         let filas = stmt
@@ -101,6 +123,26 @@ impl AlmacenCatalogos for CatalogosSqlite<'_> {
     fn eliminar_cliente(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
         self.tx.execute("DELETE FROM clientes WHERE id = ?;", [id]).map_err(fallo)?;
         Ok(())
+    }
+}
+
+/// El rastro de auditoría de las operaciones de catálogo que lo piden (la fusión de categorías): mismo registro que
+/// el de las correcciones, dentro de la **misma** transacción que la operación.
+impl RegistroDeCorrecciones for CatalogosSqlite<'_> {
+    fn anotar_caso(&mut self, caso: &CasoAAnotar) -> Result<String, ErrorAlmacen> {
+        crate::correcciones::insertar(
+            self.tx,
+            &crate::correcciones::Correccion {
+                tipo: &caso.tipo,
+                referencia_id: caso.referencia_id,
+                descripcion: caso.descripcion.clone(),
+                importe: caso.importe,
+                divisa: caso.divisa.clone(),
+                motivo: &caso.motivo,
+                detalle: caso.detalle.as_deref(),
+            },
+        )
+        .map_err(ErrorAlmacen::Fallo)
     }
 }
 

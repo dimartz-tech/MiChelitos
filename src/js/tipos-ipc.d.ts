@@ -11,7 +11,8 @@ export type SimulacionAvance = { monto: number; cargo: number; a_la_tarjeta: num
 export type AvanceEfectivo = { id: number; fecha: string; monto: number; divisa: string; tipo_cargo: string; tasa: number | null; cargo: number; cuenta_ahorro_id: number; cuenta_nombre: string; nota: string | null };
 export type BonificacionDto = { id: number; fecha: string; tarjeta_id: number; entidad: string; nombre_tarjeta: string; monto: number; divisa: string; concepto: string; gasto_id: number | null };
 export type Cliente = { id: number; rnc: string; nombre: string };
-export type Categoria = { id: number; nombre: string; fija: boolean };
+export type Categoria = { id: number; nombre: string; fija: boolean; motivo_sistema: string | null };
+export type VistaPreviaFusion = { origen_id: number; origen_nombre: string; destino_id: number; destino_nombre: string; gastos: number; desde: string | null; hasta: string | null; advertencias: string[]; origen_fija: boolean; destino_fija: boolean };
 export type LineaDeTraslado = { suscripcion_id: number; plataforma: string; monto: number; divisa: string; frecuencia: string; fecha_proximo_cobro: string | null; destino_sugerido: number | null; elegibles: number[]; motivo: string };
 export type DestinoDeCierre = { id: number; nombre: string; conserva_dolares: boolean; disponible_pesos: number; disponible_dolares: number };
 export type VistaPreviaDeCierre = { tarjeta_id: number; nombre: string; activa: boolean; balance_pesos: number; balance_dolares: number; bloqueos: string[]; lineas: LineaDeTraslado[]; destinos: DestinoDeCierre[] };
@@ -66,6 +67,9 @@ export type Comandos = {
     crear_categoria: { args: { nombre: string }; ret: Categoria };
     marcar_categoria_fija: { args: { id: number; fija: boolean }; ret: Categoria };
     eliminar_categoria: { args: { id: number }; ret: null };
+    renombrar_categoria: { args: { id: number; nombre: string }; ret: Categoria };
+    previsualizar_fusion_categorias: { args: { origenId: number; destinoId: number }; ret: VistaPreviaFusion };
+    fusionar_categorias: { args: { origenId: number; destinoId: number }; ret: number };
     obtener_clientes: { args: {  }; ret: Cliente[] };
     crear_cliente: { args: { rnc: string; nombre: string }; ret: Cliente };
     eliminar_cliente: { args: { id: number }; ret: null };
