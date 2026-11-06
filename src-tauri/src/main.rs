@@ -30,6 +30,8 @@ mod gherkin;
 #[cfg(test)]
 mod caso_de_uso_gherkin;
 #[cfg(test)]
+mod integracion_catalogos;
+#[cfg(test)]
 mod integracion_resumen;
 #[cfg(test)]
 mod integracion_categorias_fijas;
@@ -50,6 +52,9 @@ fn main() {
             comandos::catalogos::crear_categoria,
             comandos::catalogos::eliminar_categoria,
             comandos::catalogos::marcar_categoria_fija,
+            comandos::catalogos::renombrar_categoria,
+            comandos::catalogos::previsualizar_fusion_categorias,
+            comandos::catalogos::fusionar_categorias,
             comandos::gastos::obtener_gastos,
             comandos::resumen::obtener_resumen_gastos,
             comandos::gastos::crear_gasto,

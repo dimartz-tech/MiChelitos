@@ -42,6 +42,20 @@ const AppAPI = {
         return await invoke('eliminar_categoria', { id: Number(id) });
     },
 
+    async renombrarCategoria(id: number | string, nombre: string) {
+        return await invoke('renombrar_categoria', { id: Number(id), nombre });
+    },
+
+    /** Lo que pasaría al fusionar `origenId` en `destinoId`. No escribe nada. */
+    async previsualizarFusionCategorias(origenId: number | string, destinoId: number | string) {
+        return await invoke('previsualizar_fusion_categorias', { origenId: Number(origenId), destinoId: Number(destinoId) });
+    },
+
+    /** Fusiona la categoría de origen en la de destino; devuelve cuántos gastos se movieron. */
+    async fusionarCategorias(origenId: number | string, destinoId: number | string) {
+        return await invoke('fusionar_categorias', { origenId: Number(origenId), destinoId: Number(destinoId) });
+    },
+
     // --- CLIENTES ---
     async obtenerClientes() {
         return await invoke('obtener_clientes');

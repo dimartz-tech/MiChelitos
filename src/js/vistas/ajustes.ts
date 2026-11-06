@@ -12,12 +12,12 @@
 import type { CasoCorreccion, CuentaAhorro } from '../tipos-ipc';
 import { accion, alEnviar, escaparHtml, manejador } from '../nucleo/html.js';
 import { describirRespaldo } from '../nucleo/respaldos.js';
-import { AYUDA_DE_FIJAS } from './resumen_gastos.js';
+import { AYUDA_DE_FIJAS, esDeInversionYObligaciones } from './resumen_gastos.js';
 
 /** Las pestañas del panel de correcciones: sus paneles y los botones que los alternan (acción `activarPestana`). */
 const PANELES_CORRECCION = ['corr-gastos', 'corr-ingresos', 'corr-trans'];
 const BOTONES_CORRECCION = ['btn-corr-gas', 'btn-corr-ing', 'btn-corr-tra'];
-import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Motivo, Pantalla, Vista } from '../ui/servicios';
+import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, Modales, Motivo, Pantalla, Vista } from '../ui/servicios';
 
 type ApiAjustes = ApiDe<
     | 'obtenerCategorias'
@@ -32,6 +32,9 @@ type ApiAjustes = ApiDe<
     | 'crearCategoria'
     | 'eliminarCategoria'
     | 'marcarCategoriaFija'
+    | 'renombrarCategoria'
+    | 'previsualizarFusionCategorias'
+    | 'fusionarCategorias'
     | 'crearCliente'
     | 'eliminarCliente'
     | 'crearCuenta'
@@ -57,11 +60,13 @@ export interface DependenciasAjustes {
     dom: Dom;
     dialogos: Dialogos;
     motivo: Motivo;
+    modales: Modales;
 }
 
 /** Las acciones delegadas (`data-accion*` → `appUI.…`) que la plantilla escribe. */
 export const MANEJADORES_AJUSTES = [
     'handleAgregarCategoria', 'handleEliminarCategoria', 'handleMarcarCategoriaFija',
+    'handleRenombrarCategoria', 'handleFusionarCategoria', 'cambiarDestinoFusion', 'handleConfirmarFusion',
     'handleAgregarCliente', 'handleEliminarCliente',
     'handleAgregarCuenta', 'abrirEdicionCuenta', 'handleArchivarCuenta', 'handleReactivarCuenta',
     'handleAgregarTarjeta',
@@ -125,7 +130,17 @@ export function detalleDeTraspasoHtml(c: CasoCorreccion): string {
     return `<div class="caso-detalle" style="${estilo}">${partes.join(' · ')}</div>`;
 }
 
+/** Una categoría tal como la lista `obtenerCategorias`. */
+type CategoriaDeLista = Awaited<ReturnType<ApiAjustes['obtenerCategorias']>>[number];
+type VistaPreviaDeFusion = Awaited<ReturnType<ApiAjustes['previsualizarFusionCategorias']>>;
+
+/** El identificador de la ventana de fusión (la acción `quitar` la cierra por él). */
+const ID_MODAL_FUSION = 'modal-fusion-categoria';
+
 export class VistaAjustes implements Vista {
+    /** La vista previa que el titular tiene delante: «Confirmar» solo actúa sobre esa. */
+    private fusionVigente: VistaPreviaDeFusion | null = null;
+
     constructor(private readonly dep: DependenciasAjustes) {}
 
     // --- RENDER: AJUSTES ---
@@ -183,21 +198,8 @@ export class VistaAjustes implements Vista {
                         <button type="submit" class="btn" style="padding:0.5rem 0.8rem;">➕</button>
                     </form>
 
-                    <div style="display:flex; flex-direction:column; gap:0.4rem; max-height:220px; overflow-y:auto; font-size:0.85rem;">
-                        ${categorias.map(c => `
-                            <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.5rem 0.8rem; border-radius:var(--radius-sm); display:flex; justify-content:space-between; align-items:center;">
-                                <strong>${escaparHtml(c.nombre)}</strong>
-                                <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.75rem;" title="${escaparHtml(AYUDA_DE_FIJAS)}">
-                                    <input type="checkbox" class="cat-fija" ${manejador('change', 'handleMarcarCategoriaFija', [c.id], 'elemento')}${c.fija ? ' checked' : ''} aria-label="Fija / recurrente: ${escaparHtml(c.nombre)}">
-                                    <span aria-hidden="true">↻</span> Fija / recurrente
-                                </label>
-                                ${c.nombre !== 'Otros' && c.nombre !== 'Suscripciones' ? `
-                                    <button ${accion('handleEliminarCategoria', c.id)} class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
-                                ` : `
-                                    <span style="font-size:0.7rem; color:var(--text-muted); font-style:italic;">Sistema</span>
-                                `}
-                            </div>
-                        `).join('')}
+                    <div style="display:flex; flex-direction:column; gap:0.4rem; max-height:320px; overflow-y:auto; font-size:0.85rem;">
+                        ${categorias.map(c => this.filaDeCategoria(c)).join('')}
                     </div>
                 </div>
 
@@ -901,6 +903,164 @@ export class VistaAjustes implements Vista {
         }
     }
 
+    /**
+     * Una categoría de la lista. Las que el sistema busca por nombre llevan una etiqueta «🔒 Sistema» **con su motivo en
+     * texto** (no solo un color ni un icono) y no ofrecen renombrar ni fusionar; el botón de borrar se esconde, como
+     * siempre, en «Otros» y «Suscripciones».
+     */
+    private filaDeCategoria(c: CategoriaDeLista): string {
+        const sistema = c.motivo_sistema ?? null;
+        const puedeBorrarse = c.nombre !== 'Otros' && c.nombre !== 'Suscripciones';
+        const boton = 'padding:0.2rem 0.4rem; font-size:0.75rem;';
+        return `
+            <div data-categoria="${c.id}" style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.5rem 0.8rem; border-radius:var(--radius-sm);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
+                    <strong>${escaparHtml(c.nombre)}</strong>
+                    <span style="display:flex; gap:0.3rem; align-items:center; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end;">
+                        <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.75rem;" title="${escaparHtml(AYUDA_DE_FIJAS)}">
+                            <input type="checkbox" class="cat-fija" ${manejador('change', 'handleMarcarCategoriaFija', [c.id], 'elemento')}${c.fija ? ' checked' : ''} aria-label="Fija / recurrente: ${escaparHtml(c.nombre)}">
+                            <span aria-hidden="true">↻</span> Fija / recurrente
+                        </label>
+                        ${sistema === null ? `
+                            <button type="button" ${accion('handleRenombrarCategoria', c.id, c.nombre)} class="btn btn-secondary" style="${boton}" title="Cambiar el nombre">✏️ Renombrar</button>
+                            <button type="button" ${accion('handleFusionarCategoria', c.id)} class="btn btn-secondary" style="${boton}" title="Mover sus gastos a otra categoría y eliminarla">🔀 Fusionar…</button>
+                        ` : `
+                            <span class="etiqueta-sistema" style="font-size:0.7rem; color:var(--text-muted); font-style:italic;">🔒 Sistema</span>
+                        `}
+                        ${puedeBorrarse ? `<button type="button" ${accion('handleEliminarCategoria', c.id)} class="btn btn-danger" style="${boton}" title="Eliminar">🗑️</button>` : ''}
+                    </span>
+                </div>
+                ${sistema === null ? '' : `<div class="motivo-sistema" style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem;">El sistema la usa para ${escaparHtml(sistema)}. Por eso no se renombra ni se fusiona en otra.</div>`}
+            </div>`;
+    }
+
+    async handleRenombrarCategoria(id: number, nombreActual: string): Promise<void> {
+        const { api, avisos, enrutador, dialogos } = this.dep;
+        const respuesta = await dialogos.preguntar(`Nuevo nombre para «${nombreActual}» (sus gastos no cambian):`, nombreActual);
+        if (respuesta === null) return;
+        try {
+            const c = await api.renombrarCategoria(id, respuesta);
+            const antes = esDeInversionYObligaciones(nombreActual);
+            const despues = esDeInversionYObligaciones(c.nombre);
+            avisos.mostrar(
+                antes === despues
+                    ? 'Categoría renombrada.'
+                    : `Categoría renombrada. Atención: en el Resumen, «${c.nombre}» ahora ${despues ? 'se excluye' : 'se cuenta'} ` +
+                      'cuando «Incluir inversión y obligaciones» está apagado.',
+            );
+            await enrutador.mostrar('ajustes');
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+        }
+    }
+
+    /** Abre el diálogo de fusión: elegir el destino, ver la vista previa y confirmar. */
+    async handleFusionarCategoria(origenId: number): Promise<void> {
+        const { api, avisos, modales } = this.dep;
+        let categorias: CategoriaDeLista[];
+        try {
+            categorias = await api.obtenerCategorias();
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+            return;
+        }
+        const origen = categorias.find(c => c.id === origenId);
+        const posibles = categorias.filter(c => c.id !== origenId);
+        if (!origen || posibles.length === 0) {
+            avisos.mostrar('No hay otra categoría a la que fusionarla.', 'error');
+            return;
+        }
+        this.fusionVigente = null;
+        modales.abrir(ID_MODAL_FUSION, `
+            <div class="card" role="dialog" aria-modal="true" aria-labelledby="fusion_titulo" style="width: 460px; max-width: 92vw; background: var(--bg-surface-opaque); max-height:90vh; overflow-y:auto;">
+                <h3 id="fusion_titulo" tabindex="-1" style="font-family: var(--font-heading); margin-bottom: 0.4rem;">🔀 Fusionar «${escaparHtml(origen.nombre)}» en otra categoría</h3>
+                <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
+                    Todos sus gastos pasarán a la categoría que elijas y «${escaparHtml(origen.nombre)}» se eliminará.
+                </p>
+                <div class="form-group">
+                    <label for="fusion_destino">Categoría de destino</label>
+                    <select id="fusion_destino" class="form-control" ${manejador('change', 'cambiarDestinoFusion', [origen.id], 'valor')}>
+                        <option value="">Elige la categoría de destino…</option>
+                        ${posibles.map(c => `<option value="${c.id}">${escaparHtml(c.nombre)}${c.motivo_sistema ? ' (sistema)' : ''}</option>`).join('')}
+                    </select>
+                </div>
+                <div id="fusion_vista_previa" role="status" aria-live="polite" style="font-size:0.8rem; margin: 0.8rem 0; min-height:3rem; color:var(--text-secondary);">
+                    Elige un destino para ver qué se moverá.
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1rem;">
+                    <button type="button" ${accion('quitar', ID_MODAL_FUSION)} class="btn btn-secondary">Cancelar</button>
+                    <button type="button" id="fusion_confirmar" ${accion('handleConfirmarFusion', origen.id)} class="btn" disabled>Confirmar fusión</button>
+                </div>
+            </div>
+        `);
+    }
+
+    /** Elegido (o quitado) el destino: pide la vista previa y habilita «Confirmar» solo si la fusión es válida. */
+    async cambiarDestinoFusion(valor: string, origenId: number): Promise<void> {
+        const { api, dom } = this.dep;
+        const vista = dom.elemento('fusion_vista_previa');
+        const confirmar = dom.elemento<HTMLButtonElement>('fusion_confirmar');
+        this.fusionVigente = null;
+        confirmar.disabled = true;
+        if (valor === '') {
+            vista.innerHTML = 'Elige un destino para ver qué se moverá.';
+            return;
+        }
+        vista.textContent = 'Calculando…';
+        try {
+            const previa = await api.previsualizarFusionCategorias(origenId, Number(valor));
+            // Si mientras tanto se eligió otro destino, esta respuesta ya no vale.
+            if (dom.buscar<Campo>('fusion_destino')?.value !== valor) return;
+            this.fusionVigente = previa;
+            vista.innerHTML = this.vistaPreviaDeFusion(previa);
+            confirmar.disabled = false;
+        } catch (err) {
+            if (dom.buscar<Campo>('fusion_destino')?.value !== valor) return;
+            vista.innerHTML = `<p class="fusion-error" style="color:var(--color-danger);">⚠️ ${escaparHtml(String(err))}</p>`;
+        }
+    }
+
+    /** El cuerpo de la vista previa: qué se mueve, de cuándo a cuándo y qué conviene saber antes de confirmar. */
+    private vistaPreviaDeFusion(p: VistaPreviaDeFusion): string {
+        const advertencias = [...p.advertencias];
+        const deOrigen = esDeInversionYObligaciones(p.origen_nombre);
+        const deDestino = esDeInversionYObligaciones(p.destino_nombre);
+        if (deOrigen !== deDestino) {
+            advertencias.push(
+                `En el Resumen, el conmutador «Incluir inversión y obligaciones» ${deOrigen ? 'deja fuera' : 'cuenta'} «${p.origen_nombre}» ` +
+                `y ${deDestino ? 'deja fuera' : 'cuenta'} «${p.destino_nombre}»: tras la fusión, sus gastos ` +
+                `${deDestino ? 'se excluirán' : 'se contarán'} con ese conmutador.`,
+            );
+        }
+        const gastos = p.gastos === 1 ? '1 gasto' : `${p.gastos} gastos`;
+        const rango = p.desde !== null && p.hasta !== null
+            ? (p.desde === p.hasta ? ` Fecha: ${p.desde}.` : ` Del ${p.desde} al ${p.hasta}.`)
+            : '';
+        return `
+            <p class="fusion-resumen"><strong>${escaparHtml(gastos)}</strong> de «${escaparHtml(p.origen_nombre)}» pasarán a «${escaparHtml(p.destino_nombre)}».${escaparHtml(rango)}</p>
+            ${advertencias.map(a => `<p class="fusion-advertencia" style="color:var(--color-warning, #b45309); margin-top:0.4rem;">⚠️ ${escaparHtml(a)}</p>`).join('')}
+            <p style="margin-top:0.4rem;">«${escaparHtml(p.origen_nombre)}» se eliminará. Queda un caso en el registro de correcciones.</p>`;
+    }
+
+    async handleConfirmarFusion(origenId: number): Promise<void> {
+        const { api, avisos, enrutador, dom } = this.dep;
+        const previa = this.fusionVigente;
+        const destino = Number(dom.buscar<Campo>('fusion_destino')?.value);
+        if (!previa || previa.origen_id !== origenId || previa.destino_id !== destino) return;
+        const confirmar = dom.elemento<HTMLButtonElement>('fusion_confirmar');
+        confirmar.disabled = true;
+        try {
+            const movidos = await api.fusionarCategorias(origenId, destino);
+            dom.buscar(ID_MODAL_FUSION)?.remove();
+            this.fusionVigente = null;
+            avisos.mostrar(`Fusión hecha: ${movidos === 1 ? '1 gasto pasó' : `${movidos} gastos pasaron`} a «${previa.destino_nombre}».`);
+            await enrutador.mostrar('ajustes');
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+            confirmar.disabled = false;
+        }
+    }
+
     async handleEliminarCategoria(id: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
         if (await dialogos.confirmar("¿Eliminar esta categoría?")) {
@@ -923,6 +1083,10 @@ export function puenteAjustes(vista: VistaAjustes): {
     handleAgregarCategoria: (e: EventoDeFormulario) => Promise<void>;
     handleEliminarCategoria: (id: number) => Promise<void>;
     handleMarcarCategoriaFija: (control: { checked: boolean }, id: number) => Promise<void>;
+    handleRenombrarCategoria: (id: number, nombreActual: string) => Promise<void>;
+    handleFusionarCategoria: (origenId: number) => Promise<void>;
+    cambiarDestinoFusion: (valor: string, origenId: number) => Promise<void>;
+    handleConfirmarFusion: (origenId: number) => Promise<void>;
     handleAgregarCliente: (e: EventoDeFormulario) => Promise<void>;
     handleEliminarCliente: (id: number) => Promise<void>;
     handleAgregarCuenta: (e: EventoDeFormulario) => Promise<void>;
@@ -942,6 +1106,10 @@ export function puenteAjustes(vista: VistaAjustes): {
         handleAgregarCategoria: e => vista.handleAgregarCategoria(e),
         handleEliminarCategoria: id => vista.handleEliminarCategoria(id),
         handleMarcarCategoriaFija: (control, id) => vista.handleMarcarCategoriaFija(control, id),
+        handleRenombrarCategoria: (id, nombreActual) => vista.handleRenombrarCategoria(id, nombreActual),
+        handleFusionarCategoria: origenId => vista.handleFusionarCategoria(origenId),
+        cambiarDestinoFusion: (valor, origenId) => vista.cambiarDestinoFusion(valor, origenId),
+        handleConfirmarFusion: origenId => vista.handleConfirmarFusion(origenId),
         handleAgregarCliente: e => vista.handleAgregarCliente(e),
         handleEliminarCliente: id => vista.handleEliminarCliente(id),
         handleAgregarCuenta: e => vista.handleAgregarCuenta(e),
