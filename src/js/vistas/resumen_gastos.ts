@@ -29,6 +29,14 @@ function normalizar(nombre: string): string {
 }
 
 /**
+ * Si una categoría de ese nombre cae en la regla del conmutador «Incluir inversión y obligaciones» (por nombre, sin
+ * tildes ni mayúsculas). Renombrar o fusionar una categoría puede cambiar la respuesta: Ajustes lo advierte.
+ */
+export function esDeInversionYObligaciones(nombre: string): boolean {
+    return CATEGORIAS_DE_INVERSION_Y_OBLIGACIONES.some(c => normalizar(c) === normalizar(nombre));
+}
+
+/**
  * Los ids de las categorías de inversión y obligaciones que EXISTEN en el catálogo (se buscan por nombre; nunca se
  * escriben ids a mano). Si alguna no existe, simplemente no se excluye.
  */

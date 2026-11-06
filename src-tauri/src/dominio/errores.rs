@@ -107,6 +107,15 @@ pub enum ErrorDominio {
     CategoriaExistente,
     CategoriaDelSistema,
     CategoriaConGastos,
+    /// El nombre de una categoría pasa del máximo (en caracteres).
+    CategoriaNombreLargo { maximo: usize },
+    /// El nombre lo usa la propia interfaz para otra cosa («Cargos derivados»).
+    CategoriaNombreReservado { nombre: String },
+    /// El sistema busca esta categoría por su nombre: no se renombra ni se fusiona en otra. `accion` completa
+    /// «No se puede …» (`renombrar`, `fusionar en otra`); `motivo` dice para qué la usa el sistema.
+    CategoriaUsadaPorElSistema { nombre: String, accion: &'static str, motivo: &'static str },
+    /// Fusionar una categoría en sí misma no tiene sentido.
+    CategoriasIguales,
     ClienteSinDatos,
     ClienteDuplicado,
     ClienteConFacturas,
@@ -291,6 +300,21 @@ impl fmt::Display for ErrorDominio {
                 f,
                 "No se puede eliminar la categoría porque tiene gastos registrados asociados."
             ),
+            ErrorDominio::CategoriaNombreLargo { maximo } => {
+                write!(f, "El nombre de la categoría no puede pasar de {maximo} caracteres.")
+            }
+            ErrorDominio::CategoriaNombreReservado { nombre } => write!(
+                f,
+                "«{nombre}» es un nombre reservado: la aplicación lo usa para otra cosa. Elige otro."
+            ),
+            ErrorDominio::CategoriaUsadaPorElSistema { nombre, accion, motivo } => write!(
+                f,
+                "No se puede {accion} la categoría «{nombre}»: el sistema la usa para {motivo}. \
+                 Cambiarla dejaría esas operaciones sin su categoría."
+            ),
+            ErrorDominio::CategoriasIguales => {
+                write!(f, "Elige una categoría de destino distinta de la de origen.")
+            }
             ErrorDominio::ClienteSinDatos => write!(f, "RNC y nombre no pueden estar vacíos."),
             ErrorDominio::ClienteDuplicado => write!(f, "Ya existe un cliente con este RNC."),
             ErrorDominio::ClienteConFacturas => write!(

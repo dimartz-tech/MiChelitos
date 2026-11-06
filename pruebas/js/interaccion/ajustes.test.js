@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cargarInterfaz, crearEvento, crearElemento, AUSENTE } from '../ayudas/cargar_interfaz.js';
 import {
-    llamoUnaVez, noLlamoANada, avisoExito, redibujo, noRedibujo, rechazoSeMuestra,
+    llamoUnaVez, noLlamoANada, noLlamoA, avisoExito, redibujo, noRedibujo, rechazoSeMuestra,
 } from '../ayudas/afirmar.js';
 
 // --- crear respaldo ---
@@ -152,6 +152,58 @@ test('marcar una categoría como fija / recurrente: envía (id, marca) y avisa; 
     const control = { checked: true };
     await rechazoSeMuestra(ui, () => ui.appUI.handleMarcarCategoriaFija(control, 14));
     assert.equal(control.checked, false);
+});
+
+test('renombrar categoría: pide el nombre, envía (id, nombre) y redibuja; cancelar no envía; si Rust rechaza, error', async () => {
+    let ui = cargarInterfaz({ prompt: 'Vivienda', api: { renombrarCategoria: { id: 14, nombre: 'Vivienda', motivo_sistema: null } } });
+    await ui.appUI.handleRenombrarCategoria(14, 'Renta');
+    llamoUnaVez(ui, 'renombrarCategoria', [14, 'Vivienda']);
+    avisoExito(ui, /Categoría renombrada/);
+    redibujo(ui, 'ajustes');
+
+    ui = cargarInterfaz({ prompt: null });
+    await ui.appUI.handleRenombrarCategoria(14, 'Renta');
+    noLlamoANada(ui);
+
+    ui = cargarInterfaz({ prompt: 'Vivienda' });
+    ui.rechazar('renombrarCategoria', 'Error simulado de Rust');
+    await rechazoSeMuestra(ui, () => ui.appUI.handleRenombrarCategoria(14, 'Renta'));
+});
+
+const CATEGORIAS_FUSION = [
+    { id: 14, nombre: 'Renta', motivo_sistema: null },
+    { id: 15, nombre: 'Alquiler', motivo_sistema: null },
+    { id: 1, nombre: 'Otros', motivo_sistema: 'asentar las comisiones' },
+];
+
+test('fusionar categoría: abre la ventana; el destino pide la vista previa; confirmar fusiona y redibuja', async () => {
+    const previa = { origen_id: 14, origen_nombre: 'Renta', destino_id: 15, destino_nombre: 'Alquiler', gastos: 3, desde: '21/07/2026', hasta: '03/09/2026', advertencias: [] };
+    const ui = cargarInterfaz({
+        campos: { fusion_destino: { value: '15' }, fusion_vista_previa: {}, fusion_confirmar: { disabled: true }, 'modal-fusion-categoria': {} },
+        api: { obtenerCategorias: CATEGORIAS_FUSION, previsualizarFusionCategorias: previa, fusionarCategorias: 3 },
+    });
+
+    await ui.appUI.handleFusionarCategoria(14);
+    assert.equal(ui.modalesAbiertos.length, 1);
+    assert.equal(ui.modalesAbiertos[0].id, 'modal-fusion-categoria');
+
+    await ui.appUI.cambiarDestinoFusion('15', 14);
+    llamoUnaVez(ui, 'previsualizarFusionCategorias', [14, 15]);
+    assert.match(ui.elemento('fusion_vista_previa').innerHTML, /3 gastos<\/strong> de «Renta» pasarán a «Alquiler»/);
+    assert.equal(ui.elemento('fusion_confirmar').disabled, false);
+    noLlamoA(ui, 'fusionarCategorias');
+
+    await ui.appUI.handleConfirmarFusion(14);
+    llamoUnaVez(ui, 'fusionarCategorias', [14, 15]);
+    avisoExito(ui, /Fusión hecha: 3 gastos pasaron a «Alquiler»/);
+    redibujo(ui, 'ajustes');
+    assert.ok(ui.eliminados.length > 0, 'la ventana se cerró');
+});
+
+test('fusionar categoría: confirmar sin haber visto la vista previa no fusiona nada', async () => {
+    const ui = cargarInterfaz({ campos: { fusion_destino: { value: '15' }, fusion_confirmar: { disabled: true } } });
+    await ui.appUI.handleConfirmarFusion(14);
+    noLlamoANada(ui);
 });
 
 // --- clientes ---
