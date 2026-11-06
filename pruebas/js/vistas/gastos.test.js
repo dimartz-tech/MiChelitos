@@ -304,3 +304,30 @@ test('la ventana de liquidación también escapa la descripción', async () => {
     t.vista.abrirLiquidacionConsumo(9, 50, 'USD', `x'); alert(1); //"\\ <img src=x onerror="alert(2)"> &amp;`);
     assert.doesNotMatch(t.modales[0].html, /<img/);
 });
+
+test('Gastos por Categoría trae el bloque de presupuestos del mes elegido, con la nota de los dólares', async () => {
+    const t = montar();
+    const pedidos = [];
+    t.vista.dep.api.obtenerPresupuestosMes = async (anio, mes) => {
+        pedidos.push([anio, mes]);
+        return { anio, mes, total_presupuesto: '500.00', total_gastado: '105.00', total_restante: '395.00', filas: [
+            { categoria_id: 1, categoria_nombre: 'Comida', fija: false, presupuesto: '500.00', gastado: '105.00', restante: '395.00', porcentaje_milesimas: 210, estado: 'ok', usd_aparte: '0.00' },
+        ] };
+    };
+    await t.vista.render();
+    assert.deepEqual(pedidos, [[2027, 3]]);
+    const html = t.pantalla.contenido.innerHTML;
+    assert.match(html, /Presupuestos del mes/);
+    assert.match(html, /Solo cuentan los gastos en DOP/);
+    assert.match(html, /Dentro del presupuesto · Restan DOP 395\.00/);
+    await t.vista.handleSelectGastosMonth('02/2027');
+    assert.deepEqual(pedidos.at(-1), [2027, 2], 'sigue al mes elegido');
+});
+
+test('si los presupuestos fallan, Gastos se dibuja igual con un aviso en su bloque', async () => {
+    const t = montar();
+    t.vista.dep.api.obtenerPresupuestosMes = async () => { throw new Error('sin respuesta'); };
+    await t.vista.render();
+    assert.match(t.pantalla.contenido.innerHTML, /Gastos y Egresos/);
+    assert.match(t.pantalla.contenido.innerHTML, /No se pudieron leer los presupuestos/);
+});

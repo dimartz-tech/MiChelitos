@@ -4,7 +4,35 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.129.0 (Versión Actual) - 2026-11-06
+## 🚀 Versión 1.130.0 (Versión Actual) - 2026-11-06
+**Presupuestos mensuales por categoría, con alertas.** PR 5 de 5 del resumen por categoría y mes. El titular fija, para una categoría, un tope mensual en pesos; la aplicación lo compara con lo gastado y lo dice en palabras (dentro, cerca o excedido). Es descriptiva: no recomienda nada.
+
+> ⚠️ **ESTE PR SUBE EL ESQUEMA A 21: la app instalada (v19) no abre una base v21. No instalar sin respaldo y ensayo.** Volver atrás es restituir un `.app` guardado y el respaldo previo.
+
+### 🗄️ Migración 21 («presupuestos por categoría»)
+* Tabla `presupuestos (categoria_id PRIMARY KEY REFERENCES categorias ON DELETE CASCADE, monto_centavos INTEGER NOT NULL CHECK(1..99 999 999 999))`: uno por categoría, **centavos enteros** (nunca `REAL`), mayor que cero y hasta DOP 999,999,999.99. Nace vacía; no toca ninguna tabla existente; idempotente. `VERSION_OBJETIVO = 21`.
+
+### 🔧 Qué se hace
+* **Comandos:** `fijar_presupuesto(categoria_id, monto)` (monto como texto por `ImporteDecimal`; crea o reemplaza), `quitar_presupuesto(categoria_id)` (devuelve si lo había; quitar uno inexistente no falla) y `obtener_presupuestos_mes(anio, mes)` (solo lectura). Escrituras por `con_catalogos` (IMMEDIATE) y lectura por `lee_almacen`.
+* **Por categoría con presupuesto:** presupuesto, gastado, restante (negativo si se excedió), porcentaje en milésimas y estado: `ok`, `cerca` (gastado ≥ 80 % del presupuesto) y `excedido` (gastado ≥ 100 %, el 100 % exacto incluido). Comparaciones con enteros de 128 bits, sin redondeo; el porcentaje mostrado **se trunca** (99.96 % no se muestra como 100 % mientras el estado es «cerca»). Orden: excedidos, cerca, ok. Totales = suma exacta de las filas (solo de las categorías con presupuesto).
+* **Decisión: solo cuentan los gastos en DOP.** Los gastos en **USD no se convierten** (no hay tasa que valga) y quedan fuera del cálculo, también los USD liquidados en pesos; se informan **aparte** (`usd_aparte`, sin convertir) y la interfaz muestra siempre la nota de la exclusión.
+* **Decisión: categoría real.** Cuenta todo gasto de la categoría, también el que creó otra operación (comisión de abono, cargo de avance); el Resumen, en cambio, los agrupa en «Cargos derivados». Mes calendario por la fecha del gasto.
+* **Categorías fijas** tienen presupuesto igual que las variables; la marca «fija / recurrente» no se toca (ni al fijar el presupuesto ni al revés).
+* **Eliminar una categoría** elimina su presupuesto (borrado explícito además del `ON DELETE CASCADE`).
+* **Fusión de categorías (regla decidida por el titular, aislada en `dominio::presupuesto::presupuesto_tras_fusion`):** si solo el origen tiene presupuesto, el destino lo hereda; si solo el destino lo tiene, lo conserva; si **ambos** lo tienen, se conserva el del destino y **la vista previa avisa del monto del origen que se descarta**; si ninguno, nada. **Nunca se suman.** El caso de auditoría de la fusión anota «presupuesto heredado» o «presupuesto de origen descartado» con el monto.
+* **Interfaz:** en Gastos, bajo «Gastos por Categoría», el bloque «Presupuestos del mes» (sigue al mes elegido): barra con `role="progressbar"`, estado **en palabras** además del color, restante o exceso, dólares aparte, botón «Quitar» y formulario para fijar (categoría y monto mensual). En el Inicio, recordatorios `[Presupuesto]` para las categorías cerca o excedidas del **mes en curso**; si Rust no responde, el Inicio se dibuja igual. Sin `on*=`, con `escaparHtml` y `data-accion`.
+
+### 🧪 Pruebas y mutaciones
+* Unitarias: dominio (umbrales exactos 79 999/80 000/99 999/100 000, porcentaje truncado, USD aparte, mes y año, derivados, fijas, orden, tope, cuatro casos de la fusión), casos de uso con el doble (incluida la atomicidad ante un fallo a medias), adaptador SQLite, migración 21 (0→21, 20→21 sin tocar nada, 19→21, ya en 21, idempotencia, CHECK, FK, cascada) y JS (barra, estados, escape, Inicio, Gastos, manejadores).
+* Integración (`integracion_presupuestos.rs`, comandos reales sobre la siembra de septiembre): estado y totales, dólares fuera, mes vacío o inválido, validaciones sin escribir, reemplazo y quitar, categoría fija, consulta sin escritura, eliminar categoría, **los cuatro casos de fusión**, forma del DTO contra `tipos-ipc.d.ts`, respaldo→restauración y migración integrada desde una base v20.
+* Mutaciones (13: `>` por `>=`, umbral 90, USD contado, porcentaje redondeado, restante invertido, monto cero, fusión que gana el origen o suma, sin heredar, fijar que no reemplaza, derivados fuera, sin filtrar el mes, quitar que no borra): todas detectadas.
+
+### 🧭 Qué probar a mano (en una copia, nunca en la base real sin respaldo)
+* Abrir una base v20 copiada: debe migrar a 21 sin presupuestos. Fijar uno en una categoría con gasto del mes y comprobar barra, estado y la nota de los dólares; fusionar dos categorías con presupuesto y leer el aviso de la vista previa.
+
+---
+
+## Versión 1.129.0 - 2026-11-06
 **Renombrar y fusionar categorías (Ajustes).** Hasta ahora solo se podían agregar y eliminar; unificar «Renta» y «Alquiler» exigió SQL a mano. **Sin migración: el esquema se queda en 20.**
 
 ### ✏️ Renombrar

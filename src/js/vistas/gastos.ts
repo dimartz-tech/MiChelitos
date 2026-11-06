@@ -9,8 +9,10 @@
 // (`pruebas/js/vistas/gastos.test.js`). Los cuerpos son los de `ui.ts`.
 
 import type { ApiDe, Avisos, Dom, Enrutador, Formato, Modales, Pantalla, Reloj, Vista } from '../ui/servicios';
+import type { EstadoPresupuestos } from '../tipos-ipc';
 
 import { ATRIBUTOS_DE_FECHA, accion, alCambiar, alEnviar, alEscribir, escaparHtml, manejador } from '../nucleo/html.js';
+import { htmlPresupuestos } from './presupuestos.js';
 
 type ApiGastos = ApiDe<
     | 'obtenerGastos'
@@ -19,6 +21,9 @@ type ApiGastos = ApiDe<
     | 'obtenerTarjetas'
     | 'crearGasto'
     | 'liquidarConsumoPendiente'
+    | 'obtenerPresupuestosMes'
+    | 'fijarPresupuesto'
+    | 'quitarPresupuesto'
 >;
 
 export interface DependenciasGastos {
@@ -37,6 +42,7 @@ export const MANEJADORES_GASTOS = [
     'handleAgregarGasto', 'actualizarConversionGasto', 'toggleMetodoPago', 'cambiarMetodoDePago',
     'handleSelectGastosMonth', 'abrirLiquidacionConsumo', 'previsualizarTasa', 'handleLiquidacionSubmit',
     'ofrecerUltimoGasto', 'aplicarUltimoGasto', 'usarUltimoMonto', 'filtrarGastos', 'limpiarFiltrosGastos',
+    'handleFijarPresupuesto', 'handleQuitarPresupuesto',
 ] as const;
 export type ManejadorGastos = (typeof MANEJADORES_GASTOS)[number];
 
@@ -285,6 +291,15 @@ export class VistaGastos implements Vista {
         this.mesVigente = mSelected;
         const gastosMes = gastos.filter(g => g.fecha.endsWith('/' + mSelected));
 
+        // Presupuestos del mes elegido. Si Rust no responde, el resto de la pantalla se dibuja igual.
+        const [mesElegido, anioElegido] = mSelected.split('/').map(Number);
+        let presupuestos: EstadoPresupuestos | null = null;
+        try {
+            presupuestos = await api.obtenerPresupuestosMes(anioElegido, mesElegido);
+        } catch {
+            presupuestos = null;
+        }
+
         // Separar cálculos por divisa para evitar mezclar DOP y USD
         const gastosDop = gastosMes.filter(g => (g.divisa || 'DOP') === 'DOP');
         const totalNetoDop = gastosDop.reduce((sum, g) => sum + g.monto, 0);
@@ -499,6 +514,8 @@ export class VistaGastos implements Vista {
                                 <p style="color:var(--text-muted); text-align:center; padding:1rem; font-size:0.8rem; margin:0;">No hay gastos registrados en este mes.</p>
                             `}
                         </div>
+
+                        ${htmlPresupuestos(presupuestos, categorias)}
                     </div>
 
                     <!-- Historial -->
@@ -813,6 +830,35 @@ export class VistaGastos implements Vista {
         }
     }
 
+    /** Fija (o cambia) el presupuesto mensual de la categoría elegida. El monto viaja como texto, tal cual se escribió. */
+    async handleFijarPresupuesto(e: EventoDeFormulario): Promise<void> {
+        e.preventDefault();
+        const { api, avisos, enrutador, dom } = this.dep;
+        const categoria = Number(dom.elemento<Campo>('pre_cat').value);
+        const monto = dom.elemento<Campo>('pre_monto').value.trim();
+        if (!(categoria > 0)) { avisos.mostrar('Elige la categoría del presupuesto.', 'error'); return; }
+        if (!(Number(monto) > 0)) { avisos.mostrar('El presupuesto mensual debe ser mayor que cero.', 'error'); return; }
+        try {
+            const p = await api.fijarPresupuesto(categoria, monto);
+            avisos.mostrar(`Presupuesto de «${p.categoria_nombre}» fijado en DOP ${p.monto} al mes.`);
+            await enrutador.mostrar('gastos');
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+        }
+    }
+
+    /** Quita el presupuesto de una categoría (no toca ningún gasto). */
+    async handleQuitarPresupuesto(categoriaId: number): Promise<void> {
+        const { api, avisos, enrutador } = this.dep;
+        try {
+            await api.quitarPresupuesto(categoriaId);
+            avisos.mostrar('Presupuesto quitado.');
+            await enrutador.mostrar('gastos');
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+        }
+    }
+
     /**
      * Liquida un consumo pendiente. Pide el IMPORTE en pesos, no la tasa: el
      * emisor comunica cuánto cargó, nunca a qué tasa lo hizo.
@@ -886,6 +932,8 @@ export function puenteGastos(vista: VistaGastos): {
     usarUltimoMonto: () => void;
     filtrarGastos: () => void;
     limpiarFiltrosGastos: () => void;
+    handleFijarPresupuesto: (e: EventoDeFormulario) => Promise<void>;
+    handleQuitarPresupuesto: (categoriaId: number) => Promise<void>;
 } {
     return {
         handleAgregarGasto: e => vista.handleAgregarGasto(e),
@@ -901,5 +949,7 @@ export function puenteGastos(vista: VistaGastos): {
         usarUltimoMonto: () => vista.usarUltimoMonto(),
         filtrarGastos: () => vista.filtrarGastos(),
         limpiarFiltrosGastos: () => vista.limpiarFiltrosGastos(),
+        handleFijarPresupuesto: e => vista.handleFijarPresupuesto(e),
+        handleQuitarPresupuesto: categoriaId => vista.handleQuitarPresupuesto(categoriaId),
     };
 }

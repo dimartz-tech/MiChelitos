@@ -211,6 +211,22 @@ const AppAPI = {
         return await invoke('obtener_resumen_gastos', { anio, mes, nPromedio, tasaUsd, excluirCategorias });
     },
 
+    // --- PRESUPUESTOS MENSUALES POR CATEGORÍA ---
+    /** Fija o cambia el presupuesto mensual (pesos, texto exacto) de una categoría. */
+    async fijarPresupuesto(categoriaId: number | string, monto: string) {
+        return await invoke('fijar_presupuesto', { categoriaId: Number(categoriaId), monto });
+    },
+
+    /** Quita el presupuesto de una categoría; devuelve si lo había. */
+    async quitarPresupuesto(categoriaId: number | string) {
+        return await invoke('quitar_presupuesto', { categoriaId: Number(categoriaId) });
+    },
+
+    /** Presupuesto, gastado (solo DOP), restante, porcentaje y estado de cada categoría con presupuesto en el mes. Solo lectura. */
+    async obtenerPresupuestosMes(anio: number, mes: number) {
+        return await invoke('obtener_presupuestos_mes', { anio, mes });
+    },
+
     async crearGasto(gastoData: import('./tipos-ipc').GastoInput) {
         return await invoke('crear_gasto', { input: gastoData });
     },
