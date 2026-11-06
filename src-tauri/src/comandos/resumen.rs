@@ -7,7 +7,7 @@ use super::ayudantes::lee_almacen;
 use crate::aplicacion;
 use crate::aplicacion::resumen_gastos::DatosDeResumen;
 use crate::dominio::dinero::{Dinero, TasaCambio};
-use crate::dominio::resumen_gastos::{Medidas, ResumenMensual, Tendencia, ID_CARGOS_DERIVADOS};
+use crate::dominio::resumen_gastos::{Medidas, ResumenMensual, SegmentoFijoVariable, Tendencia, ID_CARGOS_DERIVADOS};
 use crate::ipc;
 
 /// Las cifras de una fila o del total. Los importes viajan como texto exacto (`1234.56`), nunca como número.
@@ -59,8 +59,22 @@ pub struct FilaResumenGasto {
     pub categoria_id: i64,
     pub categoria_nombre: String,
     pub derivado: bool,
+    /// La categoría está marcada como gasto fijo por el titular. Siempre `false` en los cargos derivados.
+    pub fija: bool,
     pub medidas: MedidasResumen,
     pub tendencia: TendenciaResumen,
+}
+
+/// Uno de los dos segmentos del total del mes (fijo o variable). Importes en pesos, texto exacto.
+#[derive(Serialize, Debug)]
+pub struct SegmentoResumen {
+    pub importe: String,
+    /// Parte del total del mes en milésimas (1000 = 100 %).
+    pub porcentaje_milesimas: i64,
+    /// El mismo segmento en el mes anterior completo.
+    pub anterior: String,
+    /// Puntos básicos; `null` si el mes anterior no es positivo.
+    pub variacion_anterior_pb: Option<i64>,
 }
 
 #[derive(Serialize, Debug)]
@@ -84,6 +98,10 @@ pub struct ResumenGastos {
     pub filas: Vec<FilaResumenGasto>,
     /// La suma de las filas.
     pub totales: MedidasResumen,
+    /// Lo que suman las categorías marcadas fijas. `totales_fijo + totales_variable = totales` exactamente.
+    pub totales_fijo: SegmentoResumen,
+    /// Lo que suman las demás, con los cargos derivados (que cuentan siempre como variables).
+    pub totales_variable: SegmentoResumen,
     /// La tendencia del total: la suma, mes a mes, de la de las filas.
     pub tendencia_total: TendenciaResumen,
     /// Los meses con algún gasto, del más reciente al más antiguo.
@@ -135,6 +153,15 @@ fn a_medidas(m: &Medidas) -> MedidasResumen {
     }
 }
 
+fn a_segmento(s: &SegmentoFijoVariable) -> SegmentoResumen {
+    SegmentoResumen {
+        importe: ipc::importe_a_texto(s.importe),
+        porcentaje_milesimas: s.porcentaje_milesimas,
+        anterior: ipc::importe_a_texto(s.anterior),
+        variacion_anterior_pb: s.variacion_anterior_pb,
+    }
+}
+
 fn a_tendencia(t: &Tendencia) -> TendenciaResumen {
     TendenciaResumen {
         meses: t
@@ -168,11 +195,14 @@ fn a_dto(r: ResumenMensual) -> ResumenGastos {
                 categoria_id: f.categoria_id,
                 categoria_nombre: f.categoria_nombre.clone(),
                 derivado: f.derivado,
+                fija: f.fija,
                 medidas: a_medidas(&f.medidas),
                 tendencia: a_tendencia(&f.tendencia),
             })
             .collect(),
         totales: a_medidas(&r.totales),
+        totales_fijo: a_segmento(&r.totales_fijo),
+        totales_variable: a_segmento(&r.totales_variable),
         tendencia_total: a_tendencia(&r.tendencia_total),
         meses_disponibles: r.meses_disponibles.iter().map(|(a, m)| MesDisponible { anio: *a, mes: *m }).collect(),
     }

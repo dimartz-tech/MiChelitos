@@ -18,15 +18,15 @@ use serde_json::Value;
 
 // --- Ayudantes ---
 
-fn conexion() -> Connection {
+pub(crate) fn conexion() -> Connection {
     db_sql::obtener_conexion().expect("abrir conexión de prueba")
 }
 
-fn importe(texto: &str) -> ImporteDecimal {
+pub(crate) fn importe(texto: &str) -> ImporteDecimal {
     ImporteDecimal::desde_texto(texto).expect("importe de prueba")
 }
 
-fn categoria_por_nombre(nombre: &str) -> i64 {
+pub(crate) fn categoria_por_nombre(nombre: &str) -> i64 {
     conexion().query_row("SELECT id FROM categorias WHERE nombre = ?;", [nombre], |r| r.get(0)).unwrap()
 }
 
@@ -86,7 +86,7 @@ fn compra_en_dolares(fecha: &str, monto: &str, tarjeta: i64) -> i64 {
 }
 
 /// Todo el contenido de la base como texto, tabla por tabla.
-fn huella_de_la_base() -> String {
+pub(crate) fn huella_de_la_base() -> String {
     let c = conexion();
     let tablas: Vec<String> = c
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
@@ -115,7 +115,7 @@ fn huella_de_la_base() -> String {
     huella
 }
 
-fn hoy(a: i32, m: u32, d: u32) -> NaiveDate {
+pub(crate) fn hoy(a: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(a, m, d).unwrap()
 }
 
@@ -124,7 +124,7 @@ fn hoy(a: i32, m: u32, d: u32) -> NaiveDate {
 /// Septiembre: alimentación 1187.53 + 33.37 (cada transferencia lleva su retención como costo adicional),
 /// transporte 3177.29, un consumo USD 53.11 liquidado por el emisor en 3190.67 y otro de USD 12.34 pendiente, un
 /// abono de 2111.37 (con su comisión) y un avance de 1187.53 con cargo del 6.25 %.
-fn sembrar() -> (i64, i64) {
+pub(crate) fn sembrar() -> (i64, i64) {
     let cuenta = crear_cuenta("Cuenta Ahorros DOP", "DOP", 5_000_000.0);
     let tarjeta = crear_tarjeta("traduce");
     // Agosto (mes anterior)
@@ -154,12 +154,12 @@ fn sembrar() -> (i64, i64) {
     (cuenta, tarjeta)
 }
 
-fn fila<'a>(r: &'a ResumenGastos, nombre: &str) -> &'a crate::comandos::resumen::FilaResumenGasto {
+pub(crate) fn fila<'a>(r: &'a ResumenGastos, nombre: &str) -> &'a crate::comandos::resumen::FilaResumenGasto {
     r.filas.iter().find(|f| f.categoria_nombre == nombre).unwrap_or_else(|| panic!("no hay la fila «{nombre}»"))
 }
 
 /// Pesos de un texto `1234.56` a centavos, sin coma flotante.
-fn centavos(t: &str) -> i64 {
+pub(crate) fn centavos(t: &str) -> i64 {
     crate::dominio::dinero::centavos_desde_texto(t).unwrap()
 }
 
@@ -365,7 +365,7 @@ fn campos_declarados(dts: &str, tipo: &str) -> Option<Vec<(String, String)>> {
 
 /// Comprueba que `valor` tiene exactamente las claves (y los tipos básicos) que declara `dts` para `tipo`, y baja a
 /// los tipos anidados que `dts` también declara.
-fn verificar_forma(dts: &str, tipo: &str, valor: &Value, ruta: &str) {
+pub(crate) fn verificar_forma(dts: &str, tipo: &str, valor: &Value, ruta: &str) {
     let declarados = campos_declarados(dts, tipo).unwrap_or_else(|| panic!("tipos-ipc.d.ts no declara «{tipo}»"));
     let objeto = valor.as_object().unwrap_or_else(|| panic!("{ruta} no es un objeto"));
     let mut reales: Vec<&str> = objeto.keys().map(String::as_str).collect();

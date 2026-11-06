@@ -33,6 +33,11 @@ const AppAPI = {
         return await invoke('crear_categoria', { nombre });
     },
 
+    /** Marca o desmarca una categoría como gasto fijo/recurrente (solo cambia esa marca). */
+    async marcarCategoriaFija(id: number | string, fija: boolean) {
+        return await invoke('marcar_categoria_fija', { id: Number(id), fija });
+    },
+
     async eliminarCategoria(id: number | string) {
         return await invoke('eliminar_categoria', { id: Number(id) });
     },

@@ -895,7 +895,7 @@ impl CatalogosEnMemoria {
     pub fn con_categoria(mut self, nombre: &str) -> Self {
         let id = self.siguiente_id;
         self.siguiente_id += 1;
-        self.categorias.push(CategoriaGuardada { id, nombre: nombre.to_string() });
+        self.categorias.push(CategoriaGuardada { id, nombre: nombre.to_string(), fija: false });
         self
     }
     pub fn id_de_categoria(&self, nombre: &str) -> i64 {
@@ -915,7 +915,7 @@ impl AlmacenCatalogos for CatalogosEnMemoria {
     fn insertar_categoria(&mut self, nombre: &str) -> Result<i64, ErrorAlmacen> {
         let id = self.siguiente_id;
         self.siguiente_id += 1;
-        self.categorias.push(CategoriaGuardada { id, nombre: nombre.to_string() });
+        self.categorias.push(CategoriaGuardada { id, nombre: nombre.to_string(), fija: false });
         Ok(id)
     }
     fn nombre_de_categoria(&self, id: i64) -> Result<String, ErrorAlmacen> {
@@ -930,6 +930,15 @@ impl AlmacenCatalogos for CatalogosEnMemoria {
     }
     fn eliminar_categoria(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
         self.categorias.retain(|c| c.id != id);
+        Ok(())
+    }
+    fn marcar_categoria_fija(&mut self, id: i64, fija: bool) -> Result<(), ErrorAlmacen> {
+        let c = self
+            .categorias
+            .iter_mut()
+            .find(|c| c.id == id)
+            .ok_or(ErrorAlmacen::NoEncontrado { entidad: "la categoría", id })?;
+        c.fija = fija;
         Ok(())
     }
     fn clientes(&self) -> Result<Vec<ClienteGuardado>, ErrorAlmacen> {

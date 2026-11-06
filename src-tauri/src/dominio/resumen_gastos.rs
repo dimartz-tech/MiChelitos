@@ -42,6 +42,21 @@
 //! 6. Un `Estable` lleva su motivo (`MotivoEstable`): `DentroDelUmbral` si el cambio no pasa del 10 %, y `PocoCambio`
 //!    si pasa del 10 % pero la diferencia es menor que el mínimo absoluto.
 //!
+//! ## Fijo y variable
+//!
+//! Decisión D6 del titular: cada categoría lleva una marca **fija** (gasto fijo/recurrente) que **él** elige; no se
+//! detecta por el texto. El resumen reparte el total del mes en dos segmentos, `totales_fijo` y `totales_variable`, que
+//! suman **exactamente** el total (cada fila está en uno solo, y los tres son sumas de los mismos importes por fila).
+//! Mismas conversión USD y mismas exclusiones que el resto. Lleva también el mes anterior, la variación y el peso de
+//! cada uno sobre el total en milésimas (`dividir_redondeando`). Reglas:
+//!
+//! * La fila sintética «Cargos derivados» (`ID_CARGOS_DERIVADOS`) cuenta siempre como **variable**, aunque la categoría
+//!   real del gasto derivado esté marcada fija: lo que otra operación genera no es un gasto recurrente que el titular
+//!   haya elegido.
+//! * La marca es **actual**, no histórica: es una propiedad de la categoría, así que al marcarla o desmarcarla cambia
+//!   la lectura de todos los meses, también de los ya cerrados.
+//! * Una categoría fija sin gasto en el mes no tiene fila y aporta cero.
+//!
 //! ## Cómo se redondea
 //!
 //! La conversión redondea una vez por cubo, así que el importe de una fila es exacto respecto de sus datos y el total
@@ -70,6 +85,8 @@ pub struct FilaAgregadoGasto {
     pub divisa: String,
     /// El gasto lo creó otra operación (comisión de abono, cargo de avance).
     pub derivado: bool,
+    /// La categoría está marcada como gasto fijo. Un derivado nunca cuenta como fijo (ver «Fijo y variable»).
+    pub fija: bool,
     /// `monto + costo_adicional`, en la divisa del gasto.
     pub centavos: i64,
     /// De `centavos`, lo que corresponde a gastos USD **liquidados**, en dólares (solo el `monto`).
@@ -180,8 +197,22 @@ pub struct FilaResumen {
     pub categoria_id: i64,
     pub categoria_nombre: String,
     pub derivado: bool,
+    /// La categoría está marcada como gasto fijo (siempre `false` en la fila de cargos derivados).
+    pub fija: bool,
     pub medidas: Medidas,
     pub tendencia: Tendencia,
+}
+
+/// Uno de los dos segmentos del total (fijo o variable). Todo en pesos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SegmentoFijoVariable {
+    pub importe: Dinero,
+    /// Parte del total del mes en milésimas (1000 = 100 %). Cero si el total no es positivo.
+    pub porcentaje_milesimas: i64,
+    /// El mismo segmento en el mes anterior completo.
+    pub anterior: Dinero,
+    /// Variación contra el mes anterior, en puntos básicos. `None` si el anterior no es positivo.
+    pub variacion_anterior_pb: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -198,6 +229,10 @@ pub struct ResumenMensual {
     pub filas: Vec<FilaResumen>,
     /// La suma de las filas.
     pub totales: Medidas,
+    /// Lo que suman las filas de categorías marcadas fijas. `fijo + variable = totales.importe`, exactamente.
+    pub totales_fijo: SegmentoFijoVariable,
+    /// Lo que suman las demás filas, incluida la de cargos derivados.
+    pub totales_variable: SegmentoFijoVariable,
     /// La tendencia del total: la suma, mes a mes, de la de las filas.
     pub tendencia_total: Tendencia,
     /// Los meses con algún gasto (del más reciente al más antiguo), para el selector.
@@ -208,6 +243,7 @@ pub struct ResumenMensual {
 struct Acumulado {
     nombre: String,
     derivado: bool,
+    fija: bool,
     dop: i64,
     usd: i64,
     usd_liquidado_origen: i64,
@@ -257,6 +293,8 @@ fn acumular(
         } else {
             a.dop += f.centavos;
         }
+        // Un derivado nunca es fijo; para una categoría real la marca viene de la fila.
+        a.fija = !f.derivado && (a.fija || f.fija);
         a.n += f.n;
     }
     mapa
@@ -422,6 +460,7 @@ pub fn resumen_por_mes(
     let cero = Acumulado::default();
     let mut brutas: Vec<(i64, String, bool, Dinero, Dinero, Option<Dinero>, Option<Dinero>, i64, i64)> = Vec::new();
     let mut series: BTreeMap<i64, Vec<PuntoTendencia>> = BTreeMap::new();
+    let mut fijas: BTreeMap<i64, bool> = BTreeMap::new();
     for id in ids {
         let a = actual.get(&id).unwrap_or(&cero);
         let p = anterior.get(&id).unwrap_or(&cero);
@@ -432,6 +471,8 @@ pub fn resumen_por_mes(
             .next()
             .unwrap_or_default();
         let derivado = id == ID_CARGOS_DERIVADOS;
+        let fija = [actual.get(&id), anterior.get(&id), promedios.get(&id)].into_iter().flatten().any(|x| x.fija);
+        fijas.insert(id, fija);
         let md = match &mismo_dia {
             Some(mapa) => Some(mapa.get(&id).unwrap_or(&cero).en_pesos(tasa_usd)?),
             None => None,
@@ -458,6 +499,22 @@ pub fn resumen_por_mes(
     let total_anterior = dop(suma(&|b| b.4.centavos()));
     let total_mismo_dia = mismo_dia.as_ref().map(|_| dop(suma(&|b| b.5.map_or(0, |d| d.centavos()))));
     let total_promedio = if meses_promedio > 0 { Some(dop(suma(&|b| b.6.map_or(0, |d| d.centavos())))) } else { None };
+    let (fijo_importe, fijo_anterior) = brutas
+        .iter()
+        .filter(|b| fijas[&b.0])
+        .fold((0i64, 0i64), |(i, a), b| (i + b.3.centavos(), a + b.4.centavos()));
+    let segmento = |importe: i64, anterior: i64| SegmentoFijoVariable {
+        importe: dop(importe),
+        porcentaje_milesimas: milesimas(dop(importe), total_importe),
+        anterior: dop(anterior),
+        variacion_anterior_pb: variacion_pb(dop(importe), dop(anterior)),
+    };
+    let totales_fijo = segmento(fijo_importe, fijo_anterior);
+    // El variable es el resto de los mismos importes por fila: así la suma es exacta, no una resta de redondeos.
+    let totales_variable = segmento(
+        brutas.iter().filter(|b| !fijas[&b.0]).map(|b| b.3.centavos()).sum(),
+        brutas.iter().filter(|b| !fijas[&b.0]).map(|b| b.4.centavos()).sum(),
+    );
     let total_usd = suma(&|b| b.7);
     let total_n = suma(&|b| b.8);
 
@@ -483,6 +540,7 @@ pub fn resumen_por_mes(
             categoria_id: id,
             categoria_nombre: nombre,
             derivado,
+            fija: fijas.get(&id).copied().unwrap_or(false),
             medidas: medidas(imp, total_importe, ant, md, prom, usd, n),
             tendencia: tendencia_de(series.remove(&id).unwrap_or_default()),
         })
@@ -504,6 +562,8 @@ pub fn resumen_por_mes(
         meses_promedio,
         filas: filas_resumen,
         totales: medidas(total_importe, total_importe, total_anterior, total_mismo_dia, total_promedio, total_usd, total_n),
+        totales_fijo,
+        totales_variable,
         tendencia_total: tendencia_de(serie_total),
         meses_disponibles,
     })
@@ -530,6 +590,7 @@ mod tests {
             categoria_nombre: nombre.into(),
             divisa: divisa.into(),
             derivado: false,
+            fija: false,
             centavos,
             liquidado_origen_centavos: 0,
             liquidado_dop_centavos: None,
@@ -1089,5 +1150,126 @@ mod tests {
         assert_eq!(de(&m, 2).tendencia.direccion, DireccionTendencia::Estable);
         assert_eq!(de(&m, 2).tendencia.motivo_estable, Some(MotivoEstable::PocoCambio));
         assert_eq!(m.tendencia_total.motivo_estable, Some(MotivoEstable::DentroDelUmbral));
+    }
+
+    // ---- Fijo/recurrente y variable ----
+
+    fn fija(mut f: FilaAgregadoGasto) -> FilaAgregadoGasto {
+        f.fija = true;
+        f
+    }
+
+    fn derivada(mut f: FilaAgregadoGasto) -> FilaAgregadoGasto {
+        f.derivado = true;
+        f
+    }
+
+    fn suman_el_total(r: &ResumenMensual) {
+        assert_eq!(
+            r.totales_fijo.importe.centavos() + r.totales_variable.importe.centavos(),
+            r.totales.importe.centavos(),
+            "fijo + variable = total del mes"
+        );
+        assert_eq!(
+            r.totales_fijo.anterior.centavos() + r.totales_variable.anterior.centavos(),
+            r.totales.anterior.centavos(),
+            "fijo + variable = total del mes anterior"
+        );
+    }
+
+    #[test]
+    fn fijo_mas_variable_es_el_total_con_dolares_exclusiones_y_derivados() {
+        let tasa_fea = TasaCambio::nueva(58.7351).unwrap();
+        let filas = vec![
+            fija(pesos(2026, 9, 1, 1, "Seguros", 123_457)),
+            fija(fila(2026, 9, 2, 2, "Suscripciones", "USD", 1_333)),
+            fila(2026, 9, 2, 2, "Suscripciones", "USD", 333),
+            pesos(2026, 9, 3, 3, "Comida", 98_765),
+            fija(pesos(2026, 9, 4, 4, "Excluida", 77_777)),
+            derivada(fija(pesos(2026, 9, 5, 1, "Seguros", 1_523))),
+            // Mes anterior.
+            fija(pesos(2026, 8, 1, 1, "Seguros", 100_001)),
+            pesos(2026, 8, 3, 3, "Comida", 55_555),
+            derivada(pesos(2026, 8, 9, 3, "Comida", 4_477)),
+        ];
+        let opciones = OpcionesResumen { excluir_categorias: vec![4] };
+        let r = resumen_por_mes(&filas, (2026, 9), fecha(2026, 10, 28), 0, tasa_fea, &opciones).unwrap();
+        suman_el_total(&r);
+        let esperado_fijo = de(&r, 1).medidas.importe.centavos() + de(&r, 2).medidas.importe.centavos();
+        assert_eq!(r.totales_fijo.importe.centavos(), esperado_fijo);
+        assert!(de(&r, 2).medidas.usd_aparte.centavos() > 0 && de(&r, 2).fija);
+        assert_eq!(
+            r.totales_variable.importe.centavos(),
+            de(&r, 3).medidas.importe.centavos() + de(&r, ID_CARGOS_DERIVADOS).medidas.importe.centavos()
+        );
+        assert!(r.filas.iter().all(|f| f.categoria_id != 4), "la excluida no cuenta en ninguno");
+        assert_eq!(r.totales_fijo.anterior.centavos(), 100_001);
+        assert_eq!(r.totales_variable.anterior.centavos(), 60_032);
+    }
+
+    #[test]
+    fn los_cargos_derivados_cuentan_como_variable_aunque_su_categoria_sea_fija() {
+        let filas = vec![fija(pesos(2026, 9, 1, 1, "Seguros", 10_000)), derivada(fija(pesos(2026, 9, 2, 1, "Seguros", 2_345)))];
+        let r = resumir(&filas, (2026, 9), fecha(2026, 10, 28), 0);
+        assert!(de(&r, 1).fija);
+        assert!(!de(&r, ID_CARGOS_DERIVADOS).fija);
+        assert_eq!(r.totales_fijo.importe.centavos(), 10_000);
+        assert_eq!(r.totales_variable.importe.centavos(), 2_345);
+        suman_el_total(&r);
+    }
+
+    #[test]
+    fn los_porcentajes_fijo_y_variable_se_redondean_en_milesimas_mitad_lejos_de_cero() {
+        // 1 de 8 = 125 milésimas exactas; 1 de 3 = 333,33 -> 333; 2 de 3 = 666,67 -> 667.
+        let r = resumir(&[fija(pesos(2026, 9, 1, 1, "A", 1)), pesos(2026, 9, 1, 2, "B", 2)], (2026, 9), fecha(2026, 10, 28), 0);
+        assert_eq!((r.totales_fijo.porcentaje_milesimas, r.totales_variable.porcentaje_milesimas), (333, 667));
+        // 1/8 -> 125; 7/8 -> 875. Y un caso en la mitad exacta: 1 de 2000 = 0,5 milésimas -> 1.
+        let r = resumir(&[fija(pesos(2026, 9, 1, 1, "A", 1)), pesos(2026, 9, 1, 2, "B", 7)], (2026, 9), fecha(2026, 10, 28), 0);
+        assert_eq!((r.totales_fijo.porcentaje_milesimas, r.totales_variable.porcentaje_milesimas), (125, 875));
+        let r = resumir(&[fija(pesos(2026, 9, 1, 1, "A", 1)), pesos(2026, 9, 1, 2, "B", 1_999)], (2026, 9), fecha(2026, 10, 28), 0);
+        assert_eq!(r.totales_fijo.porcentaje_milesimas, 1, "0,5 milésimas se redondea lejos de cero");
+    }
+
+    #[test]
+    fn la_variacion_del_fijo_y_del_variable_es_contra_el_mes_anterior() {
+        let filas = vec![
+            fija(pesos(2026, 8, 1, 1, "Seguros", 100_000)),
+            fija(pesos(2026, 9, 1, 1, "Seguros", 110_000)),
+            pesos(2026, 8, 2, 2, "Comida", 50_000),
+            pesos(2026, 9, 2, 2, "Comida", 40_000),
+        ];
+        let r = resumir(&filas, (2026, 9), fecha(2026, 10, 28), 0);
+        assert_eq!(r.totales_fijo.variacion_anterior_pb, Some(1_000));
+        assert_eq!(r.totales_variable.variacion_anterior_pb, Some(-2_000));
+        // Sin mes anterior: sin variación.
+        let sola = resumir(&[fija(pesos(2026, 9, 1, 1, "Seguros", 100))], (2026, 9), fecha(2026, 10, 28), 0);
+        assert_eq!(sola.totales_fijo.variacion_anterior_pb, None);
+        assert_eq!(sola.totales_variable.variacion_anterior_pb, None);
+    }
+
+    #[test]
+    fn una_categoria_fija_sin_gasto_en_el_mes_no_tiene_fila_y_aporta_cero() {
+        let filas = vec![fija(pesos(2026, 8, 1, 1, "Seguros", 10_000)), pesos(2026, 9, 2, 2, "Comida", 5_000)];
+        let r = resumir(&filas, (2026, 9), fecha(2026, 10, 28), 0);
+        assert_eq!(r.totales_fijo.importe.centavos(), 0);
+        assert_eq!(r.totales_fijo.anterior.centavos(), 10_000, "el mes anterior sí lo tuvo");
+        assert_eq!(r.totales_fijo.porcentaje_milesimas, 0);
+        assert_eq!(r.totales_variable.porcentaje_milesimas, 1_000);
+        assert_eq!(r.totales_fijo.variacion_anterior_pb, Some(-10_000));
+        // La fila existe porque el mes anterior tuvo gasto, y es fija.
+        assert!(de(&r, 1).fija);
+        suman_el_total(&r);
+    }
+
+    #[test]
+    fn sin_ninguna_fija_todo_es_variable_y_un_mes_vacio_da_ceros() {
+        let r = resumir(&[pesos(2026, 9, 1, 1, "Comida", 12_345), pesos(2026, 9, 1, 2, "Ocio", 6_789)], (2026, 9), fecha(2026, 10, 28), 0);
+        assert_eq!(r.totales_fijo.importe.centavos(), 0);
+        assert_eq!(r.totales_variable.importe.centavos(), r.totales.importe.centavos());
+        assert_eq!(r.totales_variable.porcentaje_milesimas, 1_000);
+        assert!(r.filas.iter().all(|f| !f.fija));
+        let vacio = resumir(&[pesos(2026, 7, 1, 1, "Comida", 100)], (2026, 9), fecha(2026, 10, 28), 0);
+        assert_eq!((vacio.totales_fijo.importe.centavos(), vacio.totales_variable.importe.centavos()), (0, 0));
+        assert_eq!(vacio.totales_fijo.porcentaje_milesimas, 0);
     }
 }

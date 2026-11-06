@@ -9,8 +9,9 @@ import {
     etiquetaDeMes, filasOrdenadas, htmlDeGastoPorCategoria, idsDeInversionYObligaciones, mesDeValor, mesesDelSelector,
     notaDeDolares, porcentajeDeMilesimas, valorDeMes, variacionDePb,
     alturasDeBarras, descripcionDeTendencia, etiquetaDeDireccion, htmlDeTendencia,
+    AYUDA_DE_FIJAS, filasFiltradas, filtroDeValor, htmlDeFijoYVariable, textoDeSegmento,
 } from '../../../src/js/vistas/resumen_gastos.js';
-import { eleccion, fila, medidas, resumen, tendencia } from '../ayudas/resumen_gastos_datos.js';
+import { eleccion, fila, medidas, resumen, segmento, tendencia } from '../ayudas/resumen_gastos_datos.js';
 
 const dibujar = (r = resumen(), e = eleccion()) => htmlDeGastoPorCategoria({ tipo: 'ok', resumen: r }, e);
 
@@ -261,4 +262,93 @@ test('los estados cargando y error no dibujan tendencia', () => {
     }
     const vacio = dibujar(resumen({ filas: [] }));
     assert.doesNotMatch(vacio, /rg-tendencia/);
+});
+
+// --- Fijo/recurrente y variable ---
+
+const FIJAS = () => resumen({
+    filas: [
+        fila(1, 'Comida', { importe: '1500.10', porcentaje_milesimas: 600 }),
+        fila(3, 'Seguros', { importe: '800.07', porcentaje_milesimas: 320 }, false, tendencia(), true),
+        fila(-1, 'Cargos derivados', { importe: '50.03', porcentaje_milesimas: 20 }, true),
+        fila(4, 'Suscripciones', { importe: '150.00', porcentaje_milesimas: 60 }, false, tendencia(), true),
+    ],
+    totales: medidas({ importe: '2500.20', porcentaje_milesimas: 1000 }),
+    totales_fijo: segmento({ importe: '950.07', porcentaje_milesimas: 380, anterior: '900.01', variacion_anterior_pb: 556 }),
+    totales_variable: segmento({ importe: '1550.13', porcentaje_milesimas: 620, anterior: '1700.02', variacion_anterior_pb: -882 }),
+});
+
+test('la categoría fija lleva la marca «fija / recurrente» con símbolo y texto; las variables y los derivados no', () => {
+    const html = dibujar(FIJAS());
+    const filas = html.split('<tr').filter(t => t.includes('<th scope="row"'));
+    const conMarca = filas.filter(t => t.includes('rg-marca-fija')).map(t => /<th scope="row"[^>]*>([^<]+)/.exec(t)[1].trim());
+    assert.deepEqual(conMarca, ['Seguros', 'Suscripciones']);
+    assert.match(html, /<span aria-hidden="true">↻<\/span> fija \/ recurrente/);
+    assert.ok(html.includes(`title="${AYUDA_DE_FIJAS}"`), 'la ayuda dice que el monto puede cambiar');
+    assert.match(AYUDA_DE_FIJAS, /aunque el monto cambie un poco/);
+});
+
+test('la línea de resumen: Fijo/recurrente y Variable con importe, porcentaje y variación en flecha y texto', () => {
+    const html = dibujar(FIJAS());
+    assert.match(html, /Fijo\/recurrente: DOP 950\.07 \(38\.0 %\)/);
+    assert.match(html, /Variable: DOP 1,550\.13 \(62\.0 %\)/);
+    assert.match(html, /▲<\/span> sube 5\.56 %/);
+    assert.match(html, /▼<\/span> baja 8\.82 %/);
+    assert.match(html, /frente al mes anterior \(DOP 900\.01\)/);
+    assert.equal(textoDeSegmento('Variable', FIJAS().totales_variable), 'Variable: DOP 1,550.13 (62.0 %)');
+});
+
+test('sin mes anterior la variación dice «—» y sin ninguna fija todo el total es variable', () => {
+    const r = resumen();
+    const html = htmlDeFijoYVariable(r);
+    assert.match(html, /Fijo\/recurrente: DOP 0\.00 \(0\.0 %\)[\s\S]*—/);
+    assert.match(html, /Variable: DOP 2,024\.68 \(100\.0 %\)/);
+    assert.doesNotMatch(dibujar(r), /rg-marca-fija/);
+});
+
+test('el filtro solo filtra filas: los totales, la línea de resumen y el pie no cambian, y lo avisa', () => {
+    const todas = dibujar(FIJAS(), eleccion({ filtro: 'todas' }));
+    const soloFijas = dibujar(FIJAS(), eleccion({ filtro: 'fijas' }));
+    const soloVariables = dibujar(FIJAS(), eleccion({ filtro: 'variables' }));
+    const nombres = h => [...h.matchAll(/<th scope="row" style="text-align:left;">([^<]+)/g)].map(m => m[1].trim());
+    assert.deepEqual(nombres(todas), ['Comida', 'Seguros', 'Suscripciones', 'Cargos derivados', 'Total del mes']);
+    assert.deepEqual(nombres(soloFijas), ['Seguros', 'Suscripciones', 'Total del mes (todas las categorías)']);
+    assert.deepEqual(nombres(soloVariables), ['Comida', 'Cargos derivados', 'Total del mes (todas las categorías)']);
+    for (const h of [todas, soloFijas, soloVariables]) {
+        assert.match(h, /Total DOP 2,500\.20/);
+        assert.match(h, /<td style="text-align:right;"><strong>2,500\.20<\/strong><\/td>/);
+        assert.match(h, /Fijo\/recurrente: DOP 950\.07/);
+        assert.match(h, /Variable: DOP 1,550\.13/);
+    }
+    assert.doesNotMatch(todas, /rg-aviso-filtro/);
+    assert.match(soloFijas, /rg-aviso-filtro[^>]*>Filtro activo: la tabla muestra solo las categorías fijas o recurrentes\. Es solo un filtro de filas: el total y la línea de arriba son los del mes completo/);
+    assert.match(soloVariables, /solo las categorías variables/);
+});
+
+test('un filtro sin filas lo dice en la tabla, sin romperla', () => {
+    const sinFijas = dibujar(resumen(), eleccion({ filtro: 'fijas' }));
+    assert.match(sinFijas, /Ninguna categoría fija o recurrente tuvo gasto en febrero 2027/);
+    assert.match(sinFijas, /<table/);
+});
+
+test('el selector del filtro: tres opciones, la elegida marcada, presente también cargando; filasFiltradas y filtroDeValor', () => {
+    const html = htmlDeGastoPorCategoria({ tipo: 'cargando' }, eleccion({ filtro: 'fijas' }));
+    assert.match(html, /id="rg-filtro"/);
+    assert.match(html, /<option value="todas">Todas<\/option>/);
+    assert.match(html, /<option value="fijas" selected>Solo fijas o recurrentes<\/option>/);
+    assert.match(html, /<option value="variables">Solo variables<\/option>/);
+    assert.match(html, /resumenGastoFiltro/);
+    const filas = FIJAS().filas;
+    assert.deepEqual(filasFiltradas(filas, 'fijas').map(f => f.categoria_id), [3, 4]);
+    assert.deepEqual(filasFiltradas(filas, 'variables').map(f => f.categoria_id), [1, -1]);
+    assert.equal(filasFiltradas(filas, 'todas').length, 4);
+    assert.deepEqual(['fijas', 'variables', 'todas', 'otra cosa', ''].map(filtroDeValor), ['fijas', 'variables', 'todas', 'todas', 'todas']);
+});
+
+test('la marca, la línea de resumen y el aviso escapan un nombre hostil y no llevan manejadores en línea', () => {
+    const hostil = `<img src=x onerror=alert(1)> "'&`;
+    const html = dibujar(resumen({ filas: [fila(1, hostil, {}, false, tendencia(), true)] }), eleccion({ filtro: 'fijas' }));
+    assert.doesNotMatch(html, /<img/);
+    assert.match(html, /rg-marca-fija/);
+    assert.doesNotMatch(html.replace(/"[^"]*"/g, '""'), /<[a-z][^>]*\son\w+=/i, 'ninguna etiqueta lleva atributos on*= (los valores entrecomillados no cuentan)');
 });

@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { VistaAjustes, MANEJADORES_AJUSTES, puenteAjustes } from '../../../src/js/vistas/ajustes.js';
 import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
 
-const CATEGORIAS = [{ id: 1, nombre: 'Otros' }, { id: 2, nombre: 'Suscripciones' }, { id: 3, nombre: 'Comida' }];
+const CATEGORIAS = [{ id: 1, nombre: 'Otros', fija: false }, { id: 2, nombre: 'Suscripciones', fija: true }, { id: 3, nombre: 'Comida', fija: false }];
 const CLIENTES = [{ id: 4, nombre: 'Cliente Uno', rnc: '101000001' }];
 const CUENTAS = [
     { id: 5, nombre: 'Cuenta Alfa', divisa: 'DOP', balance_actual: 750, entidad: 'Banco Alfa', comision_pago_impuestos: 12.5 },
@@ -54,6 +54,11 @@ function montar({ datos = DATOS(), campos = {}, falla = {}, confirmar = true, re
         listarRespaldos: async () => { if (falla.listarRespaldos) throw new Error('sin carpeta'); return datos.respaldos; },
         obtenerCorrecciones: async () => { if (falla.obtenerCorrecciones) throw new Error(falla.obtenerCorrecciones); return correcciones; },
         crearCategoria: registrar('crearCategoria'), eliminarCategoria: registrar('eliminarCategoria'),
+        marcarCategoriaFija: async (id, fija) => {
+            llamadas.push(['marcarCategoriaFija', id, fija]);
+            if (falla.marcarCategoriaFija) throw new Error(falla.marcarCategoriaFija);
+            return { id, nombre: datos.categorias.find(c => c.id === id)?.nombre ?? '?', fija };
+        },
         crearCliente: registrar('crearCliente'), eliminarCliente: registrar('eliminarCliente'),
         crearCuenta: registrar('crearCuenta'), actualizarCuenta: registrar('actualizarCuenta'), archivarCuenta: registrar('archivarCuenta'), reactivarCuenta: registrar('reactivarCuenta'),
         obtenerCuentasArchivadas: async () => datos.cuentasArchivadas ?? [],
@@ -571,4 +576,54 @@ test('sin cuentas archivadas no hay bloque de archivadas', async () => {
     const t = montar({ datos: { ...DATOS(), cuentasArchivadas: [] } });
     await t.vista.render();
     assert.doesNotMatch(t.pantalla.contenido.innerHTML, /Cuentas archivadas/);
+});
+
+// --- Categorías fijas / recurrentes ---
+
+test('cada categoría trae su casillero «Fija / recurrente», con la marca actual, etiqueta accesible y ayuda', async () => {
+    const t = montar();
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    const casilleros = [...html.matchAll(/<input type="checkbox" class="cat-fija"[^>]*>/g)].map(m => m[0]);
+    assert.equal(casilleros.length, 3);
+    assert.deepEqual(casilleros.map(c => /\schecked/.test(c)), [false, true, false], 'la marca viene del catálogo');
+    assert.match(casilleros[1], /aria-label="Fija \/ recurrente: Suscripciones"/);
+    const llamadas = llamadasDelManejador(html, 'handleMarcarCategoriaFija');
+    assert.deepEqual(llamadas.map(a => a.slice(1)), [[1], [2], [3]]);
+    assert.equal(llamadas[0][0], 'ELEMENTO');
+    assert.match(html, /Marca las categorías cuyo gasto se repite cada período, aunque el monto cambie un poco/);
+    assert.doesNotMatch(html, /\son(click|change)=/);
+});
+
+test('el nombre hostil de una categoría se escapa en la etiqueta del casillero', async () => {
+    const datos = DATOS();
+    datos.categorias = [{ id: 9, nombre: `<img src=x onerror=alert(1)> "'`, fija: false }];
+    const t = montar({ datos });
+    await t.vista.render();
+    const html = t.pantalla.contenido.innerHTML;
+    assert.doesNotMatch(html, /<img/);
+    assert.match(html, /aria-label="Fija \/ recurrente: &lt;img/);
+});
+
+test('marcar envía (id, true), avisa y no redibuja; desmarcar envía false', async () => {
+    const t = montar();
+    const control = { checked: true };
+    await t.vista.handleMarcarCategoriaFija(control, 3);
+    assert.deepEqual(t.llamadas, [['marcarCategoriaFija', 3, true]]);
+    assert.deepEqual(t.avisos.map(a => a.mensaje), ['«Comida» ahora es fija / recurrente.']);
+    assert.equal(control.checked, true);
+    assert.deepEqual(t.rutas, []);
+    const otro = { checked: false };
+    await t.vista.handleMarcarCategoriaFija(otro, 3);
+    assert.deepEqual(t.llamadas.at(-1), ['marcarCategoriaFija', 3, false]);
+    assert.match(t.avisos.at(-1).mensaje, /ahora es variable/);
+});
+
+test('si Rust rechaza el cambio el casillero vuelve a como estaba y se avisa del error', async () => {
+    const t = montar({ falla: { marcarCategoriaFija: 'No se encontró la categoría con identificador 3.' } });
+    const control = { checked: true };
+    await t.vista.handleMarcarCategoriaFija(control, 3);
+    assert.equal(control.checked, false, 'se deshace el cambio visible');
+    assert.equal(t.avisos.at(-1).tipo, 'error');
+    assert.match(t.avisos.at(-1).mensaje, /No se encontró la categoría/);
 });
