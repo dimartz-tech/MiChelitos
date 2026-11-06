@@ -126,6 +126,12 @@ pub(super) fn lee_fotos<T>(f: impl FnOnce(&mut FotosSqlite) -> Result<T, String>
     con_fotos_como(false, f)
 }
 
+/// Un listado que cruza las fotos del patrimonio con el almacén de gastos, presupuestos y situación **en una sola
+/// transacción diferida**: las dos lecturas ven el mismo instante de la base y ninguna ocupa el turno de escritura.
+pub(super) fn lee_fotos_y_almacen<T>(f: impl FnOnce(&FotosSqlite, &mut AlmacenSqlite) -> Result<T, String>) -> Result<T, String> {
+    en_transaccion(false, |tx| f(&FotosSqlite::nuevo(tx), &mut AlmacenSqlite::nuevo(tx)))
+}
+
 /// La fecha de hoy como la guarda la aplicación: `dd/mm/aaaa`.
 pub(super) fn hoy_dd_mm_aaaa() -> String {
     Local::now().format("%d/%m/%Y").to_string()

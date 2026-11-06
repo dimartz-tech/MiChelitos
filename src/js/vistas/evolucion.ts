@@ -3,11 +3,12 @@
 // Muestra el historial del patrimonio que ya guardan las fotos mensuales
 // (`obtener_fotos_patrimonio`): una gráfica SVG propia, una tabla equivalente para quien no
 // ve la gráfica, el resumen del último mes y el desglose por partidas de la foto elegida. Lo
-// único que escribe es «Tomar foto ahora» (`tomar_foto_patrimonio`, origen `manual`).
+// único que escribe es «Tomar foto ahora» (`tomar_foto_patrimonio`, origen `manual`). El bloque «Cómo aumentar tu
+// patrimonio» (`vistas/recomendaciones.ts`) muestra reglas descriptivas, no asesoría financiera, y es de solo lectura.
 //
 // Dinero: los importes llegan como **texto** y aquí no pasan por `Number`: la aritmética
 // (variaciones, escala del eje) es en centavos enteros (`nucleo/evolucion.ts`) y la gráfica la
-// dibuja una función pura (`nucleo/grafica.ts`). Sin reconstrucción del pasado ni recomendaciones.
+// dibuja una función pura (`nucleo/grafica.ts`). Sin reconstrucción del pasado.
 
 import type { ApiDe, Avisos, Dom, Enrutador, Pantalla, Vista } from '../ui/servicios';
 
@@ -18,8 +19,9 @@ import {
     type Serie, type Variacion,
 } from '../nucleo/evolucion.js';
 import { generarGrafica } from '../nucleo/grafica.js';
+import { htmlRecomendaciones } from './recomendaciones.js';
 
-type ApiEvolucion = ApiDe<'obtenerFotosPatrimonio' | 'tomarFotoPatrimonio'>;
+type ApiEvolucion = ApiDe<'obtenerFotosPatrimonio' | 'tomarFotoPatrimonio' | 'obtenerRecomendaciones'>;
 type Foto = Awaited<ReturnType<ApiEvolucion['obtenerFotosPatrimonio']>>[number];
 type Campo = HTMLInputElement;
 
@@ -102,10 +104,20 @@ export class VistaEvolucion implements Vista {
             cuerpo = `${this.htmlResumen(fotos)}${this.htmlGrafica(fotos)}${this.htmlTabla(fotos)}${this.htmlDesglose(fotos, elegida)}`;
         }
 
-        pantalla.contenido.innerHTML = `${cabecera}${cuerpo}${this.htmlTomarFoto()}`;
+        pantalla.contenido.innerHTML = `${cabecera}${cuerpo}${await this.bloqueDeRecomendaciones()}${this.htmlTomarFoto()}`;
     }
 
     // --- piezas ---
+
+    /** El bloque de recomendaciones. Si Rust no responde, el resto de la pestaña se dibuja igual. */
+    private async bloqueDeRecomendaciones(): Promise<string> {
+        try {
+            const resultado = await this.dep.api.obtenerRecomendaciones();
+            return htmlRecomendaciones(resultado ?? null, resultado ? null : 'respuesta vacía');
+        } catch (err) {
+            return htmlRecomendaciones(null, String(err));
+        }
+    }
 
     private htmlResumen(fotos: Foto[]): string {
         const ultima = fotos[fotos.length - 1], anterior = fotos[fotos.length - 2];

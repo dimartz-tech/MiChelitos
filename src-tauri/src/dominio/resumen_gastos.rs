@@ -398,6 +398,25 @@ pub fn evaluar_tendencia(puntos: &[PuntoTendencia]) -> (DireccionTendencia, Opti
     }
 }
 
+/// Los dos promedios que comparó la regla de dirección: el de los 3 últimos meses completos (reciente) y el de hasta 3
+/// meses completos anteriores a esos (previo), cada uno redondeado al centavo (mitad lejos de cero). Son para **mostrar**:
+/// la decisión de `evaluar_tendencia` se toma con productos cruzados, sin redondear. `None` con menos de 4 meses
+/// completos con dato. Aquí no se mira el umbral: solo se enseñan las cifras que lo sustentan.
+pub fn promedios_reciente_y_previo(puntos: &[PuntoTendencia]) -> Option<(Dinero, Dinero)> {
+    let completos: Vec<i128> = puntos
+        .iter()
+        .filter(|p| !p.parcial)
+        .filter_map(|p| p.importe.map(|d| d.centavos() as i128))
+        .collect();
+    if completos.len() < 4 {
+        return None;
+    }
+    let (previos, recientes) = completos.split_at(completos.len() - 3);
+    let previos = &previos[previos.len().saturating_sub(3)..];
+    let media = |v: &[i128]| dividir_redondeando(v.iter().sum::<i128>(), v.len() as i128) as i64;
+    Some((dop(media(recientes)), dop(media(previos))))
+}
+
 fn tendencia_de(meses: Vec<PuntoTendencia>) -> Tendencia {
     let (direccion, motivo_estable) = evaluar_tendencia(&meses);
     Tendencia { meses, direccion, motivo_estable }
@@ -1271,5 +1290,47 @@ mod tests {
         let vacio = resumir(&[pesos(2026, 7, 1, 1, "Comida", 100)], (2026, 9), fecha(2026, 10, 28), 0);
         assert_eq!((vacio.totales_fijo.importe.centavos(), vacio.totales_variable.importe.centavos()), (0, 0));
         assert_eq!(vacio.totales_fijo.porcentaje_milesimas, 0);
+    }
+
+    // --- Promedios que sustentan la dirección (los muestran las recomendaciones) ---
+
+    fn promedios(c: &[i64], parcial: Option<i64>) -> Option<(i64, i64)> {
+        promedios_reciente_y_previo(&puntos(&todos(c), parcial)).map(|(r, p)| (r.centavos(), p.centavos()))
+    }
+
+    #[test]
+    fn los_promedios_son_los_de_los_3_ultimos_y_los_3_anteriores_meses_completos() {
+        assert_eq!(promedios(&[100_001, 100_004, 100_001, 160_007, 160_007, 160_010], None), Some((160_008, 100_002)));
+        // Con solo 4 meses completos el previo es un solo mes.
+        assert_eq!(promedios(&[100_000, 300_000, 300_000, 300_000], None), Some((300_000, 100_000)));
+        // Más de 6: solo cuentan los 6 últimos completos.
+        assert_eq!(promedios(&[9_999_999, 1, 1, 1, 4, 4, 4], None), Some((4, 1)));
+    }
+
+    #[test]
+    fn los_promedios_ignoran_el_parcial_y_exigen_4_meses() {
+        assert_eq!(promedios(&[100, 100, 100], None), None);
+        assert_eq!(promedios(&[100, 100, 100], Some(999)), None);
+        assert_eq!(promedios(&[100_000, 300_000, 300_000, 300_000], Some(99_999_999_999)), Some((300_000, 100_000)));
+        // Un mes ausente no es un cero: no entra.
+        let con_hueco = vec![None, Some(100_000), Some(300_000), Some(300_000), Some(300_000)];
+        assert_eq!(promedios_reciente_y_previo(&puntos(&con_hueco, None)).map(|(r, p)| (r.centavos(), p.centavos())), Some((300_000, 100_000)));
+    }
+
+    #[test]
+    fn el_promedio_se_redondea_con_la_mitad_lejos_de_cero() {
+        // Siempre se promedian 3 meses: 5/3 = 1.67 sube a 2; 4/3 = 1.33 baja a 1.
+        assert_eq!(promedios(&[1, 1, 1, 1, 2, 2], None), Some((2, 1)));
+        assert_eq!(promedios(&[1, 1, 2, 1, 1, 2], None), Some((1, 1)));
+    }
+
+    #[test]
+    fn la_direccion_sube_siempre_tiene_reciente_mayor_que_previo_en_los_promedios_mostrados() {
+        for c in [[100_000i64, 100_000, 100_000, 180_000, 180_000, 180_000], [50_000, 60_000, 70_000, 400_000, 500_000, 600_000]] {
+            let p = puntos(&todos(&c), None);
+            assert_eq!(direccion_de_tendencia(&p), DireccionTendencia::Sube);
+            let (reciente, previo) = promedios_reciente_y_previo(&p).unwrap();
+            assert!(reciente.centavos() > previo.centavos() + 50_000 - 1);
+        }
     }
 }
