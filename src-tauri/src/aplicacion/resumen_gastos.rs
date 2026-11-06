@@ -48,6 +48,7 @@ mod tests {
             categoria_nombre: format!("Cat {cat}"),
             divisa: "DOP".into(),
             derivado: false,
+            fija: false,
             centavos,
             liquidado_origen_centavos: 0,
             liquidado_dop_centavos: None,

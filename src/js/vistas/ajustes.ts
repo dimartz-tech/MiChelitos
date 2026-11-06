@@ -12,6 +12,7 @@
 import type { CasoCorreccion, CuentaAhorro } from '../tipos-ipc';
 import { accion, alEnviar, escaparHtml, manejador } from '../nucleo/html.js';
 import { describirRespaldo } from '../nucleo/respaldos.js';
+import { AYUDA_DE_FIJAS } from './resumen_gastos.js';
 
 /** Las pestañas del panel de correcciones: sus paneles y los botones que los alternan (acción `activarPestana`). */
 const PANELES_CORRECCION = ['corr-gastos', 'corr-ingresos', 'corr-trans'];
@@ -30,6 +31,7 @@ type ApiAjustes = ApiDe<
     | 'obtenerCorrecciones'
     | 'crearCategoria'
     | 'eliminarCategoria'
+    | 'marcarCategoriaFija'
     | 'crearCliente'
     | 'eliminarCliente'
     | 'crearCuenta'
@@ -59,7 +61,7 @@ export interface DependenciasAjustes {
 
 /** Las acciones delegadas (`data-accion*` → `appUI.…`) que la plantilla escribe. */
 export const MANEJADORES_AJUSTES = [
-    'handleAgregarCategoria', 'handleEliminarCategoria',
+    'handleAgregarCategoria', 'handleEliminarCategoria', 'handleMarcarCategoriaFija',
     'handleAgregarCliente', 'handleEliminarCliente',
     'handleAgregarCuenta', 'abrirEdicionCuenta', 'handleArchivarCuenta', 'handleReactivarCuenta',
     'handleAgregarTarjeta',
@@ -174,6 +176,7 @@ export class VistaAjustes implements Vista {
                 <div class="card" style="height:fit-content;">
                     <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">🏷️ Categorías de Gastos</h3>
                     <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">Añade nuevas etiquetas o remueve las que no utilices.</p>
+                    <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">${escaparHtml(AYUDA_DE_FIJAS)}. Solo cambia cómo se agrupa el Resumen; no toca ningún gasto ni saldo.</p>
                     
                     <form id="form-add-categoria" ${alEnviar('handleAgregarCategoria')} style="display:flex; gap:0.4rem; margin-bottom: 1rem;">
                         <input type="text" id="cat_nom" class="form-control" placeholder="Nueva categoría..." style="padding:0.5rem 0.8rem;" required>
@@ -184,6 +187,10 @@ export class VistaAjustes implements Vista {
                         ${categorias.map(c => `
                             <div style="background:rgba(255,255,255,0.01); border:1px solid var(--border-color); padding:0.5rem 0.8rem; border-radius:var(--radius-sm); display:flex; justify-content:space-between; align-items:center;">
                                 <strong>${escaparHtml(c.nombre)}</strong>
+                                <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.75rem;" title="${escaparHtml(AYUDA_DE_FIJAS)}">
+                                    <input type="checkbox" class="cat-fija" ${manejador('change', 'handleMarcarCategoriaFija', [c.id], 'elemento')}${c.fija ? ' checked' : ''} aria-label="Fija / recurrente: ${escaparHtml(c.nombre)}">
+                                    <span aria-hidden="true">↻</span> Fija / recurrente
+                                </label>
                                 ${c.nombre !== 'Otros' && c.nombre !== 'Suscripciones' ? `
                                     <button ${accion('handleEliminarCategoria', c.id)} class="btn btn-danger" style="padding:0.2rem 0.4rem; font-size:0.75rem;">🗑️</button>
                                 ` : `
@@ -878,6 +885,22 @@ export class VistaAjustes implements Vista {
         }
     }
 
+    /**
+     * Marca o desmarca una categoría como fija / recurrente. El cambio del casillero ya es la confirmación; si Rust lo
+     * rechaza, el casillero vuelve a como estaba y se avisa.
+     */
+    async handleMarcarCategoriaFija(control: { checked: boolean }, id: number): Promise<void> {
+        const { api, avisos } = this.dep;
+        const fija = control.checked;
+        try {
+            const c = await api.marcarCategoriaFija(id, fija);
+            avisos.mostrar(c.fija ? `«${c.nombre}» ahora es fija / recurrente.` : `«${c.nombre}» ahora es variable.`);
+        } catch (err) {
+            control.checked = !fija;
+            avisos.mostrar(String(err), 'error');
+        }
+    }
+
     async handleEliminarCategoria(id: number): Promise<void> {
         const { api, avisos, enrutador, dialogos } = this.dep;
         if (await dialogos.confirmar("¿Eliminar esta categoría?")) {
@@ -899,6 +922,7 @@ export class VistaAjustes implements Vista {
 export function puenteAjustes(vista: VistaAjustes): {
     handleAgregarCategoria: (e: EventoDeFormulario) => Promise<void>;
     handleEliminarCategoria: (id: number) => Promise<void>;
+    handleMarcarCategoriaFija: (control: { checked: boolean }, id: number) => Promise<void>;
     handleAgregarCliente: (e: EventoDeFormulario) => Promise<void>;
     handleEliminarCliente: (id: number) => Promise<void>;
     handleAgregarCuenta: (e: EventoDeFormulario) => Promise<void>;
@@ -917,6 +941,7 @@ export function puenteAjustes(vista: VistaAjustes): {
     return {
         handleAgregarCategoria: e => vista.handleAgregarCategoria(e),
         handleEliminarCategoria: id => vista.handleEliminarCategoria(id),
+        handleMarcarCategoriaFija: (control, id) => vista.handleMarcarCategoriaFija(control, id),
         handleAgregarCliente: e => vista.handleAgregarCliente(e),
         handleEliminarCliente: id => vista.handleEliminarCliente(id),
         handleAgregarCuenta: e => vista.handleAgregarCuenta(e),

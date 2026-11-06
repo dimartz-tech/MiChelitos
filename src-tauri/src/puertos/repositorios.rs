@@ -739,6 +739,8 @@ pub trait CatalogoDeCuentas {
 pub struct CategoriaGuardada {
     pub id: i64,
     pub nombre: String,
+    /// Marca de gasto fijo/recurrente que elige el titular. Una categoría nueva nace variable (`false`).
+    pub fija: bool,
 }
 
 /// Un cliente tal como se guarda.
@@ -761,6 +763,8 @@ pub trait AlmacenCatalogos {
     fn nombre_de_categoria(&self, id: i64) -> Result<String, ErrorAlmacen>;
     fn gastos_de_categoria(&self, id: i64) -> Result<i64, ErrorAlmacen>;
     fn eliminar_categoria(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+    /// Fija la marca fijo/variable de una categoría. `NoEncontrado` si no hay ninguna con ese identificador.
+    fn marcar_categoria_fija(&mut self, id: i64, fija: bool) -> Result<(), ErrorAlmacen>;
 
     /// Ordenados por nombre, ascendente.
     fn clientes(&self) -> Result<Vec<ClienteGuardado>, ErrorAlmacen>;

@@ -32,6 +32,8 @@ mod caso_de_uso_gherkin;
 #[cfg(test)]
 mod integracion_resumen;
 #[cfg(test)]
+mod integracion_categorias_fijas;
+#[cfg(test)]
 mod integracion_traspasos;
 #[cfg(test)]
 mod integracion_abono_tasa;
@@ -47,6 +49,7 @@ fn main() {
             comandos::catalogos::obtener_categorias,
             comandos::catalogos::crear_categoria,
             comandos::catalogos::eliminar_categoria,
+            comandos::catalogos::marcar_categoria_fija,
             comandos::gastos::obtener_gastos,
             comandos::resumen::obtener_resumen_gastos,
             comandos::gastos::crear_gasto,

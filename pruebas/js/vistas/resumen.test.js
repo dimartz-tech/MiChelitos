@@ -233,7 +233,7 @@ test('no tiene manejadores en línea: el puente solo cuelga los controles del bl
     const { html } = await dibujar();
     assert.doesNotMatch(html, /appUI\.|\son[a-z]+=/);
     const vista = new VistaResumen({ api: {}, formato: {}, pantalla: {}, dom: {}, ahora: () => new Date(), referencias: { tasaUsdADop: 1 } });
-    assert.deepEqual(Object.keys(puenteResumen(vista)).sort(), ['resumenGastoConmutar', 'resumenGastoMes', 'resumenGastoMover', 'resumenGastoPromedio']);
+    assert.deepEqual(Object.keys(puenteResumen(vista)).sort(), ['resumenGastoConmutar', 'resumenGastoFiltro', 'resumenGastoMes', 'resumenGastoMover', 'resumenGastoPromedio']);
 });
 
 const PATRIMONIO = {
