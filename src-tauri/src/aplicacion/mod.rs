@@ -16,6 +16,7 @@ pub mod prestamos;
 pub mod patrimonio;
 pub mod previsualizar_abono;
 pub mod presupuestos;
+pub mod recomendaciones;
 pub mod resumen_gastos;
 pub mod tarjetas;
 pub mod guardar_capital;

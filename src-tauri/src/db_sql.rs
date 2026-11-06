@@ -2126,7 +2126,7 @@ mod pruebas_de_transaccion {
                 continue;
             }
             let es_listado = nombre.starts_with("obtener_") || nombre.starts_with("previsualizar_") || nombre == "suscripciones_con_aviso";
-            let usa_lectura = ["lee_almacen(", "lee_catalogos(", "lee_cuentas(", "lee_prestamos(", "lee_tarjetas(", "lee_fotos("].iter().any(|h| cuerpo.contains(h));
+            let usa_lectura = ["lee_almacen(", "lee_catalogos(", "lee_cuentas(", "lee_prestamos(", "lee_tarjetas(", "lee_fotos(", "lee_fotos_y_almacen("].iter().any(|h| cuerpo.contains(h));
             let usa_escritura = ["con_almacen(", "con_catalogos(", "con_cuentas(", "con_prestamos(", "con_tarjetas(", "con_fotos("].iter().any(|h| cuerpo.contains(h));
             if es_listado {
                 assert!(!usa_escritura, "{nombre} es un listado y no debe ocupar el turno de escritura");
