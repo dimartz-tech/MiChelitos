@@ -203,5 +203,54 @@ test('elegir mes en Gastos: guarda el mes y redibuja solo Gastos', async () => {
     assert.match(html, /<option value="02\/2026" selected>/, 'el mes elegido queda seleccionado');
     assert.match(html, /Resumen de Febrero 2026/);
     // Solo lecturas: dibujar la pantalla no escribe nada.
-    assert.deepEqual([...ui.nombresLlamados].sort(), ['obtenerCategorias', 'obtenerCuentas', 'obtenerGastos', 'obtenerTarjetas']);
+    assert.deepEqual([...ui.nombresLlamados].sort(), ['obtenerCategorias', 'obtenerCuentas', 'obtenerGastos', 'obtenerPresupuestosMes', 'obtenerTarjetas']);
+});
+
+// --- presupuestos mensuales por categoría ---
+
+test('fijar presupuesto: envía la categoría y el monto como texto, avisa y redibuja', async () => {
+    const ui = cargarInterfaz({ campos: { pre_cat: '3', pre_monto: ' 0450.07 ' }, api: { fijarPresupuesto: { categoria_nombre: 'Comida', monto: '450.07' } } });
+    const e = crearEvento();
+    await ui.appUI.handleFijarPresupuesto(e);
+    assert.equal(e.prevenido, true);
+    llamoUnaVez(ui, 'fijarPresupuesto', [3, '0450.07']);
+    avisoExito(ui, /Comida.*450\.07/);
+    redibujo(ui, 'gastos');
+});
+
+test('fijar presupuesto con monto vacío, cero o negativo: no se envía', async () => {
+    for (const monto of ['', '0', '-5', 'abc']) {
+        const ui = cargarInterfaz({ campos: { pre_cat: '3', pre_monto: monto } });
+        await ui.appUI.handleFijarPresupuesto(crearEvento());
+        noLlamoANada(ui);
+        unAvisoDeError(ui, /mayor que cero/);
+        noRedibujo(ui);
+    }
+});
+
+test('fijar presupuesto sin categoría elegida: no se envía', async () => {
+    const ui = cargarInterfaz({ campos: { pre_cat: '', pre_monto: '10' } });
+    await ui.appUI.handleFijarPresupuesto(crearEvento());
+    noLlamoANada(ui);
+    unAvisoDeError(ui, /categoría/);
+});
+
+test('fijar presupuesto: si Rust rechaza, se muestra el error y no se redibuja', async () => {
+    const ui = cargarInterfaz({ campos: { pre_cat: '3', pre_monto: '10' } });
+    ui.rechazar('fijarPresupuesto', 'Error simulado de Rust');
+    await rechazoSeMuestra(ui, () => ui.appUI.handleFijarPresupuesto(crearEvento()));
+});
+
+test('quitar presupuesto: envía el id, avisa y redibuja', async () => {
+    const ui = cargarInterfaz({ api: { quitarPresupuesto: true } });
+    await ui.appUI.handleQuitarPresupuesto(5);
+    llamoUnaVez(ui, 'quitarPresupuesto', [5]);
+    avisoExito(ui, /quitado/);
+    redibujo(ui, 'gastos');
+});
+
+test('quitar presupuesto: si Rust rechaza, se muestra el error y no se redibuja', async () => {
+    const ui = cargarInterfaz();
+    ui.rechazar('quitarPresupuesto', 'Error simulado de Rust');
+    await rechazoSeMuestra(ui, () => ui.appUI.handleQuitarPresupuesto(5));
 });

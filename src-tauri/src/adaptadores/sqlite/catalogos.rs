@@ -56,8 +56,36 @@ impl AlmacenCatalogos for CatalogosSqlite<'_> {
     }
 
     fn eliminar_categoria(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        // Explícito además del `ON DELETE CASCADE`: el presupuesto se va con su categoría sin depender del PRAGMA.
+        self.tx.execute("DELETE FROM presupuestos WHERE categoria_id = ?;", [id]).map_err(fallo)?;
         self.tx.execute("DELETE FROM categorias WHERE id = ?;", [id]).map_err(fallo)?;
         Ok(())
+    }
+
+    fn presupuesto_de_categoria(&self, id: i64) -> Result<Option<i64>, ErrorAlmacen> {
+        self.nombre_de_categoria(id)?;
+        self.tx
+            .query_row("SELECT monto_centavos FROM presupuestos WHERE categoria_id = ?;", [id], |r| r.get(0))
+            .optional()
+            .map_err(fallo)
+    }
+
+    fn fijar_presupuesto(&mut self, id: i64, centavos: i64) -> Result<(), ErrorAlmacen> {
+        self.nombre_de_categoria(id)?;
+        self.tx
+            .execute(
+                "INSERT INTO presupuestos (categoria_id, monto_centavos) VALUES (?, ?)
+                 ON CONFLICT(categoria_id) DO UPDATE SET monto_centavos = excluded.monto_centavos;",
+                rusqlite::params![id, centavos],
+            )
+            .map_err(fallo)?;
+        Ok(())
+    }
+
+    fn quitar_presupuesto(&mut self, id: i64) -> Result<bool, ErrorAlmacen> {
+        self.nombre_de_categoria(id)?;
+        let filas = self.tx.execute("DELETE FROM presupuestos WHERE categoria_id = ?;", [id]).map_err(fallo)?;
+        Ok(filas > 0)
     }
 
     fn marcar_categoria_fija(&mut self, id: i64, fija: bool) -> Result<(), ErrorAlmacen> {

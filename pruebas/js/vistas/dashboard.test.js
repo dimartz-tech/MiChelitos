@@ -25,6 +25,7 @@ function datos(extra = {}) {
         informales: [{ fecha: '11/03/2027', monto: 80, monto_recibido: 50 }],
         tarjetas: [],
         prestamos: [],
+        presupuestos: { anio: 2027, mes: 3, filas: [], total_presupuesto: '0.00', total_gastado: '0.00', total_restante: '0.00' },
         ...extra,
     };
 }
@@ -42,6 +43,7 @@ async function dibujar({ d = datos() } = {}) {
             obtenerTarjetas: responde('obtenerTarjetas', d.tarjetas),
             obtenerPrestamos: responde('obtenerPrestamos', d.prestamos),
             obtenerPatrimonio: responde('obtenerPatrimonio', d.patrimonio),
+            obtenerPresupuestosMes: async (...a) => { llamadas.push(['obtenerPresupuestosMes', ...a]); if (d.fallaPresupuestos) throw new Error('sin respuesta'); return d.presupuestos; },
         },
         formato: { importe: v => `#${Number(v).toFixed(2)}#` },
         pantalla,
@@ -62,9 +64,10 @@ const importeTras = (html, etiqueta) => {
 test('consulta las siete fuentes y dibuja el título', async () => {
     const { html, llamadas } = await dibujar();
     assert.match(html, /Dashboard General/);
-    assert.deepEqual([...llamadas].sort(), [
+    assert.deepEqual(llamadas.filter(l => typeof l === 'string').sort(), [
         'obtenerCapital', 'obtenerGastos', 'obtenerIngresos', 'obtenerIngresosInformales', 'obtenerPatrimonio', 'obtenerPrestamos', 'obtenerTarjetas',
     ]);
+    assert.deepEqual(llamadas.filter(l => Array.isArray(l)), [['obtenerPresupuestosMes', 2027, 3]], 'pide los presupuestos del mes del reloj');
 });
 
 test('el patrimonio total es el que calcula el núcleo, sin sumarlo de nuevo en la vista', async () => {
@@ -167,4 +170,35 @@ test('el texto del patrimonio se escapa', async () => {
     const { html } = await dibujar({ d: datos({ patrimonio: { ...PATRIMONIO, tasa_usd_a_dop: '<img src=x>' } }) });
     assert.doesNotMatch(html, /<img src=x>/);
     assert.match(html, /&lt;img src=x&gt;/);
+});
+
+const fila = (extra = {}) => ({
+    categoria_id: 1, categoria_nombre: 'Comida', fija: false, presupuesto: '1043.17', gastado: '850.41', restante: '192.76',
+    porcentaje_milesimas: 815, estado: 'cerca', usd_aparte: '0.00', ...extra,
+});
+
+test('las categorías cerca o excedidas del mes en curso salen como recordatorios; las que van bien, no', async () => {
+    const presupuestos = {
+        anio: 2027, mes: 3, total_presupuesto: '0.00', total_gastado: '0.00', total_restante: '0.00',
+        filas: [
+            fila({ categoria_nombre: 'Ocio <b>', estado: 'excedido', gastado: '1200.07', restante: '-156.90', porcentaje_milesimas: 1150, usd_aparte: '12.34' }),
+            fila(),
+            fila({ categoria_id: 3, categoria_nombre: 'Tranquila', estado: 'ok', gastado: '10.00', restante: '990.00', porcentaje_milesimas: 10 }),
+        ],
+    };
+    const { html } = await dibujar({ d: datos({ presupuestos }) });
+    assert.match(html, /Recordatorios del Sistema/);
+    assert.match(html, /\[Presupuesto\]<\/strong> Ocio &lt;b&gt;: excedido, DOP 1,200\.07 de DOP 1,043\.17 \(115\.0 %\)\. Excedido por DOP 156\.90\./);
+    assert.match(html, /más USD 12\.34 fuera del cálculo/);
+    assert.match(html, /Comida: cerca del límite, DOP 850\.41 de DOP 1,043\.17 \(81\.5 %\)\. Restan DOP 192\.76\./);
+    assert.doesNotMatch(html, /Tranquila/);
+    assert.doesNotMatch(html, /<b>/, 'el nombre se escapa');
+    assert.match(html, /alert-banner danger/);
+    assert.match(html, /alert-banner warning/);
+});
+
+test('si los presupuestos fallan, el Inicio se dibuja igual y sin avisos de presupuesto', async () => {
+    const { html } = await dibujar({ d: datos({ fallaPresupuestos: true }) });
+    assert.match(html, /Dashboard General/);
+    assert.doesNotMatch(html, /Presupuesto\]/);
 });
