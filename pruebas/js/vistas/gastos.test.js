@@ -69,6 +69,19 @@ test('consulta las cuatro fuentes y dibuja el título y el formulario', async ()
     assert.doesNotMatch(t.pantalla.contenido.innerHTML, /undefined|NaN/);
 });
 
+test('un filtro por una categoría que ya no existe (fusionada o eliminada en Ajustes) se limpia al redibujar', async () => {
+    const t = montar();
+    await t.vista.render();
+    t.vista.filtros = { ...t.vista.filtros, categoria: '999' };
+    await t.vista.render();
+    assert.equal(t.vista.filtros.categoria, '', 'el filtro ya no apunta a una categoría inexistente');
+
+    // Uno que sí existe se conserva.
+    t.vista.filtros = { ...t.vista.filtros, categoria: String(CATEGORIAS[0].id) };
+    await t.vista.render();
+    assert.equal(t.vista.filtros.categoria, String(CATEGORIAS[0].id));
+});
+
 test('el mes por defecto es el del reloj inyectado, y aparece entre las opciones aunque no tenga gastos', async () => {
     const t = montar({ gastos: [gasto({ fecha: '10/02/2027' })] });
     await t.vista.render();

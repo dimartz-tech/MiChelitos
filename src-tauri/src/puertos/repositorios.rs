@@ -765,6 +765,13 @@ pub trait AlmacenCatalogos {
     fn eliminar_categoria(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
     /// Fija la marca fijo/variable de una categoría. `NoEncontrado` si no hay ninguna con ese identificador.
     fn marcar_categoria_fija(&mut self, id: i64, fija: bool) -> Result<(), ErrorAlmacen>;
+    /// Cambia el nombre de la categoría (no toca su marca fija). `NoEncontrado` si no existe. La regla de unicidad
+    /// (sin mayúsculas ni tildes) la decide el caso de uso: la restricción UNIQUE de SQLite sí distingue mayúsculas.
+    fn renombrar_categoria(&mut self, id: i64, nombre: &str) -> Result<(), ErrorAlmacen>;
+    /// Las fechas (`dd/mm/aaaa`, tal como se guardan) de los gastos de la categoría, sin orden.
+    fn fechas_de_gastos_de_categoria(&self, id: i64) -> Result<Vec<String>, ErrorAlmacen>;
+    /// Reasigna **todos** los gastos de `origen` a `destino` y devuelve cuántos movió. Solo cambia la categoría.
+    fn mover_gastos_de_categoria(&mut self, origen: i64, destino: i64) -> Result<i64, ErrorAlmacen>;
 
     /// Ordenados por nombre, ascendente.
     fn clientes(&self) -> Result<Vec<ClienteGuardado>, ErrorAlmacen>;
