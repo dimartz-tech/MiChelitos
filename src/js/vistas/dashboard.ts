@@ -10,6 +10,7 @@
 import type { ApiDe, Formato, Pantalla, Reloj, Vista } from '../ui/servicios';
 
 import { accion, escaparHtml } from '../nucleo/html.js';
+import { alertasDePresupuesto } from './presupuestos.js';
 import { consultarPatrimonio, htmlCifrasDePatrimonio } from './patrimonio_cifras.js';
 
 type ApiDashboard = ApiDe<
@@ -20,6 +21,7 @@ type ApiDashboard = ApiDe<
     | 'obtenerPatrimonio'
     | 'obtenerPrestamos'
     | 'obtenerTarjetas'
+    | 'obtenerPresupuestosMes'
 >;
 
 /**
@@ -103,6 +105,14 @@ export class VistaDashboard implements Vista {
         prestamos.forEach(p => {
             if (p.alerta_pago) alertas.push({ tipo: 'Deuda / Préstamo', mensaje: `${p.institucion_financiera} (${p.tipo_prestamo}): ${p.dias_pago_msg}`, nivel: 'danger' });
         });
+
+        // Presupuestos del mes en curso: las categorías cerca del límite o excedidas. Si Rust no responde, no se avisa nada.
+        try {
+            const presupuestos = await api.obtenerPresupuestosMes(hoy.getFullYear(), hoy.getMonth() + 1);
+            alertas.push(...alertasDePresupuesto(presupuestos));
+        } catch {
+            // Los presupuestos son un aviso accesorio: el Inicio no se cae por ellos.
+        }
 
         let htmlAlertas = '';
         if (alertas.length > 0) {

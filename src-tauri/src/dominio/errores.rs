@@ -116,6 +116,10 @@ pub enum ErrorDominio {
     CategoriaUsadaPorElSistema { nombre: String, accion: &'static str, motivo: &'static str },
     /// Fusionar una categoría en sí misma no tiene sentido.
     CategoriasIguales,
+    /// Un presupuesto mensual es un importe mayor que cero.
+    PresupuestoNoPositivo,
+    /// Un presupuesto mensual no pasa del tope (DOP 999,999,999.99).
+    PresupuestoExcedeElTope,
     ClienteSinDatos,
     ClienteDuplicado,
     ClienteConFacturas,
@@ -312,6 +316,12 @@ impl fmt::Display for ErrorDominio {
                 "No se puede {accion} la categoría «{nombre}»: el sistema la usa para {motivo}. \
                  Cambiarla dejaría esas operaciones sin su categoría."
             ),
+            ErrorDominio::PresupuestoNoPositivo => {
+                write!(f, "El presupuesto mensual debe ser mayor que cero. Para no tener presupuesto, quítalo.")
+            }
+            ErrorDominio::PresupuestoExcedeElTope => {
+                write!(f, "El presupuesto mensual no puede pasar de DOP 999,999,999.99.")
+            }
             ErrorDominio::CategoriasIguales => {
                 write!(f, "Elige una categoría de destino distinta de la de origen.")
             }

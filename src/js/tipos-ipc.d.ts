@@ -30,6 +30,9 @@ export type PartidaPatrimonio = { tipo: string; rubro: string; nombre: string; d
 export type Patrimonio = { tasa_usd_a_dop: string; tasa_estimada: boolean; capital: string; liquidez_dop: string; liquidez_usd: string; liquidez_usd_en_dop: string; efectivo_dop: string; efectivo_usd: string; tarjetas_dop: string; tarjetas_usd: string; tarjetas_usd_en_dop: string; prestamos: string; total_pasivos: string; neto_actual: string; neto_con_liquidez: string; partidas: PartidaPatrimonio[] };
 export type Prestamo = { id: number; tipo_prestamo: string; monto_prestamo: number; institucion_financiera: string; tasa_actual: number; cuotas_totales: number | null; cuotas_pendientes: number | null; monto_cuota: number; dia_pago: number; saldo_actual: number; limite_credito: number | null; tarjeta_id: number | null; tarjeta_nombre: string | null; dia_corte: number | null; disponible: number | null; es_revolvente: boolean; alerta_pago: boolean; dias_pago_msg: string };
 export type MovimientoPrestamo = { id: number; fecha: string; tipo: string; monto: number; interes: number; capital: number; saldo_resultante: number };
+export type PresupuestoFijado = { categoria_id: number; categoria_nombre: string; fija: boolean; monto: string };
+export type FilaPresupuesto = { categoria_id: number; categoria_nombre: string; fija: boolean; presupuesto: string; gastado: string; restante: string; porcentaje_milesimas: number; estado: string; usd_aparte: string };
+export type EstadoPresupuestos = { anio: number; mes: number; filas: FilaPresupuesto[]; total_presupuesto: string; total_gastado: string; total_restante: string };
 export type MedidasResumen = { importe: string; porcentaje_milesimas: number; anterior: string; variacion_anterior_pb: number | null; anterior_mismo_dia: string | null; variacion_mismo_dia_pb: number | null; promedio: string | null; variacion_promedio_pb: number | null; usd_aparte: string; n: number };
 export type PuntoTendenciaResumen = { anio: number; mes: number; importe: string | null; parcial: boolean };
 export type TendenciaResumen = { meses: PuntoTendenciaResumen[]; direccion: string; motivo_estable: string | null };
@@ -111,6 +114,9 @@ export type Comandos = {
     declarar_saldo_prestamo: { args: { id: number; saldo: string; fecha?: string | null }; ret: null };
     obtener_movimientos_prestamo: { args: { id: number }; ret: MovimientoPrestamo[] };
     eliminar_prestamo: { args: { id: number }; ret: null };
+    fijar_presupuesto: { args: { categoriaId: number; monto: string }; ret: PresupuestoFijado };
+    quitar_presupuesto: { args: { categoriaId: number }; ret: boolean };
+    obtener_presupuestos_mes: { args: { anio: number; mes: number }; ret: EstadoPresupuestos };
     crear_respaldo: { args: {  }; ret: string };
     listar_respaldos: { args: {  }; ret: string[] };
     restaurar_respaldo: { args: { nombre: string }; ret: any };

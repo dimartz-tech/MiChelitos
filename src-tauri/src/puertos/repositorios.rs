@@ -17,6 +17,7 @@ use crate::dominio::conversion::EstadoConversion;
 use crate::dominio::tarjeta::PoliticaLiquidacion;
 use crate::dominio::dinero::{Dinero, Divisa, TasaCambio};
 use crate::dominio::foto_patrimonio::Foto;
+pub use crate::dominio::presupuesto::Presupuesto;
 pub use crate::dominio::resumen_gastos::FilaAgregadoGasto;
 use std::fmt;
 
@@ -773,6 +774,14 @@ pub trait AlmacenCatalogos {
     /// Reasigna **todos** los gastos de `origen` a `destino` y devuelve cuántos movió. Solo cambia la categoría.
     fn mover_gastos_de_categoria(&mut self, origen: i64, destino: i64) -> Result<i64, ErrorAlmacen>;
 
+    /// El presupuesto mensual de la categoría, en centavos de peso; `None` si no tiene.
+    fn presupuesto_de_categoria(&self, id: i64) -> Result<Option<i64>, ErrorAlmacen>;
+    /// Fija (crea o reemplaza) el presupuesto de la categoría. `NoEncontrado` si la categoría no existe. El monto ya
+    /// viene validado por el caso de uso.
+    fn fijar_presupuesto(&mut self, id: i64, centavos: i64) -> Result<(), ErrorAlmacen>;
+    /// Quita el presupuesto de la categoría; devuelve si lo había. `NoEncontrado` si la categoría no existe.
+    fn quitar_presupuesto(&mut self, id: i64) -> Result<bool, ErrorAlmacen>;
+
     /// Ordenados por nombre, ascendente.
     fn clientes(&self) -> Result<Vec<ClienteGuardado>, ErrorAlmacen>;
     /// Si ya hay un cliente con ese RNC (exacto).
@@ -780,6 +789,12 @@ pub trait AlmacenCatalogos {
     fn insertar_cliente(&mut self, rnc: &str, nombre: &str) -> Result<i64, ErrorAlmacen>;
     fn facturas_de_cliente(&self, id: i64) -> Result<i64, ErrorAlmacen>;
     fn eliminar_cliente(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
+}
+
+/// Los presupuestos mensuales fijados, con el nombre y la marca de su categoría. Solo lectura.
+pub trait ConsultaDePresupuestos {
+    /// Uno por categoría que tiene presupuesto, ordenados por nombre.
+    fn presupuestos(&self) -> Result<Vec<Presupuesto>, ErrorAlmacen>;
 }
 
 pub trait RepositorioCategorias {

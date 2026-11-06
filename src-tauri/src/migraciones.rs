@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 20;
+pub const VERSION_OBJETIVO: u32 = 21;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -193,6 +193,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 20,
             nombre: "categorías fijas",
             aplicar: crate::db_sql::migracion_20_categorias_fijas,
+        },
+        Migracion {
+            version: 21,
+            nombre: "presupuestos por categoría",
+            aplicar: crate::db_sql::migracion_21_presupuestos,
         },
     ]
 }
@@ -1400,7 +1405,7 @@ mod tests_patrimonio {
     /// Una copia textual de todas las tablas anteriores a la 18 (filas completas, en orden de inserción).
     fn volcado(c: &Connection) -> Vec<(String, String)> {
         let tablas: Vec<String> = c
-            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'patrimonio_%' ORDER BY name")
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'patrimonio_%' AND name <> 'presupuestos' ORDER BY name")
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()
@@ -1450,11 +1455,13 @@ mod tests_patrimonio {
         assert!(antes.iter().any(|(t, cuerpo)| t == "cuentas_ahorro" && cuerpo.contains("12345.67")), "la siembra llegó");
 
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (17, 20));
-        assert_eq!(informe.aplicadas, vec!["historial del patrimonio", "detalle de los casos de corrección", "categorías fijas"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (17, 21));
+        assert_eq!(informe.aplicadas, vec!["historial del patrimonio", "detalle de los casos de corrección", "categorías fijas", "presupuestos por categoría"]);
         assert_eq!(volcado(&c), antes, "ninguna fila de las tablas anteriores cambió");
         let n: i64 = c.query_row("SELECT COUNT(*) FROM patrimonio_fotos", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0, "las tablas nuevas nacen vacías: no se reconstruye el pasado");
+        let p: i64 = c.query_row("SELECT COUNT(*) FROM presupuestos", [], |r| r.get(0)).unwrap();
+        assert_eq!(p, 0, "ningún presupuesto se inventa");
     }
 }
 
@@ -1504,8 +1511,8 @@ mod tests_detalle_de_correcciones {
 
         let informe = ejecutar(&mut c).unwrap();
 
-        assert_eq!((informe.version_inicial, informe.version_final), (18, 20));
-        assert_eq!(informe.aplicadas, vec!["detalle de los casos de corrección", "categorías fijas"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (18, 21));
+        assert_eq!(informe.aplicadas, vec!["detalle de los casos de corrección", "categorías fijas", "presupuestos por categoría"]);
         let v = filas(&c);
         assert_eq!(v.len(), 2);
         assert_eq!(v[0], ("COR-2026-0001".into(), "Traspaso inventado".into(), 4, Some(1187.53), None));
@@ -1529,14 +1536,14 @@ mod tests_detalle_de_correcciones {
 
         let informe = ejecutar(&mut c).unwrap();
 
-        assert_eq!((informe.version_inicial, informe.version_final), (17, 20));
+        assert_eq!((informe.version_inicial, informe.version_final), (17, 21));
         let despues: Vec<_> = filas(&c).into_iter().map(|f| (f.0, f.1, f.2, f.3.unwrap())).collect();
         assert_eq!(despues, antes);
     }
 
     #[test]
     fn migrar_una_base_ya_migrada_no_repite_nada_ni_pierde_detalles() {
-        let mut c = base_hasta(20);
+        let mut c = base_hasta(21);
         c.execute(
             "INSERT INTO correcciones (numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo, detalle)
              VALUES ('COR-2026-0001', '01/10/2026', 'traspaso', 4, 'x', 1.5, 'USD', 'Motivo de prueba largo', '{\"version\":1}')",
@@ -1620,12 +1627,12 @@ mod tests_categorias_fijas {
     }
 
     #[test]
-    fn de_cero_a_la_version_objetivo_llega_a_20_con_la_columna() {
+    fn de_cero_a_la_version_objetivo_llega_a_21_con_la_columna() {
         let mut c = Connection::open_in_memory().unwrap();
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!(informe.version_final, 20);
-        assert_eq!(VERSION_OBJETIVO, 20);
-        assert_eq!(informe.aplicadas.last().copied(), Some("categorías fijas"));
+        assert_eq!(informe.version_final, 21);
+        assert_eq!(VERSION_OBJETIVO, 21);
+        assert!(informe.aplicadas.contains(&"categorías fijas"));
         let n: i64 = c.query_row("SELECT COUNT(*) FROM pragma_table_info('categorias') WHERE name = 'fija'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
     }
@@ -1637,8 +1644,8 @@ mod tests_categorias_fijas {
         let nombres: Vec<String> = c.prepare("SELECT nombre FROM categorias ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
         assert_eq!(nombres.len(), 3);
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (19, 20));
-        assert_eq!(informe.aplicadas, vec!["categorías fijas"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (19, 21));
+        assert_eq!(informe.aplicadas, vec!["categorías fijas", "presupuestos por categoría"]);
         let v = marcas(&c);
         assert_eq!(v.len(), nombres.len(), "no se perdió ni se creó ninguna");
         assert!(v.iter().all(|(_, f)| *f == 0), "la migración no marca nada, ni «Alquiler» ni «Suscripciones»: {v:?}");
@@ -1650,14 +1657,14 @@ mod tests_categorias_fijas {
         sembrar(&c);
         let antes: Vec<String> = c.prepare("SELECT nombre FROM categorias ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (18, 20));
+        assert_eq!((informe.version_inicial, informe.version_final), (18, 21));
         let despues: Vec<String> = marcas(&c).into_iter().map(|(n, _)| n).collect();
         assert_eq!(despues, antes);
     }
 
     #[test]
-    fn una_base_ya_en_20_no_repite_nada_ni_pierde_las_marcas() {
-        let mut c = base_hasta(20);
+    fn una_base_ya_en_21_no_repite_nada_ni_pierde_las_marcas() {
+        let mut c = base_hasta(21);
         c.execute("INSERT INTO categorias (nombre, fija) VALUES ('Renta inventada', 1), ('Comida inventada', 0)", []).unwrap();
         assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0);
         assert_eq!(marcas(&c), vec![("Renta inventada".to_string(), 1), ("Comida inventada".to_string(), 0)]);
@@ -1687,5 +1694,136 @@ mod tests_categorias_fijas {
         assert!(c.execute("UPDATE categorias SET fija = 2 WHERE nombre = 'Nueva inventada'", []).is_err());
         assert!(c.execute("UPDATE categorias SET fija = NULL WHERE nombre = 'Nueva inventada'", []).is_err(), "NOT NULL");
         assert!(c.execute("UPDATE categorias SET fija = 1 WHERE nombre = 'Nueva inventada'", []).is_ok());
+    }
+}
+
+/// Migración 21: `presupuestos`.
+#[cfg(test)]
+mod tests_presupuestos {
+    use super::*;
+
+    fn base_hasta(version: u32) -> Connection {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        for m in catalogo() {
+            if m.version > version {
+                break;
+            }
+            let tx = c.transaction().unwrap();
+            (m.aplicar)(&tx).unwrap();
+            tx.execute_batch(&format!("PRAGMA user_version = {};", m.version)).unwrap();
+            tx.commit().unwrap();
+        }
+        c.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        c
+    }
+
+    fn existe_tabla(c: &Connection) -> bool {
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'presupuestos'", [], |r| r.get(0)).unwrap();
+        n == 1
+    }
+
+    fn volcado(c: &Connection) -> Vec<(String, String)> {
+        let tablas: Vec<String> = c
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect();
+        tablas
+            .into_iter()
+            .map(|t| {
+                let n: i64 = c.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0)).unwrap();
+                (t.clone(), format!("{n}"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn de_cero_a_la_version_objetivo_crea_la_tabla_vacia() {
+        let mut c = Connection::open_in_memory().unwrap();
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!(informe.version_final, 21);
+        assert_eq!(informe.aplicadas.last().copied(), Some("presupuestos por categoría"));
+        assert!(existe_tabla(&c));
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM presupuestos", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0, "nace vacía: el titular decide qué categorías tienen presupuesto");
+    }
+
+    #[test]
+    fn de_20_a_21_solo_anade_la_tabla_y_no_toca_nada_mas() {
+        let mut c = base_hasta(20);
+        c.execute_batch("INSERT INTO categorias (nombre, fija) VALUES ('Alquiler inventado', 1), ('Comida inventada', 0);").unwrap();
+        let antes = volcado(&c);
+        let marcas: Vec<(String, i64)> = c.prepare("SELECT nombre, fija FROM categorias ORDER BY id").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
+        assert!(!existe_tabla(&c));
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!((informe.version_inicial, informe.version_final), (20, 21));
+        assert_eq!(informe.aplicadas, vec!["presupuestos por categoría"]);
+        assert!(existe_tabla(&c));
+        let despues: Vec<(String, i64)> = c.prepare("SELECT nombre, fija FROM categorias ORDER BY id").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(despues, marcas);
+        let sin_la_nueva: Vec<_> = volcado(&c).into_iter().filter(|(t, _)| t != "presupuestos").collect();
+        assert_eq!(sin_la_nueva, antes);
+    }
+
+    #[test]
+    fn de_19_a_21_encadena_las_dos_migraciones() {
+        let mut c = base_hasta(19);
+        c.execute_batch("INSERT INTO categorias (nombre) VALUES ('Comida inventada');").unwrap();
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!((informe.version_inicial, informe.version_final), (19, 21));
+        assert_eq!(informe.aplicadas, vec!["categorías fijas", "presupuestos por categoría"]);
+        assert!(existe_tabla(&c));
+    }
+
+    #[test]
+    fn una_base_ya_en_21_no_repite_nada_ni_pierde_presupuestos() {
+        let mut c = base_hasta(21);
+        c.execute_batch("INSERT INTO categorias (nombre) VALUES ('Comida inventada');").unwrap();
+        c.execute("INSERT INTO presupuestos (categoria_id, monto_centavos) VALUES (1, 1234567)", []).unwrap();
+        assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0);
+        let m: i64 = c.query_row("SELECT monto_centavos FROM presupuestos WHERE categoria_id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(m, 1_234_567);
+    }
+
+    #[test]
+    fn aplicar_la_21_dos_veces_es_idempotente() {
+        let mut c = base_hasta(21);
+        c.execute_batch("INSERT INTO categorias (nombre) VALUES ('Comida inventada');").unwrap();
+        c.execute("INSERT INTO presupuestos (categoria_id, monto_centavos) VALUES (1, 4321)", []).unwrap();
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_21_presupuestos(&tx).unwrap();
+        tx.commit().unwrap();
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM presupuestos", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn las_restricciones_rechazan_montos_invalidos_duplicados_y_categorias_inexistentes() {
+        let c = base_hasta(21);
+        c.execute_batch("INSERT INTO categorias (nombre) VALUES ('Comida inventada'), ('Ocio inventado');").unwrap();
+        let poner = |id: i64, m: rusqlite::types::Value| c.execute("INSERT INTO presupuestos (categoria_id, monto_centavos) VALUES (?, ?)", rusqlite::params![id, m]);
+        use rusqlite::types::Value::{Integer, Real, Text};
+        assert!(poner(1, Integer(0)).is_err(), "cero no es un presupuesto");
+        assert!(poner(1, Integer(-5)).is_err());
+        assert!(poner(1, Integer(100_000_000_000)).is_err(), "pasa del tope");
+        assert!(poner(1, Real(10.5)).is_err(), "los centavos son enteros, nunca REAL");
+        assert!(poner(1, Text("abc".into())).is_err());
+        assert!(poner(99, Integer(500)).is_err(), "la categoría debe existir");
+        assert!(poner(1, Integer(99_999_999_999)).is_ok(), "el tope exacto cabe");
+        assert!(poner(1, Integer(500)).is_err(), "uno por categoría");
+        assert!(poner(2, Integer(1)).is_ok());
+    }
+
+    #[test]
+    fn eliminar_la_categoria_se_lleva_su_presupuesto_y_no_toca_el_de_otra() {
+        let c = base_hasta(21);
+        c.execute_batch("INSERT INTO categorias (nombre) VALUES ('Comida inventada'), ('Ocio inventado');").unwrap();
+        c.execute("INSERT INTO presupuestos (categoria_id, monto_centavos) VALUES (1, 111), (2, 222)", []).unwrap();
+        c.execute("DELETE FROM categorias WHERE id = 1", []).unwrap();
+        let v: Vec<(i64, i64)> = c.prepare("SELECT categoria_id, monto_centavos FROM presupuestos").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(v, vec![(2, 222)]);
     }
 }

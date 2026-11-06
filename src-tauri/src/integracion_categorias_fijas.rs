@@ -256,10 +256,10 @@ fn integracion_migrar_una_base_v19_deja_todas_las_categorias_variables_y_el_resu
         c.query_row("SELECT COUNT(*) FROM gastos;", [], |r| r.get::<_, i64>(0)).unwrap()
     };
 
-    db_sql::inicializar_db().expect("la base v19 migra a v20");
+    db_sql::inicializar_db().expect("la base v19 migra a la versión objetivo");
 
     let c = conexion();
-    assert_eq!(migraciones::version_de(&c).unwrap(), 20);
+    assert_eq!(migraciones::version_de(&c).unwrap(), migraciones::VERSION_OBJETIVO);
     let marcadas: i64 = c.query_row("SELECT COUNT(*) FROM categorias WHERE fija <> 0;", [], |r| r.get(0)).unwrap();
     assert_eq!(marcadas, 0, "la migración no marca ninguna, ni «Alquiler» ni «Suscripciones»");
     let despues: i64 = c.query_row("SELECT COUNT(*) FROM gastos;", [], |r| r.get(0)).unwrap();

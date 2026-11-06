@@ -13,6 +13,8 @@
 
 use super::ErrorAplicacion;
 use crate::dominio::catalogo;
+use crate::dominio::dinero::{Dinero, Divisa};
+use crate::dominio::presupuesto;
 use crate::dominio::errores::ErrorDominio;
 use crate::puertos::repositorios::*;
 
@@ -130,6 +132,22 @@ pub fn previsualizar_fusion_categorias(
             nombre_de_marca(destino_fija),
         ));
     }
+    // Regla de presupuestos (decidida por el titular) (aislada en `dominio::presupuesto::presupuesto_tras_fusion`).
+    let tras = presupuesto::presupuesto_tras_fusion(
+        almacen.presupuesto_de_categoria(origen_id)?,
+        almacen.presupuesto_de_categoria(destino_id)?,
+    );
+    if let Some(descartado) = tras.descartado {
+        advertencias.push(format!(
+            "Ambas tienen presupuesto mensual: se conserva el de «{destino_nombre}» y el de «{origen_nombre}» (DOP {}) se descarta. No se suman.",
+            crate::ipc::importe_a_texto(Dinero::de_centavos(descartado, Divisa::Dop)),
+        ));
+    } else if tras.heredado {
+        advertencias.push(format!(
+            "«{origen_nombre}» tiene presupuesto mensual y «{destino_nombre}» no: «{destino_nombre}» lo heredará (DOP {}).",
+            crate::ipc::importe_a_texto(Dinero::de_centavos(tras.resultante.unwrap_or(0), Divisa::Dop)),
+        ));
+    }
     if gastos == 0 {
         advertencias.push(format!("«{origen_nombre}» no tiene gastos: solo se eliminará la categoría."));
     }
@@ -160,11 +178,22 @@ pub fn fusionar_categorias(
     let (origen, destino) = validar_fusion(origen_id, destino_id, almacen)?;
     let gastos = almacen.gastos_de_categoria(origen_id)?;
     let motivo = crate::dominio::correccion::motivo_de_correccion(&catalogo::motivo_de_fusion(&origen, &destino, gastos))?;
+    // Regla de presupuestos (decidida por el titular): ver `dominio::presupuesto::presupuesto_tras_fusion`.
+    let tras = presupuesto::presupuesto_tras_fusion(
+        almacen.presupuesto_de_categoria(origen_id)?,
+        almacen.presupuesto_de_categoria(destino_id)?,
+    );
+    let mut descripcion = catalogo::descripcion_de_fusion(&origen, &destino, gastos);
+    if let Some(d) = tras.descartado {
+        descripcion.push_str(&format!(" · presupuesto de origen descartado: DOP {}", crate::ipc::importe_a_texto(Dinero::de_centavos(d, Divisa::Dop))));
+    } else if tras.heredado {
+        descripcion.push_str(&format!(" · presupuesto heredado: DOP {}", crate::ipc::importe_a_texto(Dinero::de_centavos(tras.resultante.unwrap_or(0), Divisa::Dop))));
+    }
     almacen.anotar_caso(&CasoAAnotar {
         tipo: "categoria".to_string(),
         // El origen se elimina: el caso apunta al destino, que sigue existiendo.
         referencia_id: destino_id,
-        descripcion: catalogo::descripcion_de_fusion(&origen, &destino, gastos),
+        descripcion,
         importe: None,
         divisa: None,
         motivo,
@@ -177,6 +206,10 @@ pub fn fusionar_categorias(
         ))
         .into());
     }
+    if tras.heredado {
+        almacen.fijar_presupuesto(destino_id, tras.resultante.unwrap_or(0))?;
+    }
+    // El del origen se va con la categoría (el almacén lo borra al eliminarla).
     almacen.eliminar_categoria(origen_id)?;
     Ok(movidos)
 }
@@ -476,6 +509,71 @@ mod tests {
             assert_eq!(a.gastos_de_categoria(renta).unwrap(), 3, "{punto}: sus gastos siguen en el origen");
             assert_eq!(a.gastos_de_categoria(alquiler).unwrap(), 1, "{punto}: el destino no recibió nada");
             assert!(a.casos.is_empty(), "{punto}: sin caso huérfano");
+        }
+    }
+
+    // --- presupuestos al fusionar (regla decidida por el titular) ---
+
+    fn con_presupuestos(origen: Option<i64>, destino: Option<i64>) -> (CatalogosEnMemoria, i64, i64) {
+        let mut a = con_renta_y_alquiler();
+        let (renta, alquiler) = (a.id_de_categoria("Renta"), a.id_de_categoria("Alquiler"));
+        if let Some(m) = origen {
+            a.presupuestos.insert(renta, m);
+        }
+        if let Some(m) = destino {
+            a.presupuestos.insert(alquiler, m);
+        }
+        (a, renta, alquiler)
+    }
+
+    #[test]
+    fn fusionar_sin_presupuesto_en_ninguna_no_deja_ninguno() {
+        let (mut a, renta, alquiler) = con_presupuestos(None, None);
+        fusionar_categorias(renta, alquiler, &mut a).unwrap();
+        assert!(a.presupuestos.is_empty());
+        assert_eq!(a.casos[0].descripcion, "Fusión de «Renta» en «Alquiler» (3 gastos)");
+    }
+
+    #[test]
+    fn fusionar_con_presupuesto_solo_en_el_origen_lo_hereda_el_destino() {
+        let (mut a, renta, alquiler) = con_presupuestos(Some(123_457), None);
+        let v = previsualizar_fusion_categorias(renta, alquiler, &a).unwrap();
+        assert!(v.advertencias.iter().any(|x| x.contains("heredará") && x.contains("1234.57")), "{:?}", v.advertencias);
+        fusionar_categorias(renta, alquiler, &mut a).unwrap();
+        assert_eq!(a.presupuestos.len(), 1);
+        assert_eq!(a.presupuestos[&alquiler], 123_457);
+        assert!(a.casos[0].descripcion.ends_with("presupuesto heredado: DOP 1234.57"), "{}", a.casos[0].descripcion);
+    }
+
+    #[test]
+    fn fusionar_con_presupuesto_solo_en_el_destino_lo_conserva_sin_aviso() {
+        let (mut a, renta, alquiler) = con_presupuestos(None, Some(77_731));
+        let v = previsualizar_fusion_categorias(renta, alquiler, &a).unwrap();
+        assert!(!v.advertencias.iter().any(|x| x.contains("presupuesto")), "{:?}", v.advertencias);
+        fusionar_categorias(renta, alquiler, &mut a).unwrap();
+        assert_eq!(a.presupuestos[&alquiler], 77_731);
+    }
+
+    #[test]
+    fn fusionar_con_presupuesto_en_ambas_conserva_el_del_destino_y_avisa_el_descartado_sin_sumar() {
+        let (mut a, renta, alquiler) = con_presupuestos(Some(123_457), Some(77_731));
+        let v = previsualizar_fusion_categorias(renta, alquiler, &a).unwrap();
+        let aviso = v.advertencias.iter().find(|x| x.contains("se descarta")).expect("avisa");
+        assert!(aviso.contains("1234.57") && aviso.contains("«Alquiler»") && aviso.contains("No se suman"), "{aviso}");
+        fusionar_categorias(renta, alquiler, &mut a).unwrap();
+        assert_eq!(a.presupuestos.len(), 1);
+        assert_eq!(a.presupuestos[&alquiler], 77_731, "no 201 188");
+        assert!(a.casos[0].descripcion.contains("presupuesto de origen descartado: DOP 1234.57"));
+    }
+
+    #[test]
+    fn un_fallo_a_medias_tampoco_deja_el_presupuesto_a_medias() {
+        for punto in ["fijar_presupuesto", "eliminar_categoria", "anotar_caso"] {
+            let (mut a, renta, alquiler) = con_presupuestos(Some(123_457), None);
+            a.fallar_en = Some(punto);
+            a.en_transaccion(|a| fusionar_categorias(renta, alquiler, a)).unwrap_err();
+            assert_eq!(a.presupuestos.len(), 1, "{punto}");
+            assert_eq!(a.presupuestos[&renta], 123_457, "{punto}: sigue en el origen");
         }
     }
 

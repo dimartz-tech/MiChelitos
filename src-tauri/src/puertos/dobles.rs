@@ -887,6 +887,8 @@ pub struct CatalogosEnMemoria {
     /// Las fechas de los gastos de cada categoría (para la vista previa de una fusión).
     pub fechas_por_categoria: HashMap<i64, Vec<String>>,
     pub facturas_por_cliente: HashMap<i64, i64>,
+    /// Presupuesto mensual (centavos) por categoría.
+    pub presupuestos: std::collections::BTreeMap<i64, i64>,
     /// Los casos de auditoría anotados (lo que la tabla `correcciones` guardaría).
     pub casos: Vec<CasoAAnotar>,
     /// Fallo inyectado: la operación nombrada devuelve `ErrorAlmacen::Fallo` cuando le toca.
@@ -941,6 +943,25 @@ impl RegistroDeCorrecciones for CatalogosEnMemoria {
 }
 
 
+impl ConsultaDePresupuestos for CatalogosEnMemoria {
+    fn presupuestos(&self) -> Result<Vec<Presupuesto>, ErrorAlmacen> {
+        let mut v: Vec<Presupuesto> = self
+            .presupuestos
+            .iter()
+            .filter_map(|(id, centavos)| {
+                self.categorias.iter().find(|c| c.id == *id).map(|c| Presupuesto {
+                    categoria_id: *id,
+                    categoria_nombre: c.nombre.clone(),
+                    fija: c.fija,
+                    centavos: *centavos,
+                })
+            })
+            .collect();
+        v.sort_by(|a, b| a.categoria_nombre.cmp(&b.categoria_nombre));
+        Ok(v)
+    }
+}
+
 impl AlmacenCatalogos for CatalogosEnMemoria {
     fn categorias(&self) -> Result<Vec<CategoriaGuardada>, ErrorAlmacen> {
         let mut v = self.categorias.clone();
@@ -969,6 +990,7 @@ impl AlmacenCatalogos for CatalogosEnMemoria {
     fn eliminar_categoria(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
         self.fallo_inyectado("eliminar_categoria")?;
         self.categorias.retain(|c| c.id != id);
+        self.presupuestos.remove(&id);
         Ok(())
     }
     fn renombrar_categoria(&mut self, id: i64, nombre: &str) -> Result<(), ErrorAlmacen> {
@@ -991,6 +1013,21 @@ impl AlmacenCatalogos for CatalogosEnMemoria {
         let fechas = self.fechas_por_categoria.remove(&origen).unwrap_or_default();
         self.fechas_por_categoria.entry(destino).or_default().extend(fechas);
         Ok(n)
+    }
+    fn presupuesto_de_categoria(&self, id: i64) -> Result<Option<i64>, ErrorAlmacen> {
+        self.nombre_de_categoria(id)?;
+        Ok(self.presupuestos.get(&id).copied())
+    }
+    fn fijar_presupuesto(&mut self, id: i64, centavos: i64) -> Result<(), ErrorAlmacen> {
+        self.fallo_inyectado("fijar_presupuesto")?;
+        self.nombre_de_categoria(id)?;
+        self.presupuestos.insert(id, centavos);
+        Ok(())
+    }
+    fn quitar_presupuesto(&mut self, id: i64) -> Result<bool, ErrorAlmacen> {
+        self.fallo_inyectado("quitar_presupuesto")?;
+        self.nombre_de_categoria(id)?;
+        Ok(self.presupuestos.remove(&id).is_some())
     }
     fn marcar_categoria_fija(&mut self, id: i64, fija: bool) -> Result<(), ErrorAlmacen> {
         let c = self
