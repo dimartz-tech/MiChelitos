@@ -6,6 +6,7 @@ pub mod gastos;
 pub mod ingresos;
 pub mod patrimonio;
 pub mod prestamos;
+pub mod presupuestos;
 pub mod resumen_gastos;
 #[cfg(test)]
 mod resumen_gastos_pruebas;

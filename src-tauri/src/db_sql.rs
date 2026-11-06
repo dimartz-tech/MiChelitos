@@ -1979,6 +1979,26 @@ pub fn migracion_20_categorias_fijas(tx: &Transaction) -> Result<(), ErrorMigrac
     Ok(())
 }
 
+const MIG21: &str = "presupuestos por categoría";
+
+/// Migración 21. Crea **`presupuestos`**: el tope mensual, en pesos, que el titular fija para una categoría (como mucho uno
+/// por categoría: la clave primaria es `categoria_id`). El monto es **`INTEGER` en centavos** (nunca `REAL`), mayor que
+/// cero y de hasta 99 999 999 999 centavos (`dominio::presupuesto::TOPE_CENTAVOS`); quitar el presupuesto borra la fila. `ON DELETE CASCADE`: si se elimina
+/// la categoría, su presupuesto se va con ella (la fusión de categorías suma antes el del origen al del destino).
+/// No toca ninguna tabla existente. Idempotente (`IF NOT EXISTS`).
+pub fn migracion_21_presupuestos(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::paso(
+        tx,
+        MIG21,
+        "crear presupuestos",
+        "CREATE TABLE IF NOT EXISTS presupuestos (
+             categoria_id INTEGER PRIMARY KEY REFERENCES categorias(id) ON DELETE CASCADE,
+             monto_centavos INTEGER NOT NULL CHECK(typeof(monto_centavos) = 'integer' AND monto_centavos BETWEEN 1 AND 99999999999)
+         );",
+    )?;
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;

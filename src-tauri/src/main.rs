@@ -36,6 +36,8 @@ mod integracion_resumen;
 #[cfg(test)]
 mod integracion_categorias_fijas;
 #[cfg(test)]
+mod integracion_presupuestos;
+#[cfg(test)]
 mod integracion_traspasos;
 #[cfg(test)]
 mod integracion_abono_tasa;
@@ -57,6 +59,9 @@ fn main() {
             comandos::catalogos::fusionar_categorias,
             comandos::gastos::obtener_gastos,
             comandos::resumen::obtener_resumen_gastos,
+            comandos::presupuestos::fijar_presupuesto,
+            comandos::presupuestos::quitar_presupuesto,
+            comandos::presupuestos::obtener_presupuestos_mes,
             comandos::gastos::crear_gasto,
             comandos::ingresos::obtener_ingresos,
             comandos::ingresos::crear_ingreso,
