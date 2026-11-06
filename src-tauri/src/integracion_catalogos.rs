@@ -11,8 +11,8 @@
 
 use crate::caracterizacion::entorno_para_pruebas_externas;
 use crate::comandos::catalogos::{
-    crear_categoria, eliminar_categoria, fusionar_categorias, obtener_categorias, previsualizar_fusion_categorias,
-    renombrar_categoria,
+    crear_categoria, eliminar_categoria, fusionar_categorias, marcar_categoria_fija, obtener_categorias,
+    previsualizar_fusion_categorias, renombrar_categoria,
 };
 use crate::comandos::correcciones::obtener_correcciones;
 use crate::comandos::gastos::{crear_gasto, GastoInput};
@@ -30,7 +30,7 @@ fn conexion() -> Connection {
     db_sql::obtener_conexion().expect("abrir conexión de prueba")
 }
 
-fn id_de(nombre: &str) -> i64 {
+fn cat_id(nombre: &str) -> i64 {
     conexion().query_row("SELECT id FROM categorias WHERE nombre = ?;", [nombre], |r| r.get(0)).unwrap()
 }
 
@@ -71,7 +71,7 @@ fn gasto(fecha: &str, monto: &str, categoria: &str, descripcion: &str, cuenta: i
         monto: ImporteDecimal::desde_texto(monto).unwrap(),
         divisa: "DOP".into(),
         descripcion: descripcion.into(),
-        categoria_id: id_de(categoria),
+        categoria_id: cat_id(categoria),
         metodo_pago: "transferencia".into(),
         es_lbtr: false,
         tarjeta_id: None,
@@ -132,11 +132,13 @@ fn gastos_sin_categoria() -> Vec<String> {
     .unwrap()
 }
 
-/// La suma de monto y costo adicional de todos los gastos, en centavos enteros.
+/// La suma de monto y costo adicional de todos los gastos, en centavos enteros (sumada en Rust, no en SQL).
 fn total_en_centavos() -> i64 {
-    conexion()
-        .query_row("SELECT COALESCE(SUM(CAST(ROUND(monto * 100) AS INTEGER) + CAST(ROUND(costo_adicional * 100) AS INTEGER)), 0) FROM gastos;", [], |r| r.get(0))
-        .unwrap()
+    let c = conexion();
+    let mut stmt = c.prepare("SELECT monto, costo_adicional FROM gastos;").unwrap();
+    let filas: Vec<(f64, f64)> =
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap();
+    filas.iter().map(|(m, c)| (m * 100.0).round() as i64 + (c * 100.0).round() as i64).sum()
 }
 
 fn gastos_de(categoria: i64) -> i64 {
@@ -165,7 +167,7 @@ fn sembrar_renta_y_alquiler() -> i64 {
 fn integracion_renombrar_cambia_el_nombre_y_los_gastos_siguen_donde_estaban() {
     let _g = entorno_para_pruebas_externas();
     sembrar_renta_y_alquiler();
-    let renta = id_de("Renta");
+    let renta = cat_id("Renta");
     let antes = gastos_sin_categoria();
     let total = total_en_centavos();
 
@@ -174,7 +176,7 @@ fn integracion_renombrar_cambia_el_nombre_y_los_gastos_siguen_donde_estaban() {
     assert_eq!((c.id, c.nombre.as_str()), (renta, "Vivienda"));
     assert_eq!(c.motivo_sistema, None);
     assert!(!existe("Renta") && existe("Vivienda"));
-    assert_eq!(id_de("Vivienda"), renta, "el id no cambia");
+    assert_eq!(cat_id("Vivienda"), renta, "el id no cambia");
     assert_eq!(gastos_de(renta), 3, "los gastos siguen en la misma categoría");
     assert_eq!(gastos_sin_categoria(), antes, "ninguna otra columna cambió");
     assert_eq!(total_en_centavos(), total);
@@ -214,7 +216,7 @@ fn integracion_renombrar_rechaza_vacio_largo_reservado_y_las_del_sistema() {
     assert!(renombrar_categoria(ajena, "  CARGOS DERIVADOS ".into()).unwrap_err().contains("nombre reservado"));
     assert!(renombrar_categoria(999_999, "Nueva".into()).is_err(), "una inexistente");
     for sistema in ["Otros", "Suscripciones", "Impuestos"] {
-        let e = renombrar_categoria(id_de(sistema), "Otro nombre".into()).unwrap_err();
+        let e = renombrar_categoria(cat_id(sistema), "Otro nombre".into()).unwrap_err();
         assert!(e.contains("el sistema la usa para"), "{sistema}: {e}");
         assert!(e.contains(&format!("«{sistema}»")), "{e}");
     }
@@ -228,7 +230,7 @@ fn integracion_renombrar_rechaza_vacio_largo_reservado_y_las_del_sistema() {
 fn integracion_fusionar_mueve_todos_los_gastos_y_conserva_todo_lo_demas() {
     let _g = entorno_para_pruebas_externas();
     sembrar_renta_y_alquiler();
-    let (renta, alquiler) = (id_de("Renta"), id_de("Alquiler"));
+    let (renta, alquiler) = (cat_id("Renta"), cat_id("Alquiler"));
     let antes = gastos_sin_categoria();
     let total = total_en_centavos();
     let en_alquiler = gastos_de(alquiler);
@@ -266,7 +268,7 @@ fn integracion_el_resumen_suma_las_dos_categorias_en_una_sola_fila() {
     let (alq_c, alq_n) = fila(&antes, "Alquiler").expect("septiembre tiene Alquiler");
     let total_antes: i64 = antes.filas.iter().map(|f| centavos(&f.medidas.importe)).sum();
 
-    fusionar_categorias(id_de("Renta"), id_de("Alquiler")).unwrap();
+    fusionar_categorias(cat_id("Renta"), cat_id("Alquiler")).unwrap();
 
     let despues = resumen_en(hoy, 2026, 9, 3, 60.0, vec![]).unwrap();
     assert!(fila(&despues, "Renta").is_none(), "la fila de la categoría fusionada desaparece");
@@ -281,7 +283,7 @@ fn integracion_la_fusion_deja_su_caso_en_obtener_correcciones() {
     sembrar_renta_y_alquiler();
     assert!(obtener_correcciones().unwrap().is_empty());
 
-    fusionar_categorias(id_de("Renta"), id_de("Alquiler")).unwrap();
+    fusionar_categorias(cat_id("Renta"), cat_id("Alquiler")).unwrap();
 
     let casos = obtener_correcciones().unwrap();
     assert_eq!(casos.len(), 1);
@@ -289,7 +291,7 @@ fn integracion_la_fusion_deja_su_caso_en_obtener_correcciones() {
     assert_eq!(c.tipo, "categoria");
     assert_eq!(c.descripcion, "Fusión de «Renta» en «Alquiler» (3 gastos)");
     assert_eq!((c.importe, c.divisa.as_deref(), c.detalle.as_deref()), (None, None, None));
-    assert_eq!(c.referencia_id, id_de("Alquiler"));
+    assert_eq!(c.referencia_id, cat_id("Alquiler"));
     assert!(c.numero_caso.starts_with("COR-"), "{}", c.numero_caso);
     assert!(crate::dominio::correccion::motivo_de_correccion(&c.motivo).is_ok());
 }
@@ -299,7 +301,7 @@ fn integracion_la_vista_previa_informa_y_no_escribe_nada() {
     let _g = entorno_para_pruebas_externas();
     sembrar_renta_y_alquiler();
     nueva("Vacía");
-    let (renta, alquiler, vacia) = (id_de("Renta"), id_de("Alquiler"), id_de("Vacía"));
+    let (renta, alquiler, vacia) = (cat_id("Renta"), cat_id("Alquiler"), cat_id("Vacía"));
     let antes = huella_de_la_base();
 
     let v = previsualizar_fusion_categorias(renta, alquiler).unwrap();
@@ -312,7 +314,7 @@ fn integracion_la_vista_previa_informa_y_no_escribe_nada() {
     assert_eq!(v.advertencias, vec!["«Vacía» no tiene gastos: solo se eliminará la categoría.".to_string()]);
 
     assert!(previsualizar_fusion_categorias(renta, renta).is_err());
-    assert!(previsualizar_fusion_categorias(id_de("Otros"), renta).unwrap_err().contains("el sistema la usa para"));
+    assert!(previsualizar_fusion_categorias(cat_id("Otros"), renta).unwrap_err().contains("el sistema la usa para"));
     assert!(previsualizar_fusion_categorias(999_999, renta).is_err());
 
     assert_eq!(huella_de_la_base(), antes, "la vista previa no escribe ni un byte");
@@ -322,7 +324,7 @@ fn integracion_la_vista_previa_informa_y_no_escribe_nada() {
 fn integracion_una_fusion_que_falla_a_medias_no_deja_nada_a_medias() {
     let _g = entorno_para_pruebas_externas();
     sembrar_renta_y_alquiler();
-    let (renta, alquiler) = (id_de("Renta"), id_de("Alquiler"));
+    let (renta, alquiler) = (cat_id("Renta"), cat_id("Alquiler"));
     // Fallo inyectado en el último paso (borrar el origen), cuando el caso ya se anotó y los gastos ya se movieron.
     conexion()
         .execute_batch("CREATE TRIGGER inyectar_fallo BEFORE DELETE ON categorias BEGIN SELECT RAISE(ABORT, 'fallo inyectado'); END;")
@@ -341,21 +343,65 @@ fn integracion_una_fusion_que_falla_a_medias_no_deja_nada_a_medias() {
 fn integracion_las_del_sistema_no_se_fusionan_como_origen_pero_si_reciben() {
     let _g = entorno_para_pruebas_externas();
     sembrar_renta_y_alquiler();
-    let renta = id_de("Renta");
+    let renta = cat_id("Renta");
     let antes = huella_de_la_base();
 
     for sistema in ["Otros", "Suscripciones", "Impuestos"] {
-        let e = fusionar_categorias(id_de(sistema), renta).unwrap_err();
+        let e = fusionar_categorias(cat_id(sistema), renta).unwrap_err();
         assert!(e.contains("el sistema la usa para"), "{sistema}: {e}");
     }
     assert_eq!(huella_de_la_base(), antes);
 
     // Como destino, «Otros» recibe los gastos de «Renta».
-    let otros = id_de("Otros");
+    let otros = cat_id("Otros");
     let en_otros = gastos_de(otros);
     assert_eq!(fusionar_categorias(renta, otros).unwrap(), 3);
     assert_eq!(gastos_de(otros), en_otros + 3);
     assert!(existe("Otros") && !existe("Renta"));
+}
+
+// --- La marca «fija / recurrente» (categorías fijas, esquema 20) ---
+
+fn es_fija(nombre: &str) -> bool {
+    obtener_categorias().unwrap().into_iter().find(|c| c.nombre == nombre).unwrap().fija
+}
+
+#[test]
+fn integracion_renombrar_no_toca_la_marca_fija() {
+    let _g = entorno_para_pruebas_externas();
+    sembrar_renta_y_alquiler();
+    let renta = cat_id("Renta");
+    marcar_categoria_fija(renta, true).unwrap();
+
+    let c = renombrar_categoria(renta, "Vivienda".into()).unwrap();
+
+    assert!(c.fija, "el resultado trae la marca");
+    assert!(es_fija("Vivienda"), "la marca sobrevive al cambio de nombre");
+    assert!(!es_fija("Alquiler"));
+}
+
+#[test]
+fn integracion_la_fusion_conserva_la_marca_del_destino_y_la_vista_previa_avisa_si_difieren() {
+    for (origen_fija, destino_fija) in [(true, false), (false, true), (true, true), (false, false)] {
+        let _g = entorno_para_pruebas_externas();
+        sembrar_renta_y_alquiler();
+        let (renta, alquiler) = (cat_id("Renta"), cat_id("Alquiler"));
+        marcar_categoria_fija(renta, origen_fija).unwrap();
+        marcar_categoria_fija(alquiler, destino_fija).unwrap();
+        let antes = huella_de_la_base();
+
+        let v = previsualizar_fusion_categorias(renta, alquiler).unwrap();
+        assert_eq!((v.origen_fija, v.destino_fija), (origen_fija, destino_fija));
+        assert_eq!(v.advertencias.len(), usize::from(origen_fija != destino_fija), "{origen_fija}/{destino_fija}: {:?}", v.advertencias);
+        if origen_fija != destino_fija {
+            assert!(v.advertencias[0].contains("tomarán la marca de «Alquiler»"), "{:?}", v.advertencias);
+        }
+        assert_eq!(huella_de_la_base(), antes, "la vista previa no escribe");
+
+        fusionar_categorias(renta, alquiler).unwrap();
+        assert_eq!(es_fija("Alquiler"), destino_fija, "origen {origen_fija}, destino {destino_fija}: manda el destino");
+        assert!(!existe("Renta"));
+    }
 }
 
 // --- Contrato, respaldo y operaciones del sistema ---
@@ -382,13 +428,13 @@ fn integracion_contrato_de_forma_de_los_dto_con_tipos_ipc() {
     let _g = entorno_para_pruebas_externas();
     sembrar_renta_y_alquiler();
 
-    let c = serde_json::to_value(renombrar_categoria(id_de("Renta"), "Vivienda".into()).unwrap()).unwrap();
+    let c = serde_json::to_value(renombrar_categoria(cat_id("Renta"), "Vivienda".into()).unwrap()).unwrap();
     assert_eq!(claves_reales(&c), claves_declaradas("Categoria"));
     assert!(c["motivo_sistema"].is_null());
     let otros = obtener_categorias().unwrap().into_iter().find(|c| c.nombre == "Otros").unwrap();
     assert!(serde_json::to_value(&otros).unwrap()["motivo_sistema"].is_string(), "las del sistema llevan su motivo");
 
-    let v = serde_json::to_value(previsualizar_fusion_categorias(id_de("Vivienda"), id_de("Alquiler")).unwrap()).unwrap();
+    let v = serde_json::to_value(previsualizar_fusion_categorias(cat_id("Vivienda"), cat_id("Alquiler")).unwrap()).unwrap();
     assert_eq!(claves_reales(&v), claves_declaradas("VistaPreviaFusion"));
     assert!(v["gastos"].is_i64() && v["desde"].is_string() && v["advertencias"].is_array());
 
@@ -405,15 +451,15 @@ fn integracion_contrato_de_forma_de_los_dto_con_tipos_ipc() {
 fn integracion_respaldo_y_restauracion_conservan_la_fusion_y_la_deshacen() {
     let _g = entorno_para_pruebas_externas();
     sembrar_renta_y_alquiler();
-    fusionar_categorias(id_de("Renta"), id_de("Alquiler")).unwrap();
+    fusionar_categorias(cat_id("Renta"), cat_id("Alquiler")).unwrap();
     let con_la_fusion = huella_de_la_base();
     let nombre = crate::comandos::respaldos::crear_respaldo().unwrap();
     let nombre = std::path::Path::new(&nombre).file_name().unwrap().to_string_lossy().to_string();
 
     // Después del respaldo: otra categoría se renombra y se fusiona.
     nueva("Mascotas");
-    renombrar_categoria(id_de("Mascotas"), "Animales".into()).unwrap();
-    fusionar_categorias(id_de("Animales"), id_de("Alquiler")).unwrap();
+    renombrar_categoria(cat_id("Mascotas"), "Animales".into()).unwrap();
+    fusionar_categorias(cat_id("Animales"), cat_id("Alquiler")).unwrap();
     assert_eq!(obtener_correcciones().unwrap().len(), 2);
 
     let r = crate::comandos::respaldos::restaurar_respaldo(nombre).unwrap();
@@ -434,9 +480,9 @@ fn integracion_las_categorias_del_sistema_siguen_funcionando_tras_renombrar_y_fu
     nueva("Mascotas");
     nueva("Veterinaria");
     gasto("04/09/2026", "311.47", "Mascotas", "Alimento", cuenta);
-    renombrar_categoria(id_de("Mascotas"), "Animales".into()).unwrap();
-    fusionar_categorias(id_de("Animales"), id_de("Veterinaria")).unwrap();
-    eliminar_categoria(id_de("Veterinaria")).unwrap_err(); // tiene un gasto: sigue protegida por su guarda propia
+    renombrar_categoria(cat_id("Mascotas"), "Animales".into()).unwrap();
+    fusionar_categorias(cat_id("Animales"), cat_id("Veterinaria")).unwrap();
+    eliminar_categoria(cat_id("Veterinaria")).unwrap_err(); // tiene un gasto: sigue protegida por su guarda propia
 
     // Un cargo recurrente automático cae en «Suscripciones».
     crate::comandos::suscripciones::crear_suscripcion(
