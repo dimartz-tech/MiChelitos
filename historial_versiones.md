@@ -4,7 +4,30 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.128.0 (Versión Actual) - 2026-11-05
+## 🚀 Versión 1.129.0 (Versión Actual) - 2026-11-06
+**Renombrar y fusionar categorías (Ajustes).** Hasta ahora solo se podían agregar y eliminar; unificar «Renta» y «Alquiler» exigió SQL a mano. **Sin migración: el esquema se queda en 20.**
+
+### ✏️ Renombrar
+- Comando `renombrar_categoria(id, nombre)`: recorta, no admite vacío ni más de 60 caracteres, rechaza los nombres reservados («Cargos derivados», «Sin categoría») y exige un nombre **único sin distinguir mayúsculas ni tildes** (la restricción `UNIQUE` de SQLite sí distingue mayúsculas: la regla vive en el dominio). Una categoría puede cambiar su propia capitalización o tildes. **No toca la marca «fija / recurrente».**
+
+### 🔀 Fusionar
+- `previsualizar_fusion_categorias(origen_id, destino_id)` (solo lectura): cuántos gastos se moverían, rango de fechas y advertencias (origen sin gastos; origen y destino con distinta marca «fija / recurrente»; y, en la interfaz, si el conmutador «Incluir inversión y obligaciones» del Resumen trata distinto a las dos por nombre).
+- `fusionar_categorias(origen_id, destino_id)`: en **una** transacción reasigna todos los gastos al destino, anota un caso de auditoría (tipo «categoria», «Fusión de «A» en «B» (N gastos)») y elimina el origen. El destino **conserva su nombre y su marca fija**.
+- Interfaz: botones «✏️ Renombrar» y «🔀 Fusionar…» en la lista de categorías; la ventana de fusión es accesible (foco, Escape, devolución del foco) y «Confirmar» solo se habilita con una vista previa válida. El filtro de Gastos por una categoría que ya no existe se limpia.
+
+### 🔒 Categorías del sistema
+El código busca por nombre «Otros» (comisiones de abonos y cargo de avances, y respaldo de suscripciones), «Suscripciones» (cargos recurrentes automáticos) e «Impuestos» (exención de retención y comisión fija de los pagos de impuestos). **No se renombran ni se fusionan como origen** (sí pueden ser destino); la lista las marca con «🔒 Sistema» y el motivo en texto.
+
+### 🔎 Hallazgos (documentados con pruebas `hallazgo_…`, sin corregir)
+- `eliminar_categoria` solo protege «Otros»; «Suscripciones» e «Impuestos» se eliminan si no tienen gastos.
+- `crear_categoria` no tiene longitud máxima, acepta nombres reservados y distingue tildes.
+
+### ✅ Verificación
+Pruebas unitarias de dominio y casos de uso (doble en memoria con fallo inyectado), de JS y 14 pruebas `integracion_catalogos` con base temporal y comandos reales; 7 mutaciones detectadas.
+
+---
+
+## Versión 1.128.0 - 2026-11-05
 **Marca «fija / recurrente» por categoría en el resumen de gastos.** PR 4 de 5 del resumen por categoría y mes (decisión D6 del titular: la marca la elige él por categoría; no se detecta por el texto). Una categoría fija/recurrente es un gasto que se repite cada período **aunque el monto varíe** (por ejemplo Suscripciones, Telefónicas, Seguros, Impuestos).
 
 > ⚠️ **ESTE PR SUBE EL ESQUEMA A 20: la app instalada (v19) no abre una base v20. No instalar sin respaldo y ensayo.** Volver atrás es restituir un `.app` guardado y el respaldo previo.
