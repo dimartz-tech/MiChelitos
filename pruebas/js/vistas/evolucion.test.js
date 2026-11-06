@@ -11,7 +11,18 @@ const foto = (anio, mes, patrimonio, liquido, extra = {}) => ({
     tasa_usd_dop: '60.00', activos: patrimonio, pasivos: '0.00', patrimonio, liquido, calidad: 'completa', partidas: [], ...extra,
 });
 
-function crear({ fotos = [], error = null } = {}) {
+const RECOMENDACIONES = {
+    aviso: 'Reglas descriptivas, no asesoría financiera: muestran qué dicen tus propios datos.',
+    anio_gastos: 2027, mes_gastos: 2, anio_presupuestos: 2027, mes_presupuestos: 3,
+    recomendaciones: [{
+        id: 'presupuesto_excedido:7', regla: 'presupuesto', severidad: 'atencion', titulo: 'Ocio <b>inventado</b>: presupuesto del mes excedido',
+        explicacion: 'Va al 104.0 % del presupuesto.', regla_texto: 'Desde el 100 % es excedido.',
+        cifras: [{ etiqueta: 'Exceso', tipo: 'importe', valor: '49.99' }], destino: 'gastos',
+    }],
+    omitidas: 0, maximo_por_severidad: 5, reglas_evaluadas: 1, sin_datos: [], usd_excluido: [],
+};
+
+function crear({ fotos = [], error = null, recomendaciones = RECOMENDACIONES, errorRecomendaciones = null } = {}) {
     const pantalla = { contenido: { innerHTML: '' } };
     const llamadas = [];
     const avisos = [];
@@ -19,6 +30,7 @@ function crear({ fotos = [], error = null } = {}) {
         api: {
             obtenerFotosPatrimonio: async () => { llamadas.push('obtenerFotosPatrimonio'); if (error) throw error; return fotos; },
             tomarFotoPatrimonio: async (...a) => { llamadas.push(['tomar', ...a]); return fotos[0]; },
+            obtenerRecomendaciones: async () => { llamadas.push('obtenerRecomendaciones'); if (errorRecomendaciones) throw errorRecomendaciones; return recomendaciones; },
         },
         avisos: { mostrar: (m, t) => avisos.push({ m, t }) },
         pantalla,
@@ -172,4 +184,42 @@ test('ningún atributo on*= en la plantilla: solo data-accion*', async () => {
     await t.vista.render();
     assert.doesNotMatch(t.html(), /\son[a-z]+\s*=\s*["']/i);
     assert.match(t.html(), /data-accion-cambiar="handleCambiarSerieEvolucion"[^>]*data-pasa="valor"/);
+});
+
+// --- Bloque «Cómo aumentar tu patrimonio» ---
+
+test('el bloque de recomendaciones aparece con el aviso, escapa el texto de Rust y enlaza a la pestaña', async () => {
+    const t = crear({ fotos: FOTOS });
+    await t.vista.render();
+    const bloque = t.html().match(/<section class="card" id="evo-recomendaciones"[\s\S]*?<\/section>/)[0];
+    assert.match(bloque, /Cómo aumentar tu patrimonio/);
+    assert.match(bloque, /Reglas descriptivas, no asesoría financiera/);
+    assert.match(bloque, /Ocio &lt;b&gt;inventado&lt;\/b&gt;/);
+    assert.doesNotMatch(bloque, /<b>inventado/);
+    assert.match(bloque, /data-accion="navegar" data-args="\[&quot;gastos&quot;\]"/);
+    assert.match(bloque, /DOP 49\.99/);
+    assert.deepEqual(t.llamadas.filter(l => l === 'obtenerRecomendaciones'), ['obtenerRecomendaciones']);
+});
+
+test('el bloque se dibuja también sin fotos, antes de «Tomar foto ahora»', async () => {
+    const t = crear();
+    await t.vista.render();
+    const html = t.html();
+    assert.ok(html.indexOf('id="evo-recomendaciones"') > 0);
+    assert.ok(html.indexOf('id="evo-recomendaciones"') < html.indexOf('Tomar foto ahora'));
+});
+
+test('si el comando de recomendaciones falla, el resto de la pestaña se dibuja igual y el error se ve escapado', async () => {
+    const t = crear({ fotos: FOTOS, errorRecomendaciones: 'falló <i>algo</i>' });
+    await t.vista.render();
+    assert.match(t.html(), /id="evo-tabla"/);
+    assert.match(t.html(), /No se pudieron calcular las recomendaciones: falló &lt;i&gt;algo&lt;\/i&gt;/);
+    assert.doesNotMatch(t.html(), /<i>algo/);
+});
+
+test('cambiar de serie o de mes vuelve a pedir las recomendaciones (siempre al día)', async () => {
+    const t = crear({ fotos: FOTOS });
+    await t.vista.handleCambiarSerieEvolucion('liquido');
+    await t.vista.handleCambiarMesEvolucion('2027-01');
+    assert.equal(t.llamadas.filter(l => l === 'obtenerRecomendaciones').length, 2);
 });

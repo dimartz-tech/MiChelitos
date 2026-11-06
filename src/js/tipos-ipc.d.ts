@@ -33,6 +33,11 @@ export type MovimientoPrestamo = { id: number; fecha: string; tipo: string; mont
 export type PresupuestoFijado = { categoria_id: number; categoria_nombre: string; fija: boolean; monto: string };
 export type FilaPresupuesto = { categoria_id: number; categoria_nombre: string; fija: boolean; presupuesto: string; gastado: string; restante: string; porcentaje_milesimas: number; estado: string; usd_aparte: string };
 export type EstadoPresupuestos = { anio: number; mes: number; filas: FilaPresupuesto[]; total_presupuesto: string; total_gastado: string; total_restante: string };
+export type CifraRecomendacion = { etiqueta: string; tipo: string; valor: string };
+export type RecomendacionPatrimonio = { id: string; regla: string; severidad: string; titulo: string; explicacion: string; regla_texto: string; cifras: CifraRecomendacion[]; destino: string };
+export type ReglaSinDatosPatrimonio = { regla: string; motivo: string };
+export type DolaresExcluidos = { origen: string; importe: string };
+export type ResultadoRecomendaciones = { aviso: string; anio_gastos: number; mes_gastos: number; anio_presupuestos: number; mes_presupuestos: number; recomendaciones: RecomendacionPatrimonio[]; omitidas: number; maximo_por_severidad: number; reglas_evaluadas: number; sin_datos: ReglaSinDatosPatrimonio[]; usd_excluido: DolaresExcluidos[] };
 export type MedidasResumen = { importe: string; porcentaje_milesimas: number; anterior: string; variacion_anterior_pb: number | null; anterior_mismo_dia: string | null; variacion_mismo_dia_pb: number | null; promedio: string | null; variacion_promedio_pb: number | null; usd_aparte: string; n: number };
 export type PuntoTendenciaResumen = { anio: number; mes: number; importe: string | null; parcial: boolean };
 export type TendenciaResumen = { meses: PuntoTendenciaResumen[]; direccion: string; motivo_estable: string | null };
@@ -117,6 +122,7 @@ export type Comandos = {
     fijar_presupuesto: { args: { categoriaId: number; monto: string }; ret: PresupuestoFijado };
     quitar_presupuesto: { args: { categoriaId: number }; ret: boolean };
     obtener_presupuestos_mes: { args: { anio: number; mes: number }; ret: EstadoPresupuestos };
+    obtener_recomendaciones: { args: {  }; ret: ResultadoRecomendaciones };
     crear_respaldo: { args: {  }; ret: string };
     listar_respaldos: { args: {  }; ret: string[] };
     restaurar_respaldo: { args: { nombre: string }; ret: any };

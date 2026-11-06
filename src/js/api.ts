@@ -227,6 +227,15 @@ const AppAPI = {
         return await invoke('obtener_presupuestos_mes', { anio, mes });
     },
 
+    // --- RECOMENDACIONES DEL HISTORIAL DEL PATRIMONIO ---
+    /**
+     * Recomendaciones descriptivas (no asesoría financiera) sobre el patrimonio: cada una con la cifra que la dispara, la
+     * regla en palabras y la pestaña donde se ve. Con datos insuficientes lo dice en `sin_datos`. Solo lectura.
+     */
+    async obtenerRecomendaciones() {
+        return await invoke('obtener_recomendaciones');
+    },
+
     async crearGasto(gastoData: import('./tipos-ipc').GastoInput) {
         return await invoke('crear_gasto', { input: gastoData });
     },
