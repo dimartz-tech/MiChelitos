@@ -81,8 +81,9 @@ function crearDialogo(nombre, config, registro, omisiones) {
  * @param {boolean|Function|any[]} [opciones.confirm]  respuesta de `confirm()`
  * @param {string|null|Function|any[]} [opciones.prompt] respuesta de `prompt()` (`null` = cancelar)
  * @param {boolean} [opciones.renderReal]  no sustituir `render()` (por defecto solo se registra la ruta)
+ * @param {() => Date} [opciones.ahora]  la fecha de hoy que ven las vistas (por defecto, la real)
  */
-export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderReal = false } = {}) {
+export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderReal = false, ahora } = {}) {
     const llamadas = [];
     const avisos = [];
     const renders = [];
@@ -127,6 +128,7 @@ export function cargarInterfaz({ campos = {}, api = {}, confirm, prompt, renderR
             contenido: elementoReal('app-content'),
             avisos: { contenedor: elementoReal('notification-container') },
             dialogos: { confirmar: m => confirmFalso(m), preguntar: (m, d) => promptFalso(m, d) },
+            ...(ahora ? { ahora } : {}),
             // Una ventana modal abierta queda registrada y existe en el DOM falso con su
             // contenido, para que la vista (o la prueba) la encuentre y la cierre por id.
             modales: { abrir: (id, html) => { modalesAbiertos.push({ id, html }); declarar(id, { innerHTML: html }); } },
