@@ -4,7 +4,40 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.130.0 (Versión Actual) - 2026-11-06
+## 🚀 Versión 1.131.0 (Versión Actual) - 2026-11-06
+**Recomendaciones para el historial del patrimonio («Cómo aumentar tu patrimonio»).** El titular pidió poder obtener, desde el historial de patrimonio, alguna recomendación de cómo incrementarlo. Son **reglas descriptivas y deterministas**, no asesoría financiera ni inversión personalizada: cada recomendación muestra el dato que la dispara (cifras y periodo) y la regla en palabras, con sus umbrales. **Sin migración: el esquema se queda en 21** (es de solo lectura; usa fotos, gastos, presupuestos, cuentas y tarjetas que ya existen).
+
+### 🔧 Qué se hace
+* **Comando `obtener_recomendaciones`** (solo lectura, `lee_fotos_y_almacen`: una sola transacción diferida que cruza las fotos del patrimonio con el almacén de gastos, presupuestos y situación). Devuelve el aviso, los periodos leídos, las recomendaciones visibles (id estable, regla, severidad `atencion`/`info`, título, explicación, regla en palabras, cifras de respaldo y la pestaña de destino), cuántas se omitieron por el límite, cuántas reglas tuvieron datos, las reglas **sin datos** con su motivo y los **dólares excluidos** (sin convertir).
+* **Interfaz:** bloque «Cómo aumentar tu patrimonio» en la pestaña Evolución, con el aviso «Reglas descriptivas, no asesoría financiera», severidad en palabras y símbolo (nunca solo color), cifras, regla y botón «Ver en …» a la pestaña relevante (`data-accion="navegar"`). Con datos insuficientes lo dice (y lista qué regla necesita qué); si Rust falla, el resto de la pestaña se dibuja igual. Sin `on*=`, con `escaparHtml`.
+* **Orden y límite deterministas:** atención antes que informativa; dentro de cada severidad, por regla, luego por magnitud (mayor primero) y por identificador. Se muestran **a lo sumo 5 de cada severidad**; el resto se cuenta («Hay N más que no se muestran»).
+
+### 📏 Las seis reglas y sus umbrales
+1. **Presupuesto** (mes en curso, solo pesos): «cerca» desde el 80 % = informativa; «excedido» desde el 100 % = atención.
+2. **Tendencia del gasto variable** (atención): categoría **no fija** con tendencia «sube» según la regla A+D ya vigente (promedio de los 3 últimos meses completos > +10 % sobre los 3 anteriores **y** diferencia ≥ DOP 500.00; 4 meses completos como mínimo). Muestra ambos promedios, la diferencia y el cambio. Los cargos derivados no cuentan.
+3. **Variación del patrimonio** (baja = atención; sube = informativa): las dos fotos mensuales más recientes y qué componente explica el cambio (activos o pasivos, el de mayor cambio absoluto; si empatan, activos). Si alguna foto no es «completa» la severidad baja a informativa y se dice; si las tasas USD de las fotos difieren, se muestran las dos (parte del cambio puede ser cambiaria).
+4. **Deuda de tarjetas y saldo en cuentas de ahorro:** deuda en pesos ≥ DOP 100.00 y saldo en cuentas de ahorro en pesos (sin caja de efectivo ni archivadas). Atención si el ahorro alcanza para cubrir la deuda; informativa si no. **No estima costos:** la aplicación no guarda la tasa de las tarjetas ni el rendimiento de las cuentas, y no se inventan tasas.
+5. **Cargos derivados** (comisiones de abonos y cargos de avances de efectivo): desde el 5 % del gasto en pesos del último mes completo = informativa; desde el 10 % = atención; siempre con al menos DOP 200.00.
+6. **Gasto fijo/variable** (informativa): si el gasto del último mes completo es ≥ DOP 500.00 y hay categorías marcadas fijas por el titular, avisa del segmento que pesa desde el 60 %. Sin ninguna categoría fija con gasto, la regla lo dice en vez de dar una razón vacía.
+
+### 🧭 Decisiones
+* **Mes de referencia:** las reglas de gasto leen el **último mes completo** (un mes a medias distorsiona pesos y razones); los presupuestos, el **mes en curso**, que es cuando sirven.
+* **USD no se convierte** (decisión del titular, igual que en presupuestos): se excluye de todas las reglas y se informa aparte (gastos del mes de referencia, deuda de tarjetas y cuentas en dólares). La excepción son las fotos, que ya traen su propia tasa y su total en pesos.
+* **Sin tasas inventadas:** la regla de deuda y ahorro compara cifras y avisa de lo que la aplicación no sabe; no calcula un «costo mensual».
+* **Sin migración:** todo se calcula al vuelo. Las recomendaciones no se guardan ni se pueden descartar todavía (los identificadores estables permitirían descartarlas en el futuro).
+* Nueva función `promedios_reciente_y_previo` en `dominio::resumen_gastos`: las cifras que sustentan la dirección «sube», con el mismo recorte de meses que `evaluar_tendencia` (la decisión sigue tomándose sin redondear).
+
+### 🧪 Pruebas y mutaciones
+* Unitarias: dominio (cada regla en su umbral exacto y un centavo antes, mínimos absolutos, fijas y derivadas fuera de la tendencia, USD fuera, fotos desordenadas, foto con aviso, tasas distintas, empate de componente, límite de 5 por severidad, orden, determinismo, identificadores únicos), promedios de la tendencia, caso de uso con dobles (sin escritura, fallo del almacén, sin datos) y JavaScript (rótulos, escape, estados vacío/sin datos/error/omitidas, dólares, enlaces solo a pestañas conocidas, bloque dentro de Evolución con el enrutador real).
+* Integración (`integracion_recomendaciones.rs`, comandos reales): escenario de seis meses con las seis reglas activas y sus cifras exactas, base vacía, solo lectura y determinismo (huella de la base idéntica), cambio de periodo y enero, límite de cinco por severidad, destinos que son pestañas, forma del DTO contra `tipos-ipc.d.ts` y formato exacto de importes y porcentajes.
+* Mutaciones: ver el cuerpo del PR (todas detectadas).
+
+### 🧭 Qué probar a mano
+* Abrir la pestaña Evolución con la base real y leer el bloque: cada recomendación debe poder verificarse contra las cifras que muestra. Marcar o desmarcar una categoría como fija en Ajustes y ver cómo cambia la regla fijo/variable.
+
+---
+
+## Versión 1.130.0 - 2026-11-06
 **Presupuestos mensuales por categoría, con alertas.** PR 5 de 5 del resumen por categoría y mes. El titular fija, para una categoría, un tope mensual en pesos; la aplicación lo compara con lo gastado y lo dice en palabras (dentro, cerca o excedido). Es descriptiva: no recomienda nada.
 
 > ⚠️ **ESTE PR SUBE EL ESQUEMA A 21: la app instalada (v19) no abre una base v21. No instalar sin respaldo y ensayo.** Volver atrás es restituir un `.app` guardado y el respaldo previo.

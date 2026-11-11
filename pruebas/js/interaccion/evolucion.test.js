@@ -88,3 +88,31 @@ test('la pestaña con el enrutador real: sin fotos', async () => {
     await ui.enrutador.mostrar('evolucion');
     assert.match(html(ui), /Aún no hay fotos/);
 });
+
+const RECOMENDACIONES = {
+    aviso: 'Reglas descriptivas, no asesoría financiera: muestran qué dicen tus propios datos.',
+    anio_gastos: 2027, mes_gastos: 2, anio_presupuestos: 2027, mes_presupuestos: 3,
+    recomendaciones: [{
+        id: 'deuda_y_ahorro', regla: 'deuda_y_ahorro', severidad: 'info', titulo: 'Hay deuda en tarjetas y a la vez saldo en cuentas de ahorro',
+        explicacion: 'No se estima el costo.', regla_texto: 'Deuda desde DOP 100.00.',
+        cifras: [{ etiqueta: 'Deuda de tarjetas en pesos', tipo: 'importe', valor: '3210.45' }], destino: 'tarjetas',
+    }],
+    omitidas: 0, maximo_por_severidad: 5, reglas_evaluadas: 2, sin_datos: [], usd_excluido: [],
+};
+
+test('la pestaña con el enrutador real: pide las recomendaciones a la API real y las pinta con su enlace', async () => {
+    const ui = cargarInterfaz({ renderReal: true, api: { obtenerFotosPatrimonio: FOTOS, obtenerRecomendaciones: RECOMENDACIONES } });
+    await ui.enrutador.mostrar('evolucion');
+    llamoUnaVez(ui, 'obtenerRecomendaciones', []);
+    assert.match(html(ui), /Cómo aumentar tu patrimonio/);
+    assert.match(html(ui), /DOP 3,210\.45/);
+    assert.match(html(ui), /data-accion="navegar" data-args="\[&quot;tarjetas&quot;\]"/);
+});
+
+test('la pestaña con el enrutador real: si las recomendaciones fallan, el historial se ve igual', async () => {
+    const ui = cargarInterfaz({ renderReal: true, api: { obtenerFotosPatrimonio: FOTOS } });
+    ui.rechazar('obtenerRecomendaciones', 'base ocupada');
+    await ui.enrutador.mostrar('evolucion');
+    assert.match(html(ui), /id="evo-tabla"/);
+    assert.match(html(ui), /No se pudieron calcular las recomendaciones: base ocupada/);
+});
