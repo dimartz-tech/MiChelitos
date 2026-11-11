@@ -27,7 +27,7 @@
       "entitlements": null,
       "exceptionDomain": "",
       "frameworks": [],
-      "signingIdentity": null
+      "signingIdentity": "-"
     },
     "resources": [],
     "shortDescription": "Gestor Financiero Personal y Corporativo",
@@ -39,7 +39,7 @@
   },
   "productName": "MiChelitos",
   "mainBinaryName": "MiChelitos",
-  "version": "1.131.0",
+  "version": "1.132.0",
   "identifier": "com.michelitos.desktop",
   "plugins": {},
   "app": {
