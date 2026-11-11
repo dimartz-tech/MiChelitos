@@ -4,7 +4,23 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.131.0 (Versión Actual) - 2026-11-06
+## 🚀 Versión 1.132.0 (Versión Actual) - 2026-11-11
+**Firma local completa del paquete de la aplicación.** Hasta ahora la compilación no firmaba el paquete `.app`: solo quedaba la firma mínima que el enlazador pone al ejecutable (`adhoc,linker-signed`), sin sellar `Info.plist` ni los recursos, y `codesign -v` avisaba «code has no resources but signature indicates they must be present». Ocurría desde versiones antiguas (comprobado en las guardadas 1.99.0 y 1.127.0); la aplicación abría porque se compila en el mismo equipo.
+
+### 🔧 Qué se hace
+* `bundle.macOS.signingIdentity` pasa de `null` a `"-"` en `src-tauri/tauri.conf.json`: Tauri firma el paquete completo de forma local (ad hoc) al empaquetar, con `Info.plist` y recursos sellados.
+
+### 🧭 Alcance
+* Sin cambios de código, de reglas ni de esquema (sigue en 21).
+* Una firma ad hoc vale para este equipo. Distribuir a otro Mac sin avisos exigiría un certificado de desarrollador de Apple y notarización; no es el objetivo.
+
+### 🧪 Verificación
+* Compilada con el ajuste: `codesign -v --deep --strict` verifica el paquete, y `codesign -dv` muestra `Info.plist` ligado y recursos sellados. La firma queda `adhoc,runtime` (Tauri activa el entorno de ejecución reforzado).
+* Ensayada sobre una copia de la base: arranca y sigue viva a los 16 s, esquema 21, integridad ok.
+
+---
+
+## Versión 1.131.0 - 2026-11-06
 **Recomendaciones para el historial del patrimonio («Cómo aumentar tu patrimonio»).** El titular pidió poder obtener, desde el historial de patrimonio, alguna recomendación de cómo incrementarlo. Son **reglas descriptivas y deterministas**, no asesoría financiera ni inversión personalizada: cada recomendación muestra el dato que la dispara (cifras y periodo) y la regla en palabras, con sus umbrales. **Sin migración: el esquema se queda en 21** (es de solo lectura; usa fotos, gastos, presupuestos, cuentas y tarjetas que ya existen).
 
 ### 🔧 Qué se hace
