@@ -91,6 +91,8 @@ fn main() {
             comandos::fotos_patrimonio::tomar_foto_patrimonio,
             comandos::fotos_patrimonio::asegurar_foto_del_mes,
             comandos::fotos_patrimonio::obtener_fotos_patrimonio,
+            comandos::fotos_patrimonio::deshacer_foto_patrimonio,
+            comandos::fotos_patrimonio::obtener_fotos_previas_patrimonio,
             comandos::prestamos::obtener_prestamos,
             comandos::prestamos::crear_prestamo,
             comandos::prestamos::pagar_cuota_prestamo,

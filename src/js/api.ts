@@ -481,6 +481,16 @@ const AppAPI = {
         return await invoke('tomar_foto_patrimonio', { origen, tasaUsdDop: tasaUsdDop ?? null });
     },
 
+    /** Deshace el último reemplazo de la foto de ese mes: vuelve la que había antes (solo un nivel). */
+    async deshacerFotoPatrimonio(anio: number, mes: number) {
+        return await invoke('deshacer_foto_patrimonio', { anio, mes });
+    },
+
+    /** Los meses cuya foto actual reemplazó a otra que todavía se puede restituir. */
+    async obtenerFotosPreviasPatrimonio() {
+        return await invoke('obtener_fotos_previas_patrimonio');
+    },
+
     /** Al arrancar: toma la foto del mes solo si falta. */
     async asegurarFotoDelMes() {
         return await invoke('asegurar_foto_del_mes', { tasaUsdDop: null });

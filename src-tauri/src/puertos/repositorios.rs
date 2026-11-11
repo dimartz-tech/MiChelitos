@@ -37,6 +37,8 @@ pub enum ErrorAlmacen {
     TarjetaInactiva { nombre: String },
     /// La foto del patrimonio de ese mes está sellada: es inmutable.
     FotoSellada { anio: i32, mes: u32 },
+    /// Se pidió deshacer la foto de un mes que no tiene una foto anterior guardada.
+    SinFotoPrevia { anio: i32, mes: u32 },
     Fallo(String),
 }
 
@@ -66,6 +68,9 @@ impl fmt::Display for ErrorAlmacen {
                 "La foto del patrimonio de {:02}/{} está sellada: un mes cerrado no se modifica.",
                 mes, anio
             ),
+            ErrorAlmacen::SinFotoPrevia { anio, mes } => {
+                write!(f, "No hay una foto anterior que restituir para {:02}/{}.", mes, anio)
+            }
             ErrorAlmacen::Fallo(detalle) => write!(f, "Error de almacenamiento: {}", detalle),
         }
     }
@@ -1188,11 +1193,32 @@ pub trait RepositorioDeFotos {
     /// `ErrorAlmacen::FotoSellada` si la foto de ese mes ya está sellada (no se toca nada).
     fn guardar_foto(&mut self, foto: &Foto) -> Result<i64, ErrorAlmacen>;
     fn existe_foto(&self, anio: i32, mes: u32) -> Result<bool, ErrorAlmacen>;
-    /// Sella las fotos de meses **anteriores** a `(anio, mes)` que aún no lo estén. Devuelve cuántas selló.
+    /// Sella las fotos de meses **anteriores** a `(anio, mes)` que aún no lo estén. Devuelve cuántas selló. Las fotos
+    /// previas de esos meses se descartan: un mes cerrado ya no se deshace.
     fn sellar_anteriores(&mut self, anio: i32, mes: u32) -> Result<usize, ErrorAlmacen>;
     /// Todas, de la más antigua a la más reciente (por año y mes).
     fn fotos(&self) -> Result<Vec<FotoLeida>, ErrorAlmacen>;
     fn partidas_de(&self, foto_id: i64) -> Result<Vec<PartidaLeida>, ErrorAlmacen>;
+    /// Aparta la foto actual de `(anio, mes)`, con sus partidas, como **foto previa** de ese mes (sustituye a la previa
+    /// que hubiera: solo se guarda la última reemplazada). No aparta nada, y devuelve `false`, si el mes no tiene foto
+    /// o está sellada. Se llama justo antes de reemplazar la foto del mes.
+    fn guardar_previa(&mut self, anio: i32, mes: u32) -> Result<bool, ErrorAlmacen>;
+    /// Las fotos previas guardadas, por año y mes.
+    fn previas(&self) -> Result<Vec<FotoPrevia>, ErrorAlmacen>;
+    /// Deshace el último reemplazo: la foto de `(anio, mes)` vuelve a ser la previa, con sus partidas, y la previa se
+    /// consume (no hay «rehacer»). `false` si ese mes no tiene previa (no se toca nada); `ErrorAlmacen::FotoSellada`
+    /// si la foto del mes está sellada.
+    fn restituir_previa(&mut self, anio: i32, mes: u32) -> Result<bool, ErrorAlmacen>;
+}
+
+/// La foto que la actual de su mes reemplazó: lo justo para describirla antes de restituirla.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FotoPrevia {
+    pub anio: i32,
+    pub mes: u32,
+    pub fecha: String,
+    pub origen: String,
+    pub patrimonio: Dinero,
 }
 
 /// Una cuenta tal como la necesita la foto.
