@@ -1,5 +1,5 @@
 // Pestaña Evolución: cambiar de serie y de mes, tomar la foto ahora (con y sin tasa), el error del
-// comando y el mes sellado. Datos inventados.
+// comando, el mes sellado y el aviso antes de reemplazar la foto del mes. Datos inventados.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,6 +14,8 @@ const foto = (anio, mes, patrimonio, liquido, extra = {}) => ({
 
 const FOTOS = [foto(2027, 1, '1000.01', '500.05'), foto(2027, 2, '1250.77', '640.31')];
 const html = ui => ui.elemento('app-content').innerHTML;
+const FEBRERO = () => new Date(2027, 1, 14);
+const MARZO = () => new Date(2027, 2, 14);
 
 test('cambiar la serie vuelve a pedir las fotos y dibuja el líquido', async () => {
     const ui = cargarInterfaz({ api: { obtenerFotosPatrimonio: FOTOS } });
@@ -35,7 +37,7 @@ test('cambiar el mes muestra las partidas de esa foto', async () => {
 });
 
 test('tomar foto sin tasa: origen manual, sin tasa, aviso de éxito y se redibuja la pestaña', async () => {
-    const ui = cargarInterfaz({ campos: { evo_tasa: '' }, api: { tomarFotoPatrimonio: foto(2027, 3, '2000.03', '900.09') } });
+    const ui = cargarInterfaz({ campos: { evo_tasa: '' }, ahora: MARZO, api: { obtenerFotosPatrimonio: FOTOS, tomarFotoPatrimonio: foto(2027, 3, '2000.03', '900.09') } });
     await ui.appUI.handleTomarFotoEvolucion();
     llamoUnaVez(ui, 'tomarFotoPatrimonio', ['manual', undefined]);
     avisoExito(ui, /mar 2027.*2,000\.03/);
@@ -43,7 +45,7 @@ test('tomar foto sin tasa: origen manual, sin tasa, aviso de éxito y se redibuj
 });
 
 test('tomar foto con tasa: acepta la coma decimal y manda el texto con punto', async () => {
-    const ui = cargarInterfaz({ campos: { evo_tasa: ' 58,75 ' }, api: { tomarFotoPatrimonio: foto(2027, 3, '2000.03', '900.09') } });
+    const ui = cargarInterfaz({ campos: { evo_tasa: ' 58,75 ' }, ahora: MARZO, api: { obtenerFotosPatrimonio: FOTOS, tomarFotoPatrimonio: foto(2027, 3, '2000.03', '900.09') } });
     await ui.appUI.handleTomarFotoEvolucion();
     llamoUnaVez(ui, 'tomarFotoPatrimonio', ['manual', '58.75']);
     avisoExito(ui);
@@ -60,7 +62,7 @@ test('tomar foto con una tasa que no es un número: no se envía y se explica', 
 });
 
 test('si el comando falla se muestra el error y no se redibuja', async () => {
-    const ui = cargarInterfaz({ campos: { evo_tasa: '' } });
+    const ui = cargarInterfaz({ campos: { evo_tasa: '' }, ahora: MARZO, api: { obtenerFotosPatrimonio: FOTOS } });
     ui.rechazar('tomarFotoPatrimonio', 'Error simulado de Rust');
     await ui.appUI.handleTomarFotoEvolucion();
     unAvisoDeError(ui, /No se pudo tomar la foto: Error simulado de Rust/);
@@ -68,11 +70,59 @@ test('si el comando falla se muestra el error y no se redibuja', async () => {
 });
 
 test('mes sellado: el comando lo rechaza y la interfaz lo explica', async () => {
-    const ui = cargarInterfaz({ campos: { evo_tasa: '' } });
+    // El mes en curso ya tiene foto y está sellada: no se pregunta (no hay nada que confirmar), decide Rust.
+    const ui = cargarInterfaz({ campos: { evo_tasa: '' }, ahora: FEBRERO, api: { obtenerFotosPatrimonio: [FOTOS[0], foto(2027, 2, '1250.77', '640.31', { sellada: true })] } });
     ui.rechazar('tomarFotoPatrimonio', 'Una foto sellada del patrimonio no se modifica.');
     await ui.appUI.handleTomarFotoEvolucion();
+    assert.equal(ui.confirmaciones.length, 0);
     unAvisoDeError(ui, /ya está sellado.*no se puede cambiar/);
     noRedibujo(ui);
+});
+
+// --- aviso antes de reemplazar la foto del mes ---
+
+test('el mes en curso ya tiene foto: se avisa con su fecha, origen y patrimonio, y al aceptar se reemplaza', async () => {
+    const ui = cargarInterfaz({ campos: { evo_tasa: '' }, ahora: FEBRERO, confirm: true, api: { obtenerFotosPatrimonio: FOTOS, tomarFotoPatrimonio: foto(2027, 2, '1300.19', '650.07', { origen: 'manual' }) } });
+    await ui.appUI.handleTomarFotoEvolucion();
+    assert.equal(ui.confirmaciones.length, 1);
+    assert.match(ui.confirmaciones[0].texto, /Ya hay una foto de feb 2027: del 10\/02\/2027 \(Automática\), con patrimonio 1,250\.77 DOP/);
+    assert.match(ui.confirmaciones[0].texto, /la reemplaza.*no se puede recuperar.*¿Reemplazarla\?/);
+    llamoUnaVez(ui, 'tomarFotoPatrimonio', ['manual', undefined]);
+    avisoExito(ui, /feb 2027.*1,300\.19/);
+    redibujo(ui, 'evolucion');
+});
+
+test('el mes en curso ya tiene foto y se cancela: no se toma, se dice cuál se conserva y no se redibuja', async () => {
+    const ui = cargarInterfaz({ campos: { evo_tasa: '58,75' }, ahora: FEBRERO, confirm: false, api: { obtenerFotosPatrimonio: FOTOS } });
+    await ui.appUI.handleTomarFotoEvolucion();
+    assert.equal(ui.confirmaciones.length, 1);
+    noLlamoA(ui, 'tomarFotoPatrimonio');
+    avisoExito(ui, /No se tomó la foto: se conserva la del 10\/02\/2027/);
+    noRedibujo(ui);
+});
+
+test('el mes en curso no tiene foto: no se pregunta aunque haya fotos de otros meses o del mismo mes de otro año', async () => {
+    const ui = cargarInterfaz({ campos: { evo_tasa: '' }, ahora: MARZO, api: { obtenerFotosPatrimonio: [...FOTOS, foto(2026, 3, '900.41', '300.13')], tomarFotoPatrimonio: foto(2027, 3, '2000.03', '900.09') } });
+    await ui.appUI.handleTomarFotoEvolucion();
+    assert.equal(ui.confirmaciones.length, 0);
+    llamoUnaVez(ui, 'tomarFotoPatrimonio', ['manual', undefined]);
+});
+
+test('si no se puede comprobar si el mes ya tiene foto, no se toma ninguna', async () => {
+    const ui = cargarInterfaz({ campos: { evo_tasa: '' }, ahora: FEBRERO });
+    ui.rechazar('obtenerFotosPatrimonio', 'Error simulado de lectura');
+    await ui.appUI.handleTomarFotoEvolucion();
+    noLlamoA(ui, 'tomarFotoPatrimonio');
+    unAvisoDeError(ui, /No se tomó la foto: no se pudo comprobar.*Error simulado de lectura/);
+    noRedibujo(ui);
+});
+
+test('una tasa mal escrita se rechaza antes de preguntar nada', async () => {
+    const ui = cargarInterfaz({ campos: { evo_tasa: 'abc' }, ahora: FEBRERO, api: { obtenerFotosPatrimonio: FOTOS } });
+    await ui.appUI.handleTomarFotoEvolucion();
+    assert.equal(ui.confirmaciones.length, 0);
+    noLlamoA(ui, 'obtenerFotosPatrimonio');
+    noLlamoA(ui, 'tomarFotoPatrimonio');
 });
 
 test('la pestaña con el enrutador real: error del comando de lectura pintado en pantalla', async () => {
