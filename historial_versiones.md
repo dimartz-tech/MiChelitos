@@ -4,7 +4,35 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.133.0 (Versión Actual) - 2026-11-11
+## 🚀 Versión 1.134.0 (Versión Actual) - 2026-11-11
+**Deshacer el reemplazo de la foto del mes.** Solo hay una foto del patrimonio por mes, así que tomar otra reemplaza la que había; desde la 1.133.0 se avisa antes, pero la reemplazada no se podía recuperar desde la aplicación. Ahora se **aparta** y se puede **restituir**. **Migración 22: el esquema pasa a 22** (una base ya migrada no se abre con una versión anterior).
+
+### 🔧 Qué se hace
+* **Migración 22:** tablas `patrimonio_fotos_previas` y `patrimonio_partidas_previas` (mismos tipos que las de las fotos: importes `INTEGER` en centavos, tasa en micro-unidades). Nacen vacías y no tocan ninguna tabla existente.
+* **Al reemplazar** la foto de un mes no sellado (foto manual, o la que se toma al guardar el capital), la anterior se aparta con sus partidas **en la misma transacción**: si la foto nueva se rechaza, no queda ninguna previa.
+* **Comando `deshacer_foto_patrimonio(anio, mes)`:** la foto del mes vuelve a ser la previa, entera (fecha, origen, tasa, importes y partidas, con el mismo identificador), y la previa se consume.
+* **Comando `obtener_fotos_previas_patrimonio`** (solo lectura): qué meses tienen un reemplazo que se puede deshacer, con fecha, origen y patrimonio de la foto previa.
+* **Interfaz (Evolución):** bloque «Deshacer el último reemplazo» con un renglón por mes restituible y el botón «↩ Restituir la foto anterior», que pide confirmar (la foto actual se pierde). El aviso previo a reemplazar ya dice que la anterior se podrá restituir. Si las previas no se pueden leer, el resto de la pestaña se dibuja igual.
+
+### 🧭 Decisiones
+* **Un solo nivel:** se guarda solo la **última** foto reemplazada de cada mes; no hay «rehacer». Tres fotos seguidas en el mes dejan como previa la segunda.
+* **Cualquier reemplazo aparta**, también el de guardar el capital: deshacerlo restituye la foto, **no** el capital.
+* **Un mes sellado no se deshace:** al sellarse (cuando existe la foto del mes siguiente) su previa se descarta.
+* La primera foto del mes (la automática al abrir) no reemplaza nada y no genera previa.
+
+### 🧪 Pruebas y mutaciones
+* **Rust: 1307 ok.** Unitarias del caso de uso con doble (restituir entera, un solo nivel, sin previa no escribe, sellado descarta, otro mes intacto), del adaptador SQLite (ida y vuelta exacta, una sola previa, selladas, aislamiento por mes) y de la migración 22 (de cero, de 21 a 22 conservando fotos y partidas, idempotencia, restricciones).
+* **Integración** (`integracion_patrimonio.rs`, comandos reales, datos inventados): deshacer una foto manual devuelve la automática idéntica y sin partidas huérfanas; guardar el capital también aparta; mes sellado; foto rechazada no deja previa; respaldo y restauración conservan la previa; forma de los DTO contra `tipos-ipc.d.ts`.
+* **JS: 920 de 920.** El bloque aparece solo en un mes sin sellar con previa; escape; confirmar, cancelar y rechazo de Rust.
+* **17 mutaciones, todas detectadas** (12 en Rust, 5 en JS): no apartar, deshacer sin previa que no falla, apartar selladas, apartar sin partidas, no sustituir la previa anterior, restituir una sellada, no reponer partidas, no consumir la previa, sellar que no descarta o descarta de más, restituir sin la tasa, borrar previas de otros meses; ofrecer deshacer en mes sellado o sin foto, restituir sin confirmar, argumentos invertidos y lectura fallida que rompe la pestaña.
+
+### ⚠️ Antes de instalar
+* **Esquema 22:** respaldo y ensayo sobre una copia; volver atrás exige restituir la aplicación anterior **y** el respaldo en esquema 21.
+* No se probó a mano en el WebView real.
+
+---
+
+## Versión 1.133.0 - 2026-11-11
 **Aviso antes de reemplazar la foto del mes.** Solo hay una foto del patrimonio por mes: «Tomar foto ahora» reemplazaba en silencio la que el mes ya tuviera (le pasó al titular con la foto automática de noviembre, que hubo que restituir desde un respaldo). Ahora, si el mes en curso ya tiene foto, se pide confirmar antes.
 
 ### 🔧 Qué se hace

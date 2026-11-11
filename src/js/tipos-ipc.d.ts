@@ -22,6 +22,7 @@ export type CuentaAhorro = { id: number; nombre: string; divisa: string; balance
 export type TransaccionCuenta = { id: number; fecha: string; cuenta_origen_id: number; cuenta_origen_nombre: string; cuenta_destino_id: number; cuenta_destino_nombre: string; monto_origen: number; monto_destino: number; tasa_cambio: number; cargo: number; descripcion: string | null };
 export type PartidaFoto = { rubro: string; referencia: string; divisa: string; importe: string; importe_dop: string };
 export type FotoPatrimonio = { id: number; anio: number; mes: number; fecha: string; origen: string; sellada: boolean; tasa_usd_dop: string; activos: string; pasivos: string; patrimonio: string; liquido: string; calidad: string; partidas: PartidaFoto[] };
+export type FotoPreviaPatrimonio = { anio: number; mes: number; fecha: string; origen: string; patrimonio: string };
 export type FotoAsegurada = { creada: boolean; foto: FotoPatrimonio | null };
 export type Gasto = { id: number; fecha: string; monto: number; divisa: string; descripcion: string; categoria_id: number; categoria_nombre: string; metodo_pago: string; costo_adicional: number; tarjeta_id: number | null; cuenta_ahorro_id: number | null; estado_conversion: string | null; monto_liquidado: number | null; tasa_conversion: number | null };
 export type IngresoInformal = { id: number; fecha: string; descripcion: string; monto: number; estatus: string; institucion_deposito: string | null; fecha_pago: string | null; monto_recibido: number | null };
@@ -97,6 +98,8 @@ export type Comandos = {
     tomar_foto_patrimonio: { args: { origen: string; tasaUsdDop?: string | null }; ret: FotoPatrimonio };
     asegurar_foto_del_mes: { args: { tasaUsdDop?: string | null }; ret: FotoAsegurada };
     obtener_fotos_patrimonio: { args: {  }; ret: FotoPatrimonio[] };
+    deshacer_foto_patrimonio: { args: { anio: number; mes: number }; ret: FotoPatrimonio };
+    obtener_fotos_previas_patrimonio: { args: {  }; ret: FotoPreviaPatrimonio[] };
     obtener_gastos: { args: {  }; ret: Gasto[] };
     crear_gasto: { args: { input: GastoInput }; ret: number };
     liquidar_consumo_pendiente: { args: { id: number; montoLiquidado: string }; ret: number };

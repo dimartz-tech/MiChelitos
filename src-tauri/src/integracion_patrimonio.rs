@@ -5,7 +5,7 @@
 //! Los datos son inventados y con céntimos poco redondos. El reloj se inyecta: las funciones `*_en` de
 //! `comandos::fotos_patrimonio` reciben «hoy», así que un escenario de varios meses es una secuencia de fechas.
 
-use crate::comandos::fotos_patrimonio::{asegurar_en, leer_fotos, tomar_en, FotoPatrimonio};
+use crate::comandos::fotos_patrimonio::{asegurar_en, deshacer_en, leer_fotos, leer_previas, tomar_en, FotoPatrimonio};
 use crate::dominio::dinero::{Dinero, Divisa, TasaCambio};
 use crate::{db_nosql, db_sql, ipc};
 use chrono::NaiveDate;
@@ -299,6 +299,8 @@ fn integracion_contrato_de_forma_los_dto_reales_coinciden_con_tipos_ipc() {
         "tomar_foto_patrimonio: { args: { origen: string; tasaUsdDop?: string | null }; ret: FotoPatrimonio };",
         "asegurar_foto_del_mes: { args: { tasaUsdDop?: string | null }; ret: FotoAsegurada };",
         "obtener_fotos_patrimonio: { args: {  }; ret: FotoPatrimonio[] };",
+        "deshacer_foto_patrimonio: { args: { anio: number; mes: number }; ret: FotoPatrimonio };",
+        "obtener_fotos_previas_patrimonio: { args: {  }; ret: FotoPreviaPatrimonio[] };",
         "guardar_capital: { args: { data: any }; ret: string | null };",
     ] {
         assert!(TIPOS_IPC.contains(linea), "tipos-ipc.d.ts no declara: {linea}");
@@ -320,4 +322,117 @@ fn integracion_todo_importe_de_la_foto_viaja_como_texto_exacto() {
     for p in &foto.partidas {
         assert!(es_importe(&p.importe) && es_importe(&p.importe_dop), "{p:?}");
     }
+}
+
+// --- deshacer el reemplazo de la foto del mes ---
+
+fn filas(tabla: &str) -> i64 {
+    conexion().query_row(&format!("SELECT COUNT(*) FROM {tabla}"), [], |r| r.get(0)).unwrap()
+}
+
+#[test]
+fn integracion_deshacer_una_foto_manual_devuelve_la_automatica_entera() {
+    let _g = entorno();
+    sembrar(TasaCambio::nueva(60.0).unwrap());
+    let automatica = asegurar_en(None, dia(2026, 3, 5), &capital_valido()).unwrap().foto.unwrap();
+    assert!(leer_previas().unwrap().is_empty(), "la primera foto del mes no reemplaza nada");
+
+    // El titular mueve un saldo y toma una foto manual con otra tasa: reemplaza la del mes.
+    conexion().execute("UPDATE cuentas_ahorro SET balance_actual = 1.11 WHERE nombre = 'Ahorro inventado'", []).unwrap();
+    let manual = tomar_en("manual", Some("58.10"), dia(2026, 3, 20), &capital_valido()).unwrap();
+    assert_ne!(manual.patrimonio, automatica.patrimonio);
+    let previas = leer_previas().unwrap();
+    assert_eq!(previas.len(), 1);
+    assert_eq!((previas[0].anio, previas[0].mes, previas[0].fecha.as_str(), previas[0].origen.as_str()), (2026, 3, "05/03/2026", "real"));
+    assert_eq!(previas[0].patrimonio, automatica.patrimonio, "como texto exacto");
+
+    let restituida = deshacer_en(2026, 3).unwrap();
+    assert_eq!(serde_json::to_value(&restituida).unwrap(), serde_json::to_value(&automatica).unwrap(), "idéntica: id, fecha, origen, tasa, importes y partidas");
+    assert_eq!(serde_json::to_value(leer_fotos().unwrap()).unwrap(), serde_json::to_value(vec![&automatica]).unwrap());
+    assert!(leer_previas().unwrap().is_empty());
+    assert_eq!((filas("patrimonio_fotos_previas"), filas("patrimonio_partidas_previas")), (0, 0));
+    assert_eq!(filas("patrimonio_partidas") as usize, automatica.partidas.len(), "sin partidas huérfanas");
+
+    // Un solo nivel: no hay nada más que deshacer, y el intento no escribe.
+    let e = deshacer_en(2026, 3).unwrap_err();
+    assert_eq!(e, "No hay una foto anterior que restituir para 03/2026.");
+    assert_eq!(serde_json::to_value(leer_fotos().unwrap()).unwrap(), serde_json::to_value(vec![&automatica]).unwrap());
+}
+
+#[test]
+fn integracion_guardar_el_capital_tambien_aparta_la_foto_y_solo_queda_la_ultima_reemplazada() {
+    let _g = entorno();
+    sembrar(TasaCambio::nueva(60.0).unwrap());
+    asegurar_en(None, dia(2026, 3, 5), &capital_valido()).unwrap();
+    conexion().execute("UPDATE cuentas_ahorro SET balance_actual = 2.22 WHERE nombre = 'Ahorro inventado'", []).unwrap();
+    let manual = tomar_en("manual", None, dia(2026, 3, 9), &capital_valido()).unwrap();
+    conexion().execute("UPDATE cuentas_ahorro SET balance_actual = 3.33 WHERE nombre = 'Ahorro inventado'", []).unwrap();
+    tomar_en("capital", None, dia(2026, 3, 12), &capital_valido()).unwrap();
+    assert_eq!(filas("patrimonio_fotos_previas"), 1);
+    let restituida = deshacer_en(2026, 3).unwrap();
+    assert_eq!(serde_json::to_value(&restituida).unwrap(), serde_json::to_value(&manual).unwrap(), "vuelve la manual, no la automática");
+}
+
+#[test]
+fn integracion_un_mes_sellado_no_se_deshace_y_su_previa_se_descarta_al_sellar() {
+    let _g = entorno();
+    sembrar(TasaCambio::nueva(60.0).unwrap());
+    asegurar_en(None, dia(2026, 3, 5), &capital_valido()).unwrap();
+    conexion().execute("UPDATE cuentas_ahorro SET balance_actual = 2.22 WHERE nombre = 'Ahorro inventado'", []).unwrap();
+    let manual = tomar_en("manual", None, dia(2026, 3, 9), &capital_valido()).unwrap();
+    assert_eq!(leer_previas().unwrap().len(), 1);
+
+    // Abril sella marzo: la previa de marzo sobra y se va.
+    asegurar_en(None, dia(2026, 4, 2), &capital_valido()).unwrap();
+    assert!(leer_previas().unwrap().is_empty());
+    assert_eq!((filas("patrimonio_fotos_previas"), filas("patrimonio_partidas_previas")), (0, 0));
+    let e = deshacer_en(2026, 3).unwrap_err();
+    assert!(e.contains("sellada"), "{e}");
+    let marzo = leer_fotos().unwrap().remove(0);
+    assert_eq!((marzo.patrimonio, marzo.origen.as_str(), marzo.sellada), (manual.patrimonio, "manual", true));
+}
+
+#[test]
+fn integracion_si_la_foto_nueva_se_rechaza_no_queda_ninguna_previa() {
+    let _g = entorno();
+    sembrar(TasaCambio::nueva(60.0).unwrap());
+    let automatica = asegurar_en(None, dia(2026, 3, 5), &capital_valido()).unwrap().foto.unwrap();
+    assert!(tomar_en("manual", Some("-3"), dia(2026, 3, 9), &capital_valido()).is_err());
+    assert!(tomar_en("inventado", None, dia(2026, 3, 9), &capital_valido()).is_err());
+    assert!(leer_previas().unwrap().is_empty());
+    assert_eq!(serde_json::to_value(leer_fotos().unwrap()).unwrap(), serde_json::to_value(vec![&automatica]).unwrap());
+}
+
+#[test]
+fn integracion_el_respaldo_y_la_restauracion_conservan_la_foto_previa() {
+    let _g = entorno();
+    sembrar(TasaCambio::nueva(60.0).unwrap());
+    let automatica = asegurar_en(None, dia(2026, 3, 5), &capital_valido()).unwrap().foto.unwrap();
+    conexion().execute("UPDATE cuentas_ahorro SET balance_actual = 2.22 WHERE nombre = 'Ahorro inventado'", []).unwrap();
+    tomar_en("manual", None, dia(2026, 3, 9), &capital_valido()).unwrap();
+    db_nosql::guardar_coleccion("capital", &capital_valido().unwrap()).unwrap();
+    let copia = crate::respaldo::respaldar("con previa").unwrap();
+    let nombre = copia.file_name().unwrap().to_string_lossy().to_string();
+
+    // Se deshace (la previa se consume) y luego se restaura el respaldo: vuelve la manual con su previa.
+    deshacer_en(2026, 3).unwrap();
+    assert!(leer_previas().unwrap().is_empty());
+    crate::respaldo::restaurar(&nombre).unwrap();
+    assert_eq!(leer_fotos().unwrap()[0].origen, "manual");
+    assert_eq!(leer_previas().unwrap().len(), 1);
+    let restituida = deshacer_en(2026, 3).unwrap();
+    assert_eq!(serde_json::to_value(&restituida).unwrap(), serde_json::to_value(&automatica).unwrap());
+}
+
+#[test]
+fn integracion_contrato_de_forma_de_la_foto_previa_y_de_la_restituida() {
+    let _g = entorno();
+    sembrar(TasaCambio::nueva(60.0).unwrap());
+    asegurar_en(None, dia(2026, 3, 5), &capital_valido()).unwrap();
+    tomar_en("manual", None, dia(2026, 3, 9), &capital_valido()).unwrap();
+    let previas = serde_json::to_value(leer_previas().unwrap()).unwrap();
+    comprobar_forma("FotoPreviaPatrimonio", &previas[0]);
+    assert!(previas[0]["patrimonio"].is_string(), "el importe viaja como texto exacto");
+    let restituida = serde_json::to_value(deshacer_en(2026, 3).unwrap()).unwrap();
+    comprobar_forma("FotoPatrimonio", &restituida);
 }

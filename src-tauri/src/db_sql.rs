@@ -1999,6 +1999,58 @@ pub fn migracion_21_presupuestos(tx: &Transaction) -> Result<(), ErrorMigracion>
     Ok(())
 }
 
+const MIG22: &str = "foto previa del patrimonio";
+
+/// Migración 22. Crea **`patrimonio_fotos_previas`** y **`patrimonio_partidas_previas`**: la foto que la actual de su mes
+/// reemplazó, con sus partidas, para poder **deshacer** ese reemplazo. Como mucho una previa por mes (clave `(anio, mes)`):
+/// solo se guarda la última reemplazada. Mismos tipos que las tablas de las fotos (importes `INTEGER` en centavos, tasa en
+/// micro-unidades). Nacen vacías y no tocan ninguna tabla existente. Idempotente (`IF NOT EXISTS`).
+pub fn migracion_22_foto_previa(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    migraciones::paso(
+        tx,
+        MIG22,
+        "crear patrimonio_fotos_previas",
+        "CREATE TABLE IF NOT EXISTS patrimonio_fotos_previas (
+             anio INTEGER NOT NULL CHECK(typeof(anio) = 'integer' AND anio BETWEEN 2000 AND 2999),
+             mes INTEGER NOT NULL CHECK(typeof(mes) = 'integer' AND mes BETWEEN 1 AND 12),
+             fecha TEXT NOT NULL CHECK(fecha GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]'),
+             origen TEXT NOT NULL CHECK(origen IN ('real', 'manual', 'capital', 'reconstruida')),
+             tasa_usd_dop INTEGER NOT NULL CHECK(typeof(tasa_usd_dop) = 'integer' AND tasa_usd_dop > 0),
+             activos_c INTEGER NOT NULL CHECK(typeof(activos_c) = 'integer'),
+             pasivos_c INTEGER NOT NULL CHECK(typeof(pasivos_c) = 'integer'),
+             patrimonio_c INTEGER NOT NULL CHECK(typeof(patrimonio_c) = 'integer'),
+             liquido_c INTEGER NOT NULL CHECK(typeof(liquido_c) = 'integer'),
+             calidad TEXT NOT NULL CHECK(calidad IN ('completa', 'con_aviso', 'estimada')),
+             PRIMARY KEY (anio, mes),
+             CHECK (patrimonio_c = activos_c - pasivos_c)
+         );",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG22,
+        "crear patrimonio_partidas_previas",
+        "CREATE TABLE IF NOT EXISTS patrimonio_partidas_previas (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             anio INTEGER NOT NULL,
+             mes INTEGER NOT NULL,
+             rubro TEXT NOT NULL CHECK(rubro IN ('cuenta', 'efectivo', 'certificado', 'bolsa', 'inmobiliario',
+                                                 'vehiculo', 'maquinaria', 'tarjeta', 'prestamo')),
+             referencia TEXT NOT NULL,
+             divisa TEXT NOT NULL CHECK(divisa IN ('DOP', 'USD')),
+             importe_c INTEGER NOT NULL CHECK(typeof(importe_c) = 'integer'),
+             importe_dop_c INTEGER NOT NULL CHECK(typeof(importe_dop_c) = 'integer'),
+             FOREIGN KEY (anio, mes) REFERENCES patrimonio_fotos_previas(anio, mes) ON DELETE CASCADE
+         );",
+    )?;
+    migraciones::paso(
+        tx,
+        MIG22,
+        "indexar patrimonio_partidas_previas",
+        "CREATE INDEX IF NOT EXISTS idx_patrimonio_partidas_previas_mes ON patrimonio_partidas_previas(anio, mes);",
+    )?;
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;

@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 21;
+pub const VERSION_OBJETIVO: u32 = 22;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -198,6 +198,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 21,
             nombre: "presupuestos por categoría",
             aplicar: crate::db_sql::migracion_21_presupuestos,
+        },
+        Migracion {
+            version: 22,
+            nombre: "foto previa del patrimonio",
+            aplicar: crate::db_sql::migracion_22_foto_previa,
         },
     ]
 }
@@ -1455,8 +1460,8 @@ mod tests_patrimonio {
         assert!(antes.iter().any(|(t, cuerpo)| t == "cuentas_ahorro" && cuerpo.contains("12345.67")), "la siembra llegó");
 
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (17, 21));
-        assert_eq!(informe.aplicadas, vec!["historial del patrimonio", "detalle de los casos de corrección", "categorías fijas", "presupuestos por categoría"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (17, VERSION_OBJETIVO));
+        assert_eq!(informe.aplicadas, vec!["historial del patrimonio", "detalle de los casos de corrección", "categorías fijas", "presupuestos por categoría", "foto previa del patrimonio"]);
         assert_eq!(volcado(&c), antes, "ninguna fila de las tablas anteriores cambió");
         let n: i64 = c.query_row("SELECT COUNT(*) FROM patrimonio_fotos", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0, "las tablas nuevas nacen vacías: no se reconstruye el pasado");
@@ -1511,8 +1516,8 @@ mod tests_detalle_de_correcciones {
 
         let informe = ejecutar(&mut c).unwrap();
 
-        assert_eq!((informe.version_inicial, informe.version_final), (18, 21));
-        assert_eq!(informe.aplicadas, vec!["detalle de los casos de corrección", "categorías fijas", "presupuestos por categoría"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (18, VERSION_OBJETIVO));
+        assert_eq!(informe.aplicadas, vec!["detalle de los casos de corrección", "categorías fijas", "presupuestos por categoría", "foto previa del patrimonio"]);
         let v = filas(&c);
         assert_eq!(v.len(), 2);
         assert_eq!(v[0], ("COR-2026-0001".into(), "Traspaso inventado".into(), 4, Some(1187.53), None));
@@ -1536,14 +1541,14 @@ mod tests_detalle_de_correcciones {
 
         let informe = ejecutar(&mut c).unwrap();
 
-        assert_eq!((informe.version_inicial, informe.version_final), (17, 21));
+        assert_eq!((informe.version_inicial, informe.version_final), (17, VERSION_OBJETIVO));
         let despues: Vec<_> = filas(&c).into_iter().map(|f| (f.0, f.1, f.2, f.3.unwrap())).collect();
         assert_eq!(despues, antes);
     }
 
     #[test]
     fn migrar_una_base_ya_migrada_no_repite_nada_ni_pierde_detalles() {
-        let mut c = base_hasta(21);
+        let mut c = base_hasta(VERSION_OBJETIVO);
         c.execute(
             "INSERT INTO correcciones (numero_caso, fecha, tipo, referencia_id, descripcion, importe, divisa, motivo, detalle)
              VALUES ('COR-2026-0001', '01/10/2026', 'traspaso', 4, 'x', 1.5, 'USD', 'Motivo de prueba largo', '{\"version\":1}')",
@@ -1630,8 +1635,8 @@ mod tests_categorias_fijas {
     fn de_cero_a_la_version_objetivo_llega_a_21_con_la_columna() {
         let mut c = Connection::open_in_memory().unwrap();
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!(informe.version_final, 21);
-        assert_eq!(VERSION_OBJETIVO, 21);
+        assert_eq!(informe.version_final, VERSION_OBJETIVO);
+        assert_eq!(VERSION_OBJETIVO, 22);
         assert!(informe.aplicadas.contains(&"categorías fijas"));
         let n: i64 = c.query_row("SELECT COUNT(*) FROM pragma_table_info('categorias') WHERE name = 'fija'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
@@ -1644,8 +1649,8 @@ mod tests_categorias_fijas {
         let nombres: Vec<String> = c.prepare("SELECT nombre FROM categorias ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
         assert_eq!(nombres.len(), 3);
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (19, 21));
-        assert_eq!(informe.aplicadas, vec!["categorías fijas", "presupuestos por categoría"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (19, VERSION_OBJETIVO));
+        assert_eq!(informe.aplicadas, vec!["categorías fijas", "presupuestos por categoría", "foto previa del patrimonio"]);
         let v = marcas(&c);
         assert_eq!(v.len(), nombres.len(), "no se perdió ni se creó ninguna");
         assert!(v.iter().all(|(_, f)| *f == 0), "la migración no marca nada, ni «Alquiler» ni «Suscripciones»: {v:?}");
@@ -1657,14 +1662,14 @@ mod tests_categorias_fijas {
         sembrar(&c);
         let antes: Vec<String> = c.prepare("SELECT nombre FROM categorias ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (18, 21));
+        assert_eq!((informe.version_inicial, informe.version_final), (18, VERSION_OBJETIVO));
         let despues: Vec<String> = marcas(&c).into_iter().map(|(n, _)| n).collect();
         assert_eq!(despues, antes);
     }
 
     #[test]
     fn una_base_ya_en_21_no_repite_nada_ni_pierde_las_marcas() {
-        let mut c = base_hasta(21);
+        let mut c = base_hasta(VERSION_OBJETIVO);
         c.execute("INSERT INTO categorias (nombre, fija) VALUES ('Renta inventada', 1), ('Comida inventada', 0)", []).unwrap();
         assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0);
         assert_eq!(marcas(&c), vec![("Renta inventada".to_string(), 1), ("Comida inventada".to_string(), 0)]);
@@ -1744,8 +1749,8 @@ mod tests_presupuestos {
     fn de_cero_a_la_version_objetivo_crea_la_tabla_vacia() {
         let mut c = Connection::open_in_memory().unwrap();
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!(informe.version_final, 21);
-        assert_eq!(informe.aplicadas.last().copied(), Some("presupuestos por categoría"));
+        assert_eq!(informe.version_final, VERSION_OBJETIVO);
+        assert!(informe.aplicadas.contains(&"presupuestos por categoría"));
         assert!(existe_tabla(&c));
         let n: i64 = c.query_row("SELECT COUNT(*) FROM presupuestos", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0, "nace vacía: el titular decide qué categorías tienen presupuesto");
@@ -1759,12 +1764,12 @@ mod tests_presupuestos {
         let marcas: Vec<(String, i64)> = c.prepare("SELECT nombre, fija FROM categorias ORDER BY id").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
         assert!(!existe_tabla(&c));
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (20, 21));
-        assert_eq!(informe.aplicadas, vec!["presupuestos por categoría"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (20, VERSION_OBJETIVO));
+        assert_eq!(informe.aplicadas, vec!["presupuestos por categoría", "foto previa del patrimonio"]);
         assert!(existe_tabla(&c));
         let despues: Vec<(String, i64)> = c.prepare("SELECT nombre, fija FROM categorias ORDER BY id").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
         assert_eq!(despues, marcas);
-        let sin_la_nueva: Vec<_> = volcado(&c).into_iter().filter(|(t, _)| t != "presupuestos").collect();
+        let sin_la_nueva: Vec<_> = volcado(&c).into_iter().filter(|(t, _)| t != "presupuestos" && !t.ends_with("_previas")).collect();
         assert_eq!(sin_la_nueva, antes);
     }
 
@@ -1773,14 +1778,14 @@ mod tests_presupuestos {
         let mut c = base_hasta(19);
         c.execute_batch("INSERT INTO categorias (nombre) VALUES ('Comida inventada');").unwrap();
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (19, 21));
-        assert_eq!(informe.aplicadas, vec!["categorías fijas", "presupuestos por categoría"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (19, VERSION_OBJETIVO));
+        assert_eq!(informe.aplicadas, vec!["categorías fijas", "presupuestos por categoría", "foto previa del patrimonio"]);
         assert!(existe_tabla(&c));
     }
 
     #[test]
     fn una_base_ya_en_21_no_repite_nada_ni_pierde_presupuestos() {
-        let mut c = base_hasta(21);
+        let mut c = base_hasta(VERSION_OBJETIVO);
         c.execute_batch("INSERT INTO categorias (nombre) VALUES ('Comida inventada');").unwrap();
         c.execute("INSERT INTO presupuestos (categoria_id, monto_centavos) VALUES (1, 1234567)", []).unwrap();
         assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0);
@@ -1825,5 +1830,113 @@ mod tests_presupuestos {
         c.execute("DELETE FROM categorias WHERE id = 1", []).unwrap();
         let v: Vec<(i64, i64)> = c.prepare("SELECT categoria_id, monto_centavos FROM presupuestos").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
         assert_eq!(v, vec![(2, 222)]);
+    }
+}
+
+/// La migración 22: las tablas de la foto previa del patrimonio (para deshacer el reemplazo de la foto del mes).
+#[cfg(test)]
+mod tests_foto_previa {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn base_hasta(version: u32) -> Connection {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        for m in catalogo() {
+            if m.version > version {
+                break;
+            }
+            let tx = c.transaction().unwrap();
+            (m.aplicar)(&tx).unwrap();
+            tx.execute_batch(&format!("PRAGMA user_version = {};", m.version)).unwrap();
+            tx.commit().unwrap();
+        }
+        c
+    }
+
+    fn tablas_previas(c: &Connection) -> i64 {
+        c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('patrimonio_fotos_previas', 'patrimonio_partidas_previas')", [], |r| r.get(0)).unwrap()
+    }
+
+    const FOTO: &str = "INSERT INTO patrimonio_fotos (anio, mes, fecha, origen, tasa_usd_dop, activos_c, pasivos_c, patrimonio_c, liquido_c)
+                        VALUES (2026, 3, '05/03/2026', 'real', 58000000000, 90071, 20053, 70018, 40011);";
+
+    #[test]
+    fn de_cero_llega_a_22_con_las_dos_tablas_vacias() {
+        let mut c = Connection::open_in_memory().unwrap();
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!(informe.version_final, 22);
+        assert_eq!(VERSION_OBJETIVO, 22);
+        assert_eq!(informe.aplicadas.last().copied(), Some("foto previa del patrimonio"));
+        assert_eq!(tablas_previas(&c), 2);
+        for t in ["patrimonio_fotos_previas", "patrimonio_partidas_previas"] {
+            let n: i64 = c.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0)).unwrap();
+            assert_eq!(n, 0, "{t} nace vacía");
+        }
+    }
+
+    #[test]
+    fn de_21_a_22_solo_anade_las_tablas_y_conserva_fotos_y_partidas() {
+        let mut c = base_hasta(21);
+        c.execute_batch(FOTO).unwrap();
+        c.execute_batch("INSERT INTO patrimonio_partidas (foto_id, rubro, referencia, divisa, importe_c, importe_dop_c) VALUES (1, 'cuenta', 'Ahorro inventado', 'DOP', 90071, 90071);").unwrap();
+        assert_eq!(tablas_previas(&c), 0);
+        let volcar = |c: &Connection| -> Vec<String> {
+            ["patrimonio_fotos", "patrimonio_partidas"]
+                .iter()
+                .map(|t| {
+                    c.prepare(&format!("SELECT group_concat(quote(id) || ':' || quote(importe), '|') FROM (SELECT id, {} AS importe FROM {t} ORDER BY id)", if *t == "patrimonio_fotos" { "patrimonio_c" } else { "importe_dop_c" }))
+                        .unwrap()
+                        .query_row([], |r| r.get::<_, String>(0))
+                        .unwrap()
+                })
+                .collect()
+        };
+        let antes = volcar(&c);
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!((informe.version_inicial, informe.version_final), (21, 22));
+        assert_eq!(informe.aplicadas, vec!["foto previa del patrimonio"]);
+        assert_eq!(tablas_previas(&c), 2);
+        assert_eq!(volcar(&c), antes);
+    }
+
+    #[test]
+    fn una_base_ya_en_22_no_repite_nada_y_aplicarla_dos_veces_es_idempotente() {
+        let mut c = base_hasta(22);
+        c.execute_batch("INSERT INTO patrimonio_fotos_previas (anio, mes, fecha, origen, tasa_usd_dop, activos_c, pasivos_c, patrimonio_c, liquido_c, calidad)
+                         VALUES (2026, 3, '05/03/2026', 'real', 58000000000, 90071, 20053, 70018, 40011, 'completa');").unwrap();
+        assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0);
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_22_foto_previa(&tx).unwrap();
+        tx.commit().unwrap();
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM patrimonio_fotos_previas", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn las_restricciones_rechazan_previas_incoherentes_y_una_segunda_del_mismo_mes() {
+        let c = base_hasta(22);
+        let poner = |activos: &str, patrimonio: &str, origen: &str, mes: i64| {
+            c.execute(
+                &format!("INSERT INTO patrimonio_fotos_previas (anio, mes, fecha, origen, tasa_usd_dop, activos_c, pasivos_c, patrimonio_c, liquido_c, calidad)
+                          VALUES (2026, {mes}, '05/03/2026', '{origen}', 58000000000, {activos}, 20053, {patrimonio}, 40011, 'completa')"),
+                [],
+            )
+        };
+        assert!(poner("90071", "70019", "real", 3).is_err(), "patrimonio = activos - pasivos");
+        assert!(poner("900.71", "70018", "real", 3).is_err(), "los centavos son enteros, nunca REAL");
+        assert!(poner("90071", "70018", "inventado", 3).is_err(), "origen fuera del catálogo");
+        assert!(poner("90071", "70018", "real", 13).is_err(), "mes fuera de rango");
+        assert!(poner("90071", "70018", "real", 3).is_ok());
+        assert!(poner("90071", "70018", "manual", 3).is_err(), "una previa por mes");
+        let partida = |rubro: &str, divisa: &str| {
+            c.execute(
+                "INSERT INTO patrimonio_partidas_previas (anio, mes, rubro, referencia, divisa, importe_c, importe_dop_c) VALUES (2026, 3, ?, 'x', ?, 1, 1)",
+                (rubro, divisa),
+            )
+        };
+        assert!(partida("inventado", "DOP").is_err());
+        assert!(partida("cuenta", "EUR").is_err());
+        assert!(partida("cuenta", "USD").is_ok());
     }
 }

@@ -316,7 +316,7 @@ fn integracion_migrar_una_base_v20_crea_la_tabla_vacia_y_conserva_marcas_y_gasto
     db_sql::inicializar_db().expect("la base v20 migra a v21");
 
     let c = conexion();
-    assert_eq!(migraciones::version_de(&c).unwrap(), 21);
+    assert_eq!(migraciones::version_de(&c).unwrap(), migraciones::VERSION_OBJETIVO);
     let n: i64 = c.query_row("SELECT COUNT(*) FROM presupuestos;", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 0, "nace vacía: ningún presupuesto se inventa");
     let marcas: i64 = c.query_row("SELECT COUNT(*) FROM categorias WHERE fija = 1;", [], |r| r.get(0)).unwrap();

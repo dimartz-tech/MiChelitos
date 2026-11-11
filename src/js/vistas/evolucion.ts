@@ -21,8 +21,9 @@ import {
 import { generarGrafica } from '../nucleo/grafica.js';
 import { htmlRecomendaciones } from './recomendaciones.js';
 
-type ApiEvolucion = ApiDe<'obtenerFotosPatrimonio' | 'tomarFotoPatrimonio' | 'obtenerRecomendaciones'>;
+type ApiEvolucion = ApiDe<'obtenerFotosPatrimonio' | 'tomarFotoPatrimonio' | 'obtenerRecomendaciones' | 'deshacerFotoPatrimonio' | 'obtenerFotosPreviasPatrimonio'>;
 type Foto = Awaited<ReturnType<ApiEvolucion['obtenerFotosPatrimonio']>>[number];
+type Previa = Awaited<ReturnType<ApiEvolucion['obtenerFotosPreviasPatrimonio']>>[number];
 type Campo = HTMLInputElement;
 
 export interface DependenciasEvolucion {
@@ -36,7 +37,7 @@ export interface DependenciasEvolucion {
 }
 
 /** Los manejadores que el HTML llama como `appUI.<nombre>`. */
-export const MANEJADORES_EVOLUCION = ['handleCambiarSerieEvolucion', 'handleCambiarMesEvolucion', 'handleTomarFotoEvolucion'] as const;
+export const MANEJADORES_EVOLUCION = ['handleCambiarSerieEvolucion', 'handleCambiarMesEvolucion', 'handleTomarFotoEvolucion', 'handleDeshacerFotoEvolucion'] as const;
 
 /** La tasa USD→DOP que el titular sugiere para la foto (la misma que usa Rust si no se escribe ninguna). */
 export const TASA_SUGERIDA = '60.00';
@@ -106,7 +107,7 @@ export class VistaEvolucion implements Vista {
             cuerpo = `${this.htmlResumen(fotos)}${this.htmlGrafica(fotos)}${this.htmlTabla(fotos)}${this.htmlDesglose(fotos, elegida)}`;
         }
 
-        pantalla.contenido.innerHTML = `${cabecera}${cuerpo}${await this.bloqueDeRecomendaciones()}${this.htmlTomarFoto()}`;
+        pantalla.contenido.innerHTML = `${cabecera}${cuerpo}${await this.bloqueDeRecomendaciones()}${this.htmlTomarFoto()}${this.htmlDeshacer(fotos, await this.previasLegibles())}`;
     }
 
     // --- piezas ---
@@ -229,7 +230,7 @@ export class VistaEvolucion implements Vista {
         return `
             <div class="card">
                 <h3 style="font-family: var(--font-heading); font-size: 1.1rem; margin-bottom: 0.6rem;">Tomar foto ahora</h3>
-                <p style="font-size:0.85rem; color:var(--text-secondary); margin:0 0 0.8rem 0;">Guarda el estado de hoy como la foto de este mes. Solo hay una foto por mes: si este mes ya tiene una, se te pedirá confirmar antes de reemplazarla. Si el mes ya está sellado, no se puede cambiar.</p>
+                <p style="font-size:0.85rem; color:var(--text-secondary); margin:0 0 0.8rem 0;">Guarda el estado de hoy como la foto de este mes. Solo hay una foto por mes: si este mes ya tiene una, se te pedirá confirmar antes de reemplazarla, y después podrás restituir la anterior. Si el mes ya está sellado, no se puede cambiar.</p>
                 <div style="display:flex; gap:1rem; align-items:flex-end; flex-wrap:wrap;">
                     <div class="form-group" style="margin:0;">
                         <label for="evo_tasa">Tasa USD→DOP (opcional)</label>
@@ -237,6 +238,32 @@ export class VistaEvolucion implements Vista {
                     </div>
                     <button type="button" class="btn" ${accion('handleTomarFotoEvolucion')}>📸 Tomar foto ahora</button>
                 </div>
+            </div>`;
+    }
+
+    /** Las fotos previas; si no se pueden leer, ninguna: el resto de la pestaña se dibuja igual. */
+    private async previasLegibles(): Promise<Previa[]> {
+        try {
+            const previas = await this.dep.api.obtenerFotosPreviasPatrimonio();
+            return Array.isArray(previas) ? previas : [];
+        } catch {
+            return [];
+        }
+    }
+
+    /** Un renglón por mes cuya foto reemplazó a otra que aún se puede restituir (el mes no está sellado). */
+    private htmlDeshacer(fotos: Foto[], previas: Previa[]): string {
+        const restituibles = previas.filter(p => fotos.some(f => f.anio === p.anio && f.mes === p.mes && !f.sellada));
+        if (restituibles.length === 0) return '';
+        const renglones = restituibles.map(p => `
+                <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap; margin-top:0.6rem;">
+                    <p style="margin:0; flex:1 1 18rem; font-size:0.9rem;">La foto de <strong>${escaparHtml(nombreDeMes(p.anio, p.mes))}</strong> reemplazó a la del ${escaparHtml(p.fecha)} (${escaparHtml(ORIGENES[p.origen] ?? p.origen)}), con patrimonio ${importe(p.patrimonio)} DOP.</p>
+                    <button type="button" class="btn" ${accion('handleDeshacerFotoEvolucion', p.anio, p.mes)}>↩ Restituir la foto anterior</button>
+                </div>`).join('');
+        return `
+            <div class="card">
+                <h3 style="font-family: var(--font-heading); font-size: 1.1rem; margin-bottom: 0.4rem;">Deshacer el último reemplazo</h3>
+                <p style="font-size:0.85rem; color:var(--text-secondary); margin:0;">Solo se guarda la última foto reemplazada de cada mes, y deja de poder restituirse cuando el mes se sella.</p>${renglones}
             </div>`;
     }
 
@@ -277,8 +304,8 @@ export class VistaEvolucion implements Vista {
             if (existente && !existente.sellada) {
                 const origen = ORIGENES[existente.origen] ?? existente.origen;
                 const pregunta = `Ya hay una foto de ${nombreDeMes(existente.anio, existente.mes)}: del ${existente.fecha} (${origen}), `
-                    + `con patrimonio ${formatearTexto(existente.patrimonio)} DOP. La foto nueva la reemplaza y la anterior `
-                    + `no se puede recuperar desde la aplicación. ¿Reemplazarla?`;
+                    + `con patrimonio ${formatearTexto(existente.patrimonio)} DOP. La foto nueva la reemplaza; después podrás `
+                    + `restituir la anterior con «Restituir la foto anterior» (solo la última reemplazada). ¿Reemplazarla?`;
                 if (!(await dialogos.confirmar(pregunta))) {
                     avisos.mostrar(`No se tomó la foto: se conserva la del ${existente.fecha}.`);
                     return;
@@ -296,6 +323,21 @@ export class VistaEvolucion implements Vista {
                 : `No se pudo tomar la foto: ${texto}`, 'error');
         }
     }
+
+    /** Restituye la foto que la actual de ese mes reemplazó. Pide confirmar: la foto actual se pierde. */
+    async handleDeshacerFotoEvolucion(anio: number, mes: number): Promise<void> {
+        const { api, avisos, enrutador, dialogos } = this.dep;
+        try {
+            const pregunta = `¿Restituir la foto anterior de ${nombreDeMes(anio, mes)}? La foto actual de ese mes se pierde y no se podrá recuperar.`;
+            if (!(await dialogos.confirmar(pregunta))) return;
+            const foto = await api.deshacerFotoPatrimonio(anio, mes);
+            this.mesElegido = claveDeMes(foto);
+            avisos.mostrar(`Foto de ${nombreDeMes(foto.anio, foto.mes)} restituida: la del ${foto.fecha}, con patrimonio ${formatearTexto(foto.patrimonio)} DOP.`);
+            await enrutador.mostrar('evolucion');
+        } catch (err) {
+            avisos.mostrar(`No se pudo restituir la foto anterior: ${String(err)}`, 'error');
+        }
+    }
 }
 
 /** Lo que `window.appUI` expone de esta vista. */
@@ -303,10 +345,12 @@ export function puenteEvolucion(vista: VistaEvolucion): {
     handleCambiarSerieEvolucion: (valor: string) => Promise<void>;
     handleCambiarMesEvolucion: (valor: string) => Promise<void>;
     handleTomarFotoEvolucion: () => Promise<void>;
+    handleDeshacerFotoEvolucion: (anio: number, mes: number) => Promise<void>;
 } {
     return {
         handleCambiarSerieEvolucion: v => vista.handleCambiarSerieEvolucion(v),
         handleCambiarMesEvolucion: v => vista.handleCambiarMesEvolucion(v),
         handleTomarFotoEvolucion: () => vista.handleTomarFotoEvolucion(),
+        handleDeshacerFotoEvolucion: (anio, mes) => vista.handleDeshacerFotoEvolucion(anio, mes),
     };
 }

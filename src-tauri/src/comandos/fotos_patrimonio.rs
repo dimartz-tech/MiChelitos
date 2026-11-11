@@ -3,6 +3,8 @@
 //! * `tomar_foto_patrimonio`: escribe (manual, o al guardar el capital).
 //! * `asegurar_foto_del_mes`: la llama la interfaz al arrancar; solo escribe si falta la del mes.
 //! * `obtener_fotos_patrimonio`: lectura.
+//! * `deshacer_foto_patrimonio`: escribe; restituye la foto que la actual de su mes reemplazó.
+//! * `obtener_fotos_previas_patrimonio`: lectura; qué meses tienen un reemplazo que se puede deshacer.
 //!
 //! Las funciones `*_en` reciben la fecha y el capital ya leído: así se ejercitan de punta a punta sobre una base
 //! temporal con el reloj que la prueba quiera, y los comandos reales solo ponen «hoy» y el capital del disco.
@@ -40,6 +42,16 @@ pub struct FotoPatrimonio {
     pub liquido: String,
     pub calidad: String,
     pub partidas: Vec<PartidaFoto>,
+}
+
+/// La foto que la actual de su mes reemplazó, descrita para ofrecer restituirla.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FotoPreviaPatrimonio {
+    pub anio: i32,
+    pub mes: u32,
+    pub fecha: String,
+    pub origen: String,
+    pub patrimonio: String,
 }
 
 /// Lo que pasó al asegurar la foto del mes: `creada` es `false` si ya existía (y entonces no se escribió nada).
@@ -115,6 +127,26 @@ pub(crate) fn leer_fotos() -> Result<Vec<FotoPatrimonio>, String> {
     lee_fotos(|f| Ok(caso::listar_fotos(f).map_err(String::from)?.into_iter().map(a_dto).collect()))
 }
 
+pub(crate) fn deshacer_en(anio: i32, mes: u32) -> Result<FotoPatrimonio, String> {
+    con_fotos(|f| caso::deshacer_foto(f, anio, mes).map(a_dto).map_err(String::from))
+}
+
+pub(crate) fn leer_previas() -> Result<Vec<FotoPreviaPatrimonio>, String> {
+    lee_fotos(|f| {
+        Ok(caso::listar_previas(f)
+            .map_err(String::from)?
+            .into_iter()
+            .map(|p| FotoPreviaPatrimonio {
+                anio: p.anio,
+                mes: p.mes,
+                fecha: p.fecha,
+                origen: p.origen,
+                patrimonio: ipc::importe_a_texto(p.patrimonio),
+            })
+            .collect())
+    })
+}
+
 /// Toma la foto del mes a petición del titular (`origen`: `manual`) o tras guardar el capital (`capital`).
 /// La tasa USD→DOP es opcional: sin ella se usa la sugerida (60.0).
 #[tauri::command]
@@ -132,6 +164,19 @@ pub fn asegurar_foto_del_mes(tasa_usd_dop: Option<String>) -> Result<FotoAsegura
 #[tauri::command]
 pub fn obtener_fotos_patrimonio() -> Result<Vec<FotoPatrimonio>, String> {
     leer_fotos()
+}
+
+/// Deshace el último reemplazo de la foto de ese mes: vuelve la foto que había antes, con sus partidas. Solo se
+/// guarda la última reemplazada, y un mes sellado no se deshace.
+#[tauri::command]
+pub fn deshacer_foto_patrimonio(anio: i32, mes: u32) -> Result<FotoPatrimonio, String> {
+    deshacer_en(anio, mes)
+}
+
+/// Los meses cuya foto actual reemplazó a otra que todavía se puede restituir.
+#[tauri::command]
+pub fn obtener_fotos_previas_patrimonio() -> Result<Vec<FotoPreviaPatrimonio>, String> {
+    leer_previas()
 }
 
 /// Tras guardar el capital: toma la foto con el capital recién guardado. **Nunca falla el guardado**: si la foto no se

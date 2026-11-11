@@ -4,6 +4,9 @@
 //!   si no está sellada) y sella los meses anteriores. Tomarla dos veces en el mes deja una sola.
 //! * `asegurar_foto_del_mes`: la que llama la interfaz al arrancar. Si ya existe la del mes **no escribe nada**.
 //! * `listar_fotos`: lectura, de la más antigua a la más reciente.
+//! * `deshacer_foto`: restituye la foto que la actual de su mes reemplazó. Al reemplazar una foto no sellada, `tomar_foto`
+//!   aparta la anterior como **previa** (solo la última: un nivel de deshacer, sin «rehacer»). Sellar un mes descarta su
+//!   previa. `listar_previas` dice qué meses se pueden deshacer.
 //!
 //! ## Qué entra en la foto
 //!
@@ -144,6 +147,9 @@ pub fn tomar_foto<R: RepositorioDeFotos + ConsultaDePatrimonio>(
     let situacion = repo.situacion_para_foto()?;
     let (crudas, calidad) = partidas_de(&situacion, capital);
     let foto = Foto::construir(hoy, origen, tasa_usd_dop, calidad, crudas)?;
+    // Si el mes ya tenía foto (no sellada), se aparta para poder deshacer este reemplazo. Va en la misma transacción
+    // que el guardado: si este falla, tampoco queda la previa.
+    repo.guardar_previa(foto.anio, foto.mes)?;
     repo.guardar_foto(&foto)?;
     // Un mes cerrado no vuelve a cambiar: al existir la de este mes, las anteriores se sellan.
     repo.sellar_anteriores(hoy.year(), hoy.month())?;
@@ -172,6 +178,20 @@ pub fn listar_fotos<R: RepositorioDeFotos>(repo: &R) -> Result<Vec<FotoCompleta>
             Ok(FotoCompleta { foto, partidas })
         })
         .collect()
+}
+
+/// Deshace el último reemplazo de la foto de `(anio, mes)`: vuelve la que había antes, con sus partidas. Es
+/// `ErrorAlmacen::SinFotoPrevia` si ese mes no tiene nada que deshacer y `FotoSellada` si el mes está cerrado.
+pub fn deshacer_foto<R: RepositorioDeFotos>(repo: &mut R, anio: i32, mes: u32) -> Result<FotoCompleta, ErrorAplicacion> {
+    if !repo.restituir_previa(anio, mes)? {
+        return Err(ErrorAlmacen::SinFotoPrevia { anio, mes }.into());
+    }
+    leer_completa(repo, anio, mes)
+}
+
+/// Las fotos previas guardadas: los meses cuyo último reemplazo se puede deshacer.
+pub fn listar_previas<R: RepositorioDeFotos>(repo: &R) -> Result<Vec<FotoPrevia>, ErrorAplicacion> {
+    Ok(repo.previas()?)
 }
 
 /// La tasa USD→DOP de una petición: la indicada, o la sugerida (`TASA_USD_DOP_SUGERIDA`).
@@ -320,5 +340,84 @@ mod pruebas {
         assert_eq!(tasa_de_peticion(Some("58,75")).unwrap(), TasaCambio::nueva(58.75).unwrap());
         assert!(tasa_de_peticion(Some("abc")).is_err());
         assert!(tasa_de_peticion(Some("0")).is_err());
+    }
+
+    // --- deshacer el reemplazo de la foto del mes ---
+
+    fn con_ahorros(centavos: i64) -> SituacionParaFoto {
+        let mut s = situacion();
+        s.cuentas[0].saldo = d(centavos);
+        s
+    }
+
+    #[test]
+    fn deshacer_devuelve_la_foto_que_la_manual_reemplazo_con_sus_partidas_y_consume_la_previa() {
+        let mut repo = FotosEnMemoria::con_situacion(situacion());
+        let primera = tomar_foto(&mut repo, &capital(), dia(2026, 3, 5), Origen::Real, tasa()).unwrap();
+        assert!(listar_previas(&repo).unwrap().is_empty(), "la primera foto del mes no reemplaza nada");
+
+        repo.situacion = con_ahorros(777_31);
+        let manual = tomar_foto(&mut repo, &capital(), dia(2026, 3, 19), Origen::Manual, TasaCambio::nueva(61.5).unwrap()).unwrap();
+        assert_ne!(manual.foto.patrimonio, primera.foto.patrimonio);
+        let previas = listar_previas(&repo).unwrap();
+        assert_eq!(previas.len(), 1);
+        assert_eq!((previas[0].anio, previas[0].mes, previas[0].fecha.as_str(), previas[0].origen.as_str()), (2026, 3, "05/03/2026", "real"));
+        assert_eq!(previas[0].patrimonio, primera.foto.patrimonio);
+
+        let restituida = deshacer_foto(&mut repo, 2026, 3).unwrap();
+        assert_eq!(restituida, primera, "vuelve entera: cabecera, tasa y partidas, con el mismo id");
+        assert_eq!(listar_fotos(&repo).unwrap(), vec![primera]);
+        assert!(listar_previas(&repo).unwrap().is_empty(), "la previa se consume: no hay rehacer");
+    }
+
+    #[test]
+    fn solo_se_guarda_la_ultima_reemplazada() {
+        let mut repo = FotosEnMemoria::con_situacion(situacion());
+        tomar_foto(&mut repo, &capital(), dia(2026, 3, 5), Origen::Real, tasa()).unwrap();
+        repo.situacion = con_ahorros(777_31);
+        let segunda = tomar_foto(&mut repo, &capital(), dia(2026, 3, 9), Origen::Manual, tasa()).unwrap();
+        repo.situacion = con_ahorros(888_42);
+        tomar_foto(&mut repo, &capital(), dia(2026, 3, 12), Origen::Capital, tasa()).unwrap();
+        assert_eq!(listar_previas(&repo).unwrap().len(), 1);
+        assert_eq!(deshacer_foto(&mut repo, 2026, 3).unwrap(), segunda, "vuelve la segunda, no la primera");
+        let e = deshacer_foto(&mut repo, 2026, 3).unwrap_err();
+        assert_eq!(e, ErrorAplicacion::Almacen(ErrorAlmacen::SinFotoPrevia { anio: 2026, mes: 3 }), "un solo nivel");
+    }
+
+    #[test]
+    fn deshacer_sin_nada_que_deshacer_falla_y_no_escribe() {
+        let mut repo = FotosEnMemoria::con_situacion(situacion());
+        let e = deshacer_foto(&mut repo, 2026, 3).unwrap_err();
+        assert_eq!(e, ErrorAplicacion::Almacen(ErrorAlmacen::SinFotoPrevia { anio: 2026, mes: 3 }));
+        assert_eq!(e.to_string(), "No hay una foto anterior que restituir para 03/2026.");
+        let unica = tomar_foto(&mut repo, &capital(), dia(2026, 3, 5), Origen::Real, tasa()).unwrap();
+        let escrituras = repo.escrituras;
+        assert!(deshacer_foto(&mut repo, 2026, 3).is_err());
+        assert_eq!(repo.escrituras, escrituras);
+        assert_eq!(listar_fotos(&repo).unwrap(), vec![unica]);
+    }
+
+    #[test]
+    fn al_sellarse_el_mes_su_previa_se_descarta_y_ya_no_se_deshace() {
+        let mut repo = FotosEnMemoria::con_situacion(situacion());
+        tomar_foto(&mut repo, &capital(), dia(2026, 3, 5), Origen::Real, tasa()).unwrap();
+        repo.situacion = con_ahorros(777_31);
+        let manual = tomar_foto(&mut repo, &capital(), dia(2026, 3, 9), Origen::Manual, tasa()).unwrap();
+        // Llega abril: marzo se sella con la manual dentro.
+        tomar_foto(&mut repo, &capital(), dia(2026, 4, 2), Origen::Real, tasa()).unwrap();
+        assert!(listar_previas(&repo).unwrap().is_empty());
+        let e = deshacer_foto(&mut repo, 2026, 3).unwrap_err();
+        assert_eq!(e, ErrorAplicacion::Almacen(ErrorAlmacen::FotoSellada { anio: 2026, mes: 3 }));
+        let marzo = listar_fotos(&repo).unwrap().remove(0);
+        assert_eq!((marzo.foto.patrimonio, marzo.foto.origen.as_str(), marzo.foto.sellada), (manual.foto.patrimonio, "manual", true));
+    }
+
+    #[test]
+    fn deshacer_un_mes_no_toca_la_previa_ni_la_foto_de_otro() {
+        let mut repo = FotosEnMemoria::con_situacion(situacion());
+        let marzo = tomar_foto(&mut repo, &capital(), dia(2026, 3, 5), Origen::Real, tasa()).unwrap();
+        let e = deshacer_foto(&mut repo, 2026, 4).unwrap_err();
+        assert_eq!(e, ErrorAplicacion::Almacen(ErrorAlmacen::SinFotoPrevia { anio: 2026, mes: 4 }));
+        assert_eq!(listar_fotos(&repo).unwrap(), vec![marzo]);
     }
 }
