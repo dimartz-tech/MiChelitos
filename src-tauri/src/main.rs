@@ -38,6 +38,8 @@ mod integracion_categorias_fijas;
 #[cfg(test)]
 mod integracion_presupuestos;
 #[cfg(test)]
+mod integracion_recomendaciones;
+#[cfg(test)]
 mod integracion_traspasos;
 #[cfg(test)]
 mod integracion_abono_tasa;
@@ -62,6 +64,7 @@ fn main() {
             comandos::presupuestos::fijar_presupuesto,
             comandos::presupuestos::quitar_presupuesto,
             comandos::presupuestos::obtener_presupuestos_mes,
+            comandos::recomendaciones::obtener_recomendaciones,
             comandos::gastos::crear_gasto,
             comandos::ingresos::obtener_ingresos,
             comandos::ingresos::crear_ingreso,
