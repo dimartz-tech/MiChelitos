@@ -103,6 +103,12 @@ impl RepositorioDeFotos for FotosSqlite<'_> {
     }
 
     fn sellar_anteriores(&mut self, anio: i32, mes: u32) -> Result<usize, ErrorAlmacen> {
+        // Un mes cerrado ya no se deshace: sus previas sobran.
+        for tabla in ["patrimonio_partidas_previas", "patrimonio_fotos_previas"] {
+            self.tx
+                .execute(&format!("DELETE FROM {tabla} WHERE (anio * 12 + mes) < (? * 12 + ?);"), (anio, mes))
+                .map_err(fallo)?;
+        }
         self.tx
             .execute(
                 "UPDATE patrimonio_fotos SET sellada = 1 WHERE sellada = 0 AND (anio * 12 + mes) < (? * 12 + ?);",
@@ -182,6 +188,102 @@ impl RepositorioDeFotos for FotosSqlite<'_> {
             });
         }
         Ok(partidas)
+    }
+
+    fn guardar_previa(&mut self, anio: i32, mes: u32) -> Result<bool, ErrorAlmacen> {
+        self.borrar_previa(anio, mes)?;
+        let apartadas = self
+            .tx
+            .execute(
+                "INSERT INTO patrimonio_fotos_previas
+                     (anio, mes, fecha, origen, tasa_usd_dop, activos_c, pasivos_c, patrimonio_c, liquido_c, calidad)
+                 SELECT anio, mes, fecha, origen, tasa_usd_dop, activos_c, pasivos_c, patrimonio_c, liquido_c, calidad
+                 FROM patrimonio_fotos WHERE anio = ? AND mes = ? AND sellada = 0;",
+                (anio, mes),
+            )
+            .map_err(fallo)?;
+        if apartadas == 0 {
+            return Ok(false);
+        }
+        self.tx
+            .execute(
+                "INSERT INTO patrimonio_partidas_previas (anio, mes, rubro, referencia, divisa, importe_c, importe_dop_c)
+                 SELECT ?1, ?2, rubro, referencia, divisa, importe_c, importe_dop_c
+                 FROM patrimonio_partidas
+                 WHERE foto_id = (SELECT id FROM patrimonio_fotos WHERE anio = ?1 AND mes = ?2)
+                 ORDER BY id ASC;",
+                (anio, mes),
+            )
+            .map_err(fallo)?;
+        Ok(true)
+    }
+
+    fn previas(&self) -> Result<Vec<FotoPrevia>, ErrorAlmacen> {
+        let mut stmt = self
+            .tx
+            .prepare("SELECT anio, mes, fecha, origen, patrimonio_c FROM patrimonio_fotos_previas ORDER BY anio ASC, mes ASC;")
+            .map_err(fallo)?;
+        let filas = stmt
+            .query_map([], |r| {
+                Ok(FotoPrevia {
+                    anio: r.get(0)?,
+                    mes: r.get(1)?,
+                    fecha: r.get(2)?,
+                    origen: r.get(3)?,
+                    patrimonio: Dinero::de_centavos(r.get(4)?, Divisa::Dop),
+                })
+            })
+            .map_err(fallo)?;
+        filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
+    }
+
+    fn restituir_previa(&mut self, anio: i32, mes: u32) -> Result<bool, ErrorAlmacen> {
+        use rusqlite::OptionalExtension;
+        let actual: Option<(i64, i64)> = self
+            .tx
+            .query_row("SELECT id, sellada FROM patrimonio_fotos WHERE anio = ? AND mes = ?;", (anio, mes), |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .optional()
+            .map_err(fallo)?;
+        let Some((id, sellada)) = actual else { return Ok(false) };
+        if sellada == 1 {
+            return Err(ErrorAlmacen::FotoSellada { anio, mes });
+        }
+        let restituidas = self
+            .tx
+            .execute(
+                "UPDATE patrimonio_fotos SET
+                     (fecha, origen, tasa_usd_dop, activos_c, pasivos_c, patrimonio_c, liquido_c, calidad) =
+                     (SELECT fecha, origen, tasa_usd_dop, activos_c, pasivos_c, patrimonio_c, liquido_c, calidad
+                      FROM patrimonio_fotos_previas WHERE anio = ?1 AND mes = ?2)
+                 WHERE id = ?3 AND EXISTS (SELECT 1 FROM patrimonio_fotos_previas WHERE anio = ?1 AND mes = ?2);",
+                (anio, mes, id),
+            )
+            .map_err(fallo)?;
+        if restituidas == 0 {
+            return Ok(false);
+        }
+        self.tx.execute("DELETE FROM patrimonio_partidas WHERE foto_id = ?;", [id]).map_err(fallo)?;
+        self.tx
+            .execute(
+                "INSERT INTO patrimonio_partidas (foto_id, rubro, referencia, divisa, importe_c, importe_dop_c)
+                 SELECT ?3, rubro, referencia, divisa, importe_c, importe_dop_c
+                 FROM patrimonio_partidas_previas WHERE anio = ?1 AND mes = ?2 ORDER BY id ASC;",
+                (anio, mes, id),
+            )
+            .map_err(fallo)?;
+        self.borrar_previa(anio, mes)?;
+        Ok(true)
+    }
+}
+
+impl FotosSqlite<'_> {
+    fn borrar_previa(&mut self, anio: i32, mes: u32) -> Result<(), ErrorAlmacen> {
+        for tabla in ["patrimonio_partidas_previas", "patrimonio_fotos_previas"] {
+            self.tx.execute(&format!("DELETE FROM {tabla} WHERE anio = ? AND mes = ?;"), (anio, mes)).map_err(fallo)?;
+        }
+        Ok(())
     }
 }
 
@@ -357,5 +459,113 @@ mod pruebas {
         assert!(s.cuentas.iter().any(|x| x.nombre == "Cerrada" && x.archivada));
         assert_eq!((s.tarjetas[0].deuda_pesos.centavos(), s.tarjetas[0].deuda_dolares.centavos(), s.tarjetas[0].activa), (10_025, 750, true));
         assert_eq!(s.prestamos[0].saldo.centavos(), 900_010, "sin saldo llevado, el monto");
+    }
+
+    // --- foto previa: apartar, listar y restituir ---
+
+    fn cuenta(c: &Connection, tabla: &str) -> i64 {
+        c.query_row(&format!("SELECT COUNT(*) FROM {tabla}"), [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn apartar_y_restituir_devuelve_la_foto_y_sus_partidas_exactas_y_vacia_las_previas() {
+        let mut c = base();
+        {
+            let tx = c.transaction().unwrap();
+            let mut r = FotosSqlite::nuevo(&tx);
+            let original = foto(2026, 3, Origen::Real, 100_07);
+            let id = r.guardar_foto(&original).unwrap();
+            let antes = (r.fotos().unwrap(), r.partidas_de(id).unwrap());
+
+            assert!(r.guardar_previa(2026, 3).unwrap());
+            r.guardar_foto(&foto(2026, 3, Origen::Manual, 555_55)).unwrap();
+            let previas = r.previas().unwrap();
+            assert_eq!(previas.len(), 1);
+            assert_eq!((previas[0].anio, previas[0].mes, previas[0].fecha.as_str(), previas[0].origen.as_str()), (2026, 3, "09/03/2026", "real"));
+            assert_eq!(previas[0].patrimonio, original.patrimonio);
+
+            assert!(r.restituir_previa(2026, 3).unwrap());
+            assert_eq!((r.fotos().unwrap(), r.partidas_de(id).unwrap()), antes, "misma fila, misma tasa, mismas partidas y en su orden");
+            assert!(r.previas().unwrap().is_empty());
+            assert!(!r.restituir_previa(2026, 3).unwrap(), "ya no hay nada que restituir");
+            tx.commit().unwrap();
+        }
+        assert_eq!((cuenta(&c, "patrimonio_fotos_previas"), cuenta(&c, "patrimonio_partidas_previas")), (0, 0));
+        assert_eq!((cuenta(&c, "patrimonio_fotos"), cuenta(&c, "patrimonio_partidas")), (1, 3));
+    }
+
+    #[test]
+    fn apartar_dos_veces_deja_una_sola_previa_con_las_partidas_de_la_ultima() {
+        let mut c = base();
+        {
+            let tx = c.transaction().unwrap();
+            let mut r = FotosSqlite::nuevo(&tx);
+            r.guardar_foto(&foto(2026, 3, Origen::Real, 100_07)).unwrap();
+            assert!(r.guardar_previa(2026, 3).unwrap());
+            r.guardar_foto(&foto(2026, 3, Origen::Manual, 222_13)).unwrap();
+            assert!(r.guardar_previa(2026, 3).unwrap());
+            r.guardar_foto(&foto(2026, 3, Origen::Capital, 333_19)).unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!((cuenta(&c, "patrimonio_fotos_previas"), cuenta(&c, "patrimonio_partidas_previas")), (1, 3));
+        let tx = c.transaction().unwrap();
+        let mut r = FotosSqlite::nuevo(&tx);
+        assert!(r.restituir_previa(2026, 3).unwrap());
+        let f = r.fotos().unwrap().remove(0);
+        assert_eq!(f.origen, "manual");
+        assert_eq!(r.partidas_de(f.id).unwrap()[0].importe.centavos(), 222_13);
+    }
+
+    #[test]
+    fn sin_foto_del_mes_o_con_la_foto_sellada_no_se_aparta_nada() {
+        let mut c = base();
+        let tx = c.transaction().unwrap();
+        let mut r = FotosSqlite::nuevo(&tx);
+        assert!(!r.guardar_previa(2026, 3).unwrap(), "no hay foto que apartar");
+        assert!(!r.restituir_previa(2026, 3).unwrap());
+        r.guardar_foto(&foto(2025, 12, Origen::Real, 100_01)).unwrap();
+        r.guardar_foto(&foto(2026, 1, Origen::Real, 200_02)).unwrap();
+        r.sellar_anteriores(2026, 1).unwrap();
+        assert!(!r.guardar_previa(2025, 12).unwrap(), "una sellada no se aparta: no se va a reemplazar");
+        assert!(r.previas().unwrap().is_empty());
+    }
+
+    #[test]
+    fn sellar_descarta_las_previas_de_los_meses_cerrados_y_una_sellada_no_se_restituye() {
+        let mut c = base();
+        let tx = c.transaction().unwrap();
+        let mut r = FotosSqlite::nuevo(&tx);
+        for (a, m) in [(2025, 12), (2026, 1)] {
+            r.guardar_foto(&foto(a, m, Origen::Real, 100_01)).unwrap();
+            assert!(r.guardar_previa(a, m).unwrap());
+            r.guardar_foto(&foto(a, m, Origen::Manual, 900_09)).unwrap();
+        }
+        assert_eq!(r.previas().unwrap().len(), 2);
+        r.sellar_anteriores(2026, 1).unwrap();
+        let previas = r.previas().unwrap();
+        assert_eq!(previas.iter().map(|p| (p.anio, p.mes)).collect::<Vec<_>>(), vec![(2026, 1)], "solo queda la del mes abierto");
+        assert_eq!(r.restituir_previa(2025, 12).unwrap_err(), ErrorAlmacen::FotoSellada { anio: 2025, mes: 12 });
+        assert_eq!(r.fotos().unwrap()[0].origen, "manual", "diciembre quedó como se selló");
+        assert!(r.restituir_previa(2026, 1).unwrap());
+        assert_eq!(r.fotos().unwrap()[1].origen, "real");
+    }
+
+    #[test]
+    fn restituir_un_mes_no_toca_las_fotos_ni_las_previas_de_otro() {
+        let mut c = base();
+        let tx = c.transaction().unwrap();
+        let mut r = FotosSqlite::nuevo(&tx);
+        r.guardar_foto(&foto(2026, 3, Origen::Real, 100_07)).unwrap();
+        // Abril con previa; marzo sin sellar para la prueba (no se llama a sellar).
+        r.guardar_foto(&foto(2026, 4, Origen::Real, 400_04)).unwrap();
+        r.guardar_previa(2026, 4).unwrap();
+        r.guardar_foto(&foto(2026, 4, Origen::Manual, 444_44)).unwrap();
+        r.guardar_previa(2026, 3).unwrap();
+        r.guardar_foto(&foto(2026, 3, Origen::Manual, 333_33)).unwrap();
+        assert!(r.restituir_previa(2026, 3).unwrap());
+        let fotos = r.fotos().unwrap();
+        assert_eq!((fotos[0].origen.as_str(), fotos[1].origen.as_str()), ("real", "manual"));
+        assert_eq!(r.partidas_de(fotos[1].id).unwrap()[0].importe.centavos(), 444_44);
+        assert_eq!(r.previas().unwrap().iter().map(|p| p.mes).collect::<Vec<_>>(), vec![4]);
     }
 }

@@ -1770,6 +1770,8 @@ impl AlmacenSuscripciones for AlmacenEnMemoria {
 pub struct FotosEnMemoria {
     pub situacion: SituacionParaFoto,
     pub guardadas: Vec<(FotoLeida, Vec<PartidaLeida>)>,
+    /// La foto que la actual de su mes reemplazó (como mucho una por mes).
+    pub apartadas: Vec<(FotoLeida, Vec<PartidaLeida>)>,
     pub escrituras: usize,
     pub fallar_al_guardar: bool,
 }
@@ -1837,6 +1839,7 @@ impl RepositorioDeFotos for FotosEnMemoria {
                 selladas += 1;
             }
         }
+        self.apartadas.retain(|(f, _)| (f.anio * 12 + f.mes as i32) >= (anio * 12 + mes as i32));
         Ok(selladas)
     }
 
@@ -1848,6 +1851,41 @@ impl RepositorioDeFotos for FotosEnMemoria {
 
     fn partidas_de(&self, foto_id: i64) -> Result<Vec<PartidaLeida>, ErrorAlmacen> {
         Ok(self.guardadas.iter().find(|(f, _)| f.id == foto_id).map(|(_, p)| p.clone()).unwrap_or_default())
+    }
+
+    fn guardar_previa(&mut self, anio: i32, mes: u32) -> Result<bool, ErrorAlmacen> {
+        self.apartadas.retain(|(f, _)| !(f.anio == anio && f.mes == mes));
+        match self.guardadas.iter().find(|(f, _)| f.anio == anio && f.mes == mes && !f.sellada) {
+            Some(actual) => {
+                self.apartadas.push(actual.clone());
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    fn previas(&self) -> Result<Vec<FotoPrevia>, ErrorAlmacen> {
+        let mut todas: Vec<FotoPrevia> = self
+            .apartadas
+            .iter()
+            .map(|(f, _)| FotoPrevia { anio: f.anio, mes: f.mes, fecha: f.fecha.clone(), origen: f.origen.clone(), patrimonio: f.patrimonio })
+            .collect();
+        todas.sort_by_key(|f| (f.anio, f.mes));
+        Ok(todas)
+    }
+
+    fn restituir_previa(&mut self, anio: i32, mes: u32) -> Result<bool, ErrorAlmacen> {
+        let Some(actual) = self.guardadas.iter_mut().find(|(f, _)| f.anio == anio && f.mes == mes) else { return Ok(false) };
+        if actual.0.sellada {
+            return Err(ErrorAlmacen::FotoSellada { anio, mes });
+        }
+        let Some(pos) = self.apartadas.iter().position(|(f, _)| f.anio == anio && f.mes == mes) else { return Ok(false) };
+        let (mut foto, partidas) = self.apartadas.remove(pos);
+        foto.id = actual.0.id;
+        foto.sellada = false;
+        *actual = (foto, partidas);
+        self.escrituras += 1;
+        Ok(true)
     }
 }
 

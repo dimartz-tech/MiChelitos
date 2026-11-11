@@ -86,7 +86,7 @@ test('el mes en curso ya tiene foto: se avisa con su fecha, origen y patrimonio,
     await ui.appUI.handleTomarFotoEvolucion();
     assert.equal(ui.confirmaciones.length, 1);
     assert.match(ui.confirmaciones[0].texto, /Ya hay una foto de feb 2027: del 10\/02\/2027 \(Automática\), con patrimonio 1,250\.77 DOP/);
-    assert.match(ui.confirmaciones[0].texto, /la reemplaza.*no se puede recuperar.*¿Reemplazarla\?/);
+    assert.match(ui.confirmaciones[0].texto, /la reemplaza.*podrás restituir la anterior.*solo la última reemplazada.*¿Reemplazarla\?/);
     llamoUnaVez(ui, 'tomarFotoPatrimonio', ['manual', undefined]);
     avisoExito(ui, /feb 2027.*1,300\.19/);
     redibujo(ui, 'evolucion');
@@ -165,4 +165,65 @@ test('la pestaña con el enrutador real: si las recomendaciones fallan, el histo
     await ui.enrutador.mostrar('evolucion');
     assert.match(html(ui), /id="evo-tabla"/);
     assert.match(html(ui), /No se pudieron calcular las recomendaciones: base ocupada/);
+});
+
+// --- deshacer el último reemplazo de la foto del mes ---
+
+const PREVIA = { anio: 2027, mes: 2, fecha: '03/02/2027', origen: 'real', patrimonio: '1199.83' };
+
+test('la pestaña ofrece restituir la foto anterior solo en un mes sin sellar que tenga previa', async () => {
+    const ui = cargarInterfaz({ renderReal: true, api: { obtenerFotosPatrimonio: FOTOS, obtenerFotosPreviasPatrimonio: [PREVIA] } });
+    await ui.enrutador.mostrar('evolucion');
+    assert.match(html(ui), /Deshacer el último reemplazo/);
+    assert.match(html(ui), /La foto de <strong>feb 2027<\/strong> reemplazó a la del 03\/02\/2027 \(Automática\), con patrimonio 1,199\.83 DOP/);
+    assert.match(html(ui), /data-accion="handleDeshacerFotoEvolucion" data-args="\[2027,2\]"/);
+    assert.doesNotMatch(html(ui), /onclick=/);
+});
+
+test('sin previas, con la previa de un mes sellado o si la lectura falla, no se ofrece deshacer y la pestaña se ve igual', async () => {
+    const sellada = [FOTOS[0], { ...FOTOS[1], sellada: true }];
+    for (const api of [
+        { obtenerFotosPatrimonio: FOTOS, obtenerFotosPreviasPatrimonio: [] },
+        { obtenerFotosPatrimonio: sellada, obtenerFotosPreviasPatrimonio: [PREVIA] },
+        { obtenerFotosPatrimonio: FOTOS, obtenerFotosPreviasPatrimonio: [{ ...PREVIA, mes: 7 }] },
+        { obtenerFotosPatrimonio: FOTOS, obtenerFotosPreviasPatrimonio: () => { throw new Error('Error simulado de lectura'); } },
+    ]) {
+        const ui = cargarInterfaz({ renderReal: true, api });
+        await ui.enrutador.mostrar('evolucion');
+        assert.doesNotMatch(html(ui), /Deshacer el último reemplazo|handleDeshacerFotoEvolucion/);
+        assert.match(html(ui), /Tomar foto ahora/);
+    }
+});
+
+test('el origen y la fecha de la previa se escapan', async () => {
+    const ui = cargarInterfaz({ renderReal: true, api: { obtenerFotosPatrimonio: FOTOS, obtenerFotosPreviasPatrimonio: [{ ...PREVIA, origen: '<b>x</b>', fecha: '<i>y</i>' }] } });
+    await ui.enrutador.mostrar('evolucion');
+    assert.doesNotMatch(html(ui), /<b>x<\/b>|<i>y<\/i>/);
+    assert.match(html(ui), /&lt;b&gt;x&lt;\/b&gt;/);
+});
+
+test('restituir: pide confirmar, envía año y mes, avisa con la foto que volvió y redibuja', async () => {
+    const ui = cargarInterfaz({ confirm: true, api: { deshacerFotoPatrimonio: foto(2027, 2, '1199.83', '640.31', { fecha: '03/02/2027' }) } });
+    await ui.appUI.handleDeshacerFotoEvolucion(2027, 2);
+    assert.equal(ui.confirmaciones.length, 1);
+    assert.match(ui.confirmaciones[0].texto, /¿Restituir la foto anterior de feb 2027\?.*La foto actual de ese mes se pierde/);
+    llamoUnaVez(ui, 'deshacerFotoPatrimonio', [2027, 2]);
+    avisoExito(ui, /Foto de feb 2027 restituida: la del 03\/02\/2027, con patrimonio 1,199\.83 DOP/);
+    redibujo(ui, 'evolucion');
+});
+
+test('restituir cancelado: no se llama a Rust, no hay aviso y no se redibuja', async () => {
+    const ui = cargarInterfaz({ confirm: false });
+    await ui.appUI.handleDeshacerFotoEvolucion(2027, 2);
+    noLlamoA(ui, 'deshacerFotoPatrimonio');
+    assert.equal(ui.avisos.length, 0);
+    noRedibujo(ui);
+});
+
+test('restituir rechazado por Rust: se muestra el motivo y no se redibuja', async () => {
+    const ui = cargarInterfaz({ confirm: true });
+    ui.rechazar('deshacerFotoPatrimonio', 'No hay una foto anterior que restituir para 02/2027.');
+    await ui.appUI.handleDeshacerFotoEvolucion(2027, 2);
+    unAvisoDeError(ui, /No se pudo restituir la foto anterior: No hay una foto anterior que restituir para 02\/2027\./);
+    noRedibujo(ui);
 });
