@@ -4,7 +4,26 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.132.0 (Versión Actual) - 2026-11-11
+## 🚀 Versión 1.133.0 (Versión Actual) - 2026-11-11
+**Aviso antes de reemplazar la foto del mes.** Solo hay una foto del patrimonio por mes: «Tomar foto ahora» reemplazaba en silencio la que el mes ya tuviera (le pasó al titular con la foto automática de noviembre, que hubo que restituir desde un respaldo). Ahora, si el mes en curso ya tiene foto, se pide confirmar antes.
+
+### 🔧 Qué se hace
+* **Evolución › Tomar foto ahora:** antes de tomar la foto se leen las existentes. Si el mes en curso ya tiene una **no sellada**, un diálogo dice de cuándo es, su origen y su patrimonio, y que la nueva la reemplaza sin poder recuperarla desde la aplicación. Al cancelar no se toma nada y se dice cuál se conserva.
+* **Si no se puede comprobar** (falla la lectura), no se toma la foto: mejor no reemplazar a ciegas.
+* **Mes sellado:** no se pregunta; Rust lo sigue rechazando y la interfaz lo explica, como antes.
+* El texto de ayuda del bloque avisa de que solo hay una foto por mes.
+
+### 🧭 Alcance
+* Solo interfaz (`src/js/vistas/evolucion.ts`): sin cambios de Rust, de reglas ni de esquema (sigue en 21). La foto automática al abrir y la del guardado del capital no cambian.
+* No añade «deshacer»: la foto reemplazada sigue sin poder recuperarse desde la aplicación (sí desde un respaldo).
+
+### 🧪 Pruebas y mutaciones
+* Interacción (`pruebas/js/interaccion/evolucion.test.js`): aceptar reemplaza; cancelar no toma nada; mes sin foto no pregunta (ni por el mismo mes de otro año); mes sellado no pregunta; lectura fallida no toma; tasa mal escrita se rechaza antes de preguntar. El arnés `cargarInterfaz` admite ahora fijar la fecha (`ahora`). JS: 914 de 914.
+* 7 mutaciones, todas detectadas: ignorar el sellado, no comparar el año, mes desfasado, cancelar que no cancela, aceptar que cancela, seguir tras la lectura fallida y no preguntar.
+
+---
+
+## Versión 1.132.0 - 2026-11-11
 **Firma local completa del paquete de la aplicación.** Hasta ahora la compilación no firmaba el paquete `.app`: solo quedaba la firma mínima que el enlazador pone al ejecutable (`adhoc,linker-signed`), sin sellar `Info.plist` ni los recursos, y `codesign -v` avisaba «code has no resources but signature indicates they must be present». Ocurría desde versiones antiguas (comprobado en las guardadas 1.99.0 y 1.127.0); la aplicación abría porque se compila en el mismo equipo.
 
 ### 🔧 Qué se hace

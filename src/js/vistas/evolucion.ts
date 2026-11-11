@@ -10,7 +10,7 @@
 // (variaciones, escala del eje) es en centavos enteros (`nucleo/evolucion.ts`) y la gráfica la
 // dibuja una función pura (`nucleo/grafica.ts`). Sin reconstrucción del pasado.
 
-import type { ApiDe, Avisos, Dom, Enrutador, Pantalla, Vista } from '../ui/servicios';
+import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Pantalla, Reloj, Vista } from '../ui/servicios';
 
 import { accion, escaparHtml, manejador } from '../nucleo/html.js';
 import {
@@ -31,6 +31,8 @@ export interface DependenciasEvolucion {
     pantalla: Pantalla;
     dom: Dom;
     enrutador: Enrutador;
+    dialogos: Dialogos;
+    ahora: Reloj;
 }
 
 /** Los manejadores que el HTML llama como `appUI.<nombre>`. */
@@ -227,7 +229,7 @@ export class VistaEvolucion implements Vista {
         return `
             <div class="card">
                 <h3 style="font-family: var(--font-heading); font-size: 1.1rem; margin-bottom: 0.6rem;">Tomar foto ahora</h3>
-                <p style="font-size:0.85rem; color:var(--text-secondary); margin:0 0 0.8rem 0;">Guarda el estado de hoy como la foto de este mes. Si el mes ya está sellado, no se puede cambiar.</p>
+                <p style="font-size:0.85rem; color:var(--text-secondary); margin:0 0 0.8rem 0;">Guarda el estado de hoy como la foto de este mes. Solo hay una foto por mes: si este mes ya tiene una, se te pedirá confirmar antes de reemplazarla. Si el mes ya está sellado, no se puede cambiar.</p>
                 <div style="display:flex; gap:1rem; align-items:flex-end; flex-wrap:wrap;">
                     <div class="form-group" style="margin:0;">
                         <label for="evo_tasa">Tasa USD→DOP (opcional)</label>
@@ -251,12 +253,36 @@ export class VistaEvolucion implements Vista {
     }
 
     async handleTomarFotoEvolucion(): Promise<void> {
-        const { api, avisos, dom, enrutador } = this.dep;
+        const { api, avisos, dom, enrutador, dialogos, ahora } = this.dep;
         try {
             const escrita = dom.elemento<Campo>('evo_tasa').value.trim().replace(',', '.');
             if (escrita !== '' && !/^\d+(\.\d+)?$/.test(escrita)) {
                 avisos.mostrar('La tasa debe ser un número positivo, por ejemplo 58,75.', 'error');
                 return;
+            }
+            // Solo hay una foto por mes: tomar otra reemplaza la que haya. Antes de hacerlo se avisa y se pide
+            // confirmar. Si no se puede comprobar, no se toma (mejor no reemplazar a ciegas). Un mes sellado no
+            // se pregunta: Rust lo rechaza y se explica abajo.
+            let fotos: Foto[];
+            try {
+                const leidas = await api.obtenerFotosPatrimonio();
+                if (!Array.isArray(leidas)) throw new Error('respuesta inesperada');
+                fotos = leidas;
+            } catch (err) {
+                avisos.mostrar(`No se tomó la foto: no se pudo comprobar si este mes ya tiene una. ${String(err)}`, 'error');
+                return;
+            }
+            const hoy = ahora();
+            const existente = fotos.find(f => f.anio === hoy.getFullYear() && f.mes === hoy.getMonth() + 1);
+            if (existente && !existente.sellada) {
+                const origen = ORIGENES[existente.origen] ?? existente.origen;
+                const pregunta = `Ya hay una foto de ${nombreDeMes(existente.anio, existente.mes)}: del ${existente.fecha} (${origen}), `
+                    + `con patrimonio ${formatearTexto(existente.patrimonio)} DOP. La foto nueva la reemplaza y la anterior `
+                    + `no se puede recuperar desde la aplicación. ¿Reemplazarla?`;
+                if (!(await dialogos.confirmar(pregunta))) {
+                    avisos.mostrar(`No se tomó la foto: se conserva la del ${existente.fecha}.`);
+                    return;
+                }
             }
             const foto = await api.tomarFotoPatrimonio('manual', escrita === '' ? undefined : escrita);
             this.mesElegido = claveDeMes(foto);
