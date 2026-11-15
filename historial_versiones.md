@@ -4,7 +4,41 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.134.0 (Versión Actual) - 2026-11-11
+## 🚀 Versión 1.135.0 (Versión Actual) - 2026-11-14
+**Exportación para auditoría.** La única evidencia del estado de los datos eran los respaldos, que son bases SQLite y no se leen sin herramientas. Ahora la aplicación escribe lo mismo en archivos que abre cualquier hoja de cálculo, con la huella de cada uno para poder demostrar después que no se alteraron. **Sin migración: el esquema sigue en 22.**
+
+### 🔧 Qué se hace
+* **Comando `exportar_auditoria`** (solo lectura): deja una carpeta nueva y fechada, `auditoria_AAAA-MM-DDTHH-MM-SS`, en `~/.michelitos/auditoria/`, fuera del repositorio y fuera de la poda de respaldos.
+* **Un CSV por tabla** del esquema (todas, también `sqlite_sequence`): UTF-8 con marca de orden de bytes para que Excel lea las tildes, separador coma, fin de línea CRLF y comillas según RFC 4180. Las filas van en el orden interno de la tabla.
+* **`capital.json`:** copia byte a byte del archivo del capital, si existe.
+* **`manifiesto.json`:** versión de la aplicación y del esquema, fecha y hora, y por cada archivo sus columnas, filas, tamaño y SHA-256; incluye notas que explican el formato a quien lo abra sin la aplicación.
+* **`SHA256SUMS`:** las mismas huellas, más la del manifiesto, en el formato de `shasum`; se verifican con `shasum -a 256 -c SHA256SUMS` sin depender de la aplicación.
+* **Interfaz (Ajustes):** tarjeta «Exportar para auditoría» con el botón «Exportar ahora». Muestra la carpeta, cuántos archivos y filas lleva y la huella del manifiesto.
+
+### 🧭 Decisiones
+* **Fiel antes que cómoda:** cada valor sale tal como está guardado. Los importes `REAL` no se redondean a centavos (la suma en coma flotante que haya en la base es justo lo que una auditoría quiere ver) y las columnas en centavos salen en centavos. Un nulo es un campo vacío; un texto vacío es `""`.
+* **Coherente:** todas las tablas se leen en una sola transacción de lectura. El capital vive fuera de la base y se copia aparte.
+* **Entera o nada:** se escribe en una carpeta provisional y solo al final recibe su nombre; si algo falla no queda nada. No se pisa una exportación existente.
+* **Solo lectura:** a los archivos se les quita el permiso de escritura, para que no se editen por descuido. No es una protección contra quien quiera alterarlos: para eso están las huellas, y la del manifiesto conviene anotarla fuera de la carpeta.
+* **Si la base no supera `integrity_check`, no se exporta.**
+* **Dependencia nueva:** `sha2` (ya estaba en el árbol por Tauri). El CSV se escribe sin dependencias.
+* **Exportación completa siempre.** Por período y en `.xlsx` quedan para después, si hacen falta.
+
+### 🧪 Pruebas y mutaciones
+* **Unitarias** (`exportacion.rs`, 16): comillas y bordes del CSV, nulo frente a texto vacío, enteros, reales y binarios tal cual, vectores conocidos de SHA-256, tabla vacía, tabla sin rowid, manifiesto y `SHA256SUMS` contra el contenido real, capital ausente, solo lectura, no pisar, fallo a medias sin restos y base intacta.
+* **Integración** (`integracion_auditoria.rs`, 6, comando real sobre el esquema real y datos inventados): un CSV por cada tabla con todas sus filas, los gastos valor a valor (el importe vuelve al mismo `f64`), la base no cambia ni una fila, un archivo alterado deja de coincidir con su huella, el capital solo si existe, y la forma del DTO contra `tipos-ipc.d.ts`.
+* **JS:** el botón se deshabilita mientras corre, se muestran carpeta, conteos y huella, y un fallo borra el resultado anterior (vista e interacción).
+* **Mutaciones:** **25, todas detectadas** (19 en Rust, 6 en JS): comillas sin duplicar, texto vacío sin comillas, real redondeado, nulo escrito como texto, sin marca UTF-8, fin de línea LF, orden invertido (con y sin rowid), archivos escribibles, huella de otro contenido, carpeta provisional abandonada, pisar una exportación, capital inventado, `SHA256SUMS` sin el manifiesto, filas mal contadas, tabla omitida, versión de esquema fija, conteo y huella del comando; botón sin deshabilitar, sin rehabilitar o sin su texto, resultado viejo tras un fallo, salida sin huella y sin aviso de éxito.
+
+### ⚠️ Límites
+* **No es una bitácora:** muestra el estado en un instante, no quién cambió qué ni cuándo.
+* **Datos reales en claro:** la carpeta no debe copiarse a una ubicación compartida sin cifrar.
+* **Sin probar:** el rechazo de una base dañada (no hay prueba que fabrique una) y el botón en el WebView real.
+* La ventana no abre carpetas: la ruta se muestra para ir a ella desde Finder.
+
+---
+
+## Versión 1.134.0 - 2026-11-11
 **Deshacer el reemplazo de la foto del mes.** Solo hay una foto del patrimonio por mes, así que tomar otra reemplaza la que había; desde la 1.133.0 se avisa antes, pero la reemplazada no se podía recuperar desde la aplicación. Ahora se **aparta** y se puede **restituir**. **Migración 22: el esquema pasa a 22** (una base ya migrada no se abre con una versión anterior).
 
 ### 🔧 Qué se hace

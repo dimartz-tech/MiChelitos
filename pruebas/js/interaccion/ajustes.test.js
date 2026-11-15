@@ -48,6 +48,43 @@ test('crear respaldo: funciona aunque la pantalla no tenga el recuadro de result
     avisoExito(ui, /Respaldo creado/);
 });
 
+// --- exportar para auditoría ---
+
+test('exportar para auditoría: llama una vez sin argumentos, muestra carpeta, conteos y huella, y rehabilita el botón', async () => {
+    let boton;
+    const huella = 'c0de'.repeat(16);
+    const ui = cargarInterfaz({
+        campos: { auditoria_resultado: {} },
+        api: {
+            exportarAuditoria: () => {
+                assert.equal(boton.disabled, true, 'el botón debe estar deshabilitado durante la exportación');
+                assert.equal(boton.textContent, 'Exportando…');
+                return { carpeta: 'auditoria/auditoria_2031-02-03T04-05-06', archivos: 23, filas: 1207, huella_del_manifiesto: huella };
+            },
+        },
+    });
+    boton = crearElemento('button', { textContent: 'Exportar ahora' });
+    await ui.appUI.handleExportarAuditoria(boton);
+    llamoUnaVez(ui, 'exportarAuditoria', []);
+    avisoExito(ui, /Exportación para auditoría creada/);
+    assert.equal(
+        ui.elemento('auditoria_resultado').textContent,
+        `auditoria/auditoria_2031-02-03T04-05-06\n23 archivos de datos, 1207 filas.\nHuella del manifiesto (SHA-256): ${huella}`,
+    );
+    assert.equal(boton.disabled, false);
+    assert.equal(boton.textContent, 'Exportar ahora');
+});
+
+test('exportar para auditoría: si falla muestra el error, borra el resultado anterior y rehabilita el botón', async () => {
+    const ui = cargarInterfaz({ campos: { auditoria_resultado: { textContent: 'exportación vieja' } } });
+    ui.rechazar('exportarAuditoria', 'Error simulado de Rust');
+    const boton = crearElemento('button', { textContent: 'Exportar ahora' });
+    await rechazoSeMuestra(ui, () => ui.appUI.handleExportarAuditoria(boton));
+    assert.equal(ui.elemento('auditoria_resultado').textContent, '');
+    assert.equal(boton.disabled, false);
+    assert.equal(boton.textContent, 'Exportar ahora');
+});
+
 // --- restaurar respaldo ---
 
 const selector = (valor = 'michelitos_2026-03-01T10-00-00_manual.db') => ({

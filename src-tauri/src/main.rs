@@ -7,6 +7,7 @@
 mod db_sql;
 mod migraciones;
 mod respaldo;
+mod exportacion;
 mod correcciones;
 mod ipc;
 mod db_nosql;
@@ -43,6 +44,8 @@ mod integracion_recomendaciones;
 mod integracion_traspasos;
 #[cfg(test)]
 mod integracion_abono_tasa;
+#[cfg(test)]
+mod integracion_auditoria;
 
 // --- PUNTO DE ENTRADA PRINCIPAL ---
 fn main() {
@@ -106,6 +109,7 @@ fn main() {
             comandos::respaldos::crear_respaldo,
             comandos::respaldos::listar_respaldos,
             comandos::respaldos::restaurar_respaldo,
+            comandos::auditoria::exportar_auditoria,
             comandos::cuentas::obtener_cuentas,
             comandos::abonos::revertir_abono_tarjeta,
             comandos::avances::simular_avance_efectivo,

@@ -31,6 +31,8 @@ const informal = id => ({ id, fecha: '11/03/2027', descripcion: `Informal ${id}`
 const ingreso = id => ({ id, fecha_emision: '12/03/2027', numero_factura: `FAC-${id}`, cliente_nombre: 'Cliente Uno', monto_total: 300, estatus: 'emitida' });
 const transaccion = id => ({ id, fecha: '13/03/2027', cuenta_origen_nombre: 'Cuenta Alfa', cuenta_destino_nombre: 'Cuenta Beta', monto_origen: 40, cargo: 2, descripcion: null });
 
+const EXPORTACION = { carpeta: 'auditoria/auditoria_2031-02-03T04-05-06', archivos: 23, filas: 1207, huella_del_manifiesto: 'ab12'.repeat(16) };
+
 const el = (spec = {}) => ({ value: '', hidden: false, disabled: false, textContent: '', innerHTML: '', ...spec });
 
 const DATOS = () => ({
@@ -93,6 +95,7 @@ function montar({ datos = DATOS(), campos = {}, falla = {}, confirmar = true, re
         eliminarGasto: registrar('eliminarGasto', 'C-0001'), eliminarIngresoInformal: registrar('eliminarIngresoInformal'),
         eliminarIngreso: registrar('eliminarIngreso'), eliminarTransaccionCuenta: registrar('eliminarTransaccionCuenta'),
         crearRespaldo: registrar('crearRespaldo', 'respaldos/michelitos_prueba.db'),
+        exportarAuditoria: registrar('exportarAuditoria', EXPORTACION),
         restaurarRespaldo: registrar('restaurarRespaldo', { capital_restaurado: true }),
     };
     const pantalla = { contenido: { innerHTML: '' } };
@@ -543,6 +546,46 @@ test('respaldar: si falla muestra el error, borra la ruta anterior y rehabilita 
     assert.equal(t.avisos[0].tipo, 'error');
     assert.equal(salida.textContent, '');
     assert.deepEqual(boton, { disabled: false, textContent: 'Respaldar ahora' });
+});
+
+// --- Exportación para auditoría ---
+
+test('exportar para auditoría: deshabilita el botón mientras corre y muestra carpeta, conteos y huella', async () => {
+    const salida = el();
+    const boton = { disabled: false, textContent: 'Exportar ahora' };
+    let durante;
+    const t = montar({ campos: { auditoria_resultado: salida } });
+    const original = t.vista.dep.api.exportarAuditoria;
+    t.vista.dep.api.exportarAuditoria = async () => { durante = { ...boton }; return original(); };
+    await t.vista.handleExportarAuditoria(boton);
+    assert.deepEqual(durante, { disabled: true, textContent: 'Exportando…' });
+    assert.deepEqual(boton, { disabled: false, textContent: 'Exportar ahora' });
+    assert.equal(
+        salida.textContent,
+        `auditoria/auditoria_2031-02-03T04-05-06\n23 archivos de datos, 1207 filas.\nHuella del manifiesto (SHA-256): ${'ab12'.repeat(16)}`,
+    );
+    assert.deepEqual(t.avisos, [{ mensaje: 'Exportación para auditoría creada.', tipo: undefined }]);
+    assert.deepEqual(t.rutas, [], 'exportar no cambia nada: no hay que repintar');
+});
+
+test('exportar para auditoría: si falla muestra el error, borra el resultado anterior y rehabilita el botón', async () => {
+    const salida = el({ textContent: 'exportación vieja' });
+    const boton = { disabled: false, textContent: 'Exportar ahora' };
+    const t = montar({ campos: { auditoria_resultado: salida }, falla: { exportarAuditoria: 'Disco lleno' } });
+    await t.vista.handleExportarAuditoria(boton);
+    assert.equal(t.avisos.length, 1);
+    assert.equal(t.avisos[0].tipo, 'error');
+    assert.match(t.avisos[0].mensaje, /Disco lleno/);
+    assert.equal(salida.textContent, '');
+    assert.deepEqual(boton, { disabled: false, textContent: 'Exportar ahora' });
+});
+
+test('exportar para auditoría: funciona aunque la pantalla no tenga el recuadro de resultado', async () => {
+    const boton = { disabled: false, textContent: 'Exportar ahora' };
+    const t = montar();
+    await t.vista.handleExportarAuditoria(boton);
+    assert.equal(t.avisos[0].mensaje, 'Exportación para auditoría creada.');
+    assert.equal(boton.disabled, false);
 });
 
 const CAMPOS_RESTAURAR = () => ({
