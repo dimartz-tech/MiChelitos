@@ -452,18 +452,25 @@ pub struct EstadoDePrestamo {
     pub saldo: f64,
     pub tasa_anual: f64,
     pub monto_cuota: f64,
+    /// `None` en una línea revolvente: no cuenta cuotas.
+    pub cuotas_pendientes: Option<i32>,
+    /// Para describir el pago en el gasto que lo saca de la cuenta.
+    pub institucion: String,
 }
 
 /// Una línea del libro de movimientos del financiamiento.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MovimientoDePrestamo {
     pub id: i64,
+    pub prestamo_id: i64,
     pub fecha: String,
     pub tipo: String,
     pub monto: f64,
     pub interes: f64,
     pub capital: f64,
     pub saldo_resultante: f64,
+    /// El gasto que sacó el dinero de una cuenta; `None` en las conciliaciones y en las cuotas registradas sin cuenta.
+    pub gasto_id: Option<i64>,
 }
 
 /// Un movimiento por asentar.
@@ -471,12 +478,14 @@ pub struct MovimientoDePrestamo {
 pub struct MovimientoNuevo {
     pub prestamo_id: i64,
     pub fecha: String,
-    /// «cuota», «declaracion» o «disposicion» (lo exige el esquema).
+    /// «cuota», «abono_capital», «declaracion» o «disposicion» (lo exige el esquema).
     pub tipo: String,
     pub monto: Dinero,
     pub interes: Dinero,
     pub capital: Dinero,
     pub saldo_resultante: Dinero,
+    /// El gasto que sacó el dinero de la cuenta, si el movimiento es un pago con cuenta.
+    pub gasto_id: Option<i64>,
 }
 
 /// Financiamientos (préstamos y líneas de crédito): alta, corrección, libro de movimientos y baja.
@@ -495,6 +504,14 @@ pub trait AlmacenPrestamos {
     fn descontar_cuota(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
     /// Del más nuevo al más viejo.
     fn movimientos(&self, id: i64) -> Result<Vec<MovimientoDePrestamo>, ErrorAlmacen>;
+    /// Un movimiento por su identificador, de cualquier financiamiento.
+    fn movimiento(&self, id: i64) -> Result<Option<MovimientoDePrestamo>, ErrorAlmacen>;
+    /// El identificador del movimiento más reciente del financiamiento, si tiene alguno.
+    fn ultimo_movimiento(&self, prestamo_id: i64) -> Result<Option<i64>, ErrorAlmacen>;
+    /// Borra el movimiento **y** devuelve el saldo del financiamiento a `saldo_previo`.
+    fn retirar_movimiento(&mut self, id: i64, prestamo_id: i64, saldo_previo: Dinero) -> Result<(), ErrorAlmacen>;
+    /// Sube el contador una cuota; no hace nada si el financiamiento no cuenta cuotas.
+    fn reponer_cuota(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
     /// Sin guardas, y se lleva su libro. Borrar uno que no existe no es un error.
     fn eliminar_prestamo(&mut self, id: i64) -> Result<(), ErrorAlmacen>;
 }

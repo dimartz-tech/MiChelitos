@@ -93,8 +93,7 @@ test('el puente que se compone no expone nada que ninguna plantilla use (sin acc
     // para las pruebas y la consola: se listan aquí con su razón en vez de ocultarlas.
     const SOLO_DESDE_CODIGO = new Set([
         'toggleMetodoPago',        // lo llama `cambiarMetodoDePago`, la acción que escribe la plantilla
-        'handlePagarCuota',        // las tres, desde el menú de acciones de un financiamiento (`abrirMenuPasivo`)
-        'handleDeclararSaldo',
+        'handleDeclararSaldo',     // las dos, desde el menú de acciones de un financiamiento (`abrirMenuPasivo`)
         'handleEliminarPrestamo',
     ]);
     const muertas = Object.keys(cargarInterfaz().appUI).filter(n => !escritas.has(n) && !SOLO_DESDE_CODIGO.has(n));

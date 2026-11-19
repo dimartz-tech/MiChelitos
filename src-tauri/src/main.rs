@@ -46,6 +46,8 @@ mod integracion_traspasos;
 mod integracion_abono_tasa;
 #[cfg(test)]
 mod integracion_auditoria;
+#[cfg(test)]
+mod integracion_pagos_prestamo;
 
 // --- PUNTO DE ENTRADA PRINCIPAL ---
 fn main() {
@@ -103,6 +105,9 @@ fn main() {
             comandos::prestamos::declarar_saldo_prestamo,
             comandos::prestamos::obtener_movimientos_prestamo,
             comandos::prestamos::eliminar_prestamo,
+            comandos::prestamos::previsualizar_pago_prestamo,
+            comandos::prestamos::registrar_pago_prestamo,
+            comandos::prestamos::revertir_pago_prestamo,
             comandos::catalogos::obtener_clientes,
             comandos::catalogos::crear_cliente,
             comandos::catalogos::eliminar_cliente,

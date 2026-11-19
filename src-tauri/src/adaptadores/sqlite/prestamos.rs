@@ -2,8 +2,9 @@
 //!
 //! Como los demás, opera **sobre una transacción ya abierta**: quien la abre la confirma.
 
+use crate::dominio::dinero::Dinero;
 use crate::puertos::repositorios::*;
-use rusqlite::{OptionalExtension, Transaction};
+use rusqlite::{OptionalExtension, Row, Transaction};
 
 pub struct PrestamosSqlite<'a> {
     tx: &'a Transaction<'a>,
@@ -17,6 +18,22 @@ impl<'a> PrestamosSqlite<'a> {
 
 fn fallo(e: rusqlite::Error) -> ErrorAlmacen {
     ErrorAlmacen::Fallo(e.to_string())
+}
+
+const COLUMNAS_DE_MOVIMIENTO: &str = "id, prestamo_id, fecha, tipo, monto, interes, capital, saldo_resultante, gasto_id";
+
+fn movimiento_de(r: &Row) -> rusqlite::Result<MovimientoDePrestamo> {
+    Ok(MovimientoDePrestamo {
+        id: r.get(0)?,
+        prestamo_id: r.get(1)?,
+        fecha: r.get(2)?,
+        tipo: r.get(3)?,
+        monto: r.get(4)?,
+        interes: r.get(5)?,
+        capital: r.get(6)?,
+        saldo_resultante: r.get(7)?,
+        gasto_id: r.get(8)?,
+    })
 }
 
 impl AlmacenPrestamos for PrestamosSqlite<'_> {
@@ -107,13 +124,15 @@ impl AlmacenPrestamos for PrestamosSqlite<'_> {
     fn estado_de_prestamo(&self, id: i64) -> Result<Option<EstadoDePrestamo>, ErrorAlmacen> {
         self.tx
             .query_row(
-                "SELECT saldo_actual, tasa_actual, monto_cuota FROM prestamos WHERE id = ?;",
+                "SELECT saldo_actual, tasa_actual, monto_cuota, cuotas_pendientes, institucion_financiera FROM prestamos WHERE id = ?;",
                 [id],
                 |r| {
                     Ok(EstadoDePrestamo {
                         saldo: r.get::<_, Option<f64>>(0)?.unwrap_or(0.0),
                         tasa_anual: r.get(1)?,
                         monto_cuota: r.get(2)?,
+                        cuotas_pendientes: r.get(3)?,
+                        institucion: r.get(4)?,
                     })
                 },
             )
@@ -124,8 +143,8 @@ impl AlmacenPrestamos for PrestamosSqlite<'_> {
     fn asentar_movimiento(&mut self, m: &MovimientoNuevo) -> Result<(), ErrorAlmacen> {
         self.tx
             .execute(
-                "INSERT INTO movimientos_prestamo (prestamo_id, fecha, tipo, monto, interes, capital, saldo_resultante)
-                 VALUES (?, ?, ?, ?, ?, ?, ?);",
+                "INSERT INTO movimientos_prestamo (prestamo_id, fecha, tipo, monto, interes, capital, saldo_resultante, gasto_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
                 (
                     m.prestamo_id,
                     &m.fecha,
@@ -134,6 +153,7 @@ impl AlmacenPrestamos for PrestamosSqlite<'_> {
                     m.interes.unidades(),
                     m.capital.unidades(),
                     m.saldo_resultante.unidades(),
+                    m.gasto_id,
                 ),
             )
             .map_err(fallo)?;
@@ -160,25 +180,49 @@ impl AlmacenPrestamos for PrestamosSqlite<'_> {
     fn movimientos(&self, id: i64) -> Result<Vec<MovimientoDePrestamo>, ErrorAlmacen> {
         let mut stmt = self
             .tx
-            .prepare(
-                "SELECT id, fecha, tipo, monto, interes, capital, saldo_resultante
-                 FROM movimientos_prestamo WHERE prestamo_id = ? ORDER BY id DESC;",
+            .prepare(&format!(
+                "SELECT {COLUMNAS_DE_MOVIMIENTO} FROM movimientos_prestamo WHERE prestamo_id = ? ORDER BY id DESC;"
+            ))
+            .map_err(fallo)?;
+        let filas = stmt.query_map([id], movimiento_de).map_err(fallo)?;
+        filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
+    }
+
+    fn movimiento(&self, id: i64) -> Result<Option<MovimientoDePrestamo>, ErrorAlmacen> {
+        self.tx
+            .query_row(&format!("SELECT {COLUMNAS_DE_MOVIMIENTO} FROM movimientos_prestamo WHERE id = ?;"), [id], movimiento_de)
+            .optional()
+            .map_err(fallo)
+    }
+
+    fn ultimo_movimiento(&self, prestamo_id: i64) -> Result<Option<i64>, ErrorAlmacen> {
+        self.tx
+            .query_row("SELECT MAX(id) FROM movimientos_prestamo WHERE prestamo_id = ?;", [prestamo_id], |r| r.get(0))
+            .map_err(fallo)
+    }
+
+    fn retirar_movimiento(&mut self, id: i64, prestamo_id: i64, saldo_previo: Dinero) -> Result<(), ErrorAlmacen> {
+        let borrados = self
+            .tx
+            .execute("DELETE FROM movimientos_prestamo WHERE id = ? AND prestamo_id = ?;", (id, prestamo_id))
+            .map_err(fallo)?;
+        if borrados != 1 {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "movimiento de préstamo", id });
+        }
+        self.tx
+            .execute("UPDATE prestamos SET saldo_actual = ? WHERE id = ?;", (saldo_previo.unidades(), prestamo_id))
+            .map_err(fallo)?;
+        Ok(())
+    }
+
+    fn reponer_cuota(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        self.tx
+            .execute(
+                "UPDATE prestamos SET cuotas_pendientes = cuotas_pendientes + 1 WHERE id = ? AND cuotas_pendientes IS NOT NULL;",
+                [id],
             )
             .map_err(fallo)?;
-        let filas = stmt
-            .query_map([id], |r| {
-                Ok(MovimientoDePrestamo {
-                    id: r.get(0)?,
-                    fecha: r.get(1)?,
-                    tipo: r.get(2)?,
-                    monto: r.get(3)?,
-                    interes: r.get(4)?,
-                    capital: r.get(5)?,
-                    saldo_resultante: r.get(6)?,
-                })
-            })
-            .map_err(fallo)?;
-        filas.collect::<Result<Vec<_>, _>>().map_err(fallo)
+        Ok(())
     }
 
     fn eliminar_prestamo(&mut self, id: i64) -> Result<(), ErrorAlmacen> {

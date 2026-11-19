@@ -4,7 +4,39 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.135.0 (Versión Actual) - 2026-11-14
+## 🚀 Versión 1.136.0 (Versión Actual) - 2026-11-19
+**Registrar el pago de un préstamo desde una cuenta.** Hasta ahora un pago se registraba en dos sitios que no se hablaban: «Abonar cuota» bajaba el saldo del préstamo sin sacar el dinero de ninguna cuenta, y un gasto de la categoría «Prestamo» sacaba el dinero sin bajar el saldo. Con el uso, la mayoría de los pagos quedaban solo como gasto y los saldos de los préstamos se inflaban. Ahora las dos cosas ocurren en **una sola operación**, y se pueden revertir. **Migración 23: el esquema pasa a 23** (una base ya migrada no se abre con una versión anterior).
+
+### 🔧 Qué se hace
+* **Préstamos › menú › «Registrar pago»** (sustituye a «Abonar cuota»): tipo (cuota del período o abono a capital), importe libre (propone la cuota), interés del recibo (opcional), fecha (propone hoy), cuenta de la que sale (cuentas en pesos o la caja de efectivo) y categoría del gasto (propone la que se llame «Préstamo»). Muestra antes de registrar el interés, el capital, el saldo antes y después y las cuotas que quedan, calculados por el núcleo con las mismas reglas que el registro; pide confirmar.
+* **Una transacción:** el gasto (con la regla de siempre: una transferencia lleva su retención) y el movimiento del préstamo, que guarda qué gasto lo pagó. Si cualquiera falla, no queda ninguno.
+* **Cuota:** el interés del recibo si se escribe; si no, la estimación de siempre (saldo × tasa / 12). Consume una cuota pendiente; sin cuotas pendientes se rechaza y hay que registrarlo como abono a capital.
+* **Abono a capital:** va íntegro a la deuda y no consume cuota.
+* **Préstamos › menú › «Movimientos»:** el libro del préstamo (cuotas, abonos, conciliaciones), del más reciente al más antiguo, con **«Revertir»** en el último si salió de una cuenta: pide confirmar y un motivo, deja un caso de corrección (tipo `pago_prestamo`, con el detalle en JSON), devuelve el saldo y la cuota al préstamo y el dinero (con su retención) a la cuenta.
+* **El gasto de un pago no se borra suelto** desde Ajustes › Correcciones: el mensaje dice que se revierta desde Movimientos. Sigue contando como gasto de su categoría en el resumen (no como cargo derivado).
+* **Comandos nuevos:** `previsualizar_pago_prestamo` (solo lectura), `registrar_pago_prestamo`, `revertir_pago_prestamo`. `obtener_movimientos_prestamo` devuelve además `gasto_id`. El comando antiguo `pagar_cuota_prestamo` sigue existiendo pero la interfaz ya no lo usa.
+* **Migración 23:** reconstruye `movimientos_prestamo` con la columna `gasto_id` (clave hacia `gastos`, única cuando no es nula) y el tipo `abono_capital`; conserva cada fila con su id y las restricciones de céntimo, y comprueba el recuento.
+
+### 🧭 Decisiones (a confirmar por el titular)
+* **Retención:** un pago desde cuenta se registra como **transferencia** y lleva la retención del 0.20 %, igual que los siete pagos que ya estaban registrados como gasto. Si el banco no la cobra en el pago de sus propios préstamos, hay que decidir otro trato.
+* **El pago es gasto de su categoría,** como se venía haciendo: la parte de capital no es un gasto en sentido estricto, pero el conmutador del resumen ya permite excluir la categoría.
+* **Solo se revierte el último movimiento** de cada préstamo, porque los posteriores parten de su saldo. Una conciliación o una cuota antigua (sin cuenta) se corrigen conciliando.
+* **No se tocan los datos existentes:** los pagos ya registrados como gasto siguen sin enlazar y los saldos de los préstamos siguen como están; ponerlos al día es parte de la conciliación pendiente.
+* **La línea flexible ligada a una tarjeta** sigue sin vínculo automático con el abono a la tarjeta; queda para después.
+
+### 🧪 Pruebas y mutaciones
+* **Rust: 1341 ok.** Dominio (`desglosar_pago`, `saldo_previo`, tipo de pago), caso de uso con dobles (18: cuota, interés del recibo, abono a capital, efectivo, rechazos sin efectos, sin cuotas, cuenta inexistente, previsión = registro, reversión completa, último movimiento, sin cuenta, motivo) y migración 23 (de cero, de 22 a 23 conservando ids y huecos, restricciones, un gasto por movimiento, idempotencia).
+* **Integración** (`integracion_pagos_prestamo.rs`, 9, comandos reales, datos inventados): pago completo con su gasto y su retención, interés del recibo y abono a capital, fallo a mitad sin restos, guarda de borrado, reversión con caso, solo el último, resumen sin cargo derivado, borrar el préstamo conserva el gasto, contrato de forma con `tipos-ipc.d.ts`.
+* **JS: 936 de 936.** Formulario, vista previa (escape, abono sin interés, errores, respuesta tardía descartada), registro (confirmación, tipos de cada campo, caja, rechazo), movimientos y reversión; también en interacción.
+* **30 mutaciones, todas detectadas** (22 en Rust, 8 en JS).
+
+### ⚠️ Antes de instalar
+* **Esquema 23:** respaldo y ensayo sobre una copia; volver atrás exige restituir la aplicación anterior **y** el respaldo en esquema 22.
+* No se probó a mano en el WebView real.
+
+---
+
+## Versión 1.135.0 - 2026-11-14
 **Exportación para auditoría.** La única evidencia del estado de los datos eran los respaldos, que son bases SQLite y no se leen sin herramientas. Ahora la aplicación escribe lo mismo en archivos que abre cualquier hoja de cálculo, con la huella de cada uno para poder demostrar después que no se alteraron. **Sin migración: el esquema sigue en 22.**
 
 ### 🔧 Qué se hace

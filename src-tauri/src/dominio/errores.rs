@@ -129,6 +129,21 @@ pub enum ErrorDominio {
     FrecuenciaDesconocida { codigo: String },
     /// El mes que se pide al resumen no existe o es posterior al mes en curso.
     PeriodoInvalido { anio: i32, mes: u32 },
+    /// Un pago de préstamo mueve un importe mayor que cero.
+    PagoDePrestamoSinImporte,
+    /// El interés que declara el recibo no puede ser negativo ni mayor que el propio pago.
+    InteresFueraDelPago,
+    /// Un abono a capital va íntegro a la deuda: declarar interés lo contradice.
+    InteresEnAbonoACapital,
+    /// El financiamiento ya no tiene cuotas pendientes: lo que se pague va a capital.
+    SinCuotasPendientes,
+    /// El tipo de pago no es «cuota» ni «abono_capital».
+    TipoDePagoDesconocido { codigo: String },
+    MovimientoDePrestamoNoEncontrado { id: i64 },
+    /// El movimiento no salió de ninguna cuenta (una conciliación, o una cuota anterior a los pagos con cuenta).
+    MovimientoSinPago,
+    /// Solo se revierte el último movimiento de un financiamiento: los posteriores parten de su saldo.
+    NoEsElUltimoMovimiento,
 }
 
 impl fmt::Display for ErrorDominio {
@@ -349,6 +364,34 @@ impl fmt::Display for ErrorDominio {
                 f,
                 "El período {:02}/{} no es válido: el mes debe ir de 1 a 12 y no puede ser posterior al mes en curso.",
                 mes, anio
+            ),
+            ErrorDominio::PagoDePrestamoSinImporte => {
+                write!(f, "El pago del préstamo debe ser de un importe mayor que cero.")
+            }
+            ErrorDominio::InteresFueraDelPago => write!(
+                f,
+                "El interés del recibo no puede ser negativo ni mayor que el pago. Si no lo conoces, déjalo en blanco y se estima."
+            ),
+            ErrorDominio::InteresEnAbonoACapital => {
+                write!(f, "Un abono a capital va íntegro a la deuda: no lleva interés.")
+            }
+            ErrorDominio::SinCuotasPendientes => write!(
+                f,
+                "Este préstamo ya no tiene cuotas pendientes: registra el pago como abono a capital."
+            ),
+            ErrorDominio::TipoDePagoDesconocido { codigo } => {
+                write!(f, "«{}» no es un tipo de pago: usa «cuota» o «abono_capital».", codigo)
+            }
+            ErrorDominio::MovimientoDePrestamoNoEncontrado { id } => {
+                write!(f, "No existe el movimiento de préstamo {}.", id)
+            }
+            ErrorDominio::MovimientoSinPago => write!(
+                f,
+                "Este movimiento no salió de ninguna cuenta (es una conciliación o una cuota registrada sin cuenta): corrígelo conciliando el saldo con el estado de cuenta."
+            ),
+            ErrorDominio::NoEsElUltimoMovimiento => write!(
+                f,
+                "Solo se puede revertir el último movimiento del préstamo: los posteriores parten de su saldo. Revierte antes los más recientes."
             ),
             ErrorDominio::AvanceEnOtraDivisa { cuenta, avance } => write!(
                 f,

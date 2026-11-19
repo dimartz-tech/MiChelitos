@@ -574,6 +574,15 @@ pub const GASTOS_DERIVADOS: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// Gastos que **son** el pago de otra operación: el dinero que salió de la cuenta para pagar un préstamo. Como los
+/// derivados, no se borran por separado (el préstamo conservaría la amortización de un dinero que «volvió»); a
+/// diferencia de ellos, **siguen siendo gasto de su categoría** en el resumen, no un cargo derivado.
+pub const GASTOS_DE_PAGOS: &[(&str, &str, &str)] = &[(
+    "movimientos_prestamo",
+    "gasto_id",
+    "Este gasto es el pago de un préstamo. Reviértelo desde Préstamos › Movimientos: es la única forma de que la cuenta y el saldo del préstamo sigan cuadrando.",
+)];
+
 /// Claves ajenas hacia `gastos` que solo **informan**: el gasto existe por sí
 /// mismo y borrarlo no descuadra nada (la bonificación queda sin gasto de
 /// referencia).
@@ -585,7 +594,7 @@ pub fn motivo_de_no_borrar_gasto(
     tx: &Transaction,
     gasto_id: i64,
 ) -> rusqlite::Result<Option<&'static str>> {
-    for (tabla, columna, motivo) in GASTOS_DERIVADOS {
+    for (tabla, columna, motivo) in GASTOS_DERIVADOS.iter().chain(GASTOS_DE_PAGOS) {
         // Tabla y columna son constantes de esta lista, nunca entrada externa.
         let n: i64 = tx.query_row(
             &format!("SELECT COUNT(*) FROM {tabla} WHERE {columna} = ?;"),
@@ -2051,6 +2060,71 @@ pub fn migracion_22_foto_previa(tx: &Transaction) -> Result<(), ErrorMigracion> 
     Ok(())
 }
 
+const MIG23: &str = "pagos de préstamo con cuenta";
+
+/// Migración 23. Reconstruye **`movimientos_prestamo`** para los pagos que salen de una cuenta:
+///
+/// * `tipo` admite además **`abono_capital`** (un abono extraordinario que va íntegro a la deuda).
+/// * Columna **`gasto_id`**: el gasto que sacó el dinero de la cuenta. `ON DELETE SET NULL`, como las demás claves
+///   hacia `gastos`; lo que impide borrar ese gasto por separado es la guarda de `GASTOS_DE_PAGOS`.
+///
+/// Conserva todas las filas y las restricciones de céntimo de la migración 11. Cambiar un `CHECK` exige reconstruir la
+/// tabla; ninguna otra la referencia, así que basta renombrar, crear, copiar y borrar. Comprueba el recuento antes y
+/// después. Idempotente: si `gasto_id` ya existe no hace nada.
+pub fn migracion_23_pagos_de_prestamo(tx: &Transaction) -> Result<(), ErrorMigracion> {
+    let error = |e: rusqlite::Error| ErrorMigracion::Almacenamiento(e.to_string());
+    let ya_esta: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('movimientos_prestamo') WHERE name = 'gasto_id';",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(error)?;
+    if ya_esta > 0 {
+        return Ok(());
+    }
+    let antes: i64 = tx.query_row("SELECT COUNT(*) FROM movimientos_prestamo;", [], |r| r.get(0)).map_err(error)?;
+
+    migraciones::paso(
+        tx,
+        MIG23,
+        "reconstruir movimientos_prestamo con pagos desde una cuenta",
+        "ALTER TABLE movimientos_prestamo RENAME TO movimientos_prestamo_previa;
+         CREATE TABLE movimientos_prestamo (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             prestamo_id INTEGER NOT NULL,
+             fecha TEXT NOT NULL,
+             tipo TEXT CHECK(tipo IN ('cuota', 'abono_capital', 'declaracion', 'disposicion')) NOT NULL,
+             monto REAL NOT NULL,
+             interes REAL NOT NULL DEFAULT 0.0,
+             capital REAL NOT NULL DEFAULT 0.0,
+             saldo_resultante REAL NOT NULL,
+             gasto_id INTEGER REFERENCES gastos(id) ON DELETE SET NULL,
+             FOREIGN KEY (prestamo_id) REFERENCES prestamos(id) ON DELETE CASCADE,
+             CHECK (ROUND(monto, 2) = monto),
+             CHECK (ROUND(interes, 2) = interes),
+             CHECK (ROUND(capital, 2) = capital),
+             CHECK (ROUND(saldo_resultante, 2) = saldo_resultante)
+         );
+         INSERT INTO movimientos_prestamo (id, prestamo_id, fecha, tipo, monto, interes, capital, saldo_resultante)
+             SELECT id, prestamo_id, fecha, tipo, monto, interes, capital, saldo_resultante FROM movimientos_prestamo_previa;
+         DROP TABLE movimientos_prestamo_previa;
+         CREATE INDEX IF NOT EXISTS idx_movimientos_prestamo_prestamo ON movimientos_prestamo(prestamo_id);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_movimientos_prestamo_gasto ON movimientos_prestamo(gasto_id) WHERE gasto_id IS NOT NULL;",
+    )?;
+
+    let despues: i64 = tx.query_row("SELECT COUNT(*) FROM movimientos_prestamo;", [], |r| r.get(0)).map_err(error)?;
+    if antes != despues {
+        return Err(ErrorMigracion::Fallo {
+            version: 23,
+            migracion: MIG23,
+            etapa: "verificar movimientos_prestamo".into(),
+            causa: format!("entraron {} filas y salieron {}", antes, despues),
+        });
+    }
+    Ok(())
+}
+
 pub fn crear_esquema(conn: &mut Connection) -> Result<()> {
     migraciones::ejecutar(conn)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
@@ -2179,7 +2253,7 @@ mod pruebas_de_transaccion {
             }
             let es_listado = nombre.starts_with("obtener_") || nombre.starts_with("previsualizar_") || nombre == "suscripciones_con_aviso";
             let usa_lectura = ["lee_almacen(", "lee_catalogos(", "lee_cuentas(", "lee_prestamos(", "lee_tarjetas(", "lee_fotos(", "lee_fotos_y_almacen("].iter().any(|h| cuerpo.contains(h));
-            let usa_escritura = ["con_almacen(", "con_catalogos(", "con_cuentas(", "con_prestamos(", "con_tarjetas(", "con_fotos("].iter().any(|h| cuerpo.contains(h));
+            let usa_escritura = ["con_almacen(", "con_catalogos(", "con_cuentas(", "con_prestamos(", "con_tarjetas(", "con_fotos(", "con_prestamos_y_almacen("].iter().any(|h| cuerpo.contains(h));
             if es_listado {
                 assert!(!usa_escritura, "{nombre} es un listado y no debe ocupar el turno de escritura");
                 revisadas += usize::from(usa_lectura);

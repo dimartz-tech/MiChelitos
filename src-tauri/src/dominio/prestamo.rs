@@ -110,6 +110,75 @@ pub fn desglosar_cuota(
     Ok(DesgloseCuota { interes, capital })
 }
 
+/// Qué es un pago que sale de una cuenta hacia un financiamiento.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TipoPago {
+    /// La cuota del período: lleva interés y, en un amortizable, consume una cuota pendiente.
+    Cuota,
+    /// Un abono extraordinario: va **íntegro** al capital y no consume cuota.
+    AbonoCapital,
+}
+
+impl TipoPago {
+    pub fn desde_codigo(codigo: &str) -> Result<TipoPago, ErrorDominio> {
+        match codigo {
+            "cuota" => Ok(TipoPago::Cuota),
+            "abono_capital" => Ok(TipoPago::AbonoCapital),
+            otro => Err(ErrorDominio::TipoDePagoDesconocido { codigo: otro.to_string() }),
+        }
+    }
+
+    /// El que se guarda en `movimientos_prestamo.tipo`.
+    pub fn codigo(&self) -> &'static str {
+        match self {
+            TipoPago::Cuota => "cuota",
+            TipoPago::AbonoCapital => "abono_capital",
+        }
+    }
+
+    /// Si el pago consume una cuota del contador (solo la cuota, y solo donde hay contador).
+    pub fn consume_cuota(&self) -> bool {
+        matches!(self, TipoPago::Cuota)
+    }
+}
+
+/// Cómo se reparte un pago de importe libre.
+///
+/// * **Cuota:** si el recibo dice cuánto fue interés, manda el recibo (`interes_declarado`), que es lo que cobró el
+///   acreedor; si no, se estima como en [`desglosar_cuota`] (la doceava parte de la tasa anual sobre el saldo). El
+///   declarado no puede ser negativo ni mayor que el pago. El estimado sí puede superar el pago: entonces el capital
+///   sale negativo y la deuda crece, igual que con la cuota fija.
+/// * **Abono a capital:** todo el importe amortiza; declarar interés es un error.
+///
+/// Un pago de cero o negativo se rechaza: no paga nada.
+pub fn desglosar_pago(
+    saldo: Dinero,
+    tasa_anual: f64,
+    tipo: TipoPago,
+    monto: Dinero,
+    interes_declarado: Option<Dinero>,
+) -> Result<DesgloseCuota, ErrorDominio> {
+    if monto.es_negativo() || monto.es_cero() {
+        return Err(ErrorDominio::PagoDePrestamoSinImporte);
+    }
+    match (tipo, interes_declarado) {
+        (TipoPago::AbonoCapital, Some(_)) => Err(ErrorDominio::InteresEnAbonoACapital),
+        (TipoPago::AbonoCapital, None) => Ok(DesgloseCuota { interes: Dinero::cero(monto.divisa()), capital: monto }),
+        (TipoPago::Cuota, Some(interes)) => {
+            if interes.es_negativo() || monto.restar(&interes)?.es_negativo() {
+                return Err(ErrorDominio::InteresFueraDelPago);
+            }
+            Ok(DesgloseCuota { interes, capital: monto.restar(&interes)? })
+        }
+        (TipoPago::Cuota, None) => desglosar_cuota(saldo, tasa_anual, monto),
+    }
+}
+
+/// El saldo que había antes de un movimiento: el resultante más lo que amortizó. Es lo que se restituye al revertirlo.
+pub fn saldo_previo(saldo_resultante: Dinero, capital: Dinero) -> Result<Dinero, ErrorDominio> {
+    saldo_resultante.sumar(&capital)
+}
+
 /// Cupo que queda por disponer en una línea revolvente.
 ///
 /// Es lo que hace visible el efecto de pagar: a medida que el saldo baja, el
@@ -183,6 +252,73 @@ pub fn recordatorio_de_pago(
         (true, mensaje)
     } else {
         (false, format!("Faltan {} días para el pago.", dias_para_pago))
+    }
+}
+
+#[cfg(test)]
+mod tests_de_pago {
+    use super::*;
+    use crate::dominio::dinero::Divisa;
+
+    fn dop(u: f64) -> Dinero {
+        Dinero::nuevo(u, Divisa::Dop).unwrap()
+    }
+
+    #[test]
+    fn el_tipo_de_pago_ida_y_vuelta_y_rechaza_lo_desconocido() {
+        for t in [TipoPago::Cuota, TipoPago::AbonoCapital] {
+            assert_eq!(TipoPago::desde_codigo(t.codigo()), Ok(t));
+        }
+        assert_eq!(TipoPago::desde_codigo("declaracion"), Err(ErrorDominio::TipoDePagoDesconocido { codigo: "declaracion".into() }));
+        assert!(TipoPago::Cuota.consume_cuota() && !TipoPago::AbonoCapital.consume_cuota());
+    }
+
+    #[test]
+    fn una_cuota_sin_interes_declarado_lo_estima_como_la_cuota_fija() {
+        // 87 654.32 al 13.5 %: 986.11 de interés (redondeado a centavos), el resto a capital.
+        let d = desglosar_pago(dop(87_654.32), 13.5, TipoPago::Cuota, dop(3_210.47), None).unwrap();
+        assert_eq!(d, desglosar_cuota(dop(87_654.32), 13.5, dop(3_210.47)).unwrap());
+        assert_eq!((d.interes, d.capital), (dop(986.11), dop(2_224.36)));
+    }
+
+    #[test]
+    fn una_cuota_con_interes_declarado_usa_el_del_recibo() {
+        let d = desglosar_pago(dop(87_654.32), 13.5, TipoPago::Cuota, dop(3_210.47), Some(dop(1_002.03))).unwrap();
+        assert_eq!((d.interes, d.capital), (dop(1_002.03), dop(2_208.44)));
+        // Todo interés es válido: el pago entero puede ser interés.
+        let d = desglosar_pago(dop(500.0), 13.5, TipoPago::Cuota, dop(500.0), Some(dop(500.0))).unwrap();
+        assert_eq!((d.interes, d.capital), (dop(500.0), dop(0.0)));
+        // Y ninguno: interés cero declarado.
+        let d = desglosar_pago(dop(500.0), 13.5, TipoPago::Cuota, dop(41.17), Some(dop(0.0))).unwrap();
+        assert_eq!(d.capital, dop(41.17));
+    }
+
+    #[test]
+    fn el_interes_declarado_no_puede_ser_negativo_ni_mayor_que_el_pago() {
+        assert_eq!(desglosar_pago(dop(1_000.0), 12.0, TipoPago::Cuota, dop(100.0), Some(dop(100.01))), Err(ErrorDominio::InteresFueraDelPago));
+        assert_eq!(desglosar_pago(dop(1_000.0), 12.0, TipoPago::Cuota, dop(100.0), Some(dop(-0.01))), Err(ErrorDominio::InteresFueraDelPago));
+    }
+
+    #[test]
+    fn un_abono_a_capital_va_integro_y_no_admite_interes() {
+        let d = desglosar_pago(dop(87_654.32), 13.5, TipoPago::AbonoCapital, dop(5_000.03), None).unwrap();
+        assert_eq!((d.interes, d.capital), (dop(0.0), dop(5_000.03)));
+        assert_eq!(desglosar_pago(dop(1_000.0), 12.0, TipoPago::AbonoCapital, dop(5.0), Some(dop(0.0))), Err(ErrorDominio::InteresEnAbonoACapital));
+    }
+
+    #[test]
+    fn un_pago_de_cero_o_negativo_se_rechaza() {
+        for tipo in [TipoPago::Cuota, TipoPago::AbonoCapital] {
+            assert_eq!(desglosar_pago(dop(1_000.0), 12.0, tipo, dop(0.0), None), Err(ErrorDominio::PagoDePrestamoSinImporte));
+            assert_eq!(desglosar_pago(dop(1_000.0), 12.0, tipo, dop(-1.0), None), Err(ErrorDominio::PagoDePrestamoSinImporte));
+        }
+    }
+
+    #[test]
+    fn el_saldo_previo_es_el_resultante_mas_lo_amortizado() {
+        assert_eq!(saldo_previo(dop(85_429.96), dop(2_224.36)), Ok(dop(87_654.32)));
+        // Una cuota que no cubrió el interés amortizó en negativo: el previo era menor.
+        assert_eq!(saldo_previo(dop(100_500.0), dop(-500.0)), Ok(dop(100_000.0)));
     }
 }
 
