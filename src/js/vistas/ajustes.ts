@@ -49,6 +49,7 @@ type ApiAjustes = ApiDe<
     | 'eliminarTransaccionCuenta'
     | 'crearRespaldo'
     | 'restaurarRespaldo'
+    | 'exportarAuditoria'
 >;
 
 export interface DependenciasAjustes {
@@ -70,7 +71,7 @@ export const MANEJADORES_AJUSTES = [
     'handleAgregarCliente', 'handleEliminarCliente',
     'handleAgregarCuenta', 'abrirEdicionCuenta', 'handleArchivarCuenta', 'handleReactivarCuenta',
     'handleAgregarTarjeta',
-    'handleCrearRespaldo', 'handleRestaurarRespaldo',
+    'handleCrearRespaldo', 'handleRestaurarRespaldo', 'handleExportarAuditoria',
     'alternarCasosDeCorreccion',
     'handleEliminarGastoCorr', 'handleEliminarIngresoInformalCorr',
     'handleEliminarIngresoCorr', 'handleEliminarTransaccionCuentaCorr',
@@ -185,6 +186,19 @@ export class VistaAjustes implements Vista {
                            </select>
                            <button ${manejador('click', 'handleRestaurarRespaldo', [], 'elemento')} class="btn" style="width:100%;">Restaurar este respaldo</button>`}
                     <div id="restauracion_resultado" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.75rem; word-break:break-all;"></div>
+                </div>
+
+                <!-- Exportación para auditoría -->
+                <div class="card" style="height:fit-content;">
+                    <h3 style="font-family: var(--font-heading); font-size:1.15rem; margin-bottom: 0.5rem;">🧾 Exportar para auditoría</h3>
+                    <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.6rem;">
+                        Escribe todos los datos en archivos que abre cualquier hoja de cálculo: un CSV por tabla, el capital y un manifiesto con la huella SHA-256 de cada archivo. No modifica nada; cada exportación queda en una carpeta nueva y fechada.
+                    </p>
+                    <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
+                        Los archivos llevan tus datos reales sin cifrar: no los copies a una carpeta compartida.
+                    </p>
+                    <button ${manejador('click', 'handleExportarAuditoria', [], 'elemento')} class="btn" style="width:100%;">Exportar ahora</button>
+                    <div id="auditoria_resultado" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.75rem; word-break:break-all; white-space:pre-line;"></div>
                 </div>
 
                 <!-- Categorías -->
@@ -833,6 +847,36 @@ export class VistaAjustes implements Vista {
     }
 
     /**
+     * Exporta la base y el capital a archivos legibles, con sus huellas.
+     *
+     * La ventana no abre carpetas: se muestra dónde quedó y la huella del
+     * manifiesto, que es lo que conviene anotar aparte.
+     */
+    async handleExportarAuditoria(boton: BotonDeAccion): Promise<void> {
+        const { api, avisos, dom } = this.dep;
+        const salida = dom.buscar('auditoria_resultado');
+        boton.disabled = true;
+        const textoOriginal = boton.textContent;
+        boton.textContent = 'Exportando…';
+        try {
+            const r = await api.exportarAuditoria();
+            avisos.mostrar('Exportación para auditoría creada.');
+            if (salida) {
+                salida.textContent =
+                    `${r.carpeta}\n` +
+                    `${r.archivos} archivos de datos, ${r.filas} filas.\n` +
+                    `Huella del manifiesto (SHA-256): ${r.huella_del_manifiesto}`;
+            }
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+            if (salida) salida.textContent = '';
+        } finally {
+            boton.disabled = false;
+            boton.textContent = textoOriginal;
+        }
+    }
+
+    /**
      * Restaura un respaldo elegido de la lista.
      *
      * La confirmación dice qué se sustituye y dónde queda la red: es una
@@ -1096,6 +1140,7 @@ export function puenteAjustes(vista: VistaAjustes): {
     handleAgregarTarjeta: (e: EventoDeFormulario) => Promise<void>;
     handleCrearRespaldo: (boton: BotonDeAccion) => Promise<void>;
     handleRestaurarRespaldo: (boton: BotonDeAccion) => Promise<void>;
+    handleExportarAuditoria: (boton: BotonDeAccion) => Promise<void>;
     alternarCasosDeCorreccion: () => Promise<void>;
     handleEliminarGastoCorr: (id: number) => Promise<void>;
     handleEliminarIngresoInformalCorr: (id: number) => Promise<void>;
@@ -1119,6 +1164,7 @@ export function puenteAjustes(vista: VistaAjustes): {
         handleAgregarTarjeta: e => vista.handleAgregarTarjeta(e),
         handleCrearRespaldo: boton => vista.handleCrearRespaldo(boton),
         handleRestaurarRespaldo: boton => vista.handleRestaurarRespaldo(boton),
+        handleExportarAuditoria: boton => vista.handleExportarAuditoria(boton),
         alternarCasosDeCorreccion: () => vista.alternarCasosDeCorreccion(),
         handleEliminarGastoCorr: id => vista.handleEliminarGastoCorr(id),
         handleEliminarIngresoInformalCorr: id => vista.handleEliminarIngresoInformalCorr(id),

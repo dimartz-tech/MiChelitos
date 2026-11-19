@@ -5,6 +5,7 @@
 //! El generador de tipos (`herramientas/generar_tipos_ipc.mjs`) lee estos archivos, un solo nivel de profundidad.
 
 pub mod abonos;
+pub mod auditoria;
 pub mod avances;
 mod ayudantes;
 pub mod bonificaciones;
@@ -31,6 +32,7 @@ pub mod tarjetas;
 #[cfg(test)]
 pub(crate) const FUENTES: &[(&str, &str)] = &[
     ("comandos/abonos.rs", include_str!("abonos.rs")),
+    ("comandos/auditoria.rs", include_str!("auditoria.rs")),
     ("comandos/avances.rs", include_str!("avances.rs")),
     ("comandos/ayudantes.rs", include_str!("ayudantes.rs")),
     ("comandos/bonificaciones.rs", include_str!("bonificaciones.rs")),

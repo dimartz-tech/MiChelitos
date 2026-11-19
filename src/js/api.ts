@@ -82,6 +82,10 @@ const AppAPI = {
         return await invoke('restaurar_respaldo', { nombre: String(nombre) });
     },
 
+    async exportarAuditoria() {
+        return await invoke('exportar_auditoria');
+    },
+
     async obtenerCuentas() {
         return await invoke('obtener_cuentas');
     },
