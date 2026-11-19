@@ -24,7 +24,7 @@ impl CuentasSqlite<'_> {
         let mut stmt = self
             .tx
             .prepare(
-                "SELECT id, nombre, divisa, balance_actual, entidad, comision_pago_impuestos
+                "SELECT id, nombre, divisa, balance_actual, entidad, comision_pago_impuestos, es_caja_efectivo
                  FROM cuentas_ahorro WHERE archivada = ? ORDER BY nombre ASC;",
             )
             .map_err(fallo)?;
@@ -37,6 +37,7 @@ impl CuentasSqlite<'_> {
                     balance_actual: r.get(3)?,
                     entidad: r.get(4)?,
                     comision_pago_impuestos: r.get(5)?,
+                    es_caja_efectivo: r.get::<_, i64>(6)? != 0,
                 })
             })
             .map_err(fallo)?;

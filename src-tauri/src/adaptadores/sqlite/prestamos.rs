@@ -20,7 +20,9 @@ fn fallo(e: rusqlite::Error) -> ErrorAlmacen {
     ErrorAlmacen::Fallo(e.to_string())
 }
 
-const COLUMNAS_DE_MOVIMIENTO: &str = "id, prestamo_id, fecha, tipo, monto, interes, capital, saldo_resultante, gasto_id";
+/// La cuenta sale del gasto que pagó el movimiento (una consulta, no una copia: si se corrige el gasto, se ve aquí).
+const COLUMNAS_DE_MOVIMIENTO: &str = "m.id, m.prestamo_id, m.fecha, m.tipo, m.monto, m.interes, m.capital, m.saldo_resultante, m.gasto_id, g.cuenta_ahorro_id";
+const DESDE_MOVIMIENTOS: &str = "movimientos_prestamo m LEFT JOIN gastos g ON g.id = m.gasto_id";
 
 fn movimiento_de(r: &Row) -> rusqlite::Result<MovimientoDePrestamo> {
     Ok(MovimientoDePrestamo {
@@ -33,6 +35,7 @@ fn movimiento_de(r: &Row) -> rusqlite::Result<MovimientoDePrestamo> {
         capital: r.get(6)?,
         saldo_resultante: r.get(7)?,
         gasto_id: r.get(8)?,
+        cuenta_id: r.get(9)?,
     })
 }
 
@@ -181,7 +184,7 @@ impl AlmacenPrestamos for PrestamosSqlite<'_> {
         let mut stmt = self
             .tx
             .prepare(&format!(
-                "SELECT {COLUMNAS_DE_MOVIMIENTO} FROM movimientos_prestamo WHERE prestamo_id = ? ORDER BY id DESC;"
+                "SELECT {COLUMNAS_DE_MOVIMIENTO} FROM {DESDE_MOVIMIENTOS} WHERE m.prestamo_id = ? ORDER BY m.id DESC;"
             ))
             .map_err(fallo)?;
         let filas = stmt.query_map([id], movimiento_de).map_err(fallo)?;
@@ -190,7 +193,7 @@ impl AlmacenPrestamos for PrestamosSqlite<'_> {
 
     fn movimiento(&self, id: i64) -> Result<Option<MovimientoDePrestamo>, ErrorAlmacen> {
         self.tx
-            .query_row(&format!("SELECT {COLUMNAS_DE_MOVIMIENTO} FROM movimientos_prestamo WHERE id = ?;"), [id], movimiento_de)
+            .query_row(&format!("SELECT {COLUMNAS_DE_MOVIMIENTO} FROM {DESDE_MOVIMIENTOS} WHERE m.id = ?;"), [id], movimiento_de)
             .optional()
             .map_err(fallo)
     }

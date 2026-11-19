@@ -471,6 +471,8 @@ pub struct MovimientoDePrestamo {
     pub saldo_resultante: f64,
     /// El gasto que sacó el dinero de una cuenta; `None` en las conciliaciones y en las cuotas registradas sin cuenta.
     pub gasto_id: Option<i64>,
+    /// La cuenta (o la caja) de la que salió ese gasto, si lo hay.
+    pub cuenta_id: Option<i64>,
 }
 
 /// Un movimiento por asentar.
@@ -704,6 +706,8 @@ pub struct CuentaLeida {
     pub balance_actual: f64,
     pub entidad: Option<String>,
     pub comision_pago_impuestos: Option<f64>,
+    /// La caja de efectivo de su divisa: no es una cuenta bancaria (un pago desde ella no es una transferencia).
+    pub es_caja_efectivo: bool,
 }
 
 /// Una cuenta nueva, con todo ya decidido (recortado, céntimo fijado).

@@ -21,6 +21,8 @@ pub struct CuentaAhorro {
     pub entidad: Option<String>,
     /// Tarifa fija por el servicio de pago de impuestos, si la hay pactada.
     pub comision_pago_impuestos: Option<f64>,
+    /// La caja de efectivo de su divisa: los selectores de «cuenta bancaria» no la ofrecen.
+    pub es_caja_efectivo: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -46,6 +48,7 @@ fn a_cuenta_ahorro(c: puertos::repositorios::CuentaLeida) -> CuentaAhorro {
         balance_actual: c.balance_actual,
         entidad: c.entidad,
         comision_pago_impuestos: c.comision_pago_impuestos,
+        es_caja_efectivo: c.es_caja_efectivo,
     }
 }
 

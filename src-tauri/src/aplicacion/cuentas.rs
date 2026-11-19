@@ -302,6 +302,7 @@ mod tests {
             balance_actual: 0.0,
             entidad: None,
             comision_pago_impuestos: None,
+            es_caja_efectivo: false,
         });
         let otra = crear_cuenta(nueva("Otra"), &mut c).unwrap();
         let e = crear_cuenta(nueva("Vieja"), &mut c).unwrap_err().to_string();
