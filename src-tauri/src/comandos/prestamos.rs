@@ -182,6 +182,8 @@ pub struct MovimientoPrestamo {
     pub saldo_resultante: f64,
     /// El gasto que sacó el dinero de una cuenta; `None` en conciliaciones y en cuotas registradas sin cuenta.
     pub gasto_id: Option<i64>,
+    /// La cuenta (o la caja de efectivo) de la que salió ese gasto. La interfaz propone la del último pago.
+    pub cuenta_id: Option<i64>,
 }
 
 #[tauri::command]
@@ -198,6 +200,7 @@ pub fn obtener_movimientos_prestamo(id: i64) -> Result<Vec<MovimientoPrestamo>, 
                 capital: m.capital,
                 saldo_resultante: m.saldo_resultante,
                 gasto_id: m.gasto_id,
+                cuenta_id: m.cuenta_id,
             })
             .collect())
     })

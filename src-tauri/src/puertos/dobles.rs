@@ -1104,6 +1104,7 @@ impl CatalogoDeCuentas for CuentasEnMemoria {
             balance_actual: c.saldo_inicial,
             entidad: c.entidad.clone(),
             comision_pago_impuestos: c.comision_pago_impuestos,
+            es_caja_efectivo: false,
         });
         Ok(id)
     }
@@ -1431,6 +1432,7 @@ impl AlmacenPrestamos for PrestamosEnMemoria {
                 capital: m.capital.unidades(),
                 saldo_resultante: m.saldo_resultante.unidades(),
                 gasto_id: m.gasto_id,
+                cuenta_id: None,
             },
         ));
         if let Some(p) = self.prestamos.iter_mut().find(|p| p.id == m.prestamo_id) {

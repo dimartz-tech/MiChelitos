@@ -216,6 +216,59 @@ fn integracion_borrar_el_prestamo_conserva_el_gasto_que_ya_salio_de_la_cuenta() 
     assert_eq!(balance(e.cuenta), 50_000.0);
 }
 
+fn caja_dop() -> i64 {
+    conexion()
+        .query_row("SELECT id FROM cuentas_ahorro WHERE es_caja_efectivo = 1 AND divisa = 'DOP';", [], |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn integracion_la_caja_se_marca_en_las_cuentas_y_elegida_como_cuenta_paga_en_efectivo() {
+    let e = escenario();
+    let caja = caja_dop();
+    let cuentas = crate::comandos::cuentas::obtener_cuentas().unwrap();
+    let cajas: Vec<i64> = {
+        let c = conexion();
+        let mut s = c.prepare("SELECT id FROM cuentas_ahorro WHERE es_caja_efectivo = 1 ORDER BY nombre;").unwrap();
+        let v = s.query_map([], |r| r.get(0)).unwrap();
+        v.map(Result::unwrap).collect()
+    };
+    assert!(cajas.contains(&caja));
+    assert_eq!(
+        cuentas.iter().filter(|c| c.es_caja_efectivo).map(|c| c.id).collect::<Vec<_>>(),
+        cajas,
+        "las cajas (una por divisa) llevan la marca y ninguna cuenta bancaria"
+    );
+    assert!(cuentas.iter().any(|c| c.id == e.cuenta && !c.es_caja_efectivo));
+    conexion().execute("UPDATE cuentas_ahorro SET balance_actual = 9000.0 WHERE id = ?;", [caja]).unwrap();
+
+    let mut desde_la_caja = pago(&e, "cuota", "1500.00", None);
+    desde_la_caja.cuenta_id = Some(caja);
+    registrar_pago_prestamo(desde_la_caja).unwrap();
+
+    assert_eq!(balance(caja), 7_500.0, "sale el importe justo, sin la retención de una transferencia");
+    let m = obtener_movimientos_prestamo(e.prestamo).unwrap().remove(0);
+    let (metodo, cargo): (String, f64) = conexion()
+        .query_row("SELECT metodo_pago, costo_adicional FROM gastos WHERE id = ?;", [m.gasto_id.unwrap()], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((metodo.as_str(), cargo), ("efectivo", 0.0));
+    assert_eq!(m.cuenta_id, Some(caja));
+}
+
+#[test]
+fn integracion_cada_pago_dice_de_que_cuenta_salio_y_la_conciliacion_no() {
+    let e = escenario();
+    registrar_pago_prestamo(pago(&e, "cuota", "3210.47", None)).unwrap();
+    let mut en_efectivo = pago(&e, "abono_capital", "100.03", None);
+    en_efectivo.cuenta_id = None;
+    conexion().execute("UPDATE cuentas_ahorro SET balance_actual = 500.0 WHERE id = ?;", [caja_dop()]).unwrap();
+    registrar_pago_prestamo(en_efectivo).unwrap();
+    crate::comandos::prestamos::declarar_saldo_prestamo(e.prestamo, importe("85000.03"), Some("30/11/2026".into())).unwrap();
+
+    let cuentas: Vec<Option<i64>> = obtener_movimientos_prestamo(e.prestamo).unwrap().into_iter().map(|m| m.cuenta_id).collect();
+    assert_eq!(cuentas, vec![None, Some(caja_dop()), Some(e.cuenta)], "del más reciente al más antiguo");
+}
+
 #[test]
 fn integracion_contrato_de_forma_de_los_pagos_con_tipos_ipc() {
     let e = escenario();

@@ -110,7 +110,13 @@ pub fn registrar_pago_prestamo(
         .map(|e| e.institucion)
         .unwrap_or_default();
 
-    let (metodo, cuenta) = match datos.origen {
+    // La caja de efectivo no es una cuenta bancaria: pagar «desde ella» es pagar en efectivo, sin la retención de una
+    // transferencia, aunque llegue elegida como cuenta.
+    let origen = match datos.origen {
+        OrigenDelPago::Cuenta(id) if gastos.caja(MONEDA_LOCAL).ok() == Some(id) => OrigenDelPago::Efectivo,
+        otro => otro,
+    };
+    let (metodo, cuenta) = match origen {
         OrigenDelPago::Cuenta(id) => (MetodoPago::Transferencia, Some(id)),
         OrigenDelPago::Efectivo => (MetodoPago::Efectivo, None),
     };
@@ -333,6 +339,17 @@ mod tests {
         assert_eq!(g.saldo_de(11), dop(7_500.0));
         assert_eq!(g.saldo_de(10), dop(50_000.0), "la cuenta no se toca");
         assert_eq!(prestamo(&p, linea).cuotas_pendientes, None, "la línea no cuenta cuotas");
+    }
+
+    #[test]
+    fn la_caja_elegida_como_cuenta_se_paga_en_efectivo_sin_retencion() {
+        let (mut p, mut g, auto, _) = montar();
+        let mut d = pago(auto, TipoPago::Cuota, 1_500.0, None);
+        d.origen = OrigenDelPago::Cuenta(11);
+        let r = registrar_pago_prestamo(d, &mut p, &mut g).unwrap();
+        assert_eq!(g.saldo_de(11), dop(7_500.0), "sale el importe justo, sin el 0.20 %");
+        let gasto = g.gastos.get(&r.gasto_id).unwrap();
+        assert_eq!(gasto.metodo_pago, "efectivo");
     }
 
     #[test]

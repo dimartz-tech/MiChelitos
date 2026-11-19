@@ -71,6 +71,19 @@ const TIPOS_DE_MOVIMIENTO: Readonly<Record<string, string>> = {
 /** Un importe escrito tal cual: dígitos, punto decimal opcional, comas de miles toleradas. */
 const FORMA_DE_IMPORTE = /^\d*\.?\d+$/;
 
+/**
+ * De dónde se propone que salga el pago: de donde salió el último pago con cuenta de este préstamo, si sigue entre
+ * las opciones (una cuenta en pesos activa, o la caja de efectivo); si no, `null` y queda la primera de la lista.
+ * Se deduce del libro del préstamo, no se guarda aparte: revertir el último pago devuelve la propuesta al anterior.
+ */
+export function origenPropuesto(movimientos: readonly MovimientoPrestamo[], cuentas: readonly CuentaAhorro[]): string | null {
+    const ultimo = movimientos.find(m => m.gasto_id !== null && m.cuenta_id !== null);
+    const cuenta = cuentas.find(c => c.id === ultimo?.cuenta_id);
+    if (!cuenta) return null;
+    if (cuenta.es_caja_efectivo) return cuenta.divisa === 'DOP' ? 'efectivo' : null;
+    return cuenta.divisa === 'DOP' ? String(cuenta.id) : null;
+}
+
 /** La categoría que se propone para el gasto del pago: la que se llame «Préstamo(s)», sin distinguir tildes. */
 export function categoriaDePrestamo(categorias: readonly Categoria[]): Categoria | null {
     const normal = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
@@ -781,7 +794,11 @@ export class VistaPrestamos implements Vista {
             this.dep.avisos.mostrar(String(err), 'error');
             return;
         }
-        const enPesos = cuentas.filter(c => c.divisa === 'DOP');
+        // Sin el libro solo se pierde la propuesta: el pago se puede registrar igual.
+        const movimientos = await api.obtenerMovimientosPrestamo(p.id).catch(() => [] as MovimientoPrestamo[]);
+        // La caja no es una cuenta bancaria: se ofrece aparte, como «Efectivo», que no lleva la retención.
+        const enPesos = cuentas.filter(c => c.divisa === 'DOP' && !c.es_caja_efectivo);
+        const origen = origenPropuesto(movimientos, cuentas);
         const propuesta = categoriaDePrestamo(categorias);
         const hoy = ahora();
         const fecha = `${String(hoy.getDate()).padStart(2, '0')}/${String(hoy.getMonth() + 1).padStart(2, '0')}/${hoy.getFullYear()}`;
@@ -821,9 +838,10 @@ export class VistaPrestamos implements Vista {
                     <div class="form-group">
                         <label for="pag_ori_${id}">Sale de</label>
                         <select id="pag_ori_${id}" class="form-control" required>
-                            ${enPesos.map(c => `<option value="${c.id}">${escaparHtml(c.nombre)}${c.entidad ? ` — ${escaparHtml(c.entidad)}` : ''}</option>`).join('')}
-                            <option value="efectivo">Efectivo (caja en pesos)</option>
+                            ${enPesos.map(c => `<option value="${c.id}" ${origen === String(c.id) ? 'selected' : ''}>${escaparHtml(c.nombre)}${c.entidad ? ` — ${escaparHtml(c.entidad)}` : ''}</option>`).join('')}
+                            <option value="efectivo" ${origen === 'efectivo' ? 'selected' : ''}>Efectivo (caja en pesos)</option>
                         </select>
+                        ${origen === null ? '' : '<small style="font-size:0.7rem; color:var(--text-muted);">Propuesta: de donde salió el último pago de este préstamo.</small>'}
                     </div>
                     <div class="form-group">
                         <label for="pag_cat_${id}">Categoría del gasto</label>

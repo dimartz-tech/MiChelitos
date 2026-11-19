@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
-import { VistaPrestamos, MANEJADORES_PRESTAMOS, puentePrestamos, categoriaDePrestamo } from '../../../src/js/vistas/prestamos.js';
+import { VistaPrestamos, MANEJADORES_PRESTAMOS, puentePrestamos, categoriaDePrestamo, origenPropuesto } from '../../../src/js/vistas/prestamos.js';
 
 const prestamo = (extra = {}) => ({
     id: 1, tipo_prestamo: 'consumo', monto_prestamo: 2000, institucion_financiera: 'Banco Alfa', tasa_actual: 12,
@@ -39,17 +39,20 @@ const DATOS = () => ({
 const el = (spec = {}) => ({ value: '', checked: false, disabled: false, required: false, innerHTML: '', textContent: '', style: {}, ...spec, remove() { this.quitado = true; } });
 const CAMPOS_TOGGLE = () => ({ pre_campos_cuotas: el(), pre_tot: el(), pre_pen: el(), pre_grupo_limite: el(), pre_lim: el() });
 
+const cuenta = (id, nombre, divisa = 'DOP', es_caja_efectivo = false, entidad = null) => ({ id, nombre, divisa, balance_actual: 50, entidad, comision_pago_impuestos: null, es_caja_efectivo });
 const CUENTAS = [
-    { id: 5, nombre: 'Ahorro <Alfa>', divisa: 'DOP', balance_actual: 900, entidad: 'Banco Alfa', comision_pago_impuestos: null },
-    { id: 6, nombre: 'Cuenta Dólar', divisa: 'USD', balance_actual: 30, entidad: null, comision_pago_impuestos: null },
-    { id: 8, nombre: 'Nómina', divisa: 'DOP', balance_actual: 50, entidad: null, comision_pago_impuestos: null },
+    cuenta(5, 'Ahorro <Alfa>', 'DOP', false, 'Banco Alfa'),
+    cuenta(6, 'Cuenta Dólar', 'USD'),
+    cuenta(3, 'Efectivo DOP', 'DOP', true),
+    cuenta(4, 'Efectivo USD', 'USD', true),
+    cuenta(8, 'Nómina'),
 ];
 const CATEGORIAS = [
     { id: 1, nombre: 'Otros', fija: false, motivo_sistema: 'x' },
     { id: 9, nombre: 'Préstamo', fija: true, motivo_sistema: null },
 ];
 const PREVIA = { interes: '10.37', capital: '89.63', interes_estimado: true, saldo_previo: '987.41', saldo_resultante: '897.78', cuotas_pendientes_despues: 4 };
-const movimiento = (extra = {}) => ({ id: 30, fecha: '15/02/2027', tipo: 'cuota', monto: 100, interes: 10, capital: 90, saldo_resultante: 910, gasto_id: 77, ...extra });
+const movimiento = (extra = {}) => ({ id: 30, fecha: '15/02/2027', tipo: 'cuota', monto: 100, interes: 10, capital: 90, saldo_resultante: 910, gasto_id: 77, cuenta_id: 8, ...extra });
 
 function montar({ datos = DATOS(), campos = {}, falla = null, confirmar = true, respuesta = '1234.50', tasa = 60, motivo = 'Pago registrado dos veces', previa = async () => PREVIA, movimientos = [movimiento(), movimiento({ id: 29, tipo: 'declaracion', gasto_id: null })] } = {}) {
     const llamadas = [], avisos = [], rutas = [], modales = [], confirmaciones = [], preguntas = [], menus = [], motivos = [];
@@ -470,17 +473,19 @@ test('la categoría propuesta es la que se llama «Préstamo(s)», sin distingui
 });
 
 test('abrir el pago: propone la cuota, hoy y la categoría Préstamo; ofrece solo cuentas en pesos y la caja', async () => {
-    const t = montar({ campos: camposDePago() });
+    const t = montar({ campos: camposDePago(), movimientos: [] });
     await t.vista.abrirPagoPrestamo(DATOS().prestamos[0]);
     const { id, html } = t.modales[0];
     assert.equal(id, 'modal-pago-1');
     assert.match(html, /id="pag_mon_1"[^>]*value="100.00"/);
     assert.match(html, /value="05\/03\/2027"/);
     assert.match(html, /data-mascara="fecha"/);
-    assert.match(html, /<option value="5">Ahorro &lt;Alfa&gt; — Banco Alfa<\/option>/);
-    assert.match(html, /<option value="8">Nómina<\/option>/);
+    assert.match(html, /<option value="5" >Ahorro &lt;Alfa&gt; — Banco Alfa<\/option>/);
+    assert.match(html, /<option value="8" >Nómina<\/option>/);
     assert.doesNotMatch(html, /Cuenta Dólar/);
-    assert.match(html, /<option value="efectivo">/);
+    assert.doesNotMatch(html, /value="3"|value="4"|Efectivo DOP|Efectivo USD/, 'las cajas no salen como cuentas bancarias');
+    assert.match(html, /<option value="efectivo" >Efectivo \(caja en pesos\)<\/option>/);
+    assert.doesNotMatch(html, /value="(\d+|efectivo)" selected>(?!Préstamo)|Propuesta: de donde/, 'sin pagos anteriores no se propone ninguna cuenta: queda la primera');
     assert.match(html, /<option value="9" selected>Préstamo<\/option>/);
     assert.match(html, /data-accion-enviar="handleRegistrarPagoPrestamo"/);
     // Al abrir ya calcula la vista previa con lo propuesto.
@@ -630,4 +635,36 @@ test('revertir un pago: sin confirmar o sin motivo no envía nada; si Rust recha
     await u.vista.handleRevertirPagoPrestamo(30, 1);
     assert.equal(u.avisos[0].tipo, 'error');
     assert.deepEqual(u.rutas, []);
+});
+
+test('origen propuesto: el del último pago con cuenta, si sigue siendo una opción; la caja en pesos se propone como efectivo', () => {
+    const m = (id, cuenta_id, gasto_id = 70 + id) => movimiento({ id, cuenta_id, gasto_id });
+    assert.equal(origenPropuesto([m(3, 8), m(2, 5)], CUENTAS), '8', 'el más reciente manda');
+    assert.equal(origenPropuesto([m(3, null, null), m(2, 5)], CUENTAS), '5', 'una conciliación no cuenta');
+    assert.equal(origenPropuesto([m(3, 3)], CUENTAS), 'efectivo');
+    assert.equal(origenPropuesto([m(3, 4)], CUENTAS), null, 'la caja en dólares no es una opción');
+    assert.equal(origenPropuesto([m(3, 6)], CUENTAS), null, 'una cuenta en dólares tampoco');
+    assert.equal(origenPropuesto([m(3, 99)], CUENTAS), null, 'una cuenta archivada o borrada no se propone');
+    assert.equal(origenPropuesto([], CUENTAS), null);
+});
+
+test('abrir el pago: deja elegida la cuenta del último pago y lo dice; o la caja si el último fue en efectivo', async () => {
+    const t = montar({ campos: camposDePago() });   // el último pago salió de la cuenta 8
+    await t.vista.abrirPagoPrestamo(DATOS().prestamos[0]);
+    assert.match(t.modales[0].html, /<option value="8" selected>Nómina<\/option>/);
+    assert.match(t.modales[0].html, /Propuesta: de donde salió el último pago/);
+    assert.ok(t.llamadas.some(l => l[0] === 'obtenerMovimientosPrestamo' && l[1] === 1));
+
+    const u = montar({ campos: camposDePago(), movimientos: [movimiento({ cuenta_id: 3 })] });
+    await u.vista.abrirPagoPrestamo(DATOS().prestamos[0]);
+    assert.match(u.modales[0].html, /<option value="efectivo" selected>/);
+});
+
+test('abrir el pago: si el libro no se puede leer se abre igual, sin propuesta', async () => {
+    const t = montar({ campos: camposDePago() });
+    t.vista.dep.api.obtenerMovimientosPrestamo = async () => { throw new Error('sin libro'); };
+    await t.vista.abrirPagoPrestamo(DATOS().prestamos[0]);
+    assert.equal(t.modales.length, 1);
+    assert.doesNotMatch(t.modales[0].html, /value="(\d+|efectivo)" selected>(?!Préstamo)|Propuesta: de donde/);
+    assert.deepEqual(t.avisos, []);
 });

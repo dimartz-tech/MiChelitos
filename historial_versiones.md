@@ -4,7 +4,28 @@ Este archivo detalla la evolución de la aplicación de escritorio nativa macOS 
 
 ---
 
-## 🚀 Versión 1.136.0 (Versión Actual) - 2026-11-19
+## 🚀 Versión 1.137.0 (Versión Actual) - 2026-11-19
+**Registrar pago: la caja deja de aparecer como cuenta, y se propone la cuenta del último pago.** Sin migración: el esquema sigue en 23.
+
+### 🐞 Qué se corrige
+* En la 1.136.0 la caja «Efectivo DOP» salía dos veces en «Sale de»: como una cuenta más y como «Efectivo (caja en pesos)». Elegida como cuenta, el pago se registraba como **transferencia** y le cobraba a la caja la retención del 0.20 %, que no corresponde al efectivo. Ahora la caja solo se ofrece como «Efectivo», y además el núcleo trata un pago a la caja como efectivo aunque llegue elegida como cuenta.
+* No hubo pagos afectados: la función se instaló el mismo día y no se había usado.
+
+### 🔧 Qué se hace
+* **Se propone la cuenta del último pago** de ese préstamo (o «Efectivo» si fue en efectivo), con una nota que lo dice. Se deduce del libro del préstamo, no se guarda aparte: si se revierte el último pago, la propuesta pasa al anterior; si esa cuenta ya no es una opción (archivada o en dólares), queda la primera de la lista.
+* `obtener_cuentas` dice de cada cuenta si es una caja (`es_caja_efectivo`), y `obtener_movimientos_prestamo` de qué cuenta salió cada pago (`cuenta_id`, leída del gasto).
+
+### 🧭 Decisión confirmada
+* **Retención:** el titular confirmó que los bancos cobran el 0.20 % de retención sobre las transferencias, así que un pago de préstamo desde una cuenta la lleva (como desde la 1.136.0). El efectivo no.
+
+### 🧪 Pruebas y mutaciones
+* **Rust:** caja elegida como cuenta (unitaria e integración: sale el importe justo y el gasto queda en efectivo), marca de caja en las cuentas, cuenta de cada movimiento (cuenta, caja, conciliación sin cuenta).
+* **JS: 944 de 944.** Las cajas no salen como cuentas; propuesta del último pago (el más reciente manda, conciliaciones fuera, caja en pesos como efectivo, cuentas en dólares o inexistentes no), preselección y nota, libro ilegible sin romper.
+* **8 mutaciones, todas detectadas** (3 en Rust, 5 en JS).
+
+---
+
+## Versión 1.136.0 - 2026-11-19
 **Registrar el pago de un préstamo desde una cuenta.** Hasta ahora un pago se registraba en dos sitios que no se hablaban: «Abonar cuota» bajaba el saldo del préstamo sin sacar el dinero de ninguna cuenta, y un gasto de la categoría «Prestamo» sacaba el dinero sin bajar el saldo. Con el uso, la mayoría de los pagos quedaban solo como gasto y los saldos de los préstamos se inflaban. Ahora las dos cosas ocurren en **una sola operación**, y se pueden revertir. **Migración 23: el esquema pasa a 23** (una base ya migrada no se abre con una versión anterior).
 
 ### 🔧 Qué se hace
