@@ -31,7 +31,8 @@ export type Ingreso = { id: number; numero_factura: string; cliente_id: number; 
 export type PartidaPatrimonio = { tipo: string; rubro: string; nombre: string; divisa: string; importe: string; importe_dop: string };
 export type Patrimonio = { tasa_usd_a_dop: string; tasa_estimada: boolean; capital: string; liquidez_dop: string; liquidez_usd: string; liquidez_usd_en_dop: string; efectivo_dop: string; efectivo_usd: string; tarjetas_dop: string; tarjetas_usd: string; tarjetas_usd_en_dop: string; prestamos: string; total_pasivos: string; neto_actual: string; neto_con_liquidez: string; partidas: PartidaPatrimonio[] };
 export type Prestamo = { id: number; tipo_prestamo: string; monto_prestamo: number; institucion_financiera: string; tasa_actual: number; cuotas_totales: number | null; cuotas_pendientes: number | null; monto_cuota: number; dia_pago: number; saldo_actual: number; limite_credito: number | null; tarjeta_id: number | null; tarjeta_nombre: string | null; dia_corte: number | null; disponible: number | null; es_revolvente: boolean; alerta_pago: boolean; dias_pago_msg: string };
-export type MovimientoPrestamo = { id: number; fecha: string; tipo: string; monto: number; interes: number; capital: number; saldo_resultante: number };
+export type MovimientoPrestamo = { id: number; fecha: string; tipo: string; monto: number; interes: number; capital: number; saldo_resultante: number; gasto_id: number | null };
+export type PrevisionPagoPrestamo = { interes: string; capital: string; interes_estimado: boolean; saldo_previo: string; saldo_resultante: string; cuotas_pendientes_despues: number | null };
 export type PresupuestoFijado = { categoria_id: number; categoria_nombre: string; fija: boolean; monto: string };
 export type FilaPresupuesto = { categoria_id: number; categoria_nombre: string; fija: boolean; presupuesto: string; gastado: string; restante: string; porcentaje_milesimas: number; estado: string; usd_aparte: string };
 export type EstadoPresupuestos = { anio: number; mes: number; filas: FilaPresupuesto[]; total_presupuesto: string; total_gastado: string; total_restante: string };
@@ -57,6 +58,7 @@ export type GastoInput = { fecha: string; monto: string; divisa: string; descrip
 export type IngresoInput = { numero_factura: string; rnc_cliente: string; nombre_cliente: string; fecha_emision: string; monto_total: string; porcentaje_retencion: number };
 export type PrestamoInput = { tipo_prestamo: string; monto_prestamo: string; institucion_financiera: string; tasa_actual: number; cuotas_totales: number | null; cuotas_pendientes: number | null; monto_cuota: string; dia_pago: number; saldo_actual: string | null; limite_credito: string | null };
 export type ActualizarPrestamoInput = { id: number; tasa_actual: number; monto_cuota: string; dia_pago: number; limite_credito: string | null; tarjeta_id: number | null };
+export type PagoPrestamoInput = { prestamo_id: number; tipo: string; monto: string; interes: string | null; fecha: string; cuenta_id: number | null; categoria_id: number };
 
 // --- Cada comando: sus argumentos (claves en camelCase, como las envía Tauri) y su respuesta ---
 export type Comandos = {
@@ -124,6 +126,9 @@ export type Comandos = {
     declarar_saldo_prestamo: { args: { id: number; saldo: string; fecha?: string | null }; ret: null };
     obtener_movimientos_prestamo: { args: { id: number }; ret: MovimientoPrestamo[] };
     eliminar_prestamo: { args: { id: number }; ret: null };
+    previsualizar_pago_prestamo: { args: { prestamoId: number; tipo: string; monto: string; interes?: string | null }; ret: PrevisionPagoPrestamo };
+    registrar_pago_prestamo: { args: { input: PagoPrestamoInput }; ret: PrevisionPagoPrestamo };
+    revertir_pago_prestamo: { args: { movimientoId: number; motivo: string }; ret: string };
     fijar_presupuesto: { args: { categoriaId: number; monto: string }; ret: PresupuestoFijado };
     quitar_presupuesto: { args: { categoriaId: number }; ret: boolean };
     obtener_presupuestos_mes: { args: { anio: number; mes: number }; ret: EstadoPresupuestos };

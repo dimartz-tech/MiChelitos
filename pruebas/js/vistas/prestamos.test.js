@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { llamadasDelManejador, nombresDelPuente } from '../ayudas/manejadores_html.js';
-import { VistaPrestamos, MANEJADORES_PRESTAMOS, puentePrestamos } from '../../../src/js/vistas/prestamos.js';
+import { VistaPrestamos, MANEJADORES_PRESTAMOS, puentePrestamos, categoriaDePrestamo } from '../../../src/js/vistas/prestamos.js';
 
 const prestamo = (extra = {}) => ({
     id: 1, tipo_prestamo: 'consumo', monto_prestamo: 2000, institucion_financiera: 'Banco Alfa', tasa_actual: 12,
@@ -39,8 +39,20 @@ const DATOS = () => ({
 const el = (spec = {}) => ({ value: '', checked: false, disabled: false, required: false, innerHTML: '', textContent: '', style: {}, ...spec, remove() { this.quitado = true; } });
 const CAMPOS_TOGGLE = () => ({ pre_campos_cuotas: el(), pre_tot: el(), pre_pen: el(), pre_grupo_limite: el(), pre_lim: el() });
 
-function montar({ datos = DATOS(), campos = {}, falla = null, confirmar = true, respuesta = '1234.50', tasa = 60 } = {}) {
-    const llamadas = [], avisos = [], rutas = [], modales = [], confirmaciones = [], preguntas = [], menus = [];
+const CUENTAS = [
+    { id: 5, nombre: 'Ahorro <Alfa>', divisa: 'DOP', balance_actual: 900, entidad: 'Banco Alfa', comision_pago_impuestos: null },
+    { id: 6, nombre: 'Cuenta Dólar', divisa: 'USD', balance_actual: 30, entidad: null, comision_pago_impuestos: null },
+    { id: 8, nombre: 'Nómina', divisa: 'DOP', balance_actual: 50, entidad: null, comision_pago_impuestos: null },
+];
+const CATEGORIAS = [
+    { id: 1, nombre: 'Otros', fija: false, motivo_sistema: 'x' },
+    { id: 9, nombre: 'Préstamo', fija: true, motivo_sistema: null },
+];
+const PREVIA = { interes: '10.37', capital: '89.63', interes_estimado: true, saldo_previo: '987.41', saldo_resultante: '897.78', cuotas_pendientes_despues: 4 };
+const movimiento = (extra = {}) => ({ id: 30, fecha: '15/02/2027', tipo: 'cuota', monto: 100, interes: 10, capital: 90, saldo_resultante: 910, gasto_id: 77, ...extra });
+
+function montar({ datos = DATOS(), campos = {}, falla = null, confirmar = true, respuesta = '1234.50', tasa = 60, motivo = 'Pago registrado dos veces', previa = async () => PREVIA, movimientos = [movimiento(), movimiento({ id: 29, tipo: 'declaracion', gasto_id: null })] } = {}) {
+    const llamadas = [], avisos = [], rutas = [], modales = [], confirmaciones = [], preguntas = [], menus = [], motivos = [];
     const comprobar = () => { if (falla) throw new Error(falla); };
     const api = {
         obtenerPrestamos: async () => datos.prestamos,
@@ -48,8 +60,13 @@ function montar({ datos = DATOS(), campos = {}, falla = null, confirmar = true, 
         crearPrestamo: async d => { llamadas.push(['crearPrestamo', d]); comprobar(); },
         actualizarPrestamo: async d => { llamadas.push(['actualizarPrestamo', d]); comprobar(); },
         declararSaldoPrestamo: async (...a) => { llamadas.push(['declararSaldoPrestamo', ...a]); comprobar(); },
-        pagarCuotaPrestamo: async id => { llamadas.push(['pagarCuotaPrestamo', id]); comprobar(); },
         eliminarPrestamo: async id => { llamadas.push(['eliminarPrestamo', id]); comprobar(); },
+        obtenerCuentas: async () => CUENTAS,
+        obtenerCategorias: async () => CATEGORIAS,
+        obtenerMovimientosPrestamo: async id => { llamadas.push(['obtenerMovimientosPrestamo', id]); return movimientos; },
+        previsualizarPagoPrestamo: async (...a) => { llamadas.push(['previsualizarPagoPrestamo', ...a]); return previa(...a); },
+        registrarPagoPrestamo: async d => { llamadas.push(['registrarPagoPrestamo', d]); comprobar(); return PREVIA; },
+        revertirPagoPrestamo: async (...a) => { llamadas.push(['revertirPagoPrestamo', ...a]); comprobar(); return 'COR-2027-0004'; },
     };
     const pantalla = { contenido: { innerHTML: '' } };
     const registro = { ...CAMPOS_TOGGLE(), ...campos };
@@ -68,8 +85,9 @@ function montar({ datos = DATOS(), campos = {}, falla = null, confirmar = true, 
         menus: { abrir: o => { menus.push({ ...o, abierto: true }); }, cerrar: () => { menus.forEach(m => { m.abierto = false; }); } },
         referencias: { tasaUsdADop: tasa },
         ahora: () => new Date(2027, 2, 5),
+        motivo: { pedir: async (que, consecuencia) => { motivos.push({ que, consecuencia }); return motivo; } },
     });
-    return { vista, llamadas, avisos, rutas, modales, confirmaciones, preguntas, menus, pantalla, registro, evento: { preventDefault() { this.evitado = (this.evitado || 0) + 1; } } };
+    return { vista, llamadas, avisos, rutas, modales, confirmaciones, preguntas, menus, motivos, pantalla, registro, evento: { preventDefault() { this.evitado = (this.evitado || 0) + 1; } } };
 }
 
 // --- Las cifras que la vista calcula ---
@@ -330,18 +348,6 @@ test('conciliar: si Rust rechaza se avisa el error y no se redibuja', async () =
     assert.deepEqual(t.rutas, []);
 });
 
-test('abonar una cuota: envía el id y redibuja; si Rust rechaza, avisa', async () => {
-    const t = montar();
-    await t.vista.handlePagarCuota(4);
-    assert.deepEqual(t.llamadas, [['pagarCuotaPrestamo', 4]]);
-    assert.deepEqual(t.avisos, [{ mensaje: 'Abono de cuota registrado.', tipo: undefined }]);
-    assert.deepEqual(t.rutas, ['prestamos']);
-    const u = montar({ falla: 'No' });
-    await u.vista.handlePagarCuota(4);
-    assert.equal(u.avisos[0].tipo, 'error');
-    assert.deepEqual(u.rutas, []);
-});
-
 test('eliminar: sin confirmar no envía nada; confirmado, envía el id y redibuja; si Rust rechaza, avisa', async () => {
     const no = montar({ confirmar: false });
     await no.vista.handleEliminarPrestamo(2);
@@ -365,7 +371,7 @@ const eventoDeMenu = () => ({
     currentTarget: { getBoundingClientRect: () => ({ right: 300, top: 50, bottom: 80 }) },
 });
 
-test('abrir el menú: detiene el clic, lo ancla al botón y ofrece «abonar» solo si hay cuotas que abonar', () => {
+test('abrir el menú: detiene el clic, lo ancla al botón y ofrece pagar y ver movimientos a todo financiamiento', () => {
     const t = montar();
     const ev = eventoDeMenu();
     t.vista.abrirMenuPasivo(ev, DATOS().prestamos[0]);
@@ -373,20 +379,22 @@ test('abrir el menú: detiene el clic, lo ancla al botón y ofrece «abonar» so
     assert.equal(t.menus.length, 1);
     assert.equal(t.menus[0].id, 'menu-pasivo');
     assert.deepEqual(t.menus[0].ancla, { right: 300, top: 50, bottom: 80 });
-    assert.match(t.menus[0].html, /data-opcion="abonar"/);
-    t.vista.abrirMenuPasivo(eventoDeMenu(), DATOS().prestamos[3]);   // cuotas pendientes = 0
-    assert.doesNotMatch(t.menus[1].html, /data-opcion="abonar"/);
-    for (const a of ['conciliar', 'editar', 'eliminar']) assert.match(t.menus[1].html, new RegExp(`data-opcion="${a}"`));
-    t.vista.abrirMenuPasivo(eventoDeMenu(), DATOS().prestamos[2]);   // una línea siempre puede abonar
-    assert.match(t.menus[2].html, /data-opcion="abonar"/);
+    // También sin cuotas pendientes: un abono a capital sigue siendo posible.
+    t.vista.abrirMenuPasivo(eventoDeMenu(), DATOS().prestamos[3]);
+    for (const a of ['pagar', 'movimientos', 'conciliar', 'editar', 'eliminar']) {
+        for (const m of t.menus) assert.match(m.html, new RegExp(`data-opcion="${a}"`), a);
+    }
+    assert.doesNotMatch(t.menus[0].html, /data-opcion="abonar"/, 'el botón que no sacaba dinero de ninguna cuenta ya no está');
 });
 
 test('cada renglón del menú hace su acción sobre ese financiamiento', async () => {
     const t = montar({ respuesta: '700' });
     const p = DATOS().prestamos[0];
     const elegir = async accion => { t.vista.abrirMenuPasivo(eventoDeMenu(), p); t.menus.at(-1).alElegir(accion); await new Promise(r => setImmediate(r)); };
-    await elegir('abonar');
-    assert.deepEqual(t.llamadas.at(-1), ['pagarCuotaPrestamo', 1]);
+    await elegir('pagar');
+    assert.equal(t.modales.at(-1).id, 'modal-pago-1');
+    await elegir('movimientos');
+    assert.equal(t.modales.at(-1).id, 'modal-mov-1');
     await elegir('conciliar');
     assert.deepEqual(t.llamadas.at(-1), ['declararSaldoPrestamo', 1, '700']);
     assert.match(t.preguntas.at(-1).m, /DOP #1000#/);
@@ -395,7 +403,7 @@ test('cada renglón del menú hace su acción sobre ese financiamiento', async (
     await elegir('eliminar');
     assert.deepEqual(t.llamadas.at(-1), ['eliminarPrestamo', 1]);
     await elegir('algo desconocido');
-    assert.equal(t.llamadas.length, 3);
+    assert.equal(t.llamadas.filter(l => !l[0].startsWith('obtener')).length, 2);
 });
 
 // --- El puente ---
@@ -436,4 +444,190 @@ test('la ventana de edición de un préstamo escapa la institución y las tarjet
     const t = montar({ datos: { prestamos: [], tarjetas: [tarjeta({ entidad: hostil, nombre_tarjeta: hostil })] } });
     await t.vista.abrirEdicionPrestamo(prestamo({ institucion_financiera: hostil }));
     assert.doesNotMatch(t.modales[0].html, /<img/);
+});
+
+// --- Pagar un préstamo desde una cuenta ---
+
+/** Los campos del formulario de pago del préstamo 1, con lo que escribiría el titular. */
+const camposDePago = (extra = {}) => ({
+    pag_tip_1: el({ value: 'cuota' }),
+    pag_mon_1: el({ value: '100.00' }),
+    pag_int_1: el({ value: '' }),
+    pag_grupo_int_1: el(),
+    pag_fec_1: el({ value: ' 05/03/2027 ' }),
+    pag_ori_1: el({ value: '5', selectedOptions: [{ textContent: ' Ahorro <Alfa> — Banco Alfa ' }] }),
+    pag_cat_1: el({ value: '9' }),
+    pag_prev_1: el(),
+    ...extra,
+});
+
+test('la categoría propuesta es la que se llama «Préstamo(s)», sin distinguir tildes ni mayúsculas', () => {
+    const c = (id, nombre) => ({ id, nombre, fija: false, motivo_sistema: null });
+    assert.equal(categoriaDePrestamo([c(1, 'Otros'), c(2, ' PRESTAMOS ')])?.id, 2);
+    assert.equal(categoriaDePrestamo([c(1, 'Préstamo')])?.id, 1);
+    assert.equal(categoriaDePrestamo([c(1, 'Préstamo hipotecario'), c(2, 'Otros')]), null);
+    assert.equal(categoriaDePrestamo([]), null);
+});
+
+test('abrir el pago: propone la cuota, hoy y la categoría Préstamo; ofrece solo cuentas en pesos y la caja', async () => {
+    const t = montar({ campos: camposDePago() });
+    await t.vista.abrirPagoPrestamo(DATOS().prestamos[0]);
+    const { id, html } = t.modales[0];
+    assert.equal(id, 'modal-pago-1');
+    assert.match(html, /id="pag_mon_1"[^>]*value="100.00"/);
+    assert.match(html, /value="05\/03\/2027"/);
+    assert.match(html, /data-mascara="fecha"/);
+    assert.match(html, /<option value="5">Ahorro &lt;Alfa&gt; — Banco Alfa<\/option>/);
+    assert.match(html, /<option value="8">Nómina<\/option>/);
+    assert.doesNotMatch(html, /Cuenta Dólar/);
+    assert.match(html, /<option value="efectivo">/);
+    assert.match(html, /<option value="9" selected>Préstamo<\/option>/);
+    assert.match(html, /data-accion-enviar="handleRegistrarPagoPrestamo"/);
+    // Al abrir ya calcula la vista previa con lo propuesto.
+    assert.deepEqual(t.llamadas.at(-1), ['previsualizarPagoPrestamo', 1, 'cuota', '100.00', null]);
+});
+
+test('abrir el pago: si no se pueden leer las cuentas avisa y no abre nada', async () => {
+    const t = montar();
+    t.vista.dep.api.obtenerCuentas = async () => { throw new Error('sin base'); };
+    await t.vista.abrirPagoPrestamo(DATOS().prestamos[0]);
+    assert.deepEqual(t.modales, []);
+    assert.equal(t.avisos[0].tipo, 'error');
+});
+
+test('vista previa: muestra interés, capital, saldo y cuotas con escape; un abono a capital oculta y no envía el interés', async () => {
+    const t = montar({ campos: camposDePago({ pag_int_1: el({ value: '1,000.07' }), pag_mon_1: el({ value: '2,000.50' }) }) });
+    await t.vista.cambiarPagoPrestamo(1);
+    assert.deepEqual(t.llamadas.at(-1), ['previsualizarPagoPrestamo', 1, 'cuota', '2000.50', '1000.07']);
+    const salida = t.registro.pag_prev_1.innerHTML;
+    assert.match(salida, /Interés DOP #10.37# \(estimado\)/);
+    assert.match(salida, /Capital DOP #89.63#/);
+    assert.match(salida, /DOP #987.41# → <strong>DOP #897.78#<\/strong>/);
+    assert.match(salida, /Quedarán 4 cuotas/);
+    assert.equal(t.registro.pag_grupo_int_1.style.display, '');
+
+    t.registro.pag_tip_1.value = 'abono_capital';
+    await t.vista.cambiarPagoPrestamo(1);
+    assert.equal(t.registro.pag_grupo_int_1.style.display, 'none');
+    assert.deepEqual(t.llamadas.at(-1), ['previsualizarPagoPrestamo', 1, 'abono_capital', '2000.50', null]);
+});
+
+test('vista previa: sin cuotas que contar no dice cuántas quedan', async () => {
+    const t = montar({ campos: camposDePago(), previa: async () => ({ ...PREVIA, interes_estimado: false, cuotas_pendientes_despues: null }) });
+    await t.vista.cambiarPagoPrestamo(1);
+    assert.doesNotMatch(t.registro.pag_prev_1.innerHTML, /Quedarán|estimado/);
+});
+
+test('vista previa: un importe ilegible o un error de Rust se explican en el recuadro, sin avisos', async () => {
+    for (const [campos, patron, llama] of [
+        [{ pag_mon_1: el({ value: 'abc' }) }, /Escribe el importe/, false],
+        [{ pag_int_1: el({ value: '1.2.3' }) }, /interés debe ser un importe/, false],
+    ]) {
+        const t = montar({ campos: camposDePago(campos) });
+        await t.vista.cambiarPagoPrestamo(1);
+        assert.match(t.registro.pag_prev_1.textContent, patron);
+        assert.equal(t.llamadas.some(l => l[0] === 'previsualizarPagoPrestamo'), llama);
+        assert.deepEqual(t.avisos, []);
+    }
+    const t = montar({ campos: camposDePago(), previa: async () => { throw new Error('El préstamo ya no tiene cuotas pendientes'); } });
+    await t.vista.cambiarPagoPrestamo(1);
+    assert.match(t.registro.pag_prev_1.textContent, /ya no tiene cuotas/);
+    assert.deepEqual(t.avisos, []);
+});
+
+test('vista previa: una respuesta que llega después de otra más reciente se descarta', async () => {
+    let soltarPrimera;
+    const respuestas = [new Promise(r => { soltarPrimera = () => r({ ...PREVIA, capital: '1.11' }); }), Promise.resolve({ ...PREVIA, capital: '2.22' })];
+    const t = montar({ campos: camposDePago(), previa: () => respuestas.shift() });
+    const primera = t.vista.cambiarPagoPrestamo(1);
+    await t.vista.cambiarPagoPrestamo(1);
+    soltarPrimera();
+    await primera;
+    assert.match(t.registro.pag_prev_1.innerHTML, /Capital DOP #2.22#/);
+});
+
+test('registrar el pago: confirma con importe, fecha y origen, y envía cada campo con su tipo', async () => {
+    const t = montar({ campos: camposDePago({ pag_int_1: el({ value: ' 12.34 ' }) }) });
+    t.registro['modal-pago-1'] = el();
+    await t.vista.handleRegistrarPagoPrestamo(t.evento, 1);
+    assert.equal(t.evento.evitado, 1);
+    assert.match(t.confirmaciones[0], /la cuota de DOP #100# del 05\/03\/2027, pagada desde «Ahorro <Alfa> — Banco Alfa» \(más la retención/);
+    assert.deepEqual(t.llamadas, [['registrarPagoPrestamo', {
+        prestamo_id: 1, tipo: 'cuota', monto: '100.00', interes: '12.34', fecha: '05/03/2027', cuenta_id: 5, categoria_id: 9,
+    }]]);
+    assert.deepEqual(t.avisos, [{ mensaje: 'Pago registrado. Saldo del préstamo: DOP #897.78#.', tipo: undefined }]);
+    assert.equal(t.registro['modal-pago-1'].quitado, true);
+    assert.deepEqual(t.rutas, ['prestamos']);
+});
+
+test('registrar el pago: desde la caja va sin cuenta, y un abono a capital no lleva interés aunque se haya escrito', async () => {
+    const t = montar({ campos: camposDePago({ pag_tip_1: el({ value: 'abono_capital' }), pag_int_1: el({ value: '5' }), pag_ori_1: el({ value: 'efectivo' }) }) });
+    await t.vista.handleRegistrarPagoPrestamo(t.evento, 1);
+    assert.match(t.confirmaciones[0], /el abono a capital de DOP #100# .* desde la caja de efectivo/);
+    const enviado = t.llamadas[0][1];
+    assert.deepEqual([enviado.tipo, enviado.interes, enviado.cuenta_id], ['abono_capital', null, null]);
+});
+
+test('registrar el pago: sin confirmar no envía nada; un importe ilegible ni pregunta', async () => {
+    const no = montar({ campos: camposDePago(), confirmar: false });
+    await no.vista.handleRegistrarPagoPrestamo(no.evento, 1);
+    assert.deepEqual([no.llamadas, no.avisos, no.rutas], [[], [], []]);
+    const malo = montar({ campos: camposDePago({ pag_mon_1: el({ value: '' }) }) });
+    await malo.vista.handleRegistrarPagoPrestamo(malo.evento, 1);
+    assert.deepEqual([malo.llamadas, malo.confirmaciones], [[], []]);
+    assert.equal(malo.avisos[0].tipo, 'error');
+});
+
+test('registrar el pago: si Rust rechaza avisa, deja el formulario abierto y no redibuja', async () => {
+    const t = montar({ campos: camposDePago(), falla: 'La cuenta está archivada' });
+    t.registro['modal-pago-1'] = el();
+    await t.vista.handleRegistrarPagoPrestamo(t.evento, 1);
+    assert.deepEqual(t.avisos, [{ mensaje: 'Error: La cuenta está archivada', tipo: 'error' }]);
+    assert.notEqual(t.registro['modal-pago-1'].quitado, true);
+    assert.deepEqual(t.rutas, []);
+});
+
+test('movimientos: una fila por movimiento con su tipo; solo el último, y solo si salió de una cuenta, se puede revertir', async () => {
+    const t = montar();
+    await t.vista.abrirMovimientosPrestamo(prestamo({ institucion_financiera: 'Banco <Raro>' }));
+    const { id, html } = t.modales[0];
+    assert.equal(id, 'modal-mov-1');
+    assert.match(html, /Banco &lt;Raro&gt;/);
+    assert.match(html, /Cuota <span[^>]*>· cuenta<\/span>/);
+    assert.match(html, /Conciliación/);
+    assert.equal((html.match(/handleRevertirPagoPrestamo/g) ?? []).length, 1);
+    assert.match(html, /data-accion="handleRevertirPagoPrestamo" data-args="\[30,1\]"/);
+
+    const u = montar({ movimientos: [movimiento({ tipo: 'declaracion', gasto_id: null }), movimiento({ id: 20 })] });
+    await u.vista.abrirMovimientosPrestamo(prestamo());
+    assert.doesNotMatch(u.modales[0].html, /handleRevertirPagoPrestamo/, 'el último es una conciliación: nada que revertir');
+
+    const v = montar({ movimientos: [] });
+    await v.vista.abrirMovimientosPrestamo(prestamo());
+    assert.match(v.modales[0].html, /Todavía no hay movimientos/);
+});
+
+test('revertir un pago: confirma, pide el motivo, envía y dice el caso; cierra el libro y redibuja', async () => {
+    const t = montar();
+    t.registro['modal-mov-1'] = el();
+    await t.vista.handleRevertirPagoPrestamo(30, 1);
+    assert.equal(t.confirmaciones.length, 1);
+    assert.equal(t.motivos.length, 1);
+    assert.deepEqual(t.llamadas, [['revertirPagoPrestamo', 30, 'Pago registrado dos veces']]);
+    assert.deepEqual(t.avisos, [{ mensaje: 'Pago revertido. Caso COR-2027-0004.', tipo: undefined }]);
+    assert.equal(t.registro['modal-mov-1'].quitado, true);
+    assert.deepEqual(t.rutas, ['prestamos']);
+});
+
+test('revertir un pago: sin confirmar o sin motivo no envía nada; si Rust rechaza, avisa', async () => {
+    const no = montar({ confirmar: false });
+    await no.vista.handleRevertirPagoPrestamo(30, 1);
+    assert.deepEqual([no.llamadas, no.motivos, no.avisos], [[], [], []]);
+    const sinMotivo = montar({ motivo: null });
+    await sinMotivo.vista.handleRevertirPagoPrestamo(30, 1);
+    assert.deepEqual([sinMotivo.llamadas, sinMotivo.avisos, sinMotivo.rutas], [[], [], []]);
+    const u = montar({ falla: 'Solo se puede revertir el último movimiento' });
+    await u.vista.handleRevertirPagoPrestamo(30, 1);
+    assert.equal(u.avisos[0].tipo, 'error');
+    assert.deepEqual(u.rutas, []);
 });

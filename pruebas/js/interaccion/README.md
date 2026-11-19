@@ -139,7 +139,7 @@ Los 49 `handle*` están cubiertos; `cobertura.test.js` lo vigila.
 | Cuentas / Efectivo | `handleAgregarCuenta`, `handleEliminarCuenta`, `handleTransferirCuentas`, `handleAgregarEfectivoInformal`, `handleRetirarAEfectivo` |
 | Suscripciones | `handleAgregarSuscripcion`, `handleEdicionSuscripcionSubmit`, `handleEliminarSuscripcion`, `handleCorregirProximoCobro`, `handleAsentarPendiente`, `handleDescartarPendiente` |
 | Capital | `handleAgregarCertificado`, `handleEliminarCertificado`, `handleAgregarBolsa`, `handleEliminarBolsa`, `handleAgregarPropiedad`, `handleEliminarPropiedad` |
-| Préstamos | `handleAgregarPrestamo`, `handleEdicionPrestamo`, `handleDeclararSaldo`, `handlePagarCuota`, `handleEliminarPrestamo` |
+| Préstamos | `handleAgregarPrestamo`, `handleEdicionPrestamo`, `handleDeclararSaldo`, `handleRegistrarPagoPrestamo`, `handleRevertirPagoPrestamo`, `handleEliminarPrestamo` |
 | Ajustes | `handleCrearRespaldo`, `handleRestaurarRespaldo`, `handleExportarAuditoria`, `handleAgregarCategoria`, `handleEliminarCategoria`, `handleAgregarCliente`, `handleEliminarCliente`, `handleEliminarGastoCorr`, `handleEliminarIngresoCorr`, `handleEliminarIngresoInformalCorr`, `handleEliminarTransaccionCuentaCorr` |
 
 Fuera de los `handle*`: `abrirEdicionCuenta` (tres `prompt`, comisión como texto),

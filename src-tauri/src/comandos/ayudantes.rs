@@ -132,6 +132,12 @@ pub(super) fn lee_fotos_y_almacen<T>(f: impl FnOnce(&FotosSqlite, &mut AlmacenSq
     en_transaccion(false, |tx| f(&FotosSqlite::nuevo(tx), &mut AlmacenSqlite::nuevo(tx)))
 }
 
+/// Un pago de préstamo: el gasto que saca el dinero y el movimiento del préstamo **en una sola transacción
+/// `IMMEDIATE`**, para que nunca quede uno sin el otro.
+pub(super) fn con_prestamos_y_almacen<T>(f: impl FnOnce(&mut PrestamosSqlite, &mut AlmacenSqlite) -> Result<T, String>) -> Result<T, String> {
+    en_transaccion(true, |tx| f(&mut PrestamosSqlite::nuevo(tx), &mut AlmacenSqlite::nuevo(tx)))
+}
+
 /// La fecha de hoy como la guarda la aplicación: `dd/mm/aaaa`.
 pub(super) fn hoy_dd_mm_aaaa() -> String {
     Local::now().format("%d/%m/%Y").to_string()

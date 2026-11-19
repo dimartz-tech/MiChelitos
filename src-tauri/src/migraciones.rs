@@ -29,7 +29,7 @@ use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 /// Versión de esquema que esta compilación sabe manejar.
-pub const VERSION_OBJETIVO: u32 = 22;
+pub const VERSION_OBJETIVO: u32 = 23;
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorMigracion {
@@ -203,6 +203,11 @@ fn catalogo() -> Vec<Migracion> {
             version: 22,
             nombre: "foto previa del patrimonio",
             aplicar: crate::db_sql::migracion_22_foto_previa,
+        },
+        Migracion {
+            version: 23,
+            nombre: "pagos de préstamo con cuenta",
+            aplicar: crate::db_sql::migracion_23_pagos_de_prestamo,
         },
     ]
 }
@@ -1166,7 +1171,7 @@ mod tests_centavos {
         // enlace un gasto hace fallar esta prueba hasta que alguien decida si
         // ese gasto depende de la operación (derivado) o solo la menciona
         // (informativo). Así quedó sin proteger la comisión de un abono.
-        use crate::db_sql::{GASTOS_DERIVADOS, VINCULOS_INFORMATIVOS_CON_GASTOS};
+        use crate::db_sql::{GASTOS_DERIVADOS, GASTOS_DE_PAGOS, VINCULOS_INFORMATIVOS_CON_GASTOS};
         use std::collections::BTreeSet;
 
         let c = base_migrada();
@@ -1189,6 +1194,7 @@ mod tests_centavos {
         }
         let declaradas: BTreeSet<(String, String)> = GASTOS_DERIVADOS
             .iter()
+            .chain(GASTOS_DE_PAGOS)
             .map(|(t, c, _)| (t.to_string(), c.to_string()))
             .chain(VINCULOS_INFORMATIVOS_CON_GASTOS.iter().map(|(t, c)| (t.to_string(), c.to_string())))
             .collect();
@@ -1461,7 +1467,7 @@ mod tests_patrimonio {
 
         let informe = ejecutar(&mut c).unwrap();
         assert_eq!((informe.version_inicial, informe.version_final), (17, VERSION_OBJETIVO));
-        assert_eq!(informe.aplicadas, vec!["historial del patrimonio", "detalle de los casos de corrección", "categorías fijas", "presupuestos por categoría", "foto previa del patrimonio"]);
+        assert_eq!(informe.aplicadas, vec!["historial del patrimonio", "detalle de los casos de corrección", "categorías fijas", "presupuestos por categoría", "foto previa del patrimonio", "pagos de préstamo con cuenta"]);
         assert_eq!(volcado(&c), antes, "ninguna fila de las tablas anteriores cambió");
         let n: i64 = c.query_row("SELECT COUNT(*) FROM patrimonio_fotos", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0, "las tablas nuevas nacen vacías: no se reconstruye el pasado");
@@ -1517,7 +1523,7 @@ mod tests_detalle_de_correcciones {
         let informe = ejecutar(&mut c).unwrap();
 
         assert_eq!((informe.version_inicial, informe.version_final), (18, VERSION_OBJETIVO));
-        assert_eq!(informe.aplicadas, vec!["detalle de los casos de corrección", "categorías fijas", "presupuestos por categoría", "foto previa del patrimonio"]);
+        assert_eq!(informe.aplicadas, vec!["detalle de los casos de corrección", "categorías fijas", "presupuestos por categoría", "foto previa del patrimonio", "pagos de préstamo con cuenta"]);
         let v = filas(&c);
         assert_eq!(v.len(), 2);
         assert_eq!(v[0], ("COR-2026-0001".into(), "Traspaso inventado".into(), 4, Some(1187.53), None));
@@ -1636,7 +1642,7 @@ mod tests_categorias_fijas {
         let mut c = Connection::open_in_memory().unwrap();
         let informe = ejecutar(&mut c).unwrap();
         assert_eq!(informe.version_final, VERSION_OBJETIVO);
-        assert_eq!(VERSION_OBJETIVO, 22);
+        assert_eq!(VERSION_OBJETIVO, 23);
         assert!(informe.aplicadas.contains(&"categorías fijas"));
         let n: i64 = c.query_row("SELECT COUNT(*) FROM pragma_table_info('categorias') WHERE name = 'fija'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
@@ -1650,7 +1656,7 @@ mod tests_categorias_fijas {
         assert_eq!(nombres.len(), 3);
         let informe = ejecutar(&mut c).unwrap();
         assert_eq!((informe.version_inicial, informe.version_final), (19, VERSION_OBJETIVO));
-        assert_eq!(informe.aplicadas, vec!["categorías fijas", "presupuestos por categoría", "foto previa del patrimonio"]);
+        assert_eq!(informe.aplicadas, vec!["categorías fijas", "presupuestos por categoría", "foto previa del patrimonio", "pagos de préstamo con cuenta"]);
         let v = marcas(&c);
         assert_eq!(v.len(), nombres.len(), "no se perdió ni se creó ninguna");
         assert!(v.iter().all(|(_, f)| *f == 0), "la migración no marca nada, ni «Alquiler» ni «Suscripciones»: {v:?}");
@@ -1765,7 +1771,7 @@ mod tests_presupuestos {
         assert!(!existe_tabla(&c));
         let informe = ejecutar(&mut c).unwrap();
         assert_eq!((informe.version_inicial, informe.version_final), (20, VERSION_OBJETIVO));
-        assert_eq!(informe.aplicadas, vec!["presupuestos por categoría", "foto previa del patrimonio"]);
+        assert_eq!(informe.aplicadas, vec!["presupuestos por categoría", "foto previa del patrimonio", "pagos de préstamo con cuenta"]);
         assert!(existe_tabla(&c));
         let despues: Vec<(String, i64)> = c.prepare("SELECT nombre, fija FROM categorias ORDER BY id").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
         assert_eq!(despues, marcas);
@@ -1779,7 +1785,7 @@ mod tests_presupuestos {
         c.execute_batch("INSERT INTO categorias (nombre) VALUES ('Comida inventada');").unwrap();
         let informe = ejecutar(&mut c).unwrap();
         assert_eq!((informe.version_inicial, informe.version_final), (19, VERSION_OBJETIVO));
-        assert_eq!(informe.aplicadas, vec!["categorías fijas", "presupuestos por categoría", "foto previa del patrimonio"]);
+        assert_eq!(informe.aplicadas, vec!["categorías fijas", "presupuestos por categoría", "foto previa del patrimonio", "pagos de préstamo con cuenta"]);
         assert!(existe_tabla(&c));
     }
 
@@ -1865,9 +1871,8 @@ mod tests_foto_previa {
     fn de_cero_llega_a_22_con_las_dos_tablas_vacias() {
         let mut c = Connection::open_in_memory().unwrap();
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!(informe.version_final, 22);
-        assert_eq!(VERSION_OBJETIVO, 22);
-        assert_eq!(informe.aplicadas.last().copied(), Some("foto previa del patrimonio"));
+        assert_eq!(informe.version_final, VERSION_OBJETIVO);
+        assert!(informe.aplicadas.contains(&"foto previa del patrimonio"));
         assert_eq!(tablas_previas(&c), 2);
         for t in ["patrimonio_fotos_previas", "patrimonio_partidas_previas"] {
             let n: i64 = c.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0)).unwrap();
@@ -1894,15 +1899,15 @@ mod tests_foto_previa {
         };
         let antes = volcar(&c);
         let informe = ejecutar(&mut c).unwrap();
-        assert_eq!((informe.version_inicial, informe.version_final), (21, 22));
-        assert_eq!(informe.aplicadas, vec!["foto previa del patrimonio"]);
+        assert_eq!((informe.version_inicial, informe.version_final), (21, VERSION_OBJETIVO));
+        assert_eq!(informe.aplicadas, vec!["foto previa del patrimonio", "pagos de préstamo con cuenta"]);
         assert_eq!(tablas_previas(&c), 2);
         assert_eq!(volcar(&c), antes);
     }
 
     #[test]
     fn una_base_ya_en_22_no_repite_nada_y_aplicarla_dos_veces_es_idempotente() {
-        let mut c = base_hasta(22);
+        let mut c = base_hasta(VERSION_OBJETIVO);
         c.execute_batch("INSERT INTO patrimonio_fotos_previas (anio, mes, fecha, origen, tasa_usd_dop, activos_c, pasivos_c, patrimonio_c, liquido_c, calidad)
                          VALUES (2026, 3, '05/03/2026', 'real', 58000000000, 90071, 20053, 70018, 40011, 'completa');").unwrap();
         assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0);
@@ -1938,5 +1943,116 @@ mod tests_foto_previa {
         assert!(partida("inventado", "DOP").is_err());
         assert!(partida("cuenta", "EUR").is_err());
         assert!(partida("cuenta", "USD").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod tests_pagos_de_prestamo {
+    use super::*;
+
+    fn base_hasta(version: u32) -> Connection {
+        let mut c = Connection::open_in_memory().unwrap();
+        migrar_hasta(&mut c, version);
+        c
+    }
+
+    fn columnas(c: &Connection) -> Vec<String> {
+        let mut s = c.prepare("SELECT name FROM pragma_table_info('movimientos_prestamo') ORDER BY cid;").unwrap();
+        let v = s.query_map([], |r| r.get::<_, String>(0)).unwrap();
+        v.map(Result::unwrap).collect()
+    }
+
+    const PRESTAMO: &str = "INSERT INTO prestamos (tipo_prestamo, monto_prestamo, institucion_financiera, tasa_actual, cuotas_totales, cuotas_pendientes, monto_cuota, dia_pago, saldo_actual)
+                            VALUES ('vehiculo', 80000.55, 'Banco Inventado', 12.5, 48, 40, 2210.37, 15, 70000.55);";
+
+    fn volcado(c: &Connection) -> String {
+        c.query_row(
+            "SELECT group_concat(id || ':' || prestamo_id || ':' || fecha || ':' || tipo || ':' || monto || ':' || interes || ':' || capital || ':' || saldo_resultante, '|')
+             FROM (SELECT * FROM movimientos_prestamo ORDER BY id);",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn de_cero_llega_con_gasto_id_y_abono_a_capital() {
+        let mut c = Connection::open_in_memory().unwrap();
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!(informe.version_final, VERSION_OBJETIVO);
+        assert_eq!(informe.aplicadas.last().copied(), Some("pagos de préstamo con cuenta"));
+        assert_eq!(
+            columnas(&c),
+            ["id", "prestamo_id", "fecha", "tipo", "monto", "interes", "capital", "saldo_resultante", "gasto_id"]
+        );
+    }
+
+    #[test]
+    fn de_22_a_23_conserva_cada_movimiento_con_su_id_y_sin_gasto() {
+        let mut c = base_hasta(22);
+        c.execute_batch(PRESTAMO).unwrap();
+        c.execute_batch(
+            "INSERT INTO movimientos_prestamo (prestamo_id, fecha, tipo, monto, interes, capital, saldo_resultante) VALUES
+                 (1, '15/09/2026', 'cuota', 2210.37, 729.17, 1481.2, 68519.35),
+                 (1, '30/09/2026', 'declaracion', 12.03, 0, -12.03, 68531.38);
+             DELETE FROM movimientos_prestamo WHERE id = 1;
+             INSERT INTO movimientos_prestamo (prestamo_id, fecha, tipo, monto, interes, capital, saldo_resultante) VALUES
+                 (1, '15/10/2026', 'cuota', 2210.37, 713.87, 1496.5, 67034.88);",
+        )
+        .unwrap();
+        let antes = volcado(&c);
+        let informe = ejecutar(&mut c).unwrap();
+        assert_eq!((informe.version_inicial, informe.version_final), (22, VERSION_OBJETIVO));
+        assert_eq!(informe.aplicadas, vec!["pagos de préstamo con cuenta"]);
+        assert_eq!(volcado(&c), antes, "mismos ids (también el hueco del borrado), tipos e importes");
+        let sin_gasto: i64 = c.query_row("SELECT COUNT(*) FROM movimientos_prestamo WHERE gasto_id IS NULL;", [], |r| r.get(0)).unwrap();
+        assert_eq!(sin_gasto, 2);
+        // El autoincremento sigue después del más alto: no reutiliza un id borrado.
+        c.execute_batch("INSERT INTO movimientos_prestamo (prestamo_id, fecha, tipo, monto, saldo_resultante) VALUES (1, '01/11/2026', 'cuota', 1, 1);").unwrap();
+        assert_eq!(c.last_insert_rowid(), 4);
+        assert!(c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name = 'movimientos_prestamo_previa';", [], |r| r.get::<_, i64>(0)).unwrap() == 0);
+    }
+
+    #[test]
+    fn las_restricciones_se_conservan_y_admiten_el_abono_a_capital() {
+        let c = base_hasta(VERSION_OBJETIVO);
+        // `migrar_hasta` deja las claves ajenas apagadas; la aplicación las enciende en cada conexión.
+        c.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        c.execute_batch(PRESTAMO).unwrap();
+        let poner = |tipo: &str, monto: &str| {
+            c.execute(
+                &format!("INSERT INTO movimientos_prestamo (prestamo_id, fecha, tipo, monto, interes, capital, saldo_resultante) VALUES (1, '01/11/2026', '{tipo}', {monto}, 0, {monto}, 1)"),
+                [],
+            )
+        };
+        assert!(poner("abono_capital", "5000.03").is_ok());
+        assert!(poner("cuota", "1.005").is_err(), "céntimo exacto");
+        assert!(poner("inventado", "1").is_err(), "tipo fuera del catálogo");
+        assert!(c.execute("INSERT INTO movimientos_prestamo (prestamo_id, fecha, tipo, monto, saldo_resultante) VALUES (99, 'x', 'cuota', 1, 1)", []).is_err(), "el préstamo debe existir");
+        // Borrar el préstamo se lleva su libro.
+        c.execute_batch("DELETE FROM prestamos WHERE id = 1;").unwrap();
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM movimientos_prestamo;", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn un_gasto_paga_como_mucho_un_movimiento() {
+        let c = base_hasta(VERSION_OBJETIVO);
+        c.execute_batch(PRESTAMO).unwrap();
+        c.execute_batch("INSERT INTO gastos (fecha, monto, divisa, descripcion, categoria_id, metodo_pago) VALUES ('01/11/2026', 10, 'DOP', 'x', 1, 'efectivo');").unwrap();
+        let poner = || c.execute("INSERT INTO movimientos_prestamo (prestamo_id, fecha, tipo, monto, saldo_resultante, gasto_id) VALUES (1, '01/11/2026', 'cuota', 10, 1, 1)", []);
+        assert!(poner().is_ok());
+        assert!(poner().is_err(), "el mismo gasto no paga dos movimientos");
+    }
+
+    #[test]
+    fn aplicarla_dos_veces_no_hace_nada() {
+        let mut c = base_hasta(VERSION_OBJETIVO);
+        c.execute_batch(PRESTAMO).unwrap();
+        c.execute_batch("INSERT INTO movimientos_prestamo (prestamo_id, fecha, tipo, monto, saldo_resultante) VALUES (1, '01/11/2026', 'abono_capital', 10, 1);").unwrap();
+        assert_eq!(ejecutar(&mut c).unwrap().aplicadas.len(), 0);
+        let tx = c.transaction().unwrap();
+        crate::db_sql::migracion_23_pagos_de_prestamo(&tx).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM movimientos_prestamo;", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
     }
 }

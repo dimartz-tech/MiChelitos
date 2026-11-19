@@ -124,6 +124,7 @@ pub fn pagar_cuota(id: i64, fecha: &str, almacen: &mut impl AlmacenPrestamos) ->
         interes: desglose.interes,
         capital: desglose.capital,
         saldo_resultante,
+        gasto_id: None,
     })?;
     almacen.descontar_cuota(id)?;
     Ok(())
@@ -146,6 +147,7 @@ pub fn declarar_saldo(
         interes: Dinero::cero(MONEDA_LOCAL),
         capital: diferencia.negado(),
         saldo_resultante: declarado,
+        gasto_id: None,
     })?;
     Ok(())
 }

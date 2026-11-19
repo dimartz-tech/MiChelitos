@@ -128,20 +128,56 @@ test('declarar saldo: si Rust rechaza se muestra el error', async () => {
     await rechazoSeMuestra(ui, () => ui.appUI.handleDeclararSaldo(6, 9000.99));
 });
 
-// --- pagar cuota / eliminar ---
+// --- pagar desde una cuenta / revertir / eliminar ---
 
-test('pagar cuota: envía el id (sin confirmación previa) y redibuja', async () => {
-    const ui = cargarInterfaz();
-    await ui.appUI.handlePagarCuota(6);
-    llamoUnaVez(ui, 'pagarCuotaPrestamo', [6]);
-    avisoExito(ui, /Abono de cuota registrado/);
+const pago = (extra = {}) => ({
+    pag_tip_6: { value: 'cuota' }, pag_mon_6: '1,555.55', pag_int_6: '', pag_fec_6: '15/03/2027',
+    pag_ori_6: { options: [{ value: '3', textContent: 'Cuenta de Prueba' }] }, pag_cat_6: '9',
+    'modal-pago-6': {}, ...extra,
+});
+
+test('registrar pago: con confirmación envía el pago completo, cierra el formulario y redibuja', async () => {
+    const ui = cargarInterfaz({ campos: pago(), confirm: true, api: { registrarPagoPrestamo: { saldo_resultante: '8000.10' } } });
+    await ui.appUI.handleRegistrarPagoPrestamo(crearEvento(), 6);
+    llamoUnaVez(ui, 'registrarPagoPrestamo', [{
+        prestamo_id: 6, tipo: 'cuota', monto: '1555.55', interes: null, fecha: '15/03/2027', cuenta_id: 3, categoria_id: 9,
+    }]);
+    avisoExito(ui, /Pago registrado/);
+    assert.equal(ui.elemento('modal-pago-6').eliminado, true);
     redibujo(ui, 'prestamos');
 });
 
-test('pagar cuota: si Rust rechaza se muestra el error', async () => {
-    const ui = cargarInterfaz();
-    ui.rechazar('pagarCuotaPrestamo', 'Error simulado de Rust');
-    await rechazoSeMuestra(ui, () => ui.appUI.handlePagarCuota(6));
+test('registrar pago: sin confirmación no envía nada', async () => {
+    const ui = cargarInterfaz({ campos: pago(), confirm: false });
+    await ui.appUI.handleRegistrarPagoPrestamo(crearEvento(), 6);
+    noLlamoANada(ui);
+    noRedibujo(ui);
+});
+
+test('registrar pago: si Rust rechaza se muestra el error', async () => {
+    const ui = cargarInterfaz({ campos: pago(), confirm: true });
+    ui.rechazar('registrarPagoPrestamo', 'Error simulado de Rust');
+    await rechazoSeMuestra(ui, () => ui.appUI.handleRegistrarPagoPrestamo(crearEvento(), 6));
+});
+
+test('revertir pago: con confirmación y motivo envía el movimiento y el motivo, y dice el caso', async () => {
+    const ui = cargarInterfaz({
+        campos: { 'modal-mov-6': {} }, confirm: true, prompt: 'Se registró desde la cuenta equivocada',
+        api: { revertirPagoPrestamo: 'COR-2027-0009' },
+    });
+    await ui.appUI.handleRevertirPagoPrestamo(41, 6);
+    llamoUnaVez(ui, 'revertirPagoPrestamo', [41, 'Se registró desde la cuenta equivocada']);
+    avisoExito(ui, /Caso COR-2027-0009/);
+    redibujo(ui, 'prestamos');
+});
+
+test('revertir pago: sin confirmación no envía nada; si Rust rechaza se muestra el error', async () => {
+    let ui = cargarInterfaz({ confirm: false });
+    await ui.appUI.handleRevertirPagoPrestamo(41, 6);
+    noLlamoANada(ui);
+    ui = cargarInterfaz({ confirm: true, prompt: 'Se registró desde la cuenta equivocada' });
+    ui.rechazar('revertirPagoPrestamo', 'Error simulado de Rust');
+    await rechazoSeMuestra(ui, () => ui.appUI.handleRevertirPagoPrestamo(41, 6));
 });
 
 test('eliminar préstamo: con confirmación envía el id; sin ella no hace nada', async () => {

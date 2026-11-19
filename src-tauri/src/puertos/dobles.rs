@@ -1412,6 +1412,8 @@ impl AlmacenPrestamos for PrestamosEnMemoria {
             saldo: p.saldo_actual.unwrap_or(0.0),
             tasa_anual: p.tasa_actual,
             monto_cuota: p.monto_cuota,
+            cuotas_pendientes: p.cuotas_pendientes,
+            institucion: p.institucion_financiera.clone(),
         }))
     }
     fn asentar_movimiento(&mut self, m: &MovimientoNuevo) -> Result<(), ErrorAlmacen> {
@@ -1421,12 +1423,14 @@ impl AlmacenPrestamos for PrestamosEnMemoria {
             m.prestamo_id,
             MovimientoDePrestamo {
                 id,
+                prestamo_id: m.prestamo_id,
                 fecha: m.fecha.clone(),
                 tipo: m.tipo.clone(),
                 monto: m.monto.unidades(),
                 interes: m.interes.unidades(),
                 capital: m.capital.unidades(),
                 saldo_resultante: m.saldo_resultante.unidades(),
+                gasto_id: m.gasto_id,
             },
         ));
         if let Some(p) = self.prestamos.iter_mut().find(|p| p.id == m.prestamo_id) {
@@ -1446,6 +1450,31 @@ impl AlmacenPrestamos for PrestamosEnMemoria {
         let mut v: Vec<MovimientoDePrestamo> = self.libro.iter().filter(|(p, _)| *p == id).map(|(_, m)| m.clone()).collect();
         v.sort_by(|a, b| b.id.cmp(&a.id));
         Ok(v)
+    }
+    fn movimiento(&self, id: i64) -> Result<Option<MovimientoDePrestamo>, ErrorAlmacen> {
+        Ok(self.libro.iter().find(|(_, m)| m.id == id).map(|(_, m)| m.clone()))
+    }
+    fn ultimo_movimiento(&self, prestamo_id: i64) -> Result<Option<i64>, ErrorAlmacen> {
+        Ok(self.libro.iter().filter(|(p, _)| *p == prestamo_id).map(|(_, m)| m.id).max())
+    }
+    fn retirar_movimiento(&mut self, id: i64, prestamo_id: i64, saldo_previo: Dinero) -> Result<(), ErrorAlmacen> {
+        let antes = self.libro.len();
+        self.libro.retain(|(p, m)| !(m.id == id && *p == prestamo_id));
+        if self.libro.len() == antes {
+            return Err(ErrorAlmacen::NoEncontrado { entidad: "movimiento de préstamo", id });
+        }
+        if let Some(p) = self.prestamos.iter_mut().find(|p| p.id == prestamo_id) {
+            p.saldo_actual = Some(saldo_previo.unidades());
+        }
+        Ok(())
+    }
+    fn reponer_cuota(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
+        if let Some(p) = self.prestamos.iter_mut().find(|p| p.id == id) {
+            if let Some(c) = p.cuotas_pendientes {
+                p.cuotas_pendientes = Some(c + 1);
+            }
+        }
+        Ok(())
     }
     fn eliminar_prestamo(&mut self, id: i64) -> Result<(), ErrorAlmacen> {
         self.prestamos.retain(|p| p.id != id);

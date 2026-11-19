@@ -11,10 +11,10 @@
 // `Date` globales: todo entra por el constructor (`pruebas/js/vistas/prestamos.test.js`).
 // Los cuerpos son los de `ui.ts`.
 
-import type { Prestamo, Tarjeta } from '../tipos-ipc';
-import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, MenuFlotante, Modales, Pantalla, Referencias, Reloj, Vista } from '../ui/servicios';
+import type { Categoria, CuentaAhorro, MovimientoPrestamo, PagoPrestamoInput, PrevisionPagoPrestamo, Prestamo, Tarjeta } from '../tipos-ipc';
+import type { ApiDe, Avisos, Dialogos, Dom, Enrutador, Formato, MenuFlotante, Modales, Motivo, Pantalla, Referencias, Reloj, Vista } from '../ui/servicios';
 
-import { accion, alCambiar, alEnviar, escaparHtml, manejador } from '../nucleo/html.js';
+import { ATRIBUTOS_DE_FECHA, accion, alCambiar, alEnviar, alEscribir, escaparHtml, manejador } from '../nucleo/html.js';
 
 type ApiPrestamos = ApiDe<
     | 'obtenerPrestamos'
@@ -22,8 +22,13 @@ type ApiPrestamos = ApiDe<
     | 'crearPrestamo'
     | 'actualizarPrestamo'
     | 'declararSaldoPrestamo'
-    | 'pagarCuotaPrestamo'
     | 'eliminarPrestamo'
+    | 'obtenerCuentas'
+    | 'obtenerCategorias'
+    | 'obtenerMovimientosPrestamo'
+    | 'previsualizarPagoPrestamo'
+    | 'registrarPagoPrestamo'
+    | 'revertirPagoPrestamo'
 >;
 
 export interface DependenciasPrestamos {
@@ -38,19 +43,38 @@ export interface DependenciasPrestamos {
     menus: MenuFlotante;
     referencias: Referencias;
     ahora: Reloj;
+    motivo: Motivo;
 }
 
 /** Los manejadores que `window.appUI` expone de esta vista: los de la plantilla y los del menú de acciones. */
 export const MANEJADORES_PRESTAMOS = [
     'handleAgregarPrestamo', 'toggleCamposPrestamos', 'abrirMenuPasivo',
     'handleEdicionPrestamo', 'avisarFechasDerivadas',
-    'handlePagarCuota', 'handleDeclararSaldo', 'handleEliminarPrestamo',
+    'handleDeclararSaldo', 'handleEliminarPrestamo',
+    'cambiarPagoPrestamo', 'handleRegistrarPagoPrestamo', 'handleRevertirPagoPrestamo',
 ] as const;
 export type ManejadorPrestamos = (typeof MANEJADORES_PRESTAMOS)[number];
 
 /** Un formulario envía un evento con `preventDefault`; solo eso se usa. */
 interface EventoDeFormulario {
     preventDefault(): void;
+}
+
+/** Lo que dice el texto de un tipo de movimiento del libro del préstamo. */
+const TIPOS_DE_MOVIMIENTO: Readonly<Record<string, string>> = {
+    cuota: 'Cuota',
+    abono_capital: 'Abono a capital',
+    declaracion: 'Conciliación',
+    disposicion: 'Disposición',
+};
+
+/** Un importe escrito tal cual: dígitos, punto decimal opcional, comas de miles toleradas. */
+const FORMA_DE_IMPORTE = /^\d*\.?\d+$/;
+
+/** La categoría que se propone para el gasto del pago: la que se llame «Préstamo(s)», sin distinguir tildes. */
+export function categoriaDePrestamo(categorias: readonly Categoria[]): Categoria | null {
+    const normal = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+    return categorias.find(c => /^prestamos?$/.test(normal(c.nombre))) ?? null;
 }
 
 /** El clic en el botón de acciones: se usa para no cerrar el menú al abrirlo y para colocarlo. */
@@ -494,9 +518,9 @@ export class VistaPrestamos implements Vista {
         const { menus } = this.dep;
         evento.stopPropagation();
 
-        const puedeAbonar = p.es_revolvente || (p.cuotas_pendientes ?? 0) > 0;
         const html = `
-            ${puedeAbonar ? `<div data-opcion="abonar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Abonar cuota</div>` : ''}
+            <div data-opcion="pagar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Registrar pago</div>
+            <div data-opcion="movimientos" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Movimientos</div>
             <div data-opcion="conciliar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Conciliar saldo</div>
             <div data-opcion="editar" style="padding:0.5rem 0.7rem; border-radius:6px; cursor:pointer;">Editar condiciones</div>
             <div style="height:1px; background:rgba(255,255,255,0.07); margin:0.25rem 0.5rem;"></div>
@@ -508,7 +532,8 @@ export class VistaPrestamos implements Vista {
             html,
             ancla: (evento.currentTarget as NonNullable<EventoDeMenu['currentTarget']>).getBoundingClientRect(),
             alElegir: accion => {
-                if (accion === 'abonar') this.handlePagarCuota(p.id);
+                if (accion === 'pagar') void this.abrirPagoPrestamo(p);
+                if (accion === 'movimientos') void this.abrirMovimientosPrestamo(p);
                 if (accion === 'conciliar') this.handleDeclararSaldo(p.id, p.saldo_actual);
                 if (accion === 'editar') this.abrirEdicionPrestamo(p);
                 if (accion === 'eliminar') this.handleEliminarPrestamo(p.id);
@@ -737,11 +762,217 @@ export class VistaPrestamos implements Vista {
         }
     }
 
-    async handlePagarCuota(id: number): Promise<void> {
-        const { api, avisos, enrutador } = this.dep;
+    // --- PAGOS: sacar el dinero de una cuenta y asentarlo en el préstamo, en una sola operación ---
+
+    /** Para descartar una vista previa que llega después de otra más reciente. */
+    private turnoDePrevia = 0;
+
+    /**
+     * El formulario de un pago. Propone la cuota como importe, hoy como fecha y la categoría «Préstamo» si existe;
+     * todo se puede cambiar. El origen son las cuentas en pesos y la caja de efectivo.
+     */
+    async abrirPagoPrestamo(p: Prestamo): Promise<void> {
+        const { api, modales, ahora } = this.dep;
+        let cuentas: CuentaAhorro[];
+        let categorias: Categoria[];
         try {
-            await api.pagarCuotaPrestamo(id);
-            avisos.mostrar("Abono de cuota registrado.");
+            [cuentas, categorias] = await Promise.all([api.obtenerCuentas(), api.obtenerCategorias()]);
+        } catch (err) {
+            this.dep.avisos.mostrar(String(err), 'error');
+            return;
+        }
+        const enPesos = cuentas.filter(c => c.divisa === 'DOP');
+        const propuesta = categoriaDePrestamo(categorias);
+        const hoy = ahora();
+        const fecha = `${String(hoy.getDate()).padStart(2, '0')}/${String(hoy.getMonth() + 1).padStart(2, '0')}/${hoy.getFullYear()}`;
+        const id = p.id;
+
+        const html = `
+            <div class="card" style="width: 480px; background: var(--bg-surface-opaque);">
+                <h3 style="font-family: var(--font-heading); margin-bottom:0.4rem;">💸 Registrar pago</h3>
+                <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
+                    ${escaparHtml(p.institucion_financiera)} — <strong style="text-transform:capitalize;">${escaparHtml(p.tipo_prestamo)}</strong>.
+                    Saca el dinero de la cuenta (como un gasto, con su retención si es transferencia) y lo asienta en el préstamo a la vez.
+                </p>
+                <form ${alEnviar('handleRegistrarPagoPrestamo', id)}>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pag_tip_${id}">Tipo</label>
+                            <select id="pag_tip_${id}" class="form-control" ${alCambiar('cambiarPagoPrestamo', id)}>
+                                <option value="cuota" selected>Cuota del período</option>
+                                <option value="abono_capital">Abono a capital</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="pag_fec_${id}">Fecha</label>
+                            <input type="text" id="pag_fec_${id}" class="form-control" value="${escaparHtml(fecha)}" placeholder="dd/mm/aaaa" ${ATRIBUTOS_DE_FECHA} required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pag_mon_${id}">Importe (DOP)</label>
+                            <input type="text" inputmode="decimal" id="pag_mon_${id}" class="form-control" value="${escaparHtml(Number(p.monto_cuota).toFixed(2))}" ${alEscribir('cambiarPagoPrestamo', id)} required>
+                        </div>
+                        <div class="form-group" id="pag_grupo_int_${id}">
+                            <label for="pag_int_${id}">Interés del recibo</label>
+                            <input type="text" inputmode="decimal" id="pag_int_${id}" class="form-control" placeholder="En blanco: se estima" ${alEscribir('cambiarPagoPrestamo', id)}>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="pag_ori_${id}">Sale de</label>
+                        <select id="pag_ori_${id}" class="form-control" required>
+                            ${enPesos.map(c => `<option value="${c.id}">${escaparHtml(c.nombre)}${c.entidad ? ` — ${escaparHtml(c.entidad)}` : ''}</option>`).join('')}
+                            <option value="efectivo">Efectivo (caja en pesos)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="pag_cat_${id}">Categoría del gasto</label>
+                        <select id="pag_cat_${id}" class="form-control" required>
+                            ${categorias.map(c => `<option value="${c.id}" ${propuesta?.id === c.id ? 'selected' : ''}>${escaparHtml(c.nombre)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div id="pag_prev_${id}" style="font-size:0.75rem; color:var(--text-secondary); min-height:2.4rem; margin-top:0.4rem;"></div>
+                    <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1rem;">
+                        <button type="button" ${accion('quitar', `modal-pago-${id}`)} class="btn btn-secondary">Cancelar</button>
+                        <button type="submit" class="btn">Registrar pago</button>
+                    </div>
+                </form>
+            </div>
+        `;
+        modales.abrir(`modal-pago-${id}`, html);
+        await this.cambiarPagoPrestamo(id);
+    }
+
+    /** Lo que el formulario dice del pago, o `null` (y el motivo) si todavía no se puede prever. */
+    private leerPago(id: number): { tipo: string; monto: string; interes: string | null } | { error: string } {
+        const { dom } = this.dep;
+        const tipo = dom.elemento<Campo>(`pag_tip_${id}`).value;
+        const monto = dom.elemento<Campo>(`pag_mon_${id}`).value.trim().replace(/,/g, '');
+        const interesEscrito = tipo === 'cuota' ? (dom.buscar<Campo>(`pag_int_${id}`)?.value ?? '').trim().replace(/,/g, '') : '';
+        if (!FORMA_DE_IMPORTE.test(monto)) return { error: 'Escribe el importe del pago.' };
+        if (interesEscrito !== '' && !FORMA_DE_IMPORTE.test(interesEscrito)) return { error: 'El interés debe ser un importe válido, o quedar en blanco.' };
+        return { tipo, monto, interes: interesEscrito === '' ? null : interesEscrito };
+    }
+
+    /**
+     * Rehace la vista previa con lo que hay escrito: interés, capital, saldo antes y después y cuotas que quedan. La
+     * calcula el núcleo con las mismas reglas que el registro, así que lo que se ve es lo que se asienta.
+     */
+    async cambiarPagoPrestamo(id: number): Promise<void> {
+        const { api, dom, formato } = this.dep;
+        const grupoInteres = dom.buscar(`pag_grupo_int_${id}`);
+        const tipo = dom.buscar<Campo>(`pag_tip_${id}`)?.value ?? 'cuota';
+        if (grupoInteres) grupoInteres.style.display = tipo === 'cuota' ? '' : 'none';
+        const salida = dom.buscar(`pag_prev_${id}`);
+        if (!salida) return;
+
+        const pago = this.leerPago(id);
+        const turno = ++this.turnoDePrevia;
+        if ('error' in pago) {
+            salida.textContent = pago.error;
+            return;
+        }
+        let previa: PrevisionPagoPrestamo;
+        try {
+            previa = await api.previsualizarPagoPrestamo(id, pago.tipo, pago.monto, pago.interes);
+        } catch (err) {
+            if (turno === this.turnoDePrevia) salida.textContent = String(err);
+            return;
+        }
+        if (turno !== this.turnoDePrevia) return;
+        const cuotas = previa.cuotas_pendientes_despues === null ? '' : ` · Quedarán ${previa.cuotas_pendientes_despues} cuotas.`;
+        salida.innerHTML =
+            `Interés DOP ${escaparHtml(formato.importe(Number(previa.interes)))} ${previa.interes_estimado ? '(estimado)' : ''} · ` +
+            `Capital DOP ${escaparHtml(formato.importe(Number(previa.capital)))}<br>` +
+            `Saldo: DOP ${escaparHtml(formato.importe(Number(previa.saldo_previo)))} → <strong>DOP ${escaparHtml(formato.importe(Number(previa.saldo_resultante)))}</strong>${escaparHtml(cuotas)}`;
+    }
+
+    async handleRegistrarPagoPrestamo(e: EventoDeFormulario, id: number): Promise<void> {
+        e.preventDefault();
+        const { api, avisos, enrutador, dom, dialogos, formato } = this.dep;
+        const pago = this.leerPago(id);
+        if ('error' in pago) {
+            avisos.mostrar(pago.error, 'error');
+            return;
+        }
+        const origen = dom.elemento<HTMLSelectElement>(`pag_ori_${id}`);
+        const input: PagoPrestamoInput = {
+            prestamo_id: Number(id),
+            tipo: pago.tipo,
+            monto: pago.monto,
+            interes: pago.interes,
+            fecha: dom.elemento<Campo>(`pag_fec_${id}`).value.trim(),
+            cuenta_id: origen.value === 'efectivo' ? null : Number(origen.value),
+            categoria_id: Number(dom.elemento<Campo>(`pag_cat_${id}`).value),
+        };
+        const queEs = pago.tipo === 'cuota' ? 'la cuota' : 'el abono a capital';
+        const deDonde = origen.value === 'efectivo' ? 'la caja de efectivo' : `«${origen.selectedOptions?.[0]?.textContent?.trim() ?? 'la cuenta'}» (más la retención de la transferencia)`;
+        if (!(await dialogos.confirmar(`Se registrará ${queEs} de DOP ${formato.importe(Number(pago.monto))} del ${input.fecha}, pagada desde ${deDonde}. ¿Continuar?`))) return;
+
+        try {
+            const r = await api.registrarPagoPrestamo(input);
+            avisos.mostrar(`Pago registrado. Saldo del préstamo: DOP ${formato.importe(Number(r.saldo_resultante))}.`);
+            dom.buscar(`modal-pago-${id}`)?.remove();
+            await enrutador.mostrar('prestamos');
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+        }
+    }
+
+    /**
+     * El libro del préstamo, del más reciente al más antiguo. Solo el último se puede revertir, y solo si salió de una
+     * cuenta: los posteriores parten de su saldo, y una conciliación se corrige conciliando otra vez.
+     */
+    async abrirMovimientosPrestamo(p: Prestamo): Promise<void> {
+        const { api, modales, formato, avisos } = this.dep;
+        let movimientos: MovimientoPrestamo[];
+        try {
+            movimientos = await api.obtenerMovimientosPrestamo(p.id);
+        } catch (err) {
+            avisos.mostrar(String(err), 'error');
+            return;
+        }
+        const importe = (v: number) => escaparHtml(formato.importe(v));
+        const filas = movimientos.map((m, i) => `
+            <tr>
+                <td>${escaparHtml(m.fecha)}</td>
+                <td>${escaparHtml(TIPOS_DE_MOVIMIENTO[m.tipo] ?? m.tipo)}${m.gasto_id === null ? '' : ' <span title="Salió de una cuenta" style="color:var(--text-muted);">· cuenta</span>'}</td>
+                <td style="text-align:right;">${importe(m.monto)}</td>
+                <td style="text-align:right;">${importe(m.interes)}</td>
+                <td style="text-align:right;">${importe(m.capital)}</td>
+                <td style="text-align:right;">${importe(m.saldo_resultante)}</td>
+                <td>${i === 0 && m.gasto_id !== null ? `<button type="button" class="btn btn-secondary" style="padding:0.2rem 0.5rem; font-size:0.7rem;" ${accion('handleRevertirPagoPrestamo', m.id, p.id)}>Revertir</button>` : ''}</td>
+            </tr>`).join('');
+        const html = `
+            <div class="card" style="width: 640px; max-width: 95vw; background: var(--bg-surface-opaque);">
+                <h3 style="font-family: var(--font-heading); margin-bottom:0.4rem;">📒 Movimientos</h3>
+                <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.8rem;">${escaparHtml(p.institucion_financiera)} — <strong style="text-transform:capitalize;">${escaparHtml(p.tipo_prestamo)}</strong></p>
+                ${movimientos.length === 0
+                    ? '<p style="font-size:0.8rem; color:var(--text-muted);">Todavía no hay movimientos.</p>'
+                    : `<div style="overflow-x:auto;"><table class="table" style="font-size:0.75rem; width:100%;">
+                           <thead><tr><th>Fecha</th><th>Tipo</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Interés</th><th style="text-align:right;">Capital</th><th style="text-align:right;">Saldo</th><th></th></tr></thead>
+                           <tbody>${filas}</tbody>
+                       </table></div>`}
+                <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
+                    <button type="button" ${accion('quitar', `modal-mov-${p.id}`)} class="btn btn-secondary">Cerrar</button>
+                </div>
+            </div>
+        `;
+        modales.abrir(`modal-mov-${p.id}`, html);
+    }
+
+    async handleRevertirPagoPrestamo(movimientoId: number, prestamoId: number): Promise<void> {
+        const { api, avisos, enrutador, dom, dialogos, motivo: pedidorDeMotivo } = this.dep;
+        if (!(await dialogos.confirmar('¿Revertir este pago? El dinero vuelve a la cuenta (con su retención) y el préstamo recupera el saldo y la cuota.'))) return;
+        try {
+            const motivo = await pedidorDeMotivo.pedir(
+                'Vas a revertir un pago de préstamo',
+                'El gasto y el movimiento se borran; queda el caso de auditoría que estás a punto de abrir.'
+            );
+            if (motivo === null) return;
+            const caso = await api.revertirPagoPrestamo(movimientoId, motivo);
+            avisos.mostrar(`Pago revertido. Caso ${caso}.`);
+            dom.buscar(`modal-mov-${prestamoId}`)?.remove();
             await enrutador.mostrar('prestamos');
         } catch (err) {
             avisos.mostrar(String(err), 'error');
@@ -772,7 +1003,9 @@ export function puentePrestamos(vista: VistaPrestamos): {
     abrirMenuPasivo: (evento: EventoDeMenu, p: Prestamo) => void;
     handleEdicionPrestamo: (e: EventoDeFormulario, id: number) => Promise<void>;
     avisarFechasDerivadas: (id: number) => void;
-    handlePagarCuota: (id: number) => Promise<void>;
+    cambiarPagoPrestamo: (id: number) => Promise<void>;
+    handleRegistrarPagoPrestamo: (e: EventoDeFormulario, id: number) => Promise<void>;
+    handleRevertirPagoPrestamo: (movimientoId: number, prestamoId: number) => Promise<void>;
     handleDeclararSaldo: (id: number, saldoActual: number) => Promise<void>;
     handleEliminarPrestamo: (id: number) => Promise<void>;
 } {
@@ -782,7 +1015,9 @@ export function puentePrestamos(vista: VistaPrestamos): {
         abrirMenuPasivo: (evento, p) => vista.abrirMenuPasivo(evento, p),
         handleEdicionPrestamo: (e, id) => vista.handleEdicionPrestamo(e, id),
         avisarFechasDerivadas: id => vista.avisarFechasDerivadas(id),
-        handlePagarCuota: id => vista.handlePagarCuota(id),
+        cambiarPagoPrestamo: id => vista.cambiarPagoPrestamo(id),
+        handleRegistrarPagoPrestamo: (e, id) => vista.handleRegistrarPagoPrestamo(e, id),
+        handleRevertirPagoPrestamo: (movimientoId, prestamoId) => vista.handleRevertirPagoPrestamo(movimientoId, prestamoId),
         handleDeclararSaldo: (id, saldoActual) => vista.handleDeclararSaldo(id, saldoActual),
         handleEliminarPrestamo: id => vista.handleEliminarPrestamo(id),
     };

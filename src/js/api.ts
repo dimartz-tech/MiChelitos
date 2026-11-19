@@ -523,6 +523,18 @@ const AppAPI = {
         return await invoke('declarar_saldo_prestamo', { id: Number(id), saldo: String(saldo) });
     },
 
+    async previsualizarPagoPrestamo(prestamoId: number | string, tipo: string, monto: string, interes: string | null) {
+        return await invoke('previsualizar_pago_prestamo', { prestamoId: Number(prestamoId), tipo, monto, interes });
+    },
+
+    async registrarPagoPrestamo(input: import('./tipos-ipc').PagoPrestamoInput) {
+        return await invoke('registrar_pago_prestamo', { input });
+    },
+
+    async revertirPagoPrestamo(movimientoId: number | string, motivo: string) {
+        return await invoke('revertir_pago_prestamo', { movimientoId: Number(movimientoId), motivo });
+    },
+
     async obtenerMovimientosPrestamo(id: number | string) {
         return await invoke('obtener_movimientos_prestamo', { id: Number(id) });
     },
